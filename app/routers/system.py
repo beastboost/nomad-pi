@@ -702,10 +702,14 @@ def connect_wifi(request: WifiConnectRequest):
         return {"status": "success", "message": f"Simulated connection to {request.ssid}"}
     
     try:
+        # First, try to delete any existing connection profile for this SSID to avoid conflicts
+        subprocess.run(["sudo", "nmcli", "connection", "delete", "id", request.ssid], capture_output=True, check=False)
+        
         # Connect to WiFi using nmcli
-        # nmcli dev wifi connect <ssid> password <password>
+        # We use 'nmcli device wifi connect' which creates a new profile if needed
+        # Adding 'name' helps ensure the connection is identifiable
         result = subprocess.run(
-            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password],
+            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
             capture_output=True,
             text=True,
             timeout=30
@@ -714,7 +718,41 @@ def connect_wifi(request: WifiConnectRequest):
         if result.returncode == 0:
             return {"status": "success", "message": f"Successfully connected to {request.ssid}"}
         else:
-            raise HTTPException(status_code=400, detail=result.stderr or result.stdout or "Failed to connect")
+            # If the direct connect fails, try the long way: add then up
+            # This is sometimes needed for specific security configurations
+            err_msg = result.stderr or result.stdout or "Failed to connect"
+            logging.error(f"WiFi connection failed: {err_msg}")
+            
+            # Fallback: manually create the connection if it's a security property issue
+            if "802-11-wireless-security.key-mgmt" in err_msg:
+                logging.info("Attempting fallback manual connection creation...")
+                # 1. Add the connection manually
+                add_cmd = [
+                    "sudo", "nmcli", "con", "add", "type", "wifi", "ifname", "*", 
+                    "con-name", request.ssid, "ssid", request.ssid
+                ]
+                subprocess.run(add_cmd, capture_output=True, check=False)
+                
+                # 2. Set the password and security
+                modify_cmd = [
+                    "sudo", "nmcli", "con", "modify", request.ssid,
+                    "wifi-sec.key-mgmt", "wpa-psk",
+                    "wifi-sec.psk", request.password
+                ]
+                subprocess.run(modify_cmd, capture_output=True, check=False)
+                
+                # 3. Try to bring it up
+                up_result = subprocess.run(
+                    ["sudo", "nmcli", "con", "up", "id", request.ssid],
+                    capture_output=True, text=True, timeout=20
+                )
+                
+                if up_result.returncode == 0:
+                    return {"status": "success", "message": f"Successfully connected to {request.ssid} (via fallback)"}
+                else:
+                    err_msg = up_result.stderr or up_result.stdout or "Manual connection failed"
+            
+            raise HTTPException(status_code=400, detail=err_msg)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Connection attempt timed out")
     except Exception as e:
