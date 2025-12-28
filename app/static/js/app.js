@@ -1618,19 +1618,25 @@ function openWifiModal(ssid) {
         connectToWifi(ssid, password);
     };
 
-    // Close on escape
-    const handleEsc = (e) => {
-        if (e.key === 'Escape') {
-            closeWifiModal();
-            window.removeEventListener('keydown', handleEsc);
-        }
-    };
-    window.addEventListener('keydown', handleEsc);
+    // Close on escape - assigned to a stable property to avoid memory leaks
+    if (!window._wifiModalEscHandler) {
+        window._wifiModalEscHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeWifiModal();
+            }
+        };
+    }
+    window.addEventListener('keydown', window._wifiModalEscHandler);
 }
 
 function closeWifiModal() {
     const modal = document.getElementById('wifi-modal');
     if (modal) modal.classList.add('hidden');
+    
+    // Clean up the escape key listener to prevent memory leaks
+    if (window._wifiModalEscHandler) {
+        window.removeEventListener('keydown', window._wifiModalEscHandler);
+    }
 }
 
 async function connectToWifi(ssid, password) {
