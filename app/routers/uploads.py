@@ -31,9 +31,9 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 # Configuration
 UPLOAD_DIR = Path("uploads")
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 ALLOWED_EXTENSIONS = {
-    "txt", "pdf", "png", "jpg", "jpeg", "gif", "mp3", "mp4",
+    "txt", "pdf", "png", "jpg", "jpeg", "gif", "mp3", "mp4", "mkv", "avi", "mov",
     "doc", "docx", "xls", "xlsx", "zip", "csv", "json", "xml"
 }
 

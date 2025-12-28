@@ -1,15 +1,7 @@
 #!/bin/bash
-# Nomad Pi Update Script
-
-echo "Pulling latest code from GitHub..."
-git fetch origin
-git reset --hard origin/main
-
-echo "Updating Python dependencies..."
-source venv/bin/activate
-pip install -r requirements.txt
-
-echo "Restarting Nomad Pi service..."
-sudo systemctl restart nomadpi
-
-echo "Update complete! Remember to Ctrl+F5 your browser."
+echo "Pulling latest changes from Git..."
+git pull
+echo "Installing dependencies..."
+./venv/bin/pip install -r requirements.txt
+echo "Update complete. Restarting application..."
+sudo systemctl restart nomad-pi.service

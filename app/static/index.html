@@ -30,6 +30,7 @@
                 <button onclick="showSection('gallery')">Gallery</button>
                 <button onclick="showSection('files')">Files</button>
                 <button onclick="showSection('admin')">Admin</button>
+                <button onclick="showSection('settings')">Settings</button>
                 <span id="header-stats" class="header-stats"></span>
                 <button onclick="logout()" class="logout-btn">Logout</button>
             </nav>
@@ -85,6 +86,10 @@
                     <div class="card" onclick="showSection('admin')">
                         <div class="icon">⚙️</div>
                         <h3>Admin</h3>
+                    </div>
+                    <div class="card" onclick="showSection('settings')">
+                        <div class="icon">🔧</div>
+                        <h3>Settings</h3>
                     </div>
                 </div>
 
@@ -193,6 +198,32 @@
                     <button onclick="organizeMovies(true)">Preview Movie Organize</button>
                     <button onclick="organizeMovies(false)" class="warning">Apply Movie Organize</button>
                     <div id="organize-status" style="margin-top:10px;"></div>
+                </div>
+            </section>
+
+            <section id="settings" class="hidden">
+                <h2>Settings</h2>
+                <div class="admin-panel">
+                    <h3>General Settings</h3>
+                    <div class="settings-form">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Server Name</label>
+                            <input type="text" id="setting-server-name" placeholder="Nomad Pi" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Session Expiry (Days)</label>
+                            <input type="number" id="setting-session-days" value="30" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <button onclick="saveSettings()" class="primary">Save Settings</button>
+                    </div>
+                </div>
+                
+                <div class="admin-panel">
+                    <h3>Appearance</h3>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="setTheme('dark')" class="secondary">Dark Theme</button>
+                        <button onclick="setTheme('glass')" class="secondary">Glassmorphism</button>
+                    </div>
                 </div>
             </section>
         </main>

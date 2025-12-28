@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+passlib[bcrypt]
 python-multipart
 aiofiles
 jinja2

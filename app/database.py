@@ -58,6 +58,12 @@ def init_db():
             item_count INTEGER DEFAULT 0
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -291,3 +297,55 @@ def rename_media_path(old_path: str, new_path: str):
     c.execute('UPDATE library_index SET path = ? WHERE path = ?', (new_path, old_path))
     conn.commit()
     conn.close()
+
+SESSION_MAX_AGE_DAYS = int(os.environ.get("SESSION_MAX_AGE_DAYS", 30))
+
+def create_session(token: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO sessions (token) VALUES (?)', (token,))
+    conn.commit()
+    conn.close()
+
+def get_session(token: str) -> Optional[dict]:
+    cleanup_sessions() # Run cleanup when checking sessions
+    conn = get_db()
+    c = conn.cursor()
+    # Only return session if it hasn't expired
+    c.execute('''
+        SELECT token, created_at 
+        FROM sessions 
+        WHERE token = ? AND created_at >= datetime('now', '-' || ? || ' days')
+    ''', (token, SESSION_MAX_AGE_DAYS))
+    row = c.fetchone()
+    
+    if not row:
+        # If no row found, it might have expired. Try to delete it just in case.
+        c.execute('DELETE FROM sessions WHERE token = ?', (token,))
+        conn.commit()
+        conn.close()
+        return None
+        
+    conn.close()
+    return dict(row)
+
+def delete_session(token: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('DELETE FROM sessions WHERE token = ?', (token,))
+    conn.commit()
+    conn.close()
+
+def cleanup_sessions():
+    """Remove sessions older than the configured max_age."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            DELETE FROM sessions 
+            WHERE created_at < datetime('now', '-' || ? || ' days')
+        ''', (SESSION_MAX_AGE_DAYS,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error cleaning up sessions: {e}")

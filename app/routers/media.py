@@ -53,20 +53,14 @@ def safe_fs_path_from_web_path(web_path: str):
         raise HTTPException(status_code=400, detail="Invalid path")
 
     base_abs = os.path.abspath(BASE_DIR)
-    fs_path = os.path.abspath(os.path.join(BASE_DIR, *rel.split("/")))
+    # Use os.path.join for constructing the file system path
+    fs_path = os.path.abspath(os.path.join(base_abs, *rel.split('/')))
     if os.path.commonpath([base_abs, fs_path]) != base_abs:
         raise HTTPException(status_code=400, detail="Invalid path")
     return fs_path
 
-def natural_sort_key(s: str):
-    parts = re.split(r'(\d+)', s)
-    out = []
-    for p in parts:
-        if p.isdigit():
-            out.append(int(p))
-        else:
-            out.append(p.lower())
-    return out
+def natural_sort_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'([0-9]+)', s)]
 
 def guess_title_year(name: str):
     s = os.path.splitext(os.path.basename(name or ""))[0]
@@ -503,7 +497,7 @@ def browse_files(path: str = Query(default="/data")):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+    items.sort(key=lambda x: (not x["is_dir"], natural_sort_key(x["name"])))
     return {"path": path, "items": items}
 
 @router.get("/list_paged/{category}")

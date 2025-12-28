@@ -50,6 +50,11 @@
                         <i class="fas fa-film"></i>
                         <span v-if="!sidebarCollapsed">Media Library</span>
                     </a>
+                    <a href="#" @click.prevent="currentView = 'settings'"
+                       :class="{ active: currentView === 'settings' }" class="nav-item">
+                        <i class="fas fa-sliders-h"></i>
+                        <span v-if="!sidebarCollapsed">Settings</span>
+                    </a>
                 </nav>
             </aside>
 

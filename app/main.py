@@ -30,7 +30,8 @@ app.include_router(media.router, prefix="/api/media", tags=["media"], dependenci
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user)])
 
 @app.on_event("startup")
-def _startup_indexer():
+def _startup_tasks():
+    # Indexer logic
     def needs_build(category: str):
         try:
             state = media.database.get_library_index_state(category)
@@ -48,6 +49,12 @@ def _startup_indexer():
         return (datetime.now() - ts) >= media.INDEX_TTL
 
     def run():
+        # Clean up stale sessions on startup
+        try:
+            media.database.cleanup_sessions()
+        except Exception:
+            pass
+            
         for category in ["movies", "shows"]:
             if needs_build(category):
                 try:

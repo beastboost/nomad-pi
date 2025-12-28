@@ -1971,3 +1971,45 @@ async function unmountDrive(mountpoint) {
         alert('Error: ' + e);
     }
 }
+
+function saveSettings() {
+    const serverName = document.getElementById('setting-server-name').value;
+    const sessionDays = document.getElementById('setting-session-days').value;
+    localStorage.setItem('nomadpi.serverName', serverName);
+    localStorage.setItem('nomadpi.sessionDays', sessionDays);
+    if (serverName) {
+        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
+        document.title = serverName;
+    }
+    alert('Settings saved locally! (Backend settings requires environment variables update)');
+}
+
+function setTheme(theme) {
+    if (theme === 'dark') {
+        document.body.classList.remove('glass-theme');
+        document.body.classList.add('dark-theme');
+    } else {
+        document.body.classList.remove('dark-theme');
+        document.body.classList.add('glass-theme');
+    }
+    localStorage.setItem('nomadpi.theme', theme);
+}
+
+// Initialize settings on load
+window.addEventListener('DOMContentLoaded', () => {
+    const serverName = localStorage.getItem('nomadpi.serverName');
+    const sessionDays = localStorage.getItem('nomadpi.sessionDays');
+    const theme = localStorage.getItem('nomadpi.theme');
+
+    if (serverName) {
+        const nameInput = document.getElementById('setting-server-name');
+        if (nameInput) nameInput.value = serverName;
+        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
+        document.title = serverName;
+    }
+    if (sessionDays) {
+        const daysInput = document.getElementById('setting-session-days');
+        if (daysInput) daysInput.value = sessionDays;
+    }
+    if (theme) setTheme(theme);
+});
