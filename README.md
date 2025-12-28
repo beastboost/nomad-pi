@@ -51,6 +51,10 @@ If your Pi has no internet, you can transfer files via the SD card's boot partit
     ```bash
     sudo rsync -av --exclude 'data' /boot/firmware/ ~/nomad-pi/ 2>/dev/null || sudo rsync -av --exclude 'data' /boot/ ~/nomad-pi/
     ```
+3.  **Apply the update**:
+    ```bash
+    cd ~/nomad-pi && chmod +x update.sh && ./update.sh
+    ```
 
 ## First-Time Run
 
