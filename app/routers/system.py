@@ -1,11 +1,28 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 import psutil
 import os
 import subprocess
 import platform
 import json
+from app import database
 
 router = APIRouter()
+
+class OmdbKeyRequest(BaseModel):
+    key: str
+
+@router.get("/settings/omdb")
+def get_omdb_key():
+    key = database.get_setting("omdb_api_key")
+    return {"key": key or ""}
+
+@router.post("/settings/omdb")
+def save_omdb_key(request: OmdbKeyRequest):
+    database.set_setting("omdb_api_key", request.key)
+    # Also update environment for current process if possible
+    os.environ["OMDB_API_KEY"] = request.key
+    return {"status": "ok"}
 
 @router.get("/stats")
 def get_stats():

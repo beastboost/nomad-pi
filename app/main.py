@@ -4,11 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from app.routers import media, system, auth, uploads
 from app.services import ingest
+from app import database
 import os
 import threading
 from datetime import datetime
 
 app = FastAPI(title="Nomad Pi")
+
+# Initialize Database immediately
+database.init_db()
 
 # CORS
 app.add_middleware(

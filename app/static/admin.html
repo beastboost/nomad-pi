@@ -321,6 +321,56 @@
                             </div>
                         </div>
                     </section>
+
+                    <!-- Settings View -->
+                    <section v-if="currentView === 'settings'" class="view-section">
+                        <div class="settings-grid">
+                            <!-- Security Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-shield-alt"></i>
+                                    <h3>Security Settings</h3>
+                                </div>
+                                <div class="card-body">
+                                    <form @submit.prevent="changePassword" class="settings-form">
+                                        <div class="form-group">
+                                            <label>Current Password</label>
+                                            <input type="password" v-model="passChange.current" placeholder="Current Password" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>New Password</label>
+                                            <input type="password" v-model="passChange.new" placeholder="New Password" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Confirm New Password</label>
+                                            <input type="password" v-model="passChange.confirm" placeholder="Confirm New Password" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary" :disabled="passChange.loading">
+                                            <i class="fas fa-key"></i> {{ passChange.loading ? 'Updating...' : 'Change Password' }}
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- API Keys Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-key"></i>
+                                    <h3>API Configuration</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label>OMDb API Key</label>
+                                        <div class="input-with-button">
+                                            <input type="text" v-model="settings.omdb_key" placeholder="Enter OMDb API Key">
+                                            <button @click="saveOmdbKey" class="btn btn-secondary">Save</button>
+                                        </div>
+                                        <p class="help-text">Used for fetching movie/show metadata</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </main>
         </div>

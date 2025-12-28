@@ -64,8 +64,38 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
+
+def set_setting(key: str, value: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+    ''', (key, value))
+    conn.commit()
+    conn.close()
+
+def get_setting(key: str) -> Optional[str]:
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return row['value']
+    return None
 
 def update_progress(path: str, current_time: float, duration: float):
     conn = get_db()

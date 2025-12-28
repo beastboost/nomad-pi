@@ -91,7 +91,16 @@ createApp({
                 autoRefresh: true,
                 refreshInterval: 5000,
                 maxRetries: 3,
-                notifications: true
+                notifications: true,
+                omdb_key: ''
+            },
+
+            // Password Change
+            passChange: {
+                current: '',
+                new: '',
+                confirm: '',
+                loading: false
             },
 
             // Toasts
@@ -120,6 +129,7 @@ createApp({
                     this.loadStorageInfo(),
                     this.loadMediaStats(),
                     this.loadServices(),
+                    this.loadSettings(),
                     this.checkUpdates()
                 ]);
                 
@@ -187,6 +197,15 @@ createApp({
                 this.mediaStats = response;
             } catch (error) {
                 console.error('Error loading media stats:', error);
+            }
+        },
+
+        async loadSettings() {
+            try {
+                const response = await this.apiCall('/api/system/settings/omdb', 'GET');
+                this.settings.omdb_key = response.key;
+            } catch (error) {
+                console.error('Error loading settings:', error);
             }
         },
 
@@ -291,6 +310,38 @@ createApp({
                 this.showNotification('Failed to rebuild library', 'error');
             } finally {
                 this.isLoading = false;
+            }
+        },
+
+        async changePassword() {
+            if (this.passChange.new !== this.passChange.confirm) {
+                this.showNotification('New passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                this.passChange.loading = true;
+                await this.apiCall('/api/auth/change-password', 'POST', {
+                    current_password: this.passChange.current,
+                    new_password: this.passChange.new
+                });
+                this.showNotification('Password changed successfully', 'success');
+                this.passChange = { current: '', new: '', confirm: '', loading: false };
+            } catch (error) {
+                this.showNotification(error.response?.data?.detail || 'Failed to change password', 'error');
+            } finally {
+                this.passChange.loading = false;
+            }
+        },
+
+        async saveOmdbKey() {
+            try {
+                await this.apiCall('/api/system/settings/omdb', 'POST', {
+                    key: this.settings.omdb_key
+                });
+                this.showNotification('OMDb key saved successfully', 'success');
+            } catch (error) {
+                this.showNotification('Failed to save OMDb key', 'error');
             }
         },
 
