@@ -1498,13 +1498,17 @@ async function loadWifiStatus() {
                     const info = await infoRes.json();
                     if (details) {
                         if (info.mode === 'wifi' && info.ssid) {
-                            details.textContent = `Connected to: ${info.ssid}`;
+                            let detailStr = `Connected to: <strong>${info.ssid}</strong>`;
+                            if (info.ip) detailStr += ` • IP: ${info.ip}`;
+                            if (info.bitrate) detailStr += ` • ${info.bitrate}`;
+                            if (info.frequency) detailStr += ` • ${info.frequency}`;
+                            details.innerHTML = detailStr;
                             if (icon) icon.textContent = '📶';
                         } else if (info.mode === 'hotspot') {
-                            details.textContent = 'Hotspot Active: NomadPi';
+                            details.textContent = 'Hotspot Active: NomadPi (10.42.0.1)';
                             if (icon) icon.textContent = '🔥';
                         } else {
-                            details.textContent = 'Not connected';
+                            details.textContent = 'Not connected to any network';
                         }
                     }
                 }
@@ -1526,7 +1530,7 @@ async function scanWifi() {
     list.innerHTML = `
         <div style="padding:40px; text-align:center;">
             <div class="spinner" style="margin: 0 auto 15px auto; width: 30px; height: 30px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <div style="color:var(--text-muted);">Searching for nearby networks...</div>
+            <div style="color:var(--text-muted);">Scanning airwaves... this might take a moment.</div>
         </div>
     `;
 
@@ -1540,14 +1544,14 @@ async function scanWifi() {
             data.networks.forEach(net => {
                 const div = document.createElement('div');
                 div.className = 'glass-hover';
-                div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px; transition:all 0.2s ease; cursor:pointer;';
+                div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px; transition:all 0.2s ease; cursor:pointer; margin-bottom:4px;';
                 div.onclick = () => openWifiModal(net.ssid);
                 
                 // Signal strength icon logic
-                let signalIcon = '📶';
-                if (net.signal < 30) signalIcon = '▂';
-                else if (net.signal < 60) signalIcon = '▃';
-                else if (net.signal < 85) signalIcon = '▅';
+                let signalIcon = net.bars || '📶';
+                let signalColor = 'var(--success-color)';
+                if (net.signal < 30) signalColor = 'var(--danger-color)';
+                else if (net.signal < 60) signalColor = 'var(--warning-color)';
                 
                 const isEncrypted = net.security && net.security !== 'None';
                 
@@ -1555,10 +1559,11 @@ async function scanWifi() {
                 info.innerHTML = `
                     <div style="display:flex; align-items:center; gap:8px;">
                         <span style="font-weight:600; font-size:1.05em;">${net.ssid}</span>
-                        ${isEncrypted ? '<span style="font-size:0.8em; opacity:0.6;">🔒</span>' : ''}
+                        ${isEncrypted ? '<span style="font-size:0.8em; opacity:0.6;" title="' + net.security + '">🔒</span>' : ''}
                     </div>
                     <div style="font-size:0.85em; color:var(--text-muted); margin-top:4px;">
-                        ${net.security} • Signal: ${net.signal}% ${signalIcon}
+                        <span style="color:${signalColor}; font-weight:bold;">${net.signal}%</span> ${signalIcon} 
+                        ${net.freq ? ' • ' + net.freq : ''}
                     </div>
                 `;
                 
@@ -1571,18 +1576,13 @@ async function scanWifi() {
                 
                 div.appendChild(info);
                 div.appendChild(connectBtn);
-                
-                // Hover effect
-                div.onmouseover = () => { div.style.background = 'rgba(255,255,255,0.08)'; div.style.borderColor = 'rgba(255,255,255,0.1)'; };
-                div.onmouseout = () => { div.style.background = 'rgba(255,255,255,0.03)'; div.style.borderColor = 'rgba(255,255,255,0.05)'; };
-                
                 list.appendChild(div);
             });
         } else {
             list.innerHTML = `
                 <div style="padding:40px; text-align:center; color:var(--text-muted);">
                     <div style="font-size:2em; margin-bottom:10px;">🔍</div>
-                    No networks found. Try refreshing.
+                    No networks found. Try moving closer to the router or refreshing.
                 </div>
             `;
         }
@@ -1625,7 +1625,6 @@ function openWifiModal(ssid) {
                 closeWifiModal();
             }
         };
-        // Register listener only once when the handler is first created
         window.addEventListener('keydown', window._wifiModalEscHandler);
     }
 }
@@ -1637,6 +1636,7 @@ function closeWifiModal() {
     // Clean up the escape key listener to prevent memory leaks
     if (window._wifiModalEscHandler) {
         window.removeEventListener('keydown', window._wifiModalEscHandler);
+        window._wifiModalEscHandler = null;
     }
 }
 
@@ -2215,23 +2215,30 @@ function inferShowNameFromFilename(pathOrName) {
 
 async function loadStorageStats() {
     try {
-        const res = await fetch(`${API_BASE}/system/storage`);
+        const res = await fetch(`${API_BASE}/system/stats`);
         if (res.status === 401) return;
         const data = await res.json();
         
-        const percent = Number(data.percent || 0);
-        const freeGB = Number(data.free || 0) / (1024 ** 3);
-        const totalGB = Number(data.total || 0) / (1024 ** 3);
-        const usedGB = Number(data.used || 0) / (1024 ** 3);
+        // Disk Stats
+        const diskPercent = Number(data.disk_percent || 0);
+        const diskUsedGB = Number(data.disk_used || 0) / (1024 ** 3);
+        const diskTotalGB = Number(data.disk_total || 0) / (1024 ** 3);
+        const diskFreeGB = Number(data.disk_free || 0) / (1024 ** 3);
 
-        const cpuPercent = Number(data.cpu_percent);
-        const ramPercent = Number(data.ram_percent);
-        const ramUsedGB = Number(data.ram_used || 0) / (1024 ** 3);
-        const ramTotalGB = Number(data.ram_total || 0) / (1024 ** 3);
+        // CPU Stats
+        const cpuPercent = Number(data.cpu || 0);
+        const cpuFreq = Number(data.cpu_freq || 0);
+        const throttled = data.throttled || false;
 
+        // RAM Stats
+        const ramPercent = Number(data.memory_percent || 0);
+        const ramUsedGB = Number(data.memory_used || 0) / (1024 ** 3);
+        const ramTotalGB = Number(data.memory_total || 0) / (1024 ** 3);
+
+        // Network Stats
         const now = Date.now();
-        const sent = Number(data.net_bytes_sent);
-        const recv = Number(data.net_bytes_recv);
+        const sent = Number(data.network_up);
+        const recv = Number(data.network_down);
         let downRate = null;
         let upRate = null;
         if (lastNetSample && Number.isFinite(sent) && Number.isFinite(recv)) {
@@ -2245,19 +2252,63 @@ async function loadStorageStats() {
             lastNetSample = { t: now, s: sent, r: recv };
         }
 
-        const storageEl = document.getElementById('storage-stats');
-        const cpuEl = document.getElementById('cpu-stats');
-        const ramEl = document.getElementById('ram-stats');
-        const netEl = document.getElementById('net-stats');
-        const headerEl = document.getElementById('header-stats');
+        // Update UI
+        const updateText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = text;
+        };
+        const updateProgress = (id, percent) => {
+            const el = document.getElementById(id);
+            if (el) el.style.width = `${percent}%`;
+        };
 
-        if (storageEl) storageEl.innerText = `${percent.toFixed(0)}% used • ${usedGB.toFixed(1)}/${totalGB.toFixed(1)} GB • ${freeGB.toFixed(1)} GB free`;
-        if (cpuEl && Number.isFinite(cpuPercent)) cpuEl.innerText = `${cpuPercent.toFixed(0)}%`;
-        if (ramEl && Number.isFinite(ramPercent)) ramEl.innerText = `${ramPercent.toFixed(0)}% • ${ramUsedGB.toFixed(1)}/${ramTotalGB.toFixed(1)} GB`;
-        if (netEl) netEl.innerText = `${downRate === null ? '↓ --' : `↓ ${formatRate(downRate)}`} • ${upRate === null ? '↑ --' : `↑ ${formatRate(upRate)}`}`;
-        if (headerEl) headerEl.innerText = `${Number.isFinite(cpuPercent) ? `CPU ${cpuPercent.toFixed(0)}%` : ''}${Number.isFinite(ramPercent) ? ` • RAM ${ramPercent.toFixed(0)}%` : ''}${downRate === null ? '' : ` • ↓ ${formatRate(downRate)}`}${upRate === null ? '' : ` • ↑ ${formatRate(upRate)}`}`;
+        // Storage Card
+        updateText('storage-stats', `${diskPercent.toFixed(0)}%`);
+        updateProgress('disk-progress', diskPercent);
+        updateText('disk-details', `${diskUsedGB.toFixed(1)}/${diskTotalGB.toFixed(1)} GB used • ${diskFreeGB.toFixed(1)} GB free`);
+
+        // CPU Card
+        let cpuValStr = `${cpuPercent.toFixed(0)}%`;
+        if (cpuFreq > 0) cpuValStr += ` @ ${cpuFreq < 1000 ? cpuFreq.toFixed(0) + 'MHz' : (cpuFreq/1000).toFixed(2) + 'GHz'}`;
+        updateText('cpu-stats', cpuValStr);
+        updateProgress('cpu-progress', cpuPercent);
+        let cpuDetails = `${data.cores || '--'} Cores`;
+        if (throttled) cpuDetails += ' • <span style="color:var(--danger-color); font-weight:bold;">THROTTLED</span>';
+        const cpuDetailsEl = document.getElementById('cpu-details');
+        if (cpuDetailsEl) cpuDetailsEl.innerHTML = cpuDetails;
+
+        // RAM Card
+        updateText('ram-stats', `${ramPercent.toFixed(0)}%`);
+        updateProgress('mem-progress', ramPercent);
+        updateText('mem-details', `${ramUsedGB.toFixed(1)}/${ramTotalGB.toFixed(1)} GB used`);
+
+        // Temp Card
+        const tempEl = document.getElementById('cpu-temp');
+        if (tempEl) {
+            const temp = Number(data.temp);
+            tempEl.innerText = Number.isFinite(temp) ? `${temp.toFixed(1)}°C` : '--°C';
+            if (temp > 75) tempEl.style.color = 'var(--danger-color)';
+            else if (temp > 60) tempEl.style.color = 'var(--warning-color)';
+            else tempEl.style.color = 'var(--success-color)';
+        }
+        const tempDetailsEl = document.getElementById('temp-details');
+        if (tempDetailsEl && data.uptime) {
+            const uptimeHours = data.uptime / 3600;
+            if (uptimeHours < 24) {
+                tempDetailsEl.innerText = `Up: ${uptimeHours.toFixed(1)}h • Core Temp`;
+            } else {
+                tempDetailsEl.innerText = `Up: ${(uptimeHours/24).toFixed(1)}d • Core Temp`;
+            }
+        }
+
+        // Header Stats
+        const headerEl = document.getElementById('header-stats');
+        if (headerEl) {
+            headerEl.innerText = `CPU ${cpuPercent.toFixed(0)}% • RAM ${ramPercent.toFixed(0)}%${downRate === null ? '' : ` • ↓ ${formatRate(downRate)}`}`;
+        }
+
     } catch (e) {
-        console.error(e);
+        console.error('Failed to load system stats:', e);
     }
 }
 

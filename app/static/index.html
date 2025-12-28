@@ -40,21 +40,40 @@
             <section id="home" class="active">
                 <h1>Welcome Home</h1>
                 <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">Storage</div>
+                    <div class="stat-card glass-hover">
+                        <div class="stat-header">
+                            <span class="stat-icon">💾</span>
+                            <span class="stat-label">Storage</span>
+                        </div>
                         <div id="storage-stats" class="stat-value">Loading...</div>
+                        <div class="progress-container"><div id="disk-progress" class="progress-bar"></div></div>
+                        <div id="disk-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">CPU</div>
+                    <div class="stat-card glass-hover">
+                        <div class="stat-header">
+                            <span class="stat-icon">🧠</span>
+                            <span class="stat-label">CPU</span>
+                        </div>
                         <div id="cpu-stats" class="stat-value">Loading...</div>
+                        <div class="progress-container"><div id="cpu-progress" class="progress-bar"></div></div>
+                        <div id="cpu-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">RAM</div>
+                    <div class="stat-card glass-hover">
+                        <div class="stat-header">
+                            <span class="stat-icon">⚡</span>
+                            <span class="stat-label">RAM</span>
+                        </div>
                         <div id="ram-stats" class="stat-value">Loading...</div>
+                        <div class="progress-container"><div id="mem-progress" class="progress-bar"></div></div>
+                        <div id="mem-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Network</div>
-                        <div id="net-stats" class="stat-value">Loading...</div>
+                    <div class="stat-card glass-hover">
+                        <div class="stat-header">
+                            <span class="stat-icon">🌡️</span>
+                            <span class="stat-label">Temp</span>
+                        </div>
+                        <div id="cpu-temp" class="stat-value">--°C</div>
+                        <div id="temp-details" class="stat-details">Core Temperature</div>
                     </div>
                 </div>
                 

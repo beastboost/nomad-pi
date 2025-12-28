@@ -37,6 +37,8 @@ createApp({
                 storagePercent: 0,
                 cpuPercent: 0,
                 cpuCores: 0,
+                cpuFreq: 0,
+                throttled: false,
                 ramUsed: 0,
                 ramTotal: 0,
                 ramPercent: 0,
@@ -163,12 +165,14 @@ createApp({
                 const response = await this.apiCall('/api/system/stats', 'GET');
                 this.stats.cpuPercent = response.cpu || 0;
                 this.stats.cpuCores = response.cores || 0;
+                this.stats.cpuFreq = response.cpu_freq || 0;
+                this.stats.throttled = response.throttled || false;
                 this.stats.ramUsed = response.memory_used || 0;
                 this.stats.ramTotal = response.memory_total || 0;
                 this.stats.ramPercent = response.memory_percent || 0;
                 this.stats.networkUp = response.network_up || 0;
                 this.stats.networkDown = response.network_down || 0;
-                this.stats.temperature = response.temperature || 0;
+                this.stats.temperature = response.temp || 0;
                 this.stats.uptime = response.uptime || 0;
                 
                 this.updateResourcesChart();

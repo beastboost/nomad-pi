@@ -98,11 +98,12 @@ def get_stats():
         "memory_percent": mem.percent,
         "network_up": net.bytes_sent,
         "network_down": net.bytes_recv,
-        "temperature": temp,
-        "uptime": int(psutil.boot_time()),
         "disk_total": disk.total,
         "disk_used": disk.used,
-        "disk_percent": disk.percent
+        "disk_free": disk.free,
+        "disk_percent": disk.percent,
+        "temp": temp,
+        "uptime": datetime.now().timestamp() - psutil.boot_time()
     }
 
 @router.get("/storage/info")
@@ -427,51 +428,108 @@ def system_control(action: str):
 def get_wifi_info():
     """Get detailed WiFi connection information"""
     if platform.system() != "Linux":
-        return {"mode": "unknown", "message": "WiFi management only available on Linux"}
+        return {
+            "mode": "wifi", 
+            "ssid": "Mock_WiFi", 
+            "signal": 85, 
+            "interface": "wlan0",
+            "ip": "192.168.1.100",
+            "bitrate": "150 Mb/s",
+            "frequency": "2.412 GHz"
+        }
     
     try:
-        # Check if connected to WiFi
-        nmcli_output = subprocess.check_output(
-            ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "connection", "show", "--active"],
-            text=True
-        )
-        
+        # Detect Wi-Fi interface
+        wifi_iface = "wlan0"
+        try:
+            dev_output = subprocess.check_output(["nmcli", "-t", "-f", "DEVICE,TYPE", "dev"], text=True).strip().split('\n')
+            for line in dev_output:
+                if ':wifi' in line:
+                    wifi_iface = line.split(':')[0]
+                    break
+        except:
+            pass
+
+        # Get active wifi info directly from 'dev wifi' which is more accurate for current SSID
         mode = "disconnected"
         ssid = None
         signal = None
-        
-        for line in nmcli_output.strip().split('\n'):
-            if not line:
-                continue
-            parts = line.split(':')
-            if len(parts) >= 3:
-                conn_type, state, conn_name = parts[0], parts[1], parts[2]
-                if conn_type == "802-11-wireless" and state == "activated":
-                    mode = "wifi"
-                    ssid = conn_name
-                    break
-        
-        # Check if hotspot is active
+        ip_addr = None
+        bitrate = None
+        freq = None
+
+        try:
+            # Check for active WiFi SSID and signal
+            dev_wifi = subprocess.check_output(
+                ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ,BARS", "dev", "wifi"],
+                text=True
+            ).strip().split('\n')
+            
+            for line in dev_wifi:
+                if line.startswith('yes:'):
+                    parts = line.split(':')
+                    if len(parts) >= 5:
+                        mode = "wifi"
+                        # yes:SSID:SIGNAL:FREQ:BARS
+                        # SSID can have colons
+                        bars = parts[-1]
+                        freq = parts[-2]
+                        signal_str = parts[-3]
+                        ssid = ":".join(parts[1:-3])
+                        signal = int(signal_str) if signal_str.isdigit() else 0
+                        break
+        except:
+            pass
+
+        # If not found via dev wifi, check if hotspot is active
         if mode == "disconnected":
             try:
-                hotspot_check = subprocess.check_output(
+                active_conns = subprocess.check_output(
                     ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "connection", "show", "--active"],
                     text=True
                 )
-                if "NomadPi" in hotspot_check or "hotspot" in hotspot_check.lower():
+                if "NomadPi" in active_conns or "hotspot" in active_conns.lower():
                     mode = "hotspot"
                     ssid = "NomadPi"
+                    ip_addr = "10.42.0.1"
+                elif "wifi" in active_conns.lower():
+                    # If nmcli says wifi is active but we didn't find the SSID yet
+                    mode = "wifi"
             except:
                 pass
         
-        # Get signal strength if on WiFi
+        # Get IP address if connected
+        if mode != "disconnected" and not ip_addr:
+            try:
+                ip_output = subprocess.check_output(["hostname", "-I"], text=True).split()
+                if ip_output:
+                    ip_addr = ip_output[0]
+                    if mode == "disconnected":
+                        mode = "wifi" # Fallback if we have an IP but nmcli was unsure
+            except:
+                pass
+
+        # If we have mode=wifi but no SSID, try to get it from iwgetid
+        if mode == "wifi" and not ssid:
+            try:
+                ssid = subprocess.check_output(["iwgetid", "-r"], text=True).strip()
+            except:
+                pass
+
+        # Get bitrate from iwconfig if on wifi
         if mode == "wifi":
             try:
-                iwconfig_output = subprocess.check_output(["iwconfig", "wlan0"], text=True, stderr=subprocess.DEVNULL)
+                iw_output = subprocess.check_output(["iwconfig", wifi_iface], text=True, stderr=subprocess.DEVNULL)
                 import re
-                signal_match = re.search(r'Signal level=(-?\d+)', iwconfig_output)
-                if signal_match:
-                    signal = int(signal_match.group(1))
+                br_match = re.search(r'Bit Rate[:=](\d+\.?\d*\s*\w+/s)', iw_output)
+                if br_match:
+                    bitrate = br_match.group(1)
+                
+                # If freq not found yet
+                if not freq:
+                    fr_match = re.search(r'Frequency[:=](\d+\.?\d*\s*\w+Hz)', iw_output)
+                    if fr_match:
+                        freq = fr_match.group(1)
             except:
                 pass
         
@@ -479,7 +537,10 @@ def get_wifi_info():
             "mode": mode,
             "ssid": ssid,
             "signal": signal,
-            "interface": "wlan0"
+            "interface": wifi_iface,
+            "ip": ip_addr,
+            "bitrate": bitrate,
+            "frequency": freq
         }
     except Exception as e:
         return {"mode": "error", "message": str(e)}
@@ -540,43 +601,66 @@ def toggle_hotspot(enable: bool = True):
 
 @router.get("/wifi/scan")
 def scan_wifi():
-    """Scan for available WiFi networks"""
+    """Scan for available WiFi networks with better discovery"""
     if platform.system() != "Linux":
         # Mock data for Windows
         return {
             "networks": [
-                {"ssid": "Mock_Network_1", "signal": 85, "security": "WPA2"},
-                {"ssid": "Mock_Network_2", "signal": 40, "security": "WPA2"},
-                {"ssid": "Open_WiFi", "signal": 60, "security": "None"}
+                {"ssid": "Mock_Network_1", "signal": 85, "security": "WPA2", "freq": "2.4 GHz", "bars": "▂▄▆█"},
+                {"ssid": "Mock_Network_2", "signal": 40, "security": "WPA2", "freq": "5 GHz", "bars": "▂▄"},
+                {"ssid": "Open_WiFi", "signal": 60, "security": "None", "freq": "2.4 GHz", "bars": "▂▄▆"}
             ]
         }
     
     try:
-        # Trigger scan and get results
-        # nmcli dev wifi list
+        # Force a rescan first (this might take a few seconds)
+        try:
+            subprocess.run(["nmcli", "dev", "wifi", "rescan"], timeout=5, capture_output=True)
+            import time
+            time.sleep(2) # Give it a moment to populate
+        except:
+            pass
+
+        # Get results with more fields
+        # SSID,SIGNAL,SECURITY,FREQ,BARS
         result = subprocess.run(
-            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,BARS", "dev", "wifi", "list", "--rescan", "yes"],
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"],
             capture_output=True,
             text=True,
-            timeout=15
+            timeout=10
         )
         
         networks = []
         seen_ssids = set()
         
-        for line in result.stdout.strip().split('\n'):
+        lines = result.stdout.strip().split('\n')
+        for line in lines:
             if not line:
                 continue
+            
+            # nmcli -t uses ':' as separator but SSIDs can contain ':'
+            # However, the fields we requested are at the end, except SSID
             parts = line.split(':')
-            if len(parts) >= 3:
-                ssid = parts[0]
+            if len(parts) >= 5:
+                # BARS is last, FREQ is 2nd to last, SECURITY 3rd to last, SIGNAL 4th to last
+                bars = parts[-1]
+                freq = parts[-2]
+                security = parts[-3]
+                signal_str = parts[-4]
+                
+                # SSID is everything before the signal
+                # Join back in case SSID had colons
+                ssid = ":".join(parts[:-4])
+                
                 if not ssid or ssid in seen_ssids:
                     continue
                 
                 networks.append({
                     "ssid": ssid,
-                    "signal": int(parts[1]) if parts[1].isdigit() else 0,
-                    "security": parts[2] if parts[2] else "None"
+                    "signal": int(signal_str) if signal_str.isdigit() else 0,
+                    "security": security if security else "None",
+                    "freq": freq,
+                    "bars": bars
                 })
                 seen_ssids.add(ssid)
         
