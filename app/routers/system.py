@@ -247,6 +247,17 @@ def get_update_status():
             return {"progress": 0, "message": "Error reading status"}
     return {"progress": 0, "message": "No update in progress"}
 
+@router.get("/update/log")
+def get_update_log():
+    log_path = os.path.abspath("update.log")
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r") as f:
+                return {"log": f.read()}
+        except Exception as e:
+            return {"error": str(e)}
+    return {"log": "No update log found."}
+
 @router.post("/control/{action}")
 def system_control(action: str):
     if action not in ["shutdown", "reboot", "update"]:

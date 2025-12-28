@@ -507,8 +507,9 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
 def browse_files(path: str = Query(default="/data")):
     # Special handling for log files
     if path == "/update.log":
-        if os.path.exists("update.log"):
-            return {"items": [{"name": "update.log", "path": "/update.log", "is_dir": False, "size": os.path.getsize("update.log")}]}
+        log_path = os.path.abspath("update.log")
+        if os.path.exists(log_path):
+            return {"items": [{"name": "update.log", "path": "/update.log", "is_dir": False, "size": os.path.getsize(log_path)}]}
         return {"items": []}
 
     if not path.startswith("/data"):

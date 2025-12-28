@@ -1860,29 +1860,26 @@ async function systemControl(action) {
             const pollInterval = setInterval(async () => {
                 pollCount++;
                 try {
-                    const logContentRes = await fetch(`${API_BASE}/media/browse?path=/update.log`);
-                    if (logContentRes.ok) {
-                        const logData = await logContentRes.json();
-                        if (logData.items && logData.items.length > 0) {
-                            // Fetch the actual file content via the static file server
-                            const contentRes = await fetch('/update.log');
-                            if (contentRes.ok) {
-                                const text = await contentRes.text();
-                                logView.textContent = text;
-                                logView.scrollTop = logView.scrollHeight;
-                                
-                                if (text.includes('Update complete!')) {
-                                    clearInterval(pollInterval);
-                                    badge.textContent = 'Success';
-                                    badge.className = 'badge success';
-                                    alert('Update complete! The server might restart now.');
-                                }
+                    const logRes = await fetch(`${API_BASE}/system/update/log`);
+                    if (logRes.ok) {
+                        const data = await logRes.json();
+                        if (data.log) {
+                            logView.textContent = data.log;
+                            logView.scrollTop = logView.scrollHeight;
+                            
+                            if (data.log.includes('Update complete!')) {
+                                clearInterval(pollInterval);
+                                badge.textContent = 'Success';
+                                badge.className = 'badge success';
+                                alert('Update complete! The server might restart now.');
                             }
                         }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Log poll error:', e);
+                }
                 
-                if (pollCount > 60) { // Stop polling after 2 minutes
+                if (pollCount > 150) { // Stop polling after 5 minutes
                     clearInterval(pollInterval);
                     badge.textContent = 'Timed Out';
                     badge.className = 'badge danger';
