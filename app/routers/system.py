@@ -5,6 +5,7 @@ import os
 import subprocess
 import platform
 import json
+from datetime import datetime
 from app import database
 
 router = APIRouter()
@@ -264,18 +265,33 @@ def system_control(action: str):
         raise HTTPException(status_code=400, detail="Invalid action")
     
     if action == "update":
+        log_file = os.path.abspath("update.log")
+        # Ensure log file is clean before starting
+        if os.path.exists(log_file):
+            try:
+                os.remove(log_file)
+            except:
+                pass
+        
+        with open(log_file, "w") as f:
+            f.write(f"Update triggered at {datetime.now()}\n")
+
         if platform.system() == "Linux":
             # Run the update script in the background
             try:
                 # We use Popen so the API can return a response before the service restarts
-                subprocess.Popen(["/bin/bash", "./update.sh"], cwd=os.getcwd())
+                # Redirect output to the log file
+                with open(log_file, "a") as f:
+                    subprocess.Popen(["/bin/bash", "./update.sh"], cwd=os.getcwd(), stdout=f, stderr=f)
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
         elif platform.system() == "Windows":
             # Support for testing update on Windows
             try:
-                subprocess.Popen(["powershell.exe", "-File", "./update.ps1"], cwd=os.getcwd())
+                # Redirect output to the log file
+                with open(log_file, "a") as f:
+                    subprocess.Popen(["powershell.exe", "-File", "./update.ps1"], cwd=os.getcwd(), stdout=f, stderr=f)
                 return {"status": "Update initiated (Windows)."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
