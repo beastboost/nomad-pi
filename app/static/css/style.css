@@ -166,13 +166,18 @@ body {
 }
 
 input[type="text"], input[type="password"], select {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #1a1a1a; /* Solid background for selects */
+    border: 1px solid rgba(255, 255, 255, 0.15);
     color: white;
     padding: 12px 20px;
     border-radius: 8px;
     outline: none;
     transition: all 0.3s ease;
+}
+
+select option {
+    background: #1a1a1a;
+    color: white;
 }
 
 input[type="text"]:focus, input[type="password"]:focus, select:focus {
