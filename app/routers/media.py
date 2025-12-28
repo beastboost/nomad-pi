@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Q
 from typing import List, Dict
 import os
 import posixpath
+import platform
 import re
 import shutil
 import zipfile
@@ -10,10 +11,13 @@ import subprocess
 import json
 import urllib.parse
 import urllib.request
+import logging
 from datetime import datetime, timedelta
 from collections import OrderedDict
 import threading
 from app import database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -566,27 +570,32 @@ def browse_files(path: str = Query(default="/data")):
             if item.startswith('.'):
                 continue
             
-            full_path = os.path.join(fs_path, item)
-            is_dir = os.path.isdir(full_path)
-            
-            if full_path.startswith(os.path.abspath(BASE_DIR)):
-                rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
-                web_path = f"/data/{rel_path}"
-            else:
-                # External path, use absolute path for browsing
-                web_path = full_path
-            
             try:
-                size = os.path.getsize(full_path) if not is_dir else None
-            except:
-                size = None
+                full_path = os.path.join(fs_path, item)
+                is_dir = os.path.isdir(full_path)
+                
+                if full_path.startswith(os.path.abspath(BASE_DIR)):
+                    rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
+                    web_path = f"/data/{rel_path}"
+                else:
+                    # External path, use absolute path for browsing
+                    web_path = full_path
+                
+                try:
+                    size = os.path.getsize(full_path) if not is_dir else 0
+                except:
+                    size = 0
 
-            items.append({
-                "name": item,
-                "path": web_path,
-                "is_dir": is_dir,
-                "size": size
-            })
+                items.append({
+                    "name": str(item),  # Ensure string type
+                    "path": str(web_path),  # Ensure string type
+                    "is_dir": bool(is_dir),  # Ensure boolean type
+                    "size": int(size)  # Ensure integer type
+                })
+            except Exception as item_error:
+                # Skip items that cause errors (e.g., permission issues)
+                logger.warning(f"Skipping item {item}: {item_error}")
+                continue
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
