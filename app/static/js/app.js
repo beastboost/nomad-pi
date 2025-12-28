@@ -1625,8 +1625,9 @@ function openWifiModal(ssid) {
                 closeWifiModal();
             }
         };
+        // Register listener only once when the handler is first created
+        window.addEventListener('keydown', window._wifiModalEscHandler);
     }
-    window.addEventListener('keydown', window._wifiModalEscHandler);
 }
 
 function closeWifiModal() {
