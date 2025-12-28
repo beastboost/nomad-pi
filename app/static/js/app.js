@@ -246,10 +246,24 @@ function handleLoginKey(e) {
 function showSection(id) {
     document.querySelectorAll('main > section').forEach(sec => {
         sec.classList.add('hidden');
-        sec.classList.remove('active');
+        sec.style.display = 'none'; // Force hide
+        sec.classList.remove('active', 'animate-fade');
     });
-    document.getElementById(id).classList.remove('hidden');
-    document.getElementById(id).classList.add('active');
+
+    // Update active nav button
+    document.querySelectorAll('nav button').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.innerText.toLowerCase() === id.toLowerCase()) {
+            btn.classList.add('active');
+        }
+    });
+
+    const target = document.getElementById(id);
+    if (target) {
+        target.classList.remove('hidden');
+        target.style.display = 'block'; // Ensure display is set
+        target.classList.add('active', 'animate-fade');
+    }
 
     // Clear drive scan interval if leaving admin
     if (driveScanInterval) {
