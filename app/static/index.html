@@ -146,6 +146,13 @@
                         <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
                         <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
                     </div>
+                    <div id="update-log-container" class="hidden" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px solid var(--border-color);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="margin:0;">Update Progress</h4>
+                            <span id="update-status-badge" class="badge">Running...</span>
+                        </div>
+                        <pre id="update-log-view" style="max-height:200px; overflow-y:auto; font-size:0.85em; margin:0; white-space:pre-wrap; font-family:monospace;"></pre>
+                    </div>
                 </div>
 
                 <div class="admin-panel">
@@ -203,6 +210,26 @@
 
             <section id="settings" class="hidden">
                 <h2>Settings</h2>
+                <div class="admin-panel">
+                    <h3>Account Security</h3>
+                    <div class="settings-form">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Current Password</label>
+                            <input type="password" id="change-pw-current" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">New Password</label>
+                            <input type="password" id="change-pw-new" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Confirm New Password</label>
+                            <input type="password" id="change-pw-confirm" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <button onclick="changePassword()" class="primary">Update Password</button>
+                        <p id="change-pw-status" style="margin-top:10px; font-size:0.9em;"></p>
+                    </div>
+                </div>
+
                 <div class="admin-panel">
                     <h3>General Settings</h3>
                     <div class="settings-form">

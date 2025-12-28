@@ -261,8 +261,15 @@ def system_control(action: str):
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+        elif platform.system() == "Windows":
+            # Support for testing update on Windows
+            try:
+                subprocess.Popen(["powershell.exe", "-File", "./update.ps1"], cwd=os.getcwd())
+                return {"status": "Update initiated (Windows)."}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
         else:
-            return {"status": "update_simulated", "message": "Update script would run on Linux (git pull + restart)"}
+            return {"status": "update_simulated", "message": "Update script would run on Linux or Windows"}
 
     if platform.system() == "Linux":
         cmd = ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"] if action == "shutdown" else ["sudo", "-n", "/usr/sbin/reboot"]

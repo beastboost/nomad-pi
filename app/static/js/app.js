@@ -17,6 +17,7 @@ let movieMetaQueue = [];
 let movieMetaActive = 0;
 const MOVIE_META_CONCURRENCY = 2;
 const mediaPageState = {};
+const mediaState = { path: '/data' };
 
 function getPageState(category) {
     if (!mediaPageState[category]) {
@@ -1791,18 +1792,127 @@ let musicIndex = -1;
 let musicShuffle = false;
 let musicShuffleOrder = [];
 let musicShufflePos = 0;
+async function changePassword() {
+    const currentPw = document.getElementById('change-pw-current').value;
+    const newPw = document.getElementById('change-pw-new').value;
+    const confirmPw = document.getElementById('change-pw-confirm').value;
+    const statusEl = document.getElementById('change-pw-status');
+
+    if (!currentPw || !newPw || !confirmPw) {
+        statusEl.textContent = 'Please fill in all fields.';
+        statusEl.style.color = 'var(--danger-color)';
+        return;
+    }
+
+    if (newPw !== confirmPw) {
+        statusEl.textContent = 'New passwords do not match.';
+        statusEl.style.color = 'var(--danger-color)';
+        return;
+    }
+
+    statusEl.textContent = 'Updating...';
+    statusEl.style.color = 'var(--text-color)';
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_password: currentPw, new_password: newPw })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+            statusEl.textContent = 'Password updated successfully!';
+            statusEl.style.color = 'var(--success-color)';
+            document.getElementById('change-pw-current').value = '';
+            document.getElementById('change-pw-new').value = '';
+            document.getElementById('change-pw-confirm').value = '';
+        } else {
+            statusEl.textContent = data.detail || 'Failed to update password.';
+            statusEl.style.color = 'var(--danger-color)';
+        }
+    } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = 'var(--danger-color)';
+    }
+}
+
 async function systemControl(action) {
-    const msg = action === 'update' ? 'Are you sure you want to update from GitHub? This will pull latest files and restart the service.' : `Are you sure you want to ${action} the device?`;
+    if (action === 'update') {
+        const container = document.getElementById('update-log-container');
+        const logView = document.getElementById('update-log-view');
+        const badge = document.getElementById('update-status-badge');
+        
+        if (!confirm('Are you sure you want to update from GitHub? This will pull latest files and restart the service.')) return;
+        
+        container.classList.remove('hidden');
+        logView.textContent = 'Starting update...\n';
+        badge.textContent = 'Running...';
+        badge.className = 'badge warning';
+
+        try {
+            const res = await fetch(`${API_BASE}/system/control/update`, { method: 'POST' });
+            if (res.status === 401) { logout(); return; }
+            
+            // Start polling for logs
+            let pollCount = 0;
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+                try {
+                    const logContentRes = await fetch(`${API_BASE}/media/browse?path=/update.log`);
+                    if (logContentRes.ok) {
+                        const logData = await logContentRes.json();
+                        if (logData.items && logData.items.length > 0) {
+                            // Fetch the actual file content via the static file server
+                            const contentRes = await fetch('/update.log');
+                            if (contentRes.ok) {
+                                const text = await contentRes.text();
+                                logView.textContent = text;
+                                logView.scrollTop = logView.scrollHeight;
+                                
+                                if (text.includes('Update complete!')) {
+                                    clearInterval(pollInterval);
+                                    badge.textContent = 'Success';
+                                    badge.className = 'badge success';
+                                    alert('Update complete! The server might restart now.');
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {}
+                
+                if (pollCount > 60) { // Stop polling after 2 minutes
+                    clearInterval(pollInterval);
+                    badge.textContent = 'Timed Out';
+                    badge.className = 'badge danger';
+                }
+            }, 2000);
+
+        } catch (e) {
+            console.error(e);
+            logView.textContent += `\nError: ${e.message}`;
+            badge.textContent = 'Error';
+            badge.className = 'badge danger';
+        }
+        return;
+    }
+
+    const msg = `Are you sure you want to ${action} the device?`;
     if (!confirm(msg)) return;
 
     try {
         const res = await fetch(`${API_BASE}/system/control/${action}`, { method: 'POST' });
         if (res.status === 401) { logout(); return; }
-        const data = await res.json();
-        alert(data.status || data.message || 'Action initiated');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert(data.error || data.detail || `Failed to ${action}.`);
+            return;
+        }
+        alert(data.status || data.message || `System ${action} initiated.`);
     } catch (e) {
         console.error(e);
-        alert('Error controlling system.');
+        alert(`Error controlling system: ${e}`);
     }
 }
 
@@ -1845,10 +1955,23 @@ async function loadDrives(silent = false) {
                     </div>`;
             
             if (dev.mountpoint) {
+                // Try to convert absolute mountpoint to web path if possible
+                let browsePath = dev.mountpoint;
+                const dataIdx = browsePath.indexOf('data' + (browsePath.includes('\\') ? '\\' : '/') + 'external');
+                if (dataIdx !== -1) {
+                    browsePath = '/data' + browsePath.substring(dataIdx + 4).replaceAll('\\', '/');
+                } else if (!browsePath.startsWith('/data')) {
+                    // If not under data/external, we might not be able to browse it yet
+                    // But let's try to be smart if it's just 'data/external/...'
+                    if (browsePath.startsWith('data/external')) {
+                        browsePath = '/' + browsePath;
+                    }
+                }
+
                 html += `<div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;margin-top:5px;">
                     <span class="badge success" style="margin-right:auto;">Mounted: ${escapeHtml(dev.mountpoint)}</span>
                     <button class="primary small" onclick="prepareDrive('${escapeHtml(dev.mountpoint)}')">Prepare</button>
-                    <button class="secondary small" onclick="mediaState.path='${escapeHtml(dev.mountpoint).replaceAll('\\', '\\\\')}';showSection('files');">Browse</button>
+                    <button class="secondary small" onclick="mediaState.path='${escapeHtml(browsePath).replaceAll('\\', '\\\\')}';showSection('files');">Browse</button>
                     <button class="danger small drive-unmount" data-mountpoint="${escapeHtml(dev.mountpoint)}">Unmount</button>
                 </div>`;
             } else if ((dev.type === 'part' || dev.fstype) && !dev.children) {
@@ -1932,22 +2055,6 @@ async function mountDrive(device, name, btn) {
     }
 }
 
-async function systemControl(action) {
-    if (!confirm(`Are you sure you want to ${action} the system?`)) return;
-
-    try {
-        const res = await fetch(`${API_BASE}/system/control/${action}`, { method: 'POST' });
-        if (res.status === 401) { logout(); return; }
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            alert(data.error || data.detail || `Failed to ${action}.`);
-            return;
-        }
-        alert(data.status || `System ${action} initiated.`);
-    } catch (e) {
-        alert(`Error: ${e}`);
-    }
-}
 
 async function unmountDrive(mountpoint) {
     if (!confirm(`Unmount ${mountpoint}?`)) return;
