@@ -450,7 +450,7 @@ function renderMediaList(category, files) {
                 div.innerHTML = `
                     ${cardDeleteBtn}
                     ${folderHtml}
-                    <img src="${file.path}" loading="lazy" alt="${file.name}" onclick="window.open('${file.path}')">
+                    <img src="${file.path}" loading="lazy" alt="${file.name}" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(file.name)}')">
                     <div class="caption">${file.name}</div>
                 `;
             } else {
