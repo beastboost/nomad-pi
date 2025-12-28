@@ -1049,16 +1049,11 @@ async def upload_stream(category: str, request: Request, path: str = Query(defau
 
     try:
         async with aiofiles.open(file_location, "wb") as out:
-            # Buffer 1MB to reduce context switching overhead
-            buffer = bytearray()
-            buffer_size = 1024 * 1024
+            # Consuming the stream directly is often faster than manual buffering in Python
+            # as aiofiles and the underlying stream handler already have their own buffers.
             async for chunk in request.stream():
-                buffer.extend(chunk)
-                if len(buffer) >= buffer_size:
-                    await out.write(buffer)
-                    buffer = bytearray()
-            if buffer:
-                await out.write(buffer)
+                if chunk:
+                    await out.write(chunk)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
 

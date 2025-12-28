@@ -103,7 +103,7 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$CURRENT_DIR
 EnvironmentFile=-$ENV_FILE
-ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools --workers 1
 Restart=always
 
 [Install]

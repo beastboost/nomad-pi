@@ -1418,7 +1418,7 @@ async function uploadFiles() {
         return;
     }
     
-    const concurrency = 5;
+    const concurrency = 3; // Reduced concurrency for better stability on low-power devices like Pi Zero 2W
     const loadedByIndex = new Array(totalFiles).fill(0);
 
     function computeDisplayName(entry) {

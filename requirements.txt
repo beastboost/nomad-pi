@@ -1,6 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 aiofiles
 jinja2
 psutil
+uvloop; platform_system != 'Windows'
+httptools; platform_system != 'Windows'

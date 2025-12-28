@@ -83,4 +83,4 @@ if os.path.exists("app/static"):
 if __name__ == "__main__":
     import uvicorn
     # 8000 for dev, 80 for prod (requires sudo on linux)
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False, loop="auto", http="auto")
