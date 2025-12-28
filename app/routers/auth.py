@@ -81,6 +81,13 @@ def login(request: LoginRequest):
         return response
     raise HTTPException(status_code=401, detail="Invalid password")
 
+# Dependency for protecting routes
+def get_current_user(request: Request):
+    token = request.cookies.get("auth_token")
+    if not token or not database.get_session(token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return token
+
 @router.post("/change-password")
 def change_password(request: PasswordChangeRequest, current_user=Depends(get_current_user)):
     global _CURRENT_ADMIN_HASH
@@ -108,10 +115,3 @@ def check_auth(request: Request):
     if token and database.get_session(token):
         return {"authenticated": True}
     return {"authenticated": False}
-
-# Dependency for protecting routes
-def get_current_user(request: Request):
-    token = request.cookies.get("auth_token")
-    if not token or not database.get_session(token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return token
