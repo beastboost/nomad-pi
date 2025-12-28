@@ -46,9 +46,15 @@ echo "=========================================="
 echo "      Nomad Pi Installation Script        "
 echo "=========================================="
 
-# 0. Check for Updates
+# 0. Check for Updates and Fix Git Remote
 if [ -d ".git" ]; then
-    echo "[0/9] Pulling latest changes from GitHub..."
+    echo "[0/9] Optimizing Git configuration..."
+    # Switch to clean public URL to avoid password prompts for public repo
+    git remote set-url origin https://github.com/beastboost/nomad-pi.git
+    # Remember credentials for 1 month if they are ever entered
+    git config credential.helper 'cache --timeout=2592000'
+    
+    echo "Pulling latest changes from GitHub..."
     git pull || echo "Warning: Could not pull latest changes. Continuing with current version."
 fi
 
