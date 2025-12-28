@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Q
 from typing import List, Dict
 import os
 import posixpath
+import platform
 import re
 import shutil
 import zipfile
@@ -10,10 +11,13 @@ import subprocess
 import json
 import urllib.parse
 import urllib.request
+import logging
 from datetime import datetime, timedelta
 from collections import OrderedDict
 import threading
 from app import database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -329,11 +333,11 @@ def maybe_start_index_build(category: str, force: bool = False):
             if category in ["shows", "movies"]:
                 try:
                     if category == "shows":
-                        organize_shows(dry_run=False, rename_files=True, limit=50)
+                        organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True, limit=50)
                     else:
                         organize_movies(dry_run=False, use_omdb=True, write_poster=True, limit=50)
                 except Exception as e:
-                    print(f"Auto-organize error for {category}: {e}")
+                    logger.error(f"Auto-organize error for {category}: {e}")
         finally:
             with _index_lock:
                 _index_building[category] = False
@@ -566,27 +570,32 @@ def browse_files(path: str = Query(default="/data")):
             if item.startswith('.'):
                 continue
             
-            full_path = os.path.join(fs_path, item)
-            is_dir = os.path.isdir(full_path)
-            
-            if full_path.startswith(os.path.abspath(BASE_DIR)):
-                rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
-                web_path = f"/data/{rel_path}"
-            else:
-                # External path, use absolute path for browsing
-                web_path = full_path
-            
             try:
-                size = os.path.getsize(full_path) if not is_dir else None
-            except:
-                size = None
+                full_path = os.path.join(fs_path, item)
+                is_dir = os.path.isdir(full_path)
+                
+                if full_path.startswith(os.path.abspath(BASE_DIR)):
+                    rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
+                    web_path = f"/data/{rel_path}"
+                else:
+                    # External path, use absolute path for browsing
+                    web_path = full_path
+                
+                try:
+                    size = os.path.getsize(full_path) if not is_dir else 0
+                except:
+                    size = 0
 
-            items.append({
-                "name": item,
-                "path": web_path,
-                "is_dir": is_dir,
-                "size": size
-            })
+                items.append({
+                    "name": str(item),  # Ensure string type
+                    "path": str(web_path),  # Ensure string type
+                    "is_dir": bool(is_dir),  # Ensure boolean type
+                    "size": int(size)  # Ensure integer type
+                })
+            except Exception as item_error:
+                # Skip items that cause errors (e.g., permission issues)
+                logger.warning(f"Skipping item {item}: {item_error}")
+                continue
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -921,7 +930,7 @@ def _auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
     return normalized
 
 @router.post("/organize/shows")
-def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), limit: int = Query(default=250)):
+def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
     base = os.path.join(BASE_DIR, "shows")
     if not os.path.isdir(base):
         raise HTTPException(status_code=404, detail="Shows folder not found")
@@ -931,6 +940,7 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
     moved = 0
     skipped = 0
     errors = 0
+    shows_processed = set()  # Track which shows we've fetched metadata for
 
     for root, _, filenames in os.walk(base):
         for f in filenames:
@@ -994,9 +1004,9 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
             os.makedirs(dest_dir, exist_ok=True)
             try:
                 shutil.move(src_fs, dest_fs)
-                print(f"Organized show file: {src_fs} -> {dest_fs}")
+                logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
             except Exception as e:
-                print(f"Failed to move show file {src_fs}: {e}")
+                logger.error(f"Failed to move show file {src_fs}: {e}")
                 errors += 1
                 continue
 
@@ -1005,13 +1015,47 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
             except Exception:
                 pass
 
+            # Fetch OMDB metadata and poster for the show (once per show)
+            if use_omdb and show_name != "Unsorted" and show_name not in shows_processed:
+                shows_processed.add(show_name)
+                if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
+                    try:
+                        # Fetch show metadata
+                        meta = omdb_fetch(title=show_name, media_type="series")
+                        
+                        # Cache poster if available
+                        poster_url = meta.get("Poster")
+                        if poster_url and poster_url != "N/A" and write_poster:
+                            cached_poster = cache_remote_poster(poster_url)
+                            if cached_poster:
+                                # Also save as poster.jpg in show directory
+                                show_dir = os.path.join(base, show_name)
+                                poster_dest = os.path.join(show_dir, "poster.jpg")
+                                try:
+                                    # Copy from cache to show directory
+                                    cached_fs = safe_fs_path_from_web_path(cached_poster)
+                                    if os.path.exists(cached_fs) and not os.path.exists(poster_dest):
+                                        shutil.copy2(cached_fs, poster_dest)
+                                        logger.info(f"Saved poster for {show_name}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to save poster for {show_name}: {e}")
+                        
+                        logger.info(f"Fetched OMDB metadata for show: {show_name}")
+                    except HTTPException as e:
+                        if e.status_code == 404:
+                            logger.warning(f"Show not found in OMDB: {show_name}")
+                        else:
+                            logger.warning(f"Failed to fetch OMDB data for {show_name}: {e.detail}")
+                    except Exception as e:
+                        logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
+
             moved += 1
             if moved >= limit:
                 break
         if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
             break
 
-    return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "moved": moved, "skipped": skipped, "errors": errors, "planned": planned[: min(len(planned), 1000)]}
+    return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
 @router.post("/organize/movies")
 def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):

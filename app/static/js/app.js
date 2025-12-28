@@ -760,13 +760,14 @@ async function organizeShows(preview) {
     const out = document.getElementById('organize-status');
     if (out) out.textContent = preview ? 'Previewing…' : 'Organizing…';
     try {
-        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=1`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=1&use_omdb=1&write_poster=1`, { method: 'POST' });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.detail || 'Organize failed');
         const planned = Array.isArray(data.planned) ? data.planned : [];
         const lines = [];
         lines.push(`dry_run=${data.dry_run} moved=${data.moved} skipped=${data.skipped} errors=${data.errors}`);
+        if (data.shows_metadata_fetched) lines.push(`Shows with metadata: ${data.shows_metadata_fetched}`);
         for (const it of planned.slice(0, 20)) {
             if (it?.from && it?.to) lines.push(`${it.from} -> ${it.to}`);
         }
@@ -1007,7 +1008,8 @@ function openVideoViewer(path, title, startSeconds = 0) {
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'metadata';
+    video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
+    video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
