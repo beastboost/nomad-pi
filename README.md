@@ -15,73 +15,58 @@ This project turns your Pi Zero 2W into a portable Wi-Fi Hotspot media center.
   - **System Control** (Shutdown/Reboot) from the UI.
 - **Modern UI**: Dark mode, responsive grid layout, mobile-friendly.
 
-## Installation & Setup
+## Installation & Setup (Raspberry Pi)
 
-### For Raspberry Pi (Production)
+The easiest way to install Nomad Pi on your Raspberry Pi Zero 2W.
 
-The easiest way to install Nomad Pi is using the automated setup script.
-
-1.  **Clone the repository**:
+1.  **Prepare the directory**:
     ```bash
-    git clone https://github.com/beastboost/nomad-pi.git
-    cd nomad-pi
+    mkdir -p ~/nomad-pi
+    cd ~/nomad-pi
     ```
 
-2.  **Run the Installer**:
+2.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/beastboost/nomad-pi.git .
+    ```
+    *(Note: The dot `.` at the end clones it directly into the current folder)*
+
+3.  **Run the Installer**:
     ```bash
     chmod +x setup.sh
     ./setup.sh
     ```
     
-    *This script will:*
-    - Install system dependencies (Python, NetworkManager, etc.).
-    - Create a virtual environment and install Python packages.
-    - Configure the `nomad-pi` system service to start on boot.
-    - Set up a Wi-Fi Hotspot named `NomadPi` (password: `nomadpassword`).
-    - Configure the hostname to `nomadpi.local`.
-
-### For Windows (Development)
-
-To run Nomad Pi locally for development or as a personal media server on Windows:
-
-1.  **Clone the repository**:
-    ```powershell
-    git clone https://github.com/beastboost/nomad-pi.git
-    cd nomad-pi
-    ```
-
-2.  **Create and Activate Virtual Environment**:
-    ```powershell
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
-
-3.  **Install Dependencies**:
-    ```powershell
-    pip install -r requirements.txt
-    ```
-
-4.  **Run the Server**:
-    ```powershell
-    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ```
+    *This script will automatically:*
+    - Install all system dependencies.
+    - Create a Python virtual environment.
+    - Configure the `nomad-pi` system service to auto-start on boot.
+    - Set up the Wi-Fi Hotspot (`NomadPi`, password: `nomadpassword`).
+    - Configure the local hostname to `nomadpi.local`.
 
 ## First-Time Run
 
-Once the server is running (either on your Pi or PC):
+Once the setup is complete and your Pi has rebooted:
 
-1.  **Access the Web UI**:
-    - **Pi**: Go to `http://nomadpi.local:8000` or `http://10.42.0.1:8000`.
-    - **PC**: Go to `http://localhost:8000`.
-2.  **Log In**:
-    - **Default Password**: `nomad`
-3.  **Change Password**:
+1.  **Connect**: Join the `NomadPi` Wi-Fi network from your phone or laptop.
+2.  **Access**: Open your browser and go to `http://nomadpi.local:8000` or `http://10.42.0.1:8000`.
+3.  **Log In**: Use the default password: `nomad`.
+4.  **Secure Your Pi**:
     - Go to the **Admin** panel (gear icon).
-    - Scroll to **Security** and change your password immediately.
-4.  **Add Media**:
-    - You can upload files directly via the **Upload** tab.
-    - Or copy files into the `data/` subfolders (`music/`, `movies/`, etc.).
-    - For Windows users, you can browse external drives by clicking "Browse External Drives" in the File Browser.
+    - Scroll down to the **Security** section.
+    - Change the default password to something secure.
+5.  **Add Media**:
+    - Use the **Upload** tab to add files.
+    - Or plug in a USB drive and use **Admin -> Storage Management** to mount it.
+
+## Development & Windows Usage
+
+If you want to run Nomad Pi on Windows for development purposes:
+
+1.  **Clone**: `git clone https://github.com/beastboost/nomad-pi.git`
+2.  **Setup**: Create a `venv`, activate it, and `pip install -r requirements.txt`.
+3.  **Run**: `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`
+*Note: Hotspot and hardware-specific features are disabled on Windows.*
 
 ## Security & Authentication
 
