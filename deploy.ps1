@@ -1,6 +1,6 @@
-$PiUser = "pi"
-$PiHost = Read-Host "Enter your Pi's IP address (e.g., 192.168.1.100) or hostname (e.g., raspberrypi.local)"
-$TargetDir = "/home/pi/nomad-pi"
+$PiUser = "beastboost"
+$PiHost = Read-Host "Enter your Pi's IP address (e.g., 192.168.1.100) or hostname (e.g., nomadpi.local)"
+$TargetDir = "/home/beastboost/nomad-pi"
 
 Write-Host "Transferring files to $PiUser@$PiHost:$TargetDir ..." -ForegroundColor Cyan
 

@@ -3,777 +3,605 @@
  * Features: Upload handling, storage monitoring, system control, and API interactions
  */
 
-const AdminApp = new Vue({
-  el: '#admin-app',
-  data: {
-    // Authentication
-    isAuthenticated: false,
-    currentUser: null,
-    apiToken: localStorage.getItem('adminToken') || null,
-    
-    // UI State
-    activeTab: 'dashboard',
-    isLoading: false,
-    notifications: [],
-    darkMode: localStorage.getItem('darkMode') === 'true',
-    
-    // Dashboard Data
-    systemStats: {
-      cpuUsage: 0,
-      memoryUsage: 0,
-      diskUsage: 0,
-      temperature: 0,
-      uptime: 0,
-      processes: 0,
-    },
-    
-    // Storage Monitoring
-    storageData: {
-      total: 0,
-      used: 0,
-      available: 0,
-      percentage: 0,
-      breakdown: {
-        videos: 0,
-        images: 0,
-        documents: 0,
-        other: 0,
-      },
-      disks: [],
-    },
-    
-    // File Upload
-    uploadQueue: [],
-    uploadProgress: {},
-    maxFileSize: 5000000000, // 5GB
-    allowedFileTypes: ['video/*', 'image/*', 'application/pdf', 'text/*', 'audio/*'],
-    dragOver: false,
-    
-    // System Control
-    services: [],
-    systemInfo: {},
-    logs: [],
-    
-    // API Configuration
-    apiBaseUrl: '/api',
-    apiEndpoints: {
-      stats: '/api/system/stats',
-      storage: '/api/storage/info',
-      upload: '/api/files/upload',
-      services: '/api/services',
-      logs: '/api/logs',
-      config: '/api/config',
-    },
-    
-    // Pagination
-    currentPage: 1,
-    itemsPerPage: 20,
-    totalItems: 0,
-    
-    // Search & Filter
-    searchQuery: '',
-    filterType: 'all',
-    dateRange: {
-      start: null,
-      end: null,
-    },
-    
-    // Modal States
-    modals: {
-      uploadModal: false,
-      configModal: false,
-      logViewerModal: false,
-      serviceControlModal: false,
-    },
-    
-    // Settings
-    settings: {
-      autoRefresh: true,
-      refreshInterval: 5000,
-      maxRetries: 3,
-      timeout: 30000,
-      notifications: true,
-      logLevel: 'info',
-    },
-  },
-  
-  computed: {
-    /**
-     * Computed property for storage percentage
-     */
-    storagePercentage() {
-      if (this.storageData.total === 0) return 0;
-      return Math.round((this.storageData.used / this.storageData.total) * 100);
-    },
-    
-    /**
-     * Computed property for formatted storage
-     */
-    formattedStorage() {
-      return {
-        total: this.formatBytes(this.storageData.total),
-        used: this.formatBytes(this.storageData.used),
-        available: this.formatBytes(this.storageData.available),
-      };
-    },
-    
-    /**
-     * Computed property for system health status
-     */
-    systemHealth() {
-      const cpuHealth = this.systemStats.cpuUsage < 80 ? 'good' : 'warning';
-      const memHealth = this.systemStats.memoryUsage < 85 ? 'good' : 'warning';
-      const diskHealth = this.storagePercentage < 90 ? 'good' : 'warning';
-      
-      if (cpuHealth === 'warning' || memHealth === 'warning' || diskHealth === 'warning') {
-        return 'warning';
-      }
-      return 'good';
-    },
-    
-    /**
-     * Active uploads count
-     */
-    activeUploadsCount() {
-      return Object.values(this.uploadProgress).filter(p => p.status === 'uploading').length;
-    },
-    
-    /**
-     * Running services count
-     */
-    runningServicesCount() {
-      return this.services.filter(s => s.status === 'running').length;
-    },
-    
-    /**
-     * Filtered logs based on search and date range
-     */
-    filteredLogs() {
-      let filtered = this.logs;
-      
-      if (this.searchQuery) {
-        const query = this.searchQuery.toLowerCase();
-        filtered = filtered.filter(log =>
-          log.message.toLowerCase().includes(query) ||
-          log.source.toLowerCase().includes(query)
-        );
-      }
-      
-      if (this.filterType !== 'all') {
-        filtered = filtered.filter(log => log.level === this.filterType);
-      }
-      
-      if (this.dateRange.start && this.dateRange.end) {
-        filtered = filtered.filter(log => {
-          const logDate = new Date(log.timestamp);
-          return logDate >= this.dateRange.start && logDate <= this.dateRange.end;
-        });
-      }
-      
-      return filtered;
-    },
-    
-    /**
-     * Paginated logs
-     */
-    paginatedLogs() {
-      const start = (this.currentPage - 1) * this.itemsPerPage;
-      const end = start + this.itemsPerPage;
-      return this.filteredLogs.slice(start, end);
-    },
-  },
-  
-  methods: {
-    /**
-     * Initialize admin application
-     */
-    async init() {
-      console.log('Initializing Admin Dashboard...');
-      await this.checkAuthentication();
-      
-      if (this.isAuthenticated) {
-        this.startAutoRefresh();
-        await Promise.all([
-          this.loadSystemStats(),
-          this.loadStorageInfo(),
-          this.loadServices(),
-          this.loadLogs(),
-        ]);
-      }
-    },
-    
-    /**
-     * Check authentication status
-     */
-    async checkAuthentication() {
-      try {
-        const response = await this.apiCall('/api/auth/me', 'GET');
-        this.isAuthenticated = true;
-        this.currentUser = response.user;
-      } catch (error) {
-        console.warn('Authentication check failed:', error);
-        this.isAuthenticated = false;
-        this.redirectToLogin();
-      }
-    },
-    
-    /**
-     * Load system statistics
-     */
-    async loadSystemStats() {
-      try {
-        this.isLoading = true;
-        const response = await this.apiCall(this.apiEndpoints.stats, 'GET');
-        
-        this.systemStats = {
-          cpuUsage: response.cpu || 0,
-          memoryUsage: response.memory || 0,
-          diskUsage: response.disk || 0,
-          temperature: response.temperature || 0,
-          uptime: response.uptime || 0,
-          processes: response.processes || 0,
-        };
-      } catch (error) {
-        this.showNotification('Failed to load system statistics', 'error');
-        console.error('Error loading system stats:', error);
-      } finally {
-        this.isLoading = false;
-      }
-    },
-    
-    /**
-     * Load storage information
-     */
-    async loadStorageInfo() {
-      try {
-        const response = await this.apiCall(this.apiEndpoints.storage, 'GET');
-        
-        this.storageData = {
-          total: response.total || 0,
-          used: response.used || 0,
-          available: response.available || 0,
-          percentage: response.percentage || 0,
-          breakdown: response.breakdown || {
-            videos: 0,
-            images: 0,
-            documents: 0,
-            other: 0,
-          },
-          disks: response.disks || [],
-        };
-      } catch (error) {
-        this.showNotification('Failed to load storage information', 'error');
-        console.error('Error loading storage info:', error);
-      }
-    },
-    
-    /**
-     * Load services status
-     */
-    async loadServices() {
-      try {
-        const response = await this.apiCall(this.apiEndpoints.services, 'GET');
-        this.services = response.services || [];
-      } catch (error) {
-        this.showNotification('Failed to load services', 'error');
-        console.error('Error loading services:', error);
-      }
-    },
-    
-    /**
-     * Load system logs
-     */
-    async loadLogs(page = 1) {
-      try {
-        const response = await this.apiCall(
-          `${this.apiEndpoints.logs}?page=${page}&limit=${this.itemsPerPage}`,
-          'GET'
-        );
-        
-        this.logs = response.logs || [];
-        this.totalItems = response.total || 0;
-        this.currentPage = page;
-      } catch (error) {
-        this.showNotification('Failed to load logs', 'error');
-        console.error('Error loading logs:', error);
-      }
-    },
-    
-    /**
-     * Handle file selection for upload
-     */
-    handleFileSelect(event) {
-      const files = event.target.files || [];
-      this.addFilesToQueue(Array.from(files));
-    },
-    
-    /**
-     * Handle drag and drop
-     */
-    handleDragOver(event) {
-      event.preventDefault();
-      this.dragOver = true;
-    },
-    
-    handleDragLeave() {
-      this.dragOver = false;
-    },
-    
-    handleDrop(event) {
-      event.preventDefault();
-      this.dragOver = false;
-      const files = event.dataTransfer.files || [];
-      this.addFilesToQueue(Array.from(files));
-    },
-    
-    /**
-     * Add files to upload queue
-     */
-    addFilesToQueue(files) {
-      files.forEach(file => {
-        // Validate file
-        if (!this.validateFile(file)) {
-          return;
-        }
-        
-        const fileId = `${file.name}-${Date.now()}`;
-        this.uploadQueue.push({
-          id: fileId,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          file: file,
-          status: 'pending',
-          createdAt: new Date(),
-        });
-        
-        this.uploadProgress[fileId] = {
-          status: 'pending',
-          progress: 0,
-          speed: 0,
-          eta: 0,
-        };
-      });
-      
-      // Auto-start upload if enabled
-      if (this.uploadQueue.length > 0) {
-        this.processUploadQueue();
-      }
-    },
-    
-    /**
-     * Validate file before upload
-     */
-    validateFile(file) {
-      // Check file size
-      if (file.size > this.maxFileSize) {
-        this.showNotification(
-          `File ${file.name} exceeds maximum size of ${this.formatBytes(this.maxFileSize)}`,
-          'error'
-        );
-        return false;
-      }
-      
-      // Check file type
-      const isAllowed = this.allowedFileTypes.some(type => {
-        if (type.endsWith('/*')) {
-          return file.type.startsWith(type.replace('/*', ''));
-        }
-        return file.type === type;
-      });
-      
-      if (!isAllowed) {
-        this.showNotification(`File type ${file.type} is not allowed`, 'error');
-        return false;
-      }
-      
-      return true;
-    },
-    
-    /**
-     * Process upload queue
-     */
-    async processUploadQueue() {
-      const pendingFile = this.uploadQueue.find(f => f.status === 'pending');
-      
-      if (!pendingFile) {
-        return;
-      }
-      
-      try {
-        await this.uploadFile(pendingFile);
-      } catch (error) {
-        console.error('Upload error:', error);
-        this.uploadProgress[pendingFile.id].status = 'failed';
-        this.showNotification(`Upload failed for ${pendingFile.name}`, 'error');
-      }
-      
-      // Process next file
-      const nextPending = this.uploadQueue.find(f => f.status === 'pending');
-      if (nextPending) {
-        await this.processUploadQueue();
-      }
-    },
-    
-    /**
-     * Upload a single file
-     */
-    async uploadFile(fileItem) {
-      const formData = new FormData();
-      formData.append('file', fileItem.file);
-      formData.append('description', fileItem.name);
-      
-      this.uploadProgress[fileItem.id].status = 'uploading';
-      fileItem.status = 'uploading';
-      
-      try {
-        const xhr = new XMLHttpRequest();
-        
-        // Track upload progress
-        xhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable) {
-            const progress = Math.round((event.loaded / event.total) * 100);
-            const speed = event.loaded / ((Date.now() - fileItem.createdAt.getTime()) / 1000);
-            const eta = (event.total - event.loaded) / speed;
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            // UI State
+            sidebarCollapsed: false,
+            currentView: 'dashboard',
+            isDarkMode: localStorage.getItem('darkMode') === 'true',
+            isLoading: false,
+            connectionStatus: 'connected',
+            userAvatar: 'https://ui-avatars.com/api/?name=Admin&background=0D8ABC&color=fff',
             
-            this.uploadProgress[fileItem.id] = {
-              status: 'uploading',
-              progress,
-              speed: this.formatBytes(speed) + '/s',
-              eta: this.formatTime(eta),
-            };
-          }
-        });
-        
-        // Handle completion
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            this.uploadProgress[fileItem.id].status = 'completed';
-            fileItem.status = 'completed';
-            this.showNotification(`File ${fileItem.name} uploaded successfully`, 'success');
-            this.loadStorageInfo(); // Refresh storage info
-          } else {
-            throw new Error(`Upload failed with status ${xhr.status}`);
-          }
-        });
-        
-        xhr.addEventListener('error', () => {
-          this.uploadProgress[fileItem.id].status = 'failed';
-          fileItem.status = 'failed';
-          throw new Error('Network error during upload');
-        });
-        
-        xhr.open('POST', this.apiEndpoints.upload, true);
-        xhr.setRequestHeader('Authorization', `Bearer ${this.apiToken}`);
-        xhr.send(formData);
-        
-        return new Promise((resolve, reject) => {
-          xhr.addEventListener('loadend', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(`Upload failed: ${xhr.statusText}`));
-            }
-          });
-        });
-      } catch (error) {
-        this.uploadProgress[fileItem.id].status = 'failed';
-        fileItem.status = 'failed';
-        throw error;
-      }
-    },
-    
-    /**
-     * Remove file from upload queue
-     */
-    removeFromQueue(fileId) {
-      const index = this.uploadQueue.findIndex(f => f.id === fileId);
-      if (index > -1) {
-        this.uploadQueue.splice(index, 1);
-        delete this.uploadProgress[fileId];
-      }
-    },
-    
-    /**
-     * Control service (start, stop, restart)
-     */
-    async controlService(serviceName, action) {
-      try {
-        this.isLoading = true;
-        const response = await this.apiCall(
-          `${this.apiEndpoints.services}/${serviceName}/${action}`,
-          'POST'
-        );
-        
-        this.showNotification(
-          `Service ${serviceName} ${action}ed successfully`,
-          'success'
-        );
-        
-        await this.loadServices();
-      } catch (error) {
-        this.showNotification(`Failed to ${action} service ${serviceName}`, 'error');
-        console.error('Service control error:', error);
-      } finally {
-        this.isLoading = false;
-      }
-    },
-    
-    /**
-     * Restart system
-     */
-    async restartSystem() {
-      if (!confirm('Are you sure you want to restart the system? This will disconnect all users.')) {
-        return;
-      }
-      
-      try {
-        this.isLoading = true;
-        await this.apiCall('/api/system/restart', 'POST');
-        this.showNotification('System restart initiated', 'info');
-      } catch (error) {
-        this.showNotification('Failed to restart system', 'error');
-        console.error('System restart error:', error);
-      } finally {
-        this.isLoading = false;
-      }
-    },
-    
-    /**
-     * Shutdown system
-     */
-    async shutdownSystem() {
-      if (!confirm('Are you sure you want to shutdown the system?')) {
-        return;
-      }
-      
-      try {
-        this.isLoading = true;
-        await this.apiCall('/api/system/shutdown', 'POST');
-        this.showNotification('System shutdown initiated', 'info');
-      } catch (error) {
-        this.showNotification('Failed to shutdown system', 'error');
-        console.error('System shutdown error:', error);
-      } finally {
-        this.isLoading = false;
-      }
-    },
-    
-    /**
-     * Update system settings
-     */
-    async updateSettings(newSettings) {
-      try {
-        this.isLoading = true;
-        await this.apiCall(this.apiEndpoints.config, 'PUT', newSettings);
-        
-        Object.assign(this.settings, newSettings);
-        localStorage.setItem('adminSettings', JSON.stringify(this.settings));
-        
-        this.showNotification('Settings updated successfully', 'success');
-      } catch (error) {
-        this.showNotification('Failed to update settings', 'error');
-        console.error('Settings update error:', error);
-      } finally {
-        this.isLoading = false;
-      }
-    },
-    
-    /**
-     * Clear logs
-     */
-    async clearLogs() {
-      if (!confirm('Are you sure you want to clear all logs? This action cannot be undone.')) {
-        return;
-      }
-      
-      try {
-        await this.apiCall(`${this.apiEndpoints.logs}`, 'DELETE');
-        this.logs = [];
-        this.showNotification('Logs cleared successfully', 'success');
-      } catch (error) {
-        this.showNotification('Failed to clear logs', 'error');
-        console.error('Clear logs error:', error);
-      }
-    },
-    
-    /**
-     * Export logs
-     */
-    exportLogs() {
-      try {
-        const dataStr = JSON.stringify(this.filteredLogs, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `logs-${new Date().toISOString().split('T')[0]}.json`;
-        link.click();
-        URL.revokeObjectURL(url);
-        
-        this.showNotification('Logs exported successfully', 'success');
-      } catch (error) {
-        this.showNotification('Failed to export logs', 'error');
-        console.error('Export logs error:', error);
-      }
-    },
-    
-    /**
-     * Generic API call function
-     */
-    async apiCall(endpoint, method = 'GET', data = null, retries = 0) {
-      try {
-        const options = {
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-          },
+            viewTitles: {
+                dashboard: 'System Dashboard',
+                uploads: 'File Uploads',
+                storage: 'Storage & Mounts',
+                system: 'System Control',
+                media: 'Media Library',
+                settings: 'Settings'
+            },
+
+            // Authentication
+            isAuthenticated: false,
+            currentUser: null,
+            apiToken: localStorage.getItem('adminToken') || null,
+
+            // System Stats
+            stats: {
+                storageUsed: 0,
+                storageTotal: 0,
+                storagePercent: 0,
+                cpuPercent: 0,
+                cpuCores: 0,
+                ramUsed: 0,
+                ramTotal: 0,
+                ramPercent: 0,
+                networkUp: 0,
+                networkDown: 0,
+                temperature: 0,
+                uptime: 0
+            },
+
+            // Media Stats
+            mediaStats: {
+                movies: 0,
+                shows: 0,
+                music: 0,
+                books: 0
+            },
+
+            // Uploads
+            uploads: [],
+            showUploadModal: false,
+            maxFileSize: 5 * 1024 * 1024 * 1024, // 5GB
+            allowedFileTypes: ['video/*', 'image/*', 'application/pdf', 'text/*', 'audio/*'],
+
+            // Storage & Drives
+            drives: [],
+            
+            // System Control
+            services: [],
+            logs: [],
+            
+            // Update State
+            updateStatus: {
+                available: false,
+                updating: false,
+                progress: 0,
+                message: '',
+                error: null
+            },
+
+            // Confirmation Modal
+            showConfirmModal: false,
+            confirmModal: {
+                title: '',
+                message: '',
+                action: null,
+                actionText: 'Confirm',
+                actionClass: 'btn-primary'
+            },
+
+            // Settings
+            settings: {
+                autoRefresh: true,
+                refreshInterval: 5000,
+                maxRetries: 3,
+                notifications: true
+            },
+
+            // Toasts
+            toasts: [],
+
+            // Charts
+            storageChart: null,
+            resourcesChart: null
         };
-        
-        if (this.apiToken) {
-          options.headers['Authorization'] = `Bearer ${this.apiToken}`;
+    },
+
+    computed: {
+        activeUploadsCount() {
+            return this.uploads.filter(u => u.status === 'uploading').length;
         }
-        
-        if (data) {
-          options.body = JSON.stringify(data);
+    },
+
+    methods: {
+        async init() {
+            console.log('Initializing Admin Dashboard (Vue 3)...');
+            await this.checkAuthentication();
+            
+            if (this.isAuthenticated) {
+                await Promise.all([
+                    this.loadSystemStats(),
+                    this.loadStorageInfo(),
+                    this.loadMediaStats(),
+                    this.loadServices(),
+                    this.checkUpdates()
+                ]);
+                
+                this.initCharts();
+                this.startAutoRefresh();
+            }
+
+            // Apply theme
+            if (this.isDarkMode) {
+                document.body.classList.add('dark-mode');
+            }
+        },
+
+        async checkAuthentication() {
+            try {
+                // If no token, we should probably redirect, but let's try the API first
+                const response = await this.apiCall('/api/auth/me', 'GET');
+                this.isAuthenticated = true;
+                this.currentUser = response.user;
+                this.connectionStatus = 'connected';
+            } catch (error) {
+                console.warn('Authentication check failed:', error);
+                this.isAuthenticated = false;
+                this.connectionStatus = 'disconnected';
+                this.redirectToLogin();
+            }
+        },
+
+        async loadSystemStats() {
+            try {
+                const response = await this.apiCall('/api/system/stats', 'GET');
+                this.stats.cpuPercent = response.cpu || 0;
+                this.stats.cpuCores = response.cores || 0;
+                this.stats.ramUsed = response.memory_used || 0;
+                this.stats.ramTotal = response.memory_total || 0;
+                this.stats.ramPercent = response.memory_percent || 0;
+                this.stats.networkUp = response.network_up || 0;
+                this.stats.networkDown = response.network_down || 0;
+                this.stats.temperature = response.temperature || 0;
+                this.stats.uptime = response.uptime || 0;
+                
+                this.updateResourcesChart();
+            } catch (error) {
+                console.error('Error loading system stats:', error);
+            }
+        },
+
+        async loadStorageInfo() {
+            try {
+                const response = await this.apiCall('/api/system/storage/info', 'GET');
+                this.stats.storageUsed = response.used || 0;
+                this.stats.storageTotal = response.total || 0;
+                this.stats.storagePercent = response.percentage || 0;
+                this.drives = response.disks || [];
+                
+                this.updateStorageChart();
+            } catch (error) {
+                console.error('Error loading storage info:', error);
+            }
+        },
+
+        async loadMediaStats() {
+            try {
+                const response = await this.apiCall('/api/media/stats', 'GET');
+                this.mediaStats = response;
+            } catch (error) {
+                console.error('Error loading media stats:', error);
+            }
+        },
+
+        async loadServices() {
+            try {
+                const response = await this.apiCall('/api/system/services', 'GET');
+                this.services = response.services || [];
+            } catch (error) {
+                console.error('Error loading services:', error);
+            }
+        },
+
+        async checkUpdates() {
+            try {
+                const response = await this.apiCall('/api/system/update/check', 'GET');
+                this.updateStatus.available = response.available;
+            } catch (error) {
+                console.error('Update check error:', error);
+            }
+        },
+
+        async performUpdate() {
+            this.showConfirmModal = true;
+            this.confirmModal = {
+                title: 'System Update',
+                message: 'Are you sure you want to update? The system will pull latest changes and restart. This will disconnect all active sessions.',
+                action: async () => {
+                    this.showConfirmModal = false;
+                    try {
+                        this.updateStatus.updating = true;
+                        this.updateStatus.progress = 5;
+                        this.updateStatus.message = 'Starting update...';
+                        
+                        await this.apiCall('/api/system/control/update', 'POST');
+                        this.pollUpdateStatus();
+                    } catch (error) {
+                        this.updateStatus.updating = false;
+                        this.showNotification('Failed to start update', 'error');
+                    }
+                },
+                actionText: 'Update Now',
+                actionClass: 'btn-success'
+            };
+        },
+
+        async pollUpdateStatus() {
+            if (!this.updateStatus.updating) return;
+
+            try {
+                const response = await this.apiCall('/api/system/update/status', 'GET');
+                this.updateStatus.progress = response.progress;
+                this.updateStatus.message = response.message;
+
+                if (response.progress >= 90) {
+                    this.updateStatus.message = 'Update complete! System is restarting...';
+                    this.handleSystemRestart();
+                    return;
+                }
+                setTimeout(() => this.pollUpdateStatus(), 2000);
+            } catch (error) {
+                if (this.updateStatus.progress >= 80) {
+                    this.handleSystemRestart();
+                } else {
+                    setTimeout(() => this.pollUpdateStatus(), 5000);
+                }
+            }
+        },
+
+        async handleSystemRestart() {
+            this.updateStatus.message = 'System is restarting. Reconnecting...';
+            this.isLoading = true;
+            this.connectionStatus = 'disconnected';
+
+            const checkOnline = async () => {
+                try {
+                    const response = await fetch('/api/auth/me', {
+                        credentials: 'same-origin'
+                    });
+                    if (response.ok) {
+                        this.updateStatus.updating = false;
+                        this.isLoading = false;
+                        this.connectionStatus = 'connected';
+                        this.showNotification('System is back online!', 'success');
+                        setTimeout(() => window.location.reload(), 1000);
+                    } else {
+                        setTimeout(checkOnline, 3000);
+                    }
+                } catch (error) {
+                    setTimeout(checkOnline, 3000);
+                }
+            };
+            setTimeout(checkOnline, 5000);
+        },
+
+        async rebuildLibrary() {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/media/rebuild', 'POST');
+                this.showNotification('Library rebuild initiated', 'success');
+                await this.loadMediaStats();
+            } catch (error) {
+                this.showNotification('Failed to rebuild library', 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async confirmReboot() {
+            this.showConfirmModal = true;
+            this.confirmModal = {
+                title: 'System Reboot',
+                message: 'Are you sure you want to reboot the Nomad Pi?',
+                action: async () => {
+                    this.showConfirmModal = false;
+                    try {
+                        await this.apiCall('/api/system/control/reboot', 'POST');
+                        this.handleSystemRestart();
+                    } catch (error) {
+                        this.showNotification('Failed to initiate reboot', 'error');
+                    }
+                },
+                actionText: 'Reboot',
+                actionClass: 'btn-warning'
+            };
+        },
+
+        async confirmShutdown() {
+            this.showConfirmModal = true;
+            this.confirmModal = {
+                title: 'System Shutdown',
+                message: 'Are you sure you want to shut down the Nomad Pi?',
+                action: async () => {
+                    this.showConfirmModal = false;
+                    try {
+                        await this.apiCall('/api/system/control/shutdown', 'POST');
+                        this.showNotification('System is shutting down...', 'warning');
+                    } catch (error) {
+                        this.showNotification('Failed to initiate shutdown', 'error');
+                    }
+                },
+                actionText: 'Shutdown',
+                actionClass: 'btn-danger'
+            };
+        },
+
+        async scanDrives() {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/system/storage/scan', 'POST');
+                await this.loadStorageInfo();
+                this.showNotification('Drive scan complete', 'success');
+            } catch (error) {
+                this.showNotification('Failed to scan drives', 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async mountDrive(drive) {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/system/mount', 'POST', {
+                    device: drive.device,
+                    mount_point: drive.label || drive.device.split('/').pop()
+                });
+                this.showNotification(`Drive ${drive.device} mounted successfully`, 'success');
+                await this.loadStorageInfo();
+            } catch (error) {
+                this.showNotification(`Failed to mount ${drive.device}`, 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async unmountDrive(drive) {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/system/unmount', 'POST', {
+                    target: drive.mountpoint
+                });
+                this.showNotification(`Drive ${drive.device} unmounted successfully`, 'success');
+                await this.loadStorageInfo();
+            } catch (error) {
+                this.showNotification(`Failed to unmount ${drive.device}`, 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+        },
+
+        toggleTheme() {
+            this.isDarkMode = !this.isDarkMode;
+            localStorage.setItem('darkMode', this.isDarkMode);
+            document.body.classList.toggle('dark-mode', this.isDarkMode);
+        },
+
+        formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const icons = {
+                mp4: 'fas fa-file-video', mkv: 'fas fa-file-video', avi: 'fas fa-file-video',
+                mp3: 'fas fa-file-audio', flac: 'fas fa-file-audio', wav: 'fas fa-file-audio',
+                jpg: 'fas fa-file-image', jpeg: 'fas fa-file-image', png: 'fas fa-file-image',
+                pdf: 'fas fa-file-pdf', txt: 'fas fa-file-alt', zip: 'fas fa-file-archive'
+            };
+            return icons[ext] || 'fas fa-file';
+        },
+
+        handleFileSelect(event) {
+            const files = Array.from(event.target.files);
+            this.addFilesToUpload(files);
+        },
+
+        handleDrop(event) {
+            const files = Array.from(event.dataTransfer.files);
+            this.addFilesToUpload(files);
+        },
+
+        addFilesToUpload(files) {
+            files.forEach(file => {
+                const upload = {
+                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                    name: file.name,
+                    size: file.size,
+                    progress: 0,
+                    status: 'pending',
+                    file: file
+                };
+                this.uploads.push(upload);
+                this.startUpload(upload);
+            });
+        },
+
+        async startUpload(upload) {
+            upload.status = 'uploading';
+            const formData = new FormData();
+            formData.append('file', upload.file);
+            
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.withCredentials = true;
+
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        upload.progress = Math.round((e.loaded / e.total) * 100);
+                    }
+                };
+                
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        upload.status = 'completed';
+                        upload.progress = 100;
+                        this.showNotification(`Uploaded ${upload.name}`, 'success');
+                        this.loadStorageInfo();
+                    } else {
+                        upload.status = 'failed';
+                        this.showNotification(`Upload failed: ${upload.name}`, 'error');
+                    }
+                };
+                
+                xhr.onerror = () => {
+                    upload.status = 'failed';
+                    this.showNotification(`Network error uploading ${upload.name}`, 'error');
+                };
+                
+                xhr.open('POST', '/api/uploads/single', true);
+                xhr.send(formData);
+            } catch (error) {
+                upload.status = 'failed';
+            }
+        },
+
+        removeUpload(id) {
+            this.uploads = this.uploads.filter(u => u.id !== id);
+        },
+
+        async apiCall(endpoint, method = 'GET', data = null) {
+            const options = {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin'
+            };
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+
+            try {
+                const response = await fetch(endpoint, options);
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        this.isAuthenticated = false;
+                        this.redirectToLogin();
+                    }
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`API Call failed: ${endpoint}`, error);
+                throw error;
+            }
+        },
+
+        showNotification(message, type = 'info') {
+            const id = Date.now();
+            this.toasts.push({ id, message, type });
+            setTimeout(() => {
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, 5000);
+        },
+
+        getToastIcon(type) {
+            switch (type) {
+                case 'success': return 'fas fa-check-circle';
+                case 'error': return 'fas fa-exclamation-circle';
+                case 'warning': return 'fas fa-exclamation-triangle';
+                default: return 'fas fa-info-circle';
+            }
+        },
+
+        redirectToLogin() {
+            window.location.href = '/';
+        },
+
+        startAutoRefresh() {
+            if (this.settings.autoRefresh) {
+                setInterval(() => {
+                    if (this.currentView === 'dashboard') {
+                        this.loadSystemStats();
+                        this.loadStorageInfo();
+                    }
+                }, this.settings.refreshInterval);
+            }
+        },
+
+        initCharts() {
+            // Storage Chart
+            const storageCtx = document.getElementById('storageChart')?.getContext('2d');
+            if (storageCtx) {
+                this.storageChart = new Chart(storageCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Used', 'Free'],
+                        datasets: [{
+                            data: [this.stats.storageUsed, this.stats.storageTotal - this.stats.storageUsed],
+                            backgroundColor: ['#3498db', '#ecf0f1']
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+
+            // Resources Chart
+            const resourcesCtx = document.getElementById('resourcesChart')?.getContext('2d');
+            if (resourcesCtx) {
+                this.resourcesChart = new Chart(resourcesCtx, {
+                    type: 'line',
+                    data: {
+                        labels: Array(10).fill(''),
+                        datasets: [
+                            {
+                                label: 'CPU %',
+                                data: Array(10).fill(0),
+                                borderColor: '#e74c3c',
+                                tension: 0.4
+                            },
+                            {
+                                label: 'RAM %',
+                                data: Array(10).fill(0),
+                                borderColor: '#2ecc71',
+                                tension: 0.4
+                            }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+        },
+
+        updateStorageChart() {
+            if (this.storageChart) {
+                this.storageChart.data.datasets[0].data = [
+                    this.stats.storageUsed,
+                    Math.max(0, this.stats.storageTotal - this.stats.storageUsed)
+                ];
+                this.storageChart.update();
+            }
+        },
+
+        updateResourcesChart() {
+            if (this.resourcesChart) {
+                const cpuData = this.resourcesChart.data.datasets[0].data;
+                const ramData = this.resourcesChart.data.datasets[1].data;
+                
+                cpuData.push(this.stats.cpuPercent);
+                cpuData.shift();
+                
+                ramData.push(this.stats.ramPercent);
+                ramData.shift();
+                
+                this.resourcesChart.update();
+            }
         }
-        
-        const response = await fetch(endpoint, options);
-        
-        if (!response.ok) {
-          if (response.status === 401) {
-            this.isAuthenticated = false;
-            this.redirectToLogin();
-          }
-          throw new Error(`API error: ${response.status} ${response.statusText}`);
-        }
-        
-        return await response.json();
-      } catch (error) {
-        if (retries < this.settings.maxRetries) {
-          await this.sleep(1000);
-          return this.apiCall(endpoint, method, data, retries + 1);
-        }
-        throw error;
-      }
     },
-    
-    /**
-     * Format bytes to human readable
-     */
-    formatBytes(bytes) {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
-    },
-    
-    /**
-     * Format time in seconds to readable format
-     */
-    formatTime(seconds) {
-      if (seconds < 60) return Math.round(seconds) + 's';
-      if (seconds < 3600) return Math.round(seconds / 60) + 'm';
-      return Math.round(seconds / 3600) + 'h';
-    },
-    
-    /**
-     * Format uptime
-     */
-    formatUptime(seconds) {
-      const days = Math.floor(seconds / 86400);
-      const hours = Math.floor((seconds % 86400) / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      
-      let result = '';
-      if (days > 0) result += `${days}d `;
-      if (hours > 0) result += `${hours}h `;
-      if (minutes > 0) result += `${minutes}m`;
-      
-      return result.trim() || '< 1m';
-    },
-    
-    /**
-     * Show notification
-     */
-    showNotification(message, type = 'info') {
-      if (!this.settings.notifications) return;
-      
-      const notification = {
-        id: Date.now(),
-        message,
-        type,
-        timestamp: new Date(),
-      };
-      
-      this.notifications.push(notification);
-      
-      // Auto-remove after 5 seconds
-      setTimeout(() => {
-        const index = this.notifications.findIndex(n => n.id === notification.id);
-        if (index > -1) {
-          this.notifications.splice(index, 1);
-        }
-      }, 5000);
-    },
-    
-    /**
-     * Toggle dark mode
-     */
-    toggleDarkMode() {
-      this.darkMode = !this.darkMode;
-      localStorage.setItem('darkMode', this.darkMode);
-      document.body.classList.toggle('dark-mode', this.darkMode);
-    },
-    
-    /**
-     * Start auto-refresh of system stats
-     */
-    startAutoRefresh() {
-      if (this.settings.autoRefresh) {
-        setInterval(() => {
-          this.loadSystemStats();
-          this.loadStorageInfo();
-        }, this.settings.refreshInterval);
-      }
-    },
-    
-    /**
-     * Redirect to login page
-     */
-    redirectToLogin() {
-      window.location.href = '/login';
-    },
-    
-    /**
-     * Sleep utility function
-     */
-    sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
-    },
-  },
-  
-  watch: {
-    /**
-     * Watch for dark mode changes
-     */
-    darkMode(newVal) {
-      document.body.classList.toggle('dark-mode', newVal);
-    },
-  },
-  
-  mounted() {
-    console.log('Admin Dashboard mounted');
-    this.init();
-    
-    // Apply dark mode on mount
-    if (this.darkMode) {
-      document.body.classList.add('dark-mode');
+
+    mounted() {
+        this.init();
     }
-  },
-  
-  beforeDestroy() {
-    console.log('Admin Dashboard destroyed');
-  },
-});
+}).mount('#app');

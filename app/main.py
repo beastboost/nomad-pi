@@ -2,7 +2,8 @@ from fastapi import FastAPI, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from app.routers import media, system, auth
+from app.routers import media, system, auth, uploads
+from app.services import ingest
 import os
 import threading
 from datetime import datetime
@@ -19,7 +20,7 @@ app.add_middleware(
 )
 
 # Create data directories if not exist
-DATA_DIRS = ["data/movies", "data/shows", "data/music", "data/books", "data/files", "data/external", "data/gallery"]
+DATA_DIRS = ["data/movies", "data/shows", "data/music", "data/books", "data/files", "data/external", "data/gallery", "data/uploads"]
 for d in DATA_DIRS:
     os.makedirs(d, exist_ok=True)
 
@@ -28,6 +29,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Protect these routes
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user)])
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user)])
+app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user)])
 
 @app.on_event("startup")
 def _startup_tasks():
@@ -63,6 +65,16 @@ def _startup_tasks():
                     pass
 
     threading.Thread(target=run, daemon=True).start()
+
+    # Start ingest service
+    try:
+        ingest.start_ingest_service()
+    except Exception as e:
+        print(f"Failed to start ingest service: {e}")
+
+@app.on_event("shutdown")
+def _shutdown_tasks():
+    ingest.stop_ingest_service()
 
 @app.middleware("http")
 async def protect_data(request: Request, call_next):

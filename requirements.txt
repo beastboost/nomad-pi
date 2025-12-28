@@ -7,3 +7,4 @@ jinja2
 psutil
 uvloop; platform_system != 'Windows'
 httptools; platform_system != 'Windows'
+watchdog

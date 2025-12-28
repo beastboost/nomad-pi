@@ -7,6 +7,115 @@ import json
 
 router = APIRouter()
 
+@router.get("/stats")
+def get_stats():
+    disk_path = "/" if platform.system() == "Linux" else os.getcwd()
+    disk = psutil.disk_usage(disk_path)
+    mem = psutil.virtual_memory()
+    net = psutil.net_io_counters()
+    
+    # Get temperature if on Linux/RPi
+    temp = 0
+    if platform.system() == "Linux":
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp = int(f.read()) / 1000
+        except:
+            pass
+
+    return {
+        "cpu": psutil.cpu_percent(interval=0.1),
+        "cores": psutil.cpu_count(),
+        "memory_total": mem.total,
+        "memory_used": mem.used,
+        "memory_percent": mem.percent,
+        "network_up": net.bytes_sent,
+        "network_down": net.bytes_recv,
+        "temperature": temp,
+        "uptime": int(psutil.boot_time()),
+        "disk_total": disk.total,
+        "disk_used": disk.used,
+        "disk_percent": disk.percent
+    }
+
+@router.get("/storage/info")
+def get_storage_info():
+    disk_path = "/" if platform.system() == "Linux" else os.getcwd()
+    disk = psutil.disk_usage(disk_path)
+    
+    drives = []
+    if platform.system() == "Linux":
+        try:
+            output = subprocess.check_output(["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,LABEL,FSTYPE"]).decode()
+            data = json.loads(output)
+            # Flatten lsblk output for easier consumption
+            for dev in data.get("blockdevices", []):
+                if dev.get("type") == "part" or not dev.get("children"):
+                    drives.append({
+                        "device": f"/dev/{dev['name']}",
+                        "total": dev.get("size"),
+                        "mounted": bool(dev.get("mountpoint")),
+                        "mountpoint": dev.get("mountpoint"),
+                        "label": dev.get("label"),
+                        "fstype": dev.get("fstype")
+                    })
+                for child in dev.get("children", []):
+                    drives.append({
+                        "device": f"/dev/{child['name']}",
+                        "total": child.get("size"),
+                        "mounted": bool(child.get("mountpoint")),
+                        "mountpoint": child.get("mountpoint"),
+                        "label": child.get("label"),
+                        "fstype": child.get("fstype")
+                    })
+        except:
+            pass
+    else:
+        for p in psutil.disk_partitions():
+            try:
+                usage = psutil.disk_usage(p.mountpoint)
+                drives.append({
+                    "device": p.device,
+                    "total": usage.total,
+                    "used": usage.used,
+                    "mounted": True,
+                    "mountpoint": p.mountpoint,
+                    "fstype": p.fstype
+                })
+            except:
+                pass
+
+    return {
+        "total": disk.total,
+        "used": disk.used,
+        "percentage": disk.percent,
+        "disks": drives
+    }
+
+@router.post("/storage/scan")
+def scan_storage():
+    # In a real app, this might trigger a rescan of block devices
+    return {"status": "success", "message": "Storage scan complete"}
+
+@router.get("/services")
+def get_services():
+    services = []
+    if platform.system() == "Linux":
+        # Check some common services we might care about
+        check_services = ["nomad-pi.service", "nginx", "docker"]
+        for s in check_services:
+            try:
+                status = subprocess.run(["systemctl", "is-active", s], capture_output=True, text=True).stdout.strip()
+                services.append({"name": s, "status": "running" if status == "active" else "stopped"})
+            except:
+                pass
+    else:
+        services = [
+            {"name": "Nomad Pi Server", "status": "running"},
+            {"name": "Database", "status": "running"}
+        ]
+    return {"services": services}
+
 @router.get("/storage")
 def get_storage():
     disk_path = "/" if platform.system() == "Linux" else os.getcwd()
@@ -87,6 +196,39 @@ def unmount_drive(target: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
+
+@router.get("/update/check")
+def check_update():
+    if platform.system() == "Linux":
+        try:
+            subprocess.run(["git", "fetch"], check=True)
+            output = subprocess.check_output(["git", "status", "-uno"]).decode()
+            if "Your branch is behind" in output:
+                return {"available": True, "message": "New version available on GitHub"}
+            return {"available": False, "message": "System is up to date"}
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+    return {"available": True, "message": "Update check simulated (Windows)"}
+
+@router.get("/update/status")
+def get_update_status():
+    status_file = "/tmp/nomad-pi-update.json"
+    if os.path.exists(status_file):
+        try:
+            # Secure validation of the status file
+            st = os.stat(status_file)
+            # Check ownership (should be same as running user)
+            if st.st_uid != os.getuid():
+                return {"progress": 0, "message": "Security error: invalid file ownership"}
+            # Check permissions (should not be world-writable)
+            if st.st_mode & 0o002:
+                return {"progress": 0, "message": "Security error: invalid file permissions"}
+                
+            with open(status_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {"progress": 0, "message": "Error reading status"}
+    return {"progress": 0, "message": "No update in progress"}
 
 @router.post("/control/{action}")
 def system_control(action: str):

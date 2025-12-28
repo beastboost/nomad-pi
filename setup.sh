@@ -18,6 +18,19 @@ if [[ "$SCRIPT_DIR" == /boot* ]]; then
     sudo chown -R "$USER:$USER" "$HOME/nomad-pi"
     exec bash "$HOME/nomad-pi/setup.sh"
 fi
+
+# Also move out of /root if we're there, as it causes permission issues for the user
+if [[ "$SCRIPT_DIR" == /root* ]]; then
+    echo "Detected installation in /root. Moving to $HOME/nomad-pi for better permissions..."
+    TARGET_DIR="$HOME/nomad-pi"
+    sudo mkdir -p "$TARGET_DIR"
+    sudo cp -r "$SCRIPT_DIR/." "$TARGET_DIR/"
+    sudo chown -R "$USER:$USER" "$TARGET_DIR"
+    echo "Moved to $TARGET_DIR. Restarting setup from new location..."
+    cd "$TARGET_DIR"
+    exec bash "./setup.sh"
+fi
+
 cd "$SCRIPT_DIR"
 
 # Fix Windows line endings for other files just in case
@@ -28,6 +41,12 @@ sed -i 's/\r$//' requirements.txt || true
 echo "=========================================="
 echo "      Nomad Pi Installation Script        "
 echo "=========================================="
+
+# 0. Check for Updates
+if [ -d ".git" ]; then
+    echo "[0/9] Pulling latest changes from GitHub..."
+    git pull || echo "Warning: Could not pull latest changes. Continuing with current version."
+fi
 
 # 1. System Updates
 echo "[1/9] Updating system packages..."
@@ -56,10 +75,9 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 
-source venv/bin/activate
-
 echo "Installing Python dependencies..."
-pip install -r requirements.txt
+./venv/bin/pip install --upgrade pip
+./venv/bin/pip install -r requirements.txt
 
 # 4. Create Directories
 echo "[4/9] Ensuring data directories exist..."
@@ -71,7 +89,7 @@ sudo chmod -R 775 data
 # 5. Systemd Service Setup
 echo "[5/9] Configuring systemd service..."
 
-SERVICE_FILE="/etc/systemd/system/nomadpi.service"
+SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 CURRENT_DIR=$(pwd)
 USER_NAME=$(whoami)
 ENV_FILE="/etc/nomadpi.env"
@@ -117,14 +135,14 @@ sudo systemctl daemon-reload
 echo "Stopping any existing processes on port 8000..."
 sudo fuser -k 8000/tcp >/dev/null 2>&1 || true
 
-sudo systemctl enable nomadpi
-sudo systemctl restart nomadpi
+sudo systemctl enable nomad-pi
+sudo systemctl restart nomad-pi
 
-# 6. Sudoers Configuration (for Mount/Shutdown/Reboot)
+# 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
 echo "[6/9] Configuring permissions..."
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot
+$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl restart nomad-pi
 EOL
 sudo chmod 0440 $SUDOERS_FILE
 

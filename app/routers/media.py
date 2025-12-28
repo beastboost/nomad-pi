@@ -177,6 +177,46 @@ def cache_remote_poster(poster_url: str):
     rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
     return f"/data/{rel}"
 
+@router.get("/stats")
+def get_media_stats():
+    stats = {
+        "movies": 0,
+        "shows": 0,
+        "music": 0,
+        "books": 0
+    }
+    
+    for category in stats.keys():
+        try:
+            # Check library index
+            index = database.get_library_index(category)
+            if category == "shows":
+                # For shows, count episodes
+                count = 0
+                for show in index:
+                    for season in show.get("seasons", []):
+                        count += len(season.get("episodes", []))
+                stats[category] = count
+            else:
+                stats[category] = len(index)
+        except Exception:
+            # Fallback to file count if index doesn't exist
+            count = 0
+            paths = get_scan_paths(category)
+            for p in paths:
+                if os.path.exists(p):
+                    for root, dirs, files in os.walk(p):
+                        count += len([f for f in files if not f.startswith(".")])
+            stats[category] = count
+            
+    return stats
+
+@router.post("/rebuild")
+def rebuild_library(background_tasks: BackgroundTasks):
+    for category in ["movies", "shows", "music", "books"]:
+        background_tasks.add_task(build_library_index, category)
+    return {"status": "Library rebuild started in background"}
+
 def build_library_index(category: str):
     paths_to_scan = get_scan_paths(category)
     count = 0
@@ -702,6 +742,19 @@ def rename_media(data: Dict = Body(...)):
         pass
 
     return {"status": "ok", "old_path": old_path, "new_path": new_path}
+
+# Public wrappers for ingestion/organization
+def parse_season_episode(filename: str):
+    return _parse_season_episode(filename)
+
+def parse_episode_only(filename: str):
+    return _parse_episode_only(filename)
+
+def auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
+    return _auto_dest_rel(category, normalized, rename_files)
+
+def pick_unique_dest(path: str):
+    return _pick_unique_dest(path)
 
 def _sanitize_show_part(s: str):
     s = re.sub(r"[\._]+", " ", str(s or ""))

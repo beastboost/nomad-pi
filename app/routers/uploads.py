@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
 # Configuration
-UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR = Path("data/uploads")
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 ALLOWED_EXTENSIONS = {
