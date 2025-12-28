@@ -34,16 +34,65 @@ def get_stats():
     
     # Get temperature if on Linux/RPi
     temp = 0
+    cpu_freq = 0
+    cpu_freq_max = 0
+    cpu_freq_min = 0
+    throttled = False
+    
     if platform.system() == "Linux":
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp = int(f.read()) / 1000
         except:
             pass
+        
+        # Get CPU frequency (Raspberry Pi specific)
+        try:
+            result = subprocess.run(
+                ["vcgencmd", "measure_clock", "arm"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            if result.returncode == 0:
+                # Output format: frequency(48)=1500000000
+                freq_str = result.stdout.strip().split('=')[1]
+                cpu_freq = int(freq_str) / 1000000  # Convert to MHz
+        except:
+            # Fallback to psutil
+            try:
+                freq = psutil.cpu_freq()
+                if freq:
+                    cpu_freq = freq.current
+                    cpu_freq_max = freq.max
+                    cpu_freq_min = freq.min
+            except:
+                pass
+        
+        # Check for throttling (Raspberry Pi specific)
+        try:
+            result = subprocess.run(
+                ["vcgencmd", "get_throttled"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            if result.returncode == 0:
+                # Output format: throttled=0x0
+                throttled_hex = result.stdout.strip().split('=')[1]
+                throttled_value = int(throttled_hex, 16)
+                # Bit 0: under-voltage, Bit 1: arm frequency capped, Bit 2: currently throttled
+                throttled = (throttled_value & 0x7) != 0
+        except:
+            pass
 
     return {
         "cpu": psutil.cpu_percent(interval=0.1),
         "cores": psutil.cpu_count(),
+        "cpu_freq": cpu_freq,
+        "cpu_freq_max": cpu_freq_max,
+        "cpu_freq_min": cpu_freq_min,
+        "throttled": throttled,
         "memory_total": mem.total,
         "memory_used": mem.used,
         "memory_percent": mem.percent,
@@ -478,5 +527,186 @@ def restart_dlna():
         # Force rescan
         subprocess.run(["sudo", "minidlnad", "-R"], check=False)
         return {"status": "ok", "message": "DLNA server restarted and rescanning media"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/info")
+def get_system_info():
+    """Get detailed system information"""
+    info = {
+        "hostname": platform.node(),
+        "platform": platform.system(),
+        "platform_release": platform.release(),
+        "platform_version": platform.version(),
+        "architecture": platform.machine(),
+        "processor": platform.processor(),
+        "python_version": platform.python_version(),
+    }
+    
+    if platform.system() == "Linux":
+        # Get Raspberry Pi model
+        try:
+            with open("/proc/device-tree/model", "r") as f:
+                info["model"] = f.read().strip().replace('\x00', '')
+        except:
+            info["model"] = "Unknown"
+        
+        # Get OS info
+        try:
+            with open("/etc/os-release", "r") as f:
+                os_info = {}
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=', 1)
+                        os_info[key] = value.strip('"')
+                info["os_name"] = os_info.get("PRETTY_NAME", "Linux")
+                info["os_version"] = os_info.get("VERSION", "Unknown")
+        except:
+            info["os_name"] = "Linux"
+            info["os_version"] = "Unknown"
+        
+        # Get kernel version
+        try:
+            info["kernel"] = subprocess.check_output(["uname", "-r"], text=True).strip()
+        except:
+            info["kernel"] = platform.release()
+        
+        # Get uptime
+        try:
+            with open("/proc/uptime", "r") as f:
+                uptime_seconds = float(f.read().split()[0])
+                days = int(uptime_seconds // 86400)
+                hours = int((uptime_seconds % 86400) // 3600)
+                minutes = int((uptime_seconds % 3600) // 60)
+                info["uptime_formatted"] = f"{days}d {hours}h {minutes}m"
+        except:
+            info["uptime_formatted"] = "Unknown"
+        
+        # Get memory info
+        try:
+            mem = psutil.virtual_memory()
+            info["memory_total_gb"] = round(mem.total / (1024**3), 2)
+            info["memory_available_gb"] = round(mem.available / (1024**3), 2)
+        except:
+            pass
+        
+        # Get CPU info
+        try:
+            info["cpu_count"] = psutil.cpu_count(logical=False)
+            info["cpu_count_logical"] = psutil.cpu_count(logical=True)
+        except:
+            pass
+        
+        # Get voltage (Raspberry Pi specific)
+        try:
+            result = subprocess.run(
+                ["vcgencmd", "measure_volts", "core"],
+                capture_output=True,
+                text=True,
+                timeout=1
+            )
+            if result.returncode == 0:
+                # Output format: volt=1.2000V
+                voltage_str = result.stdout.strip().split('=')[1].rstrip('V')
+                info["voltage"] = float(voltage_str)
+        except:
+            pass
+    
+    return info
+
+@router.get("/processes")
+def get_processes():
+    """Get list of running processes"""
+    try:
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
+            try:
+                pinfo = proc.info
+                # Only include processes using significant resources or important ones
+                if pinfo['cpu_percent'] > 1 or pinfo['memory_percent'] > 1 or pinfo['name'] in ['python', 'uvicorn', 'minidlna', 'smbd', 'nmbd']:
+                    processes.append({
+                        'pid': pinfo['pid'],
+                        'name': pinfo['name'],
+                        'cpu': round(pinfo['cpu_percent'], 1),
+                        'memory': round(pinfo['memory_percent'], 1),
+                        'status': pinfo['status']
+                    })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        
+        # Sort by CPU usage
+        processes.sort(key=lambda x: x['cpu'], reverse=True)
+        return {"processes": processes[:20]}  # Top 20
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/logs")
+def get_system_logs(lines: int = 50):
+    """Get recent system logs"""
+    if platform.system() != "Linux":
+        return {"logs": ["System logs only available on Linux"]}
+    
+    try:
+        # Try journalctl first
+        result = subprocess.run(
+            ["journalctl", "-n", str(lines), "--no-pager"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return {"logs": result.stdout.split('\n')}
+        
+        # Fallback to syslog
+        result = subprocess.run(
+            ["tail", "-n", str(lines), "/var/log/syslog"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            return {"logs": result.stdout.split('\n')}
+        
+        return {"logs": ["No logs available"]}
+    except Exception as e:
+        return {"logs": [f"Error reading logs: {str(e)}"]}
+
+@router.get("/network/interfaces")
+def get_network_interfaces():
+    """Get network interface information"""
+    try:
+        interfaces = []
+        net_if_addrs = psutil.net_if_addrs()
+        net_if_stats = psutil.net_if_stats()
+        
+        for interface_name, addresses in net_if_addrs.items():
+            if interface_name == 'lo':
+                continue
+            
+            interface_info = {
+                "name": interface_name,
+                "addresses": [],
+                "is_up": net_if_stats[interface_name].isup if interface_name in net_if_stats else False,
+                "speed": net_if_stats[interface_name].speed if interface_name in net_if_stats else 0
+            }
+            
+            for addr in addresses:
+                if addr.family == 2:  # AF_INET (IPv4)
+                    interface_info["addresses"].append({
+                        "type": "IPv4",
+                        "address": addr.address,
+                        "netmask": addr.netmask
+                    })
+                elif addr.family == 10:  # AF_INET6 (IPv6)
+                    interface_info["addresses"].append({
+                        "type": "IPv6",
+                        "address": addr.address
+                    })
+                elif addr.family == 17:  # AF_PACKET (MAC)
+                    interface_info["mac"] = addr.address
+            
+            interfaces.append(interface_info)
+        
+        return {"interfaces": interfaces}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
