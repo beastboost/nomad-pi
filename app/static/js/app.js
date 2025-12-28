@@ -1678,6 +1678,21 @@ let musicIndex = -1;
 let musicShuffle = false;
 let musicShuffleOrder = [];
 let musicShufflePos = 0;
+async function systemControl(action) {
+    const msg = action === 'update' ? 'Are you sure you want to update from GitHub? This will pull latest files and restart the service.' : `Are you sure you want to ${action} the device?`;
+    if (!confirm(msg)) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/system/control/${action}`, { method: 'POST' });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        alert(data.status || data.message || 'Action initiated');
+    } catch (e) {
+        console.error(e);
+        alert('Error controlling system.');
+    }
+}
+
 async function loadDrives(silent = false) {
     const container = document.getElementById('drive-list');
     if (!silent) container.innerHTML = '<div class="loading">Scanning...</div>';

@@ -136,8 +136,11 @@
                 
                 <div class="admin-panel">
                     <h3>System Control</h3>
-                    <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
-                    <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="systemControl('update')" class="primary">Update from GitHub</button>
+                        <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
+                        <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
+                    </div>
                 </div>
 
                 <div class="admin-panel">

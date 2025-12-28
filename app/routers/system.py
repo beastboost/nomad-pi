@@ -90,9 +90,21 @@ def unmount_drive(target: str):
 
 @router.post("/control/{action}")
 def system_control(action: str):
-    if action not in ["shutdown", "reboot"]:
+    if action not in ["shutdown", "reboot", "update"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     
+    if action == "update":
+        if platform.system() == "Linux":
+            # Run the update script in the background
+            try:
+                # We use Popen so the API can return a response before the service restarts
+                subprocess.Popen(["/bin/bash", "./update.sh"], cwd=os.getcwd())
+                return {"status": "Update initiated. System will restart shortly."}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+        else:
+            return {"status": "update_simulated", "message": "Update script would run on Linux (git pull + restart)"}
+
     if platform.system() == "Linux":
         cmd = ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"] if action == "shutdown" else ["sudo", "-n", "/usr/sbin/reboot"]
         try:
