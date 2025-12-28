@@ -47,7 +47,7 @@ To run Nomad Pi locally for development or as a personal media server on Windows
 1.  **Clone the repository**:
     ```powershell
     git clone https://github.com/beastboost/nomad-pi.git
-    cd "media server"
+    cd nomad-pi
     ```
 
 2.  **Create and Activate Virtual Environment**:
