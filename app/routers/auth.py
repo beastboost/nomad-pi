@@ -16,9 +16,8 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
 if not ADMIN_PASSWORD_HASH and not ADMIN_PASSWORD:
-    import sys
-    print("FATAL: ADMIN_PASSWORD or ADMIN_PASSWORD_HASH environment variable is required.")
-    sys.exit(1)
+    print("WARNING: No ADMIN_PASSWORD or ADMIN_PASSWORD_HASH found. Using default: nomad")
+    ADMIN_PASSWORD = "nomad"
 
 class LoginRequest(BaseModel):
     password: str
