@@ -445,19 +445,21 @@ h1, h2, h3 {
 
     nav button {
         margin-left: 0;
-        margin-right: 10px;
-        padding: 8px 8px;
-        font-size: 0.9rem;
+        margin-right: 8px;
+        padding: 12px 16px; /* Slightly taller buttons */
+        font-size: 0.95rem;
+        min-width: 90px;
     }
 
     nav .logout-btn {
-        padding: 8px 12px;
+        padding: 10px 16px;
     }
 
     .header-stats {
         margin-left: 0;
-        margin-right: 10px;
+        margin-right: 12px;
         display: inline-block;
+        font-size: 0.8rem;
     }
 
     .login-box {
@@ -476,8 +478,31 @@ h1, h2, h3 {
         margin-top: 18px;
     }
 
+    .list-item {
+        padding: 18px 12px;
+        gap: 12px;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .list-item > div:last-child {
+        width: 100%;
+        justify-content: space-between;
+        margin-top: 8px;
+    }
+
+    .list-item span {
+        font-size: 1.05rem;
+        word-break: break-all;
+    }
+
+    .music-play {
+        padding: 10px 25px !important;
+        font-size: 1rem !important;
+    }
+
     main {
-        padding: 16px 12px;
+        padding: 16px 12px 180px 12px; /* Even more bottom padding for the larger mobile player */
     }
 
     .modal-content {
@@ -487,38 +512,101 @@ h1, h2, h3 {
 
     /* Mobile Player Bar Fixes */
     .player-bar {
-        grid-template-columns: 1fr;
         grid-template-areas: 
-            "title"
             "progress"
+            "title"
             "controls";
-        gap: 10px;
-        padding: 12px;
-        bottom: 8px;
-        left: 8px;
-        right: 8px;
+        grid-template-columns: 1fr;
+        height: auto;
+        padding: 12px 8px;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        border-radius: 16px 16px 0 0;
+        border-bottom: none;
+        gap: 8px;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
     }
 
     .player-title {
         grid-area: title;
         text-align: center;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
+        padding: 2px 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: 500;
     }
 
     .player-progress {
         grid-area: progress;
         width: 100%;
+        padding: 0 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    #player-seek {
+        height: 24px; /* Larger touch target */
+    }
+
+    .player-time {
+        font-size: 0.75rem;
+        opacity: 0.8;
+        margin-top: -4px;
     }
 
     .player-controls {
         grid-area: controls;
         justify-content: center;
         width: 100%;
+        gap: 30px;
+        padding: 5px 0 10px 0;
+    }
+
+    .player-btn {
+        padding: 12px;
+        font-size: 1.4rem;
+        min-width: 50px;
+        background: none;
+        border: none;
+        box-shadow: none;
+    }
+
+    #player-play {
+        padding: 12px 25px;
+        font-size: 1.8rem;
+        background: rgba(255,255,255,0.1);
+        border-radius: 50%;
     }
 
     .player-volume {
-        display: none; /* Hide volume on mobile to save space, use system volume */
+        display: none;
     }
+}
+
+/* Update Log */
+.update-log {
+    background: #000;
+    color: #0f0;
+    font-family: monospace;
+    padding: 15px;
+    border-radius: 4px;
+    height: 300px;
+    overflow-y: auto;
+    margin-top: 20px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    border: 1px solid #333;
+    white-space: pre-wrap;
+}
+
+.update-log div {
+    margin-bottom: 4px;
 }
 
 /* Home Grid */
@@ -988,4 +1076,69 @@ button.small {
     font-style: italic;
     padding: 20px;
     text-align: center;
+}
+
+/* Mobile Media Player Optimizations */
+@media (max-width: 768px) {
+    .player-bar {
+        padding: 15px 10px;
+        flex-direction: column;
+        gap: 15px;
+        height: auto;
+        bottom: 0;
+        border-radius: 15px 15px 0 0;
+    }
+
+    .player-title {
+        text-align: center;
+        width: 100%;
+        font-size: 1.1rem;
+        margin-bottom: 5px;
+    }
+
+    .player-controls {
+        justify-content: center;
+        width: 100%;
+        gap: 20px;
+    }
+
+    .player-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 1.5rem;
+    }
+
+    .player-progress {
+        width: 100%;
+        margin: 0;
+    }
+
+    .player-volume {
+        display: none; /* Hide volume on mobile to save space, usually handled by hardware buttons */
+    }
+
+    .player-time {
+        font-size: 0.85rem;
+    }
+    
+    /* Ensure main content doesn't get covered by the tall mobile player bar */
+    main {
+        padding-bottom: 180px !important;
+    }
+}
+
+/* Password Change Section */
+.settings-group {
+    margin-bottom: 25px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-group:last-child {
+    border-bottom: none;
+}
+
+.settings-group h4 {
+    margin-bottom: 15px;
+    color: var(--accent-color);
 }

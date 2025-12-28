@@ -503,6 +503,34 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     stored = database.get_file_metadata(path)
     return {"configured": True, "cached": True, **(stored or {})}
 
+from fastapi.responses import FileResponse, StreamingResponse
+import mimetypes
+
+@router.get("/stream")
+async def stream_media(path: str = Query(...), token: str = Query(None)):
+    # The middleware already checks for token, but we can double check here if needed
+    # However, if it got here, it's either authenticated or it's a path that doesn't start with /data or /api/media
+    
+    # We should ensure the path is valid
+    if not os.path.isabs(path) and not path.startswith("/data/"):
+        # Try to resolve relative to BASE_DIR if it's not absolute
+        fs_path = os.path.abspath(os.path.join(BASE_DIR, path.lstrip("/")))
+    else:
+        if path.startswith("/data/"):
+            try:
+                fs_path = safe_fs_path_from_web_path(path)
+            except:
+                raise HTTPException(status_code=400, detail="Invalid data path")
+        else:
+            # Absolute path (e.g. D:\Music)
+            fs_path = path
+
+    if not os.path.isfile(fs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Simple FileResponse for now, it supports range requests
+    return FileResponse(fs_path)
+
 @router.get("/browse")
 def browse_files(path: str = Query(default="/data")):
     # Special handling for log files
@@ -512,11 +540,20 @@ def browse_files(path: str = Query(default="/data")):
             return {"items": [{"name": "update.log", "path": "/update.log", "is_dir": False, "size": os.path.getsize(log_path)}]}
         return {"items": []}
 
-    if not path.startswith("/data"):
+    # Allow Windows absolute paths or paths starting with /data
+    is_windows_path = platform.system() == "Windows" and len(path) >= 2 and path[1] == ":"
+    
+    if not path.startswith("/data") and not is_windows_path:
         raise HTTPException(status_code=400, detail="Invalid path")
     
     try:
-        fs_path = safe_fs_path_from_web_path(path) if path != "/data" else BASE_DIR
+        if path == "/data":
+            fs_path = BASE_DIR
+        elif path.startswith("/data/"):
+            fs_path = safe_fs_path_from_web_path(path)
+        else:
+            # Windows path
+            fs_path = os.path.abspath(path)
     except HTTPException:
         raise HTTPException(status_code=400, detail="Invalid path")
 
@@ -532,14 +569,23 @@ def browse_files(path: str = Query(default="/data")):
             full_path = os.path.join(fs_path, item)
             is_dir = os.path.isdir(full_path)
             
-            rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
-            web_path = f"/data/{rel_path}"
+            if full_path.startswith(os.path.abspath(BASE_DIR)):
+                rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
+                web_path = f"/data/{rel_path}"
+            else:
+                # External path, use absolute path for browsing
+                web_path = full_path
             
+            try:
+                size = os.path.getsize(full_path) if not is_dir else None
+            except:
+                size = None
+
             items.append({
                 "name": item,
                 "path": web_path,
                 "is_dir": is_dir,
-                "size": os.path.getsize(full_path) if not is_dir else None
+                "size": size
             })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

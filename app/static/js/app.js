@@ -1,5 +1,12 @@
 console.log("App v1.1 loaded - Cache cleared");
 const API_BASE = '/api';
+
+function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
+}
 let currentMedia = null;
 let driveScanInterval = null;
 let statsInterval = null;
@@ -302,25 +309,74 @@ async function loadMedia(category) {
 async function loadFileBrowser(path) {
     console.log('loadFileBrowser called with path:', path);
     const container = document.getElementById('files-list');
-    if (!container) {
-        console.error('files-list container not found');
-        return;
-    }
+    if (!container) return;
 
     container.innerHTML = '<div class="loading">Loading files...</div>';
+    
+    // Check if we should show drive list (Windows)
+    if (path === 'DRIVES') {
+        try {
+            const res = await fetch(`${API_BASE}/system/drives`);
+            const data = await res.json();
+            container.innerHTML = '<h2>Available Drives</h2>';
+            const drives = data.blockdevices || [];
+            
+            // Back to /data
+            const backDiv = document.createElement('div');
+            backDiv.className = 'media-item folder';
+            backDiv.innerHTML = `
+                <div class="media-card glass" onclick="loadFileBrowser('/data')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back to /data)</h3>
+                    </div>
+                </div>
+            `;
+            container.appendChild(backDiv);
+
+            drives.forEach(d => {
+                const div = document.createElement('div');
+                div.className = 'media-item folder';
+                div.innerHTML = `
+                    <div class="media-card glass" onclick="loadFileBrowser('${d.mountpoint.replaceAll('\\', '\\\\')}')">
+                        <div class="media-info">
+                            <h3>💽 Drive ${d.name} (${formatBytes(d.free)} free)</h3>
+                            <p>${d.fstype} - ${d.mountpoint}</p>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+            return;
+        } catch (e) {
+            console.error('Error loading drives:', e);
+        }
+    }
+
     try {
         const url = `${API_BASE}/media/browse?path=${encodeURIComponent(path)}`;
-        console.log('Fetching from URL:', url);
         const res = await fetch(url);
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
-        console.log('Received data:', data);
         
         container.innerHTML = '';
         
-        // Add "Back" button if not at root
-        if (path !== '/data') {
-            const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '/data';
+        // Add "Back" and "Drives" buttons
+        const isWindows = path.includes(':');
+        const isRoot = path === '/data' || (isWindows && (path.endsWith(':\\') || path.endsWith(':') || path.endsWith(':/')));
+
+        if (!isRoot) {
+            // Calculate parent path more robustly
+            let parentPath = '';
+            if (path.includes('\\')) {
+                parentPath = path.substring(0, path.lastIndexOf('\\'));
+                if (parentPath.endsWith(':')) parentPath += '\\';
+            } else if (path.includes('/')) {
+                parentPath = path.substring(0, path.lastIndexOf('/'));
+                if (parentPath === '') parentPath = '/';
+            } else {
+                parentPath = '/data';
+            }
+
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
@@ -331,15 +387,38 @@ async function loadFileBrowser(path) {
                 </div>
             `;
             container.appendChild(backDiv);
+        } else if (path === '/data') {
+            // Show "Browse Drives" button at /data root
+            const driveDiv = document.createElement('div');
+            driveDiv.className = 'media-item folder';
+            driveDiv.innerHTML = `
+                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                    <div class="media-info">
+                        <h3>💽 Browse External Drives / Partitions</h3>
+                    </div>
+                </div>
+            `;
+            container.appendChild(driveDiv);
+        } else if (isWindows && isRoot) {
+            // At drive root, allow going back to drives list
+            const backDiv = document.createElement('div');
+            backDiv.className = 'media-item folder';
+            backDiv.innerHTML = `
+                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back to Drives)</h3>
+                    </div>
+                </div>
+            `;
+            container.appendChild(backDiv);
         }
 
         if (!data.items || data.items.length === 0) {
-            container.innerHTML = '<p style="padding:20px; text-align:center; color:var(--text-muted);">This folder is empty.</p>';
+            container.innerHTML += '<p style="padding:20px; text-align:center; color:var(--text-muted);">This folder is empty.</p>';
         } else {
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
-                
                 const itemPath = item.path.replaceAll('\\', '\\\\');
 
                 if (item.is_dir) {
@@ -381,7 +460,7 @@ async function loadFileBrowser(path) {
 function openFile(path) {
     const ext = path.split('.').pop().toLowerCase();
     if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) {
-        openVideoPlayer(path);
+        openVideoViewer(path);
     } else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
         openImageViewer(path);
     } else if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) {
@@ -391,6 +470,18 @@ function openFile(path) {
     } else {
         window.open(path, '_blank');
     }
+}
+
+function playAudio(path) {
+    console.log('playAudio called for:', path);
+    // When playing from file browser, we don't have the full track list easily.
+    // Create a temporary track object and start a queue with just this one file.
+    const name = path.split('/').pop() || path;
+    const track = {
+        name: name,
+        path: path
+    };
+    startMusicQueue([track], 0);
 }
 
 function renderMediaFromCache(category) {
@@ -735,6 +826,29 @@ function startMusicQueue(list, startIdx) {
     const audio = document.getElementById('global-audio');
     const bar = document.getElementById('player-bar');
     if (!audio || !bar) return;
+
+    // Add error listeners if not already added
+    if (!audio.dataset.listenersAdded) {
+        audio.addEventListener('error', (e) => {
+            console.error('Audio element error:', audio.error);
+            let msg = 'Audio error occurred.';
+            if (audio.error) {
+                switch (audio.error.code) {
+                    case 1: msg = 'Fetching aborted.'; break;
+                    case 2: msg = 'Network error.'; break;
+                    case 3: msg = 'Decoding failed.'; break;
+                    case 4: msg = 'Source not supported.'; break;
+                }
+                msg += ' (Code ' + audio.error.code + ')';
+            }
+            alert(msg);
+        });
+        audio.addEventListener('stalled', () => console.warn('Audio stalled...'));
+        audio.addEventListener('waiting', () => console.log('Audio waiting for data...'));
+        audio.addEventListener('canplay', () => console.log('Audio can play now'));
+        audio.dataset.listenersAdded = 'true';
+    }
+
     musicQueue = (list || []).filter(f => f && f.path);
     if (musicQueue.length === 0) return;
     musicIndex = Math.max(0, Math.min(startIdx || 0, musicQueue.length - 1));
@@ -761,28 +875,54 @@ function shuffleOrder(n, start) {
 }
 
 function playMusicAt(idx) {
+    console.log('playMusicAt called with index:', idx);
     const audio = document.getElementById('global-audio');
     const titleEl = document.getElementById('player-title');
-    if (!audio || !musicQueue[idx]) return;
+    const playBtn = document.getElementById('player-play');
+    
+    if (!audio || !musicQueue[idx]) {
+        console.error('Audio element or track not found', { audio: !!audio, track: !!musicQueue[idx] });
+        return;
+    }
+    
     musicIndex = idx;
     const track = musicQueue[musicIndex];
     if (titleEl) titleEl.textContent = cleanTitle(track.name);
+    if (playBtn) playBtn.textContent = '⏳';
     
-    // Ensure the path is correctly encoded for the audio source
-    const encodedPath = track.path.split('/').map(segment => encodeURIComponent(segment)).join('/');
-    audio.src = encodedPath;
+    const token = getCookie('auth_token');
     
-    console.log('Playing music:', track.name, 'at', encodedPath);
+    // Use the /api/media/stream endpoint for all playback to handle auth and external paths
+    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(track.path)}`;
+    if (token) {
+        streamUrl += '&token=' + token;
+    }
     
-    audio.load(); // Force reload to ensure the new source is picked up
-    audio.play().catch(err => {
-        console.error('Audio play error:', err);
-        // If it fails, try to skip to the next track after a short delay
-        setTimeout(() => musicNext(), 2000);
-    });
-    
-    const playBtn = document.getElementById('player-play');
-    if (playBtn) playBtn.textContent = 'Pause';
+    console.log('Playing track:', track.name, 'Stream URL:', streamUrl);
+
+    // Reset audio state before loading new src
+    audio.pause();
+    audio.src = streamUrl;
+    audio.load();
+
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+        playPromise.then(() => {
+            console.log('Playback started successfully');
+            if (playBtn) playBtn.textContent = '⏸';
+        }).catch(err => {
+            console.error('Audio play error:', err);
+            if (playBtn) playBtn.textContent = '▶';
+            
+            if (err.name === 'NotAllowedError') {
+                console.warn('Autoplay blocked. User interaction required.');
+            } else if (err.name === 'AbortError') {
+                console.log('Playback aborted');
+            } else {
+                alert('Playback failed: ' + err.message + '. Path: ' + track.path);
+            }
+        });
+    }
 }
 
 function musicNext() {
@@ -837,8 +977,12 @@ function openImageViewer(path, title) {
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading) return;
 
+    const token = getCookie('auth_token');
+    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
+    if (token) streamUrl += '&token=' + token;
+
     heading.textContent = title ? String(title) : 'Image';
-    body.innerHTML = `<div class="image-viewer"><img src="${escapeHtml(path)}" style="max-width:100%; max-height:80vh; border-radius:8px;"></div>`;
+    body.innerHTML = `<div class="image-viewer"><img src="${streamUrl}" style="max-width:100%; max-height:80vh; border-radius:8px;"></div>`;
     modal.classList.remove('hidden');
 }
 
@@ -854,11 +998,17 @@ function openVideoViewer(path, title, startSeconds = 0) {
     heading.textContent = title ? String(title) : 'Video';
     body.innerHTML = '';
 
+    const token = getCookie('auth_token');
+    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
+    if (token) streamUrl += '&token=' + token;
+
+    console.log('Opening video:', path, 'at', streamUrl);
+
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
     video.preload = 'metadata';
-    video.src = path;
+    video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
@@ -1350,8 +1500,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         audio.addEventListener('ended', () => musicNext());
-        audio.addEventListener('play', () => { if (btnPlay) btnPlay.textContent = 'Pause'; });
-        audio.addEventListener('pause', () => { if (btnPlay) btnPlay.textContent = 'Play'; });
+        audio.addEventListener('play', () => { if (btnPlay) btnPlay.textContent = '⏸'; });
+        audio.addEventListener('pause', () => { if (btnPlay) btnPlay.textContent = '▶'; });
+        audio.addEventListener('error', (e) => {
+            console.error('Global audio error:', audio.error);
+            const titleEl = document.getElementById('player-title');
+            if (titleEl) titleEl.textContent = 'Error playing track';
+            const btnPlay = document.getElementById('player-play');
+            if (btnPlay) btnPlay.textContent = '▶';
+            
+            // Show more details if possible
+            let msg = 'Unknown playback error';
+            if (audio.error) {
+                switch (audio.error.code) {
+                    case 1: msg = 'Playback aborted'; break;
+                    case 2: msg = 'Network error'; break;
+                    case 3: msg = 'Decoding error'; break;
+                    case 4: msg = 'Source not supported'; break;
+                }
+            }
+            console.error('Audio Error Detail:', msg);
+        });
     }
 
     if (btnPlay && audio) {
@@ -1876,10 +2045,11 @@ async function systemControl(action) {
                     if (logRes.ok) {
                         const data = await logRes.json();
                         if (data.log) {
-                            logView.textContent = data.log;
+                            const logText = Array.isArray(data.log) ? data.log.join('') : String(data.log);
+                            logView.textContent = logText;
                             logView.scrollTop = logView.scrollHeight;
                             
-                            if (data.log.includes('Update complete!')) {
+                            if (logText.includes('Update complete!')) {
                                 clearInterval(pollInterval);
                                 badge.textContent = 'Success';
                                 badge.className = 'badge success';
@@ -2085,6 +2255,52 @@ async function unmountDrive(mountpoint) {
         }
     } catch (e) {
         alert('Error: ' + e);
+    }
+}
+
+async function changePassword() {
+    const current = document.getElementById('change-pwd-current').value;
+    const newPass = document.getElementById('change-pwd-new').value;
+    const confirm = document.getElementById('change-pwd-confirm').value;
+
+    if (!current || !newPass || !confirm) {
+        alert('Please fill in all password fields.');
+        return;
+    }
+
+    if (newPass !== confirm) {
+        alert('New passwords do not match.');
+        return;
+    }
+
+    if (newPass.length < 4) {
+        alert('New password must be at least 4 characters long.');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_password: current,
+                new_password: newPass
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            alert('Password updated successfully!');
+            // Clear fields
+            document.getElementById('change-pwd-current').value = '';
+            document.getElementById('change-pwd-new').value = '';
+            document.getElementById('change-pwd-confirm').value = '';
+        } else {
+            alert(data.detail || 'Failed to update password.');
+        }
+    } catch (e) {
+        console.error('Error updating password:', e);
+        alert('Error updating password. See console for details.');
     }
 }
 

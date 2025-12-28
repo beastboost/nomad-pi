@@ -7,7 +7,23 @@ from app.services import ingest
 from app import database
 import os
 import threading
+import mimetypes
 from datetime import datetime
+
+# Add common media types for Windows compatibility
+mimetypes.add_type('audio/mpeg', '.mp3')
+mimetypes.add_type('audio/mp4', '.m4a')
+mimetypes.add_type('audio/ogg', '.ogg')
+mimetypes.add_type('audio/wav', '.wav')
+mimetypes.add_type('audio/flac', '.flac')
+mimetypes.add_type('video/mp4', '.mp4')
+mimetypes.add_type('video/x-matroska', '.mkv')
+mimetypes.add_type('video/webm', '.webm')
+mimetypes.add_type('image/jpeg', '.jpg')
+mimetypes.add_type('image/jpeg', '.jpeg')
+mimetypes.add_type('image/png', '.png')
+mimetypes.add_type('image/gif', '.gif')
+mimetypes.add_type('application/pdf', '.pdf')
 
 app = FastAPI(title="Nomad Pi")
 
@@ -18,7 +34,7 @@ database.init_db()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # Changed to False since we use token in URL or it's same-origin
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,10 +98,24 @@ def _shutdown_tasks():
 
 @app.middleware("http")
 async def protect_data(request: Request, call_next):
+    # Allow OPTIONS requests for CORS preflight
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     if request.url.path.startswith("/data/"):
-        token = request.cookies.get("auth_token")
-        if not token or token not in auth.SESSIONS:
+        token = request.cookies.get("auth_token") or request.query_params.get("token")
+        
+        if not token:
+            print(f"Unauthorized access attempt (no token): {request.url.path}")
             return Response(status_code=401)
+        
+        session = database.get_session(token)
+        if not session:
+            # Mask token for logging
+            masked_token = (token[:4] + "...") if token and len(token) > 4 else "****"
+            print(f"Unauthorized access attempt (invalid session): {request.url.path} | Token: {masked_token}")
+            return Response(status_code=401)
+    
     response = await call_next(request)
     p = request.url.path
     if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):

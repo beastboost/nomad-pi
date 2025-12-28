@@ -238,6 +238,7 @@ def cleanup_old_uploads(background_tasks: BackgroundTasks, file_path: Path, dela
 async def upload_single_file(
     file: UploadFile = File(...),
     file_id: Optional[str] = Query(None),
+    category: str = Query("files"),
 ) -> UploadResponse:
     """
     Upload a single file with progress tracking.
@@ -245,6 +246,7 @@ async def upload_single_file(
     Args:
         file: The file to upload
         file_id: Optional unique identifier for tracking
+        category: Media category (music, movies, etc.)
         
     Returns:
         UploadResponse with file details
@@ -271,6 +273,39 @@ async def upload_single_file(
         
         upload_time = time.time() - start_time
         
+        # Integrate with library index
+        try:
+            from app import database
+            import os
+            
+            # Map common media extensions to categories if category is "files"
+            ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+            if category == "files":
+                if ext in ["mp3", "flac", "wav", "m4a"]:
+                    category = "music"
+                elif ext in ["mp4", "mkv", "avi", "mov", "webm"]:
+                    category = "movies"
+                elif ext in ["jpg", "jpeg", "png", "gif"]:
+                    category = "gallery"
+                elif ext in ["pdf", "epub", "cbz", "cbr"]:
+                    category = "books"
+
+            rel_path = os.path.relpath(destination, "data").replace(os.sep, "/")
+            web_path = f"/data/{rel_path}"
+            
+            database.upsert_library_index_item({
+                "path": web_path,
+                "category": category,
+                "name": file.filename,
+                "folder": "uploads/" + file_id,
+                "source": "local",
+                "poster": None,
+                "mtime": float(os.path.getmtime(destination)),
+                "size": file_size,
+            })
+        except Exception as e:
+            logger.error(f"Failed to index uploaded file: {e}")
+
         return UploadResponse(
             file_id=file_id,
             filename=file.filename,
@@ -287,12 +322,16 @@ async def upload_single_file(
 
 
 @router.post("/multiple", response_model=MultipleUploadResponse)
-async def upload_multiple_files(files: List[UploadFile] = File(...)):
+async def upload_multiple_files(
+    files: List[UploadFile] = File(...),
+    category: str = Query("files")
+):
     """
     Upload multiple files with individual progress tracking.
     
     Args:
         files: List of files to upload
+        category: Media category
         
     Returns:
         MultipleUploadResponse with details for all files
@@ -304,6 +343,9 @@ async def upload_multiple_files(files: List[UploadFile] = File(...)):
     failed_count = 0
     total_size = 0
     
+    from app import database
+    import os
+
     for file in files:
         file_id = hashlib.md5(f"{file.filename}{datetime.utcnow()}".encode()).hexdigest()
         
@@ -322,6 +364,37 @@ async def upload_multiple_files(files: List[UploadFile] = File(...)):
             file_size, checksum = await save_upload_file(file, file_id, destination)
             total_size += file_size
             
+            # Index the file
+            try:
+                # Auto-category if still default
+                item_category = category
+                ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+                if item_category == "files":
+                    if ext in ["mp3", "flac", "wav", "m4a"]:
+                        item_category = "music"
+                    elif ext in ["mp4", "mkv", "avi", "mov", "webm"]:
+                        item_category = "movies"
+                    elif ext in ["jpg", "jpeg", "png", "gif"]:
+                        item_category = "gallery"
+                    elif ext in ["pdf", "epub", "cbz", "cbr"]:
+                        item_category = "books"
+
+                rel_path = os.path.relpath(destination, "data").replace(os.sep, "/")
+                web_path = f"/data/{rel_path}"
+                
+                database.upsert_library_index_item({
+                    "path": web_path,
+                    "category": item_category,
+                    "name": file.filename,
+                    "folder": "uploads/" + file_id,
+                    "source": "local",
+                    "poster": None,
+                    "mtime": float(os.path.getmtime(destination)),
+                    "size": file_size,
+                })
+            except Exception as e:
+                logger.error(f"Failed to index uploaded file {file.filename}: {e}")
+
             uploaded_files.append(UploadResponse(
                 file_id=file_id,
                 filename=file.filename,

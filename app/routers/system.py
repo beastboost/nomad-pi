@@ -230,17 +230,20 @@ def check_update():
 
 @router.get("/update/status")
 def get_update_status():
-    status_file = "/tmp/nomad-pi-update.json"
+    if platform.system() == "Windows":
+        status_file = "update_status.json"
+    else:
+        status_file = "/tmp/nomad-pi-update.json"
+
     if os.path.exists(status_file):
         try:
-            # Secure validation of the status file
-            st = os.stat(status_file)
-            # Check ownership (should be same as running user)
-            if st.st_uid != os.getuid():
-                return {"progress": 0, "message": "Security error: invalid file ownership"}
-            # Check permissions (should not be world-writable)
-            if st.st_mode & 0o002:
-                return {"progress": 0, "message": "Security error: invalid file permissions"}
+            # On Linux, perform security checks
+            if platform.system() == "Linux":
+                st = os.stat(status_file)
+                if st.st_uid != os.getuid():
+                    return {"progress": 0, "message": "Security error: invalid file ownership"}
+                if st.st_mode & 0o002:
+                    return {"progress": 0, "message": "Security error: invalid file permissions"}
                 
             with open(status_file, "r") as f:
                 return json.load(f)
@@ -253,11 +256,12 @@ def get_update_log():
     log_path = os.path.abspath("update.log")
     if os.path.exists(log_path):
         try:
-            with open(log_path, "r") as f:
-                return {"log": f.read()}
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+                return {"log": lines}
         except Exception as e:
-            return {"error": str(e)}
-    return {"log": "No update log found."}
+            return {"log": [f"Error reading log: {str(e)}"]}
+    return {"log": ["No update log found."]}
 
 @router.post("/control/{action}")
 def system_control(action: str):
@@ -279,19 +283,19 @@ def system_control(action: str):
         if platform.system() == "Linux":
             # Run the update script in the background
             try:
-                # We use Popen so the API can return a response before the service restarts
-                # Redirect output to the log file
-                with open(log_file, "a") as f:
-                    subprocess.Popen(["/bin/bash", "./update.sh"], cwd=os.getcwd(), stdout=f, stderr=f)
+                # Use a shell wrapper to ensure output is flushed and we have a clear completion marker
+                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
+                subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
         elif platform.system() == "Windows":
             # Support for testing update on Windows
             try:
-                # Redirect output to the log file
-                with open(log_file, "a") as f:
-                    subprocess.Popen(["powershell.exe", "-File", "./update.ps1"], cwd=os.getcwd(), stdout=f, stderr=f)
+                # Use powershell to append to log and add completion marker
+                # We use -ExecutionPolicy Bypass to ensure the script can run
+                pwsh_cmd = "powershell.exe -ExecutionPolicy Bypass -Command \"& { ./update.ps1 | Out-File -FilePath update.log -Append -Encoding utf8; if ($?) { Add-Content update.log '`nUpdate complete!' } else { Add-Content update.log '`nUpdate failed!' } }\""
+                subprocess.Popen(pwsh_cmd, shell=True, cwd=os.getcwd())
                 return {"status": "Update initiated (Windows)."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
