@@ -1066,7 +1066,11 @@ function renderComicPage() {
     comicIndex = Math.max(0, Math.min(comicIndex, comicPages.length - 1));
 
     const page = comicPages[comicIndex];
-    const url = page?.path || page?.url || '';
+    let url = page?.path || page?.url || '';
+    const token = getCookie('auth_token');
+    if (token && url.startsWith('/data/')) {
+        url += (url.includes('?') ? '&' : '?') + 'token=' + token;
+    }
     const total = comicPages.length;
     const idx = comicIndex + 1;
 
@@ -1101,7 +1105,11 @@ function renderComicPage() {
     // Preload next page
     if (comicIndex < total - 1) {
         const nextImg = new Image();
-        nextImg.src = comicPages[comicIndex + 1].path || comicPages[comicIndex + 1].url;
+        let nextUrl = comicPages[comicIndex + 1].path || comicPages[comicIndex + 1].url;
+        if (token && nextUrl.startsWith('/data/')) {
+            nextUrl += (nextUrl.includes('?') ? '&' : '?') + 'token=' + token;
+        }
+        nextImg.src = nextUrl;
     }
 }
 
