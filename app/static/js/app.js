@@ -2272,7 +2272,20 @@ async function loadStorageStats() {
         if (cpuFreq > 0) cpuValStr += ` @ ${cpuFreq < 1000 ? cpuFreq.toFixed(0) + 'MHz' : (cpuFreq/1000).toFixed(2) + 'GHz'}`;
         updateText('cpu-stats', cpuValStr);
         updateProgress('cpu-progress', cpuPercent);
+        
         let cpuDetails = `${data.cores || '--'} Cores`;
+        
+        // Add Overclock info if present
+        if (data.cpu_overclock && Object.keys(data.cpu_overclock).length > 0) {
+            const oc = data.cpu_overclock;
+            if (oc.arm_freq) {
+                cpuDetails += ` • OC: ${oc.arm_freq}MHz`;
+            }
+            if (oc.over_voltage) {
+                cpuDetails += ` (+${oc.over_voltage})`;
+            }
+        }
+
         if (throttled) cpuDetails += ' • <span style="color:var(--danger-color); font-weight:bold;">THROTTLED</span>';
         const cpuDetailsEl = document.getElementById('cpu-details');
         if (cpuDetailsEl) cpuDetailsEl.innerHTML = cpuDetails;

@@ -5,6 +5,7 @@ import os
 import subprocess
 import platform
 import json
+import logging
 from datetime import datetime
 from app import database
 
@@ -38,6 +39,7 @@ def get_stats():
     cpu_freq_max = 0
     cpu_freq_min = 0
     throttled = False
+    cpu_overclock = {}
     
     if platform.system() == "Linux":
         try:
@@ -86,12 +88,24 @@ def get_stats():
         except:
             pass
 
+        # Get Overclocking config (Raspberry Pi specific)
+        try:
+            # Check arm_freq and over_voltage
+            for param in ["arm_freq", "over_voltage", "core_freq", "gpu_freq"]:
+                res = subprocess.run(["vcgencmd", "get_config", param], capture_output=True, text=True, timeout=1)
+                if res.returncode == 0 and "=" in res.stdout:
+                    val = res.stdout.strip().split("=")[1]
+                    cpu_overclock[param] = val
+        except:
+            pass
+
     return {
         "cpu": psutil.cpu_percent(interval=0.1),
         "cores": psutil.cpu_count(),
         "cpu_freq": cpu_freq,
         "cpu_freq_max": cpu_freq_max,
         "cpu_freq_min": cpu_freq_min,
+        "cpu_overclock": cpu_overclock,
         "throttled": throttled,
         "memory_total": mem.total,
         "memory_used": mem.used,
@@ -613,59 +627,66 @@ def scan_wifi():
         }
     
     try:
-        # Force a rescan first (this might take a few seconds)
-        try:
-            subprocess.run(["nmcli", "dev", "wifi", "rescan"], timeout=5, capture_output=True)
-            import time
-            time.sleep(2) # Give it a moment to populate
-        except:
-            pass
-
-        # Get results with more fields
-        # SSID,SIGNAL,SECURITY,FREQ,BARS
-        result = subprocess.run(
-            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Some Linux systems require 'sudo' for a full Wi-Fi scan or to see other networks
+        # We'll try with sudo first, then fallback to normal user
         
-        networks = []
-        seen_ssids = set()
-        
-        lines = result.stdout.strip().split('\n')
-        for line in lines:
-            if not line:
-                continue
+        def get_networks(use_sudo=True, force_rescan=True):
+            cmd = []
+            if use_sudo:
+                cmd = ["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
+            else:
+                cmd = ["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             
-            # nmcli -t uses ':' as separator but SSIDs can contain ':'
-            # However, the fields we requested are at the end, except SSID
-            parts = line.split(':')
-            if len(parts) >= 5:
-                # BARS is last, FREQ is 2nd to last, SECURITY 3rd to last, SIGNAL 4th to last
-                bars = parts[-1]
-                freq = parts[-2]
-                security = parts[-3]
-                signal_str = parts[-4]
+            if force_rescan:
+                cmd.append("--rescan")
+                cmd.append("yes")
                 
-                # SSID is everything before the signal
-                # Join back in case SSID had colons
-                ssid = ":".join(parts[:-4])
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if result.returncode != 0 and use_sudo:
+                    # If sudo failed (e.g. no nopasswd), try without sudo
+                    return get_networks(use_sudo=False, force_rescan=force_rescan)
                 
-                if not ssid or ssid in seen_ssids:
-                    continue
-                
-                networks.append({
-                    "ssid": ssid,
-                    "signal": int(signal_str) if signal_str.isdigit() else 0,
-                    "security": security if security else "None",
-                    "freq": freq,
-                    "bars": bars
-                })
-                seen_ssids.add(ssid)
+                nets = []
+                seen = set()
+                for line in result.stdout.strip().split('\n'):
+                    if not line: continue
+                    parts = line.split(':')
+                    if len(parts) >= 6:
+                        bars = parts[-1]
+                        freq = parts[-2]
+                        security = parts[-3]
+                        signal_str = parts[-4]
+                        in_use = parts[0] == '*'
+                        ssid = ":".join(parts[1:-4])
+                        if not ssid or ssid in seen: continue
+                        nets.append({
+                            "ssid": ssid,
+                            "signal": int(signal_str) if signal_str.isdigit() else 0,
+                            "security": security if security else "None",
+                            "freq": freq,
+                            "bars": bars,
+                            "active": in_use
+                        })
+                        seen.add(ssid)
+                return nets
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as e:
+                # Targeted exception handling as requested
+                logging.error(f"WiFi scan error (sudo={use_sudo}): {str(e)}")
+                if use_sudo:
+                    return get_networks(use_sudo=False, force_rescan=force_rescan)
+                return []
+            # KeyboardInterrupt and SystemExit will propagate naturally as they are not caught here
+
+        # Try with sudo and rescan first for maximum visibility
+        networks = get_networks(use_sudo=True, force_rescan=True)
         
-        # Sort by signal strength
-        networks.sort(key=lambda x: x['signal'], reverse=True)
+        # If still nothing, try one more time without rescan (sometimes rescan fails but list works)
+        if len(networks) <= 1:
+            networks = get_networks(use_sudo=False, force_rescan=False)
+            
+        # Sort: active first, then by signal strength
+        networks.sort(key=lambda x: (x.get('active', False), x['signal']), reverse=True)
         return {"networks": networks}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
