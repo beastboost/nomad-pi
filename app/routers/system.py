@@ -423,9 +423,9 @@ def system_control(action: str):
         return {"status": f"Simulated {action} (Windows)"}
 
 # WiFi and Hotspot Management
-@router.get("/wifi/status")
-def get_wifi_status():
-    """Get current WiFi connection status"""
+@router.get("/wifi/info")
+def get_wifi_info():
+    """Get detailed WiFi connection information"""
     if platform.system() != "Linux":
         return {"mode": "unknown", "message": "WiFi management only available on Linux"}
     
@@ -535,6 +535,83 @@ def toggle_hotspot(enable: bool = True):
                     "mode": "disconnected",
                     "message": "Hotspot disabled. No WiFi connection available."
                 }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/wifi/scan")
+def scan_wifi():
+    """Scan for available WiFi networks"""
+    if platform.system() != "Linux":
+        # Mock data for Windows
+        return {
+            "networks": [
+                {"ssid": "Mock_Network_1", "signal": 85, "security": "WPA2"},
+                {"ssid": "Mock_Network_2", "signal": 40, "security": "WPA2"},
+                {"ssid": "Open_WiFi", "signal": 60, "security": "None"}
+            ]
+        }
+    
+    try:
+        # Trigger scan and get results
+        # nmcli dev wifi list
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,BARS", "dev", "wifi", "list", "--rescan", "yes"],
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        
+        networks = []
+        seen_ssids = set()
+        
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            parts = line.split(':')
+            if len(parts) >= 3:
+                ssid = parts[0]
+                if not ssid or ssid in seen_ssids:
+                    continue
+                
+                networks.append({
+                    "ssid": ssid,
+                    "signal": int(parts[1]) if parts[1].isdigit() else 0,
+                    "security": parts[2] if parts[2] else "None"
+                })
+                seen_ssids.add(ssid)
+        
+        # Sort by signal strength
+        networks.sort(key=lambda x: x['signal'], reverse=True)
+        return {"networks": networks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class WifiConnectRequest(BaseModel):
+    ssid: str
+    password: str
+
+@router.post("/wifi/connect")
+def connect_wifi(request: WifiConnectRequest):
+    """Connect to a new WiFi network"""
+    if platform.system() != "Linux":
+        return {"status": "success", "message": f"Simulated connection to {request.ssid}"}
+    
+    try:
+        # Connect to WiFi using nmcli
+        # nmcli dev wifi connect <ssid> password <password>
+        result = subprocess.run(
+            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            return {"status": "success", "message": f"Successfully connected to {request.ssid}"}
+        else:
+            raise HTTPException(status_code=400, detail=result.stderr or result.stdout or "Failed to connect")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Connection attempt timed out")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

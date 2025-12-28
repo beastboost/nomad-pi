@@ -151,7 +151,18 @@
                     <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                         <button id="wifi-toggle-btn" onclick="toggleWifiUI()" class="primary">Checking Wi-Fi...</button>
                         <button onclick="systemControl('wifi_restart')" class="warning">Restart Wi-Fi</button>
+                        <button onclick="scanWifi()" class="secondary">Scan Networks</button>
                         <span id="wifi-status-text" style="font-size: 0.9em; color: var(--text-muted);">Status: Unknown</span>
+                    </div>
+
+                    <div id="wifi-scan-container" class="hidden" style="margin-top:15px; padding:15px; background:rgba(0,0,0,0.4); border-radius:12px; border:1px solid var(--border-color);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                            <h4 style="margin:0;">Available Networks</h4>
+                            <button onclick="scanWifi()" class="secondary" style="padding: 5px 10px; font-size: 0.8em;">Refresh</button>
+                        </div>
+                        <div id="wifi-networks-list" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto;">
+                            <!-- Networks will be listed here -->
+                        </div>
                     </div>
 
                     <div id="update-log-container" class="hidden" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px solid var(--border-color);">

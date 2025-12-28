@@ -1486,9 +1486,101 @@ async function loadWifiStatus() {
             btn.textContent = wifiEnabled ? 'Disable Wi-Fi' : 'Enable Wi-Fi';
             btn.className = wifiEnabled ? 'danger' : 'primary';
             text.textContent = `Status: ${wifiEnabled ? 'Enabled' : 'Disabled'}`;
+
+            // If enabled, also get detailed info
+            if (wifiEnabled) {
+                const infoRes = await fetch(`${API_BASE}/system/wifi/info`);
+                if (infoRes.ok) {
+                    const info = await infoRes.json();
+                    if (info.mode === 'wifi' && info.ssid) {
+                        text.textContent += ` (Connected to: ${info.ssid})`;
+                    } else if (info.mode === 'hotspot') {
+                        text.textContent += ` (Hotspot Active: NomadPi)`;
+                    }
+                }
+            }
         }
     } catch (e) {
         console.error('Failed to load Wi-Fi status:', e);
+    }
+}
+
+async function scanWifi() {
+    const container = document.getElementById('wifi-scan-container');
+    const list = document.getElementById('wifi-networks-list');
+    if (!container || !list) return;
+
+    container.classList.remove('hidden');
+    list.innerHTML = '<div style="padding:20px; text-align:center;">Scanning for networks...</div>';
+
+    try {
+        const res = await fetch(`${API_BASE}/system/wifi/scan`);
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        if (data.networks && data.networks.length > 0) {
+            list.innerHTML = '';
+            data.networks.forEach(net => {
+                const div = document.createElement('div');
+                div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:10px; background:rgba(255,255,255,0.05); border-radius:8px;';
+                
+                const info = document.createElement('div');
+                info.innerHTML = `
+                    <div style="font-weight:bold;">${net.ssid}</div>
+                    <div style="font-size:0.8em; color:var(--text-muted);">${net.security} • Signal: ${net.signal}%</div>
+                `;
+                
+                const connectBtn = document.createElement('button');
+                connectBtn.textContent = 'Connect';
+                connectBtn.className = 'secondary';
+                connectBtn.style.padding = '5px 12px';
+                connectBtn.onclick = () => promptConnect(net.ssid);
+                
+                div.appendChild(info);
+                div.appendChild(connectBtn);
+                list.appendChild(div);
+            });
+        } else {
+            list.innerHTML = '<div style="padding:20px; text-align:center;">No networks found.</div>';
+        }
+    } catch (e) {
+        list.innerHTML = `<div style="padding:20px; text-align:center; color:var(--danger-color);">Error: ${e.message}</div>`;
+    }
+}
+
+function promptConnect(ssid) {
+    const password = prompt(`Enter password for ${ssid}:`);
+    if (password === null) return; // User cancelled
+    
+    connectToWifi(ssid, password);
+}
+
+async function connectToWifi(ssid, password) {
+    const list = document.getElementById('wifi-networks-list');
+    const originalContent = list.innerHTML;
+    list.innerHTML = `<div style="padding:20px; text-align:center;">Connecting to ${ssid}...</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/system/wifi/connect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ssid, password })
+        });
+        
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        
+        if (res.ok) {
+            alert(`Successfully connected to ${ssid}`);
+            document.getElementById('wifi-scan-container').classList.add('hidden');
+            loadWifiStatus();
+        } else {
+            alert(`Failed to connect: ${data.detail || 'Unknown error'}`);
+            list.innerHTML = originalContent;
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+        list.innerHTML = originalContent;
     }
 }
 
@@ -1797,9 +1889,9 @@ async function uploadFiles() {
     }
     
     // Show cancel button
-    const cancelBtn = document.getElementById('cancel-upload-btn');
+    let cancelBtn = document.getElementById('cancel-upload-btn');
     if (cancelBtn) cancelBtn.classList.remove('hidden');
-    const startBtn = document.getElementById('start-upload-btn');
+    let startBtn = document.getElementById('start-upload-btn');
     if (startBtn) {
         startBtn.disabled = true;
         startBtn.textContent = 'Uploading...';
@@ -1924,9 +2016,9 @@ async function uploadFiles() {
     await Promise.all(workers);
 
     // Hide cancel button
-    const cancelBtn = document.getElementById('cancel-upload-btn');
+    cancelBtn = document.getElementById('cancel-upload-btn');
     if (cancelBtn) cancelBtn.classList.add('hidden');
-    const startBtn = document.getElementById('start-upload-btn');
+    startBtn = document.getElementById('start-upload-btn');
     if (startBtn) {
         startBtn.disabled = false;
         startBtn.textContent = 'Start Upload';
