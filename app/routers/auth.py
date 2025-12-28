@@ -17,6 +17,12 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
 
 def get_admin_password_hash():
+    """Returns the current admin password hash based on priority:
+    1. Environment Variable ADMIN_PASSWORD_HASH
+    2. Environment Variable ADMIN_PASSWORD (hashed)
+    3. Database setting 'admin_password_hash'
+    4. Default password 'nomad' (if allowed)
+    """
     # 1. Check environment variables (highest priority)
     if ADMIN_PASSWORD_HASH:
         return ADMIN_PASSWORD_HASH
@@ -31,10 +37,6 @@ def get_admin_password_hash():
     # 3. Handle default if allowed
     if ALLOW_INSECURE_DEFAULT:
         default_pass = "nomad"
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        print("WARNING: Using insecure default password: 'nomad'")
-        print("Please change this immediately via the UI or set ADMIN_PASSWORD")
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         h = pwd_context.hash(default_pass)
         # Store it so it's persistent and can be changed
         database.set_setting("admin_password_hash", h)
@@ -47,14 +49,19 @@ def get_admin_password_hash():
     print("To bypass this (NOT RECOMMENDED), set ALLOW_INSECURE_DEFAULT=true")
     sys.exit(1)
 
-# Initialize current hash lazily
-_CURRENT_ADMIN_HASH = None
+# Log security status at startup
+def log_security_status():
+    if not ADMIN_PASSWORD_HASH and not ADMIN_PASSWORD:
+        stored_hash = database.get_setting("admin_password_hash")
+        if not stored_hash and ALLOW_INSECURE_DEFAULT:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print("WARNING: Using insecure default password: 'nomad'")
+            print("Please change this immediately via the UI or set ADMIN_PASSWORD")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        elif not stored_hash:
+             print("Security: No credentials found. Server will fail fast on next access.")
 
-def get_current_hash():
-    global _CURRENT_ADMIN_HASH
-    if _CURRENT_ADMIN_HASH is None:
-        _CURRENT_ADMIN_HASH = get_admin_password_hash()
-    return _CURRENT_ADMIN_HASH
+log_security_status()
 
 class LoginRequest(BaseModel):
     password: str
@@ -65,15 +72,9 @@ class PasswordChangeRequest(BaseModel):
 
 @router.post("/login")
 def login(request: LoginRequest):
-    global _CURRENT_ADMIN_HASH
-    # Always refresh from DB to catch UI changes
-    db_hash = database.get_setting("admin_password_hash")
-    if db_hash:
-        _CURRENT_ADMIN_HASH = db_hash
-    else:
-        _CURRENT_ADMIN_HASH = get_current_hash()
+    current_hash = get_admin_password_hash()
         
-    if pwd_context.verify(request.password, _CURRENT_ADMIN_HASH):
+    if pwd_context.verify(request.password, current_hash):
         token = str(uuid.uuid4())
         database.create_session(token)
         response = JSONResponse(content={"status": "ok"})
@@ -90,14 +91,12 @@ def get_current_user(request: Request):
 
 @router.post("/change-password")
 def change_password(request: PasswordChangeRequest, current_user=Depends(get_current_user)):
-    global _CURRENT_ADMIN_HASH
-    current_hash = get_current_hash()
+    current_hash = get_admin_password_hash()
     if not pwd_context.verify(request.current_password, current_hash):
         raise HTTPException(status_code=400, detail="Current password incorrect")
     
     new_hash = pwd_context.hash(request.new_password)
     database.set_setting("admin_password_hash", new_hash)
-    _CURRENT_ADMIN_HASH = new_hash
     return {"status": "ok", "message": "Password changed successfully"}
 
 @router.post("/logout")
