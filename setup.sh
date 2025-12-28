@@ -105,10 +105,17 @@ CURRENT_DIR=$(pwd)
 USER_NAME=$(whoami)
 ENV_FILE="/etc/nomadpi.env"
 OMDB_KEY_VALUE="${OMDB_API_KEY:-}"
+ADMIN_PASS_VALUE="${ADMIN_PASSWORD:-}"
+
 if [ -f "$ENV_FILE" ]; then
     EXISTING_OMDB_LINE="$(grep -E "^OMDB_API_KEY=" "$ENV_FILE" 2>/dev/null | tail -n 1 || true)"
     if [ -n "$EXISTING_OMDB_LINE" ] && [ -z "$OMDB_KEY_VALUE" ]; then
         OMDB_KEY_VALUE="${EXISTING_OMDB_LINE#OMDB_API_KEY=}"
+    fi
+    
+    EXISTING_PASS_LINE="$(grep -E "^ADMIN_PASSWORD=" "$ENV_FILE" 2>/dev/null | tail -n 1 || true)"
+    if [ -n "$EXISTING_PASS_LINE" ] && [ -z "$ADMIN_PASS_VALUE" ]; then
+        ADMIN_PASS_VALUE="${EXISTING_PASS_LINE#ADMIN_PASSWORD=}"
     fi
 fi
 
@@ -116,10 +123,19 @@ if [ -z "$OMDB_KEY_VALUE" ]; then
     read -r -p "Enter OMDb API key (leave blank to skip): " OMDB_KEY_VALUE
 fi
 
+# Set default password if none exists
+if [ -z "$ADMIN_PASS_VALUE" ]; then
+    ADMIN_PASS_VALUE="nomad"
+    echo "No ADMIN_PASSWORD found. Setting default to: nomad"
+fi
+
 sudo bash -c "umask 077; : > \"$ENV_FILE\""
 sudo chmod 600 "$ENV_FILE"
 if [ -n "$OMDB_KEY_VALUE" ]; then
-    sudo bash -c "umask 077; printf 'OMDB_API_KEY=%s\n' \"$OMDB_KEY_VALUE\" > \"$ENV_FILE\""
+    sudo bash -c "umask 077; printf 'OMDB_API_KEY=%s\n' \"$OMDB_KEY_VALUE\" >> \"$ENV_FILE\""
+fi
+if [ -n "$ADMIN_PASS_VALUE" ]; then
+    sudo bash -c "umask 077; printf 'ADMIN_PASSWORD=%s\n' \"$ADMIN_PASS_VALUE\" >> \"$ENV_FILE\""
 fi
 
 # Create service file
@@ -134,6 +150,7 @@ WorkingDirectory=$CURRENT_DIR
 EnvironmentFile=-$ENV_FILE
 ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools --workers 1
 Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
