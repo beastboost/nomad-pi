@@ -2048,6 +2048,9 @@ async function systemControl(action) {
             
             // Start polling for logs
             let pollCount = 0;
+            let updateComplete = false;
+            let serverRestarting = false;
+            
             const pollInterval = setInterval(async () => {
                 pollCount++;
                 try {
@@ -2059,24 +2062,82 @@ async function systemControl(action) {
                             logView.textContent = logText;
                             logView.scrollTop = logView.scrollHeight;
                             
-                            if (logText.includes('Update complete!')) {
-                                clearInterval(pollInterval);
-                                badge.textContent = 'Success';
-                                badge.className = 'badge success';
-                                alert('Update complete! The server might restart now.');
+                            // Check if update completed
+                            if (logText.includes('Update Complete!') && !updateComplete) {
+                                updateComplete = true;
+                                badge.textContent = 'Restarting...';
+                                badge.className = 'badge warning';
+                                logView.textContent += '\n\nServer is restarting...\nPlease wait 10-15 seconds, then refresh the page.';
+                                
+                                // Wait a bit then try to detect when server is back
+                                setTimeout(() => {
+                                    serverRestarting = true;
+                                    checkServerRestart();
+                                }, 8000);
                             }
                         }
+                    } else if (updateComplete && !serverRestarting) {
+                        // Server went down, start checking for restart
+                        serverRestarting = true;
+                        logView.textContent += '\n\nServer is restarting...\nChecking for server availability...';
+                        checkServerRestart();
                     }
                 } catch (e) {
-                    console.error('Log poll error:', e);
+                    if (updateComplete && !serverRestarting) {
+                        // Server went down during restart
+                        serverRestarting = true;
+                        logView.textContent += '\n\nServer is restarting...\nChecking for server availability...';
+                        checkServerRestart();
+                    }
                 }
                 
                 if (pollCount > 150) { // Stop polling after 5 minutes
                     clearInterval(pollInterval);
                     badge.textContent = 'Timed Out';
                     badge.className = 'badge danger';
+                    logView.textContent += '\n\nUpdate timed out. Please check the server manually.';
                 }
             }, 2000);
+            
+            // Function to check if server is back online
+            async function checkServerRestart() {
+                clearInterval(pollInterval);
+                let attempts = 0;
+                const maxAttempts = 30; // 30 seconds
+                
+                const checkInterval = setInterval(async () => {
+                    attempts++;
+                    try {
+                        const pingRes = await fetch(`${API_BASE}/system/stats`, { 
+                            method: 'GET',
+                            cache: 'no-cache'
+                        });
+                        if (pingRes.ok) {
+                            clearInterval(checkInterval);
+                            badge.textContent = 'Complete!';
+                            badge.className = 'badge success';
+                            logView.textContent += '\n\n✅ Server is back online!\n\nUpdate completed successfully.\nRefreshing page in 3 seconds...';
+                            
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 3000);
+                        }
+                    } catch (e) {
+                        // Server still down, keep checking
+                        if (attempts % 5 === 0) {
+                            logView.textContent += '.';
+                            logView.scrollTop = logView.scrollHeight;
+                        }
+                    }
+                    
+                    if (attempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        badge.textContent = 'Manual Refresh Needed';
+                        badge.className = 'badge warning';
+                        logView.textContent += '\n\n⚠️ Server restart taking longer than expected.\nPlease refresh the page manually.';
+                    }
+                }, 1000);
+            }
 
         } catch (e) {
             console.error(e);

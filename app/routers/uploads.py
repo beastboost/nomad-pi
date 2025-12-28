@@ -30,8 +30,9 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
 # Configuration
 UPLOAD_DIR = Path("data/uploads")
-CHUNK_SIZE = 8 * 1024 * 1024  # 8MB chunks (increased from 1MB for better performance)
+CHUNK_SIZE = 16 * 1024 * 1024  # 16MB chunks (optimized for WiFi throughput)
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
+BUFFER_SIZE = 64 * 1024  # 64KB buffer for file I/O
 ALLOWED_EXTENSIONS = {
     "txt", "pdf", "png", "jpg", "jpeg", "gif", "mp3", "mp4", "mkv", "avi", "mov",
     "doc", "docx", "xls", "xlsx", "zip", "csv", "json", "xml"
@@ -174,8 +175,8 @@ async def save_upload_file(
         # Create parent directories if needed
         destination.parent.mkdir(parents=True, exist_ok=True)
         
-        # Write file with chunked buffering
-        async with aiofiles.open(destination, "wb") as f:
+        # Write file with chunked buffering and optimized I/O
+        async with aiofiles.open(destination, "wb", buffering=BUFFER_SIZE) as f:
             while True:
                 chunk = await upload_file.file.read(CHUNK_SIZE)
                 if not chunk:
@@ -186,8 +187,8 @@ async def save_upload_file(
                 hash_sha256.update(chunk)
                 total_size += len(chunk)
                 
-                # Update progress
-                if file_id in progress_tracker:
+                # Update progress less frequently to reduce overhead
+                if file_id in progress_tracker and total_size % (CHUNK_SIZE * 4) == 0:
                     progress_tracker[file_id].uploaded_size = total_size
                     progress_tracker[file_id].percentage = (total_size / max(upload_file.size or total_size, 1)) * 100
         
