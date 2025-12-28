@@ -175,6 +175,7 @@ input[type="text"], input[type="password"], select {
     transition: all 0.3s ease;
     appearance: none; /* Remove default browser styling */
     -webkit-appearance: none;
+    color-scheme: dark; /* Force browser to use dark-themed controls */
 }
 
 select {
@@ -186,14 +187,14 @@ select {
 }
 
 select option {
-    background: #1a1a1a;
-    color: white;
+    background: #1a1a1a !important;
+    color: white !important;
 }
 
 input[type="text"]:focus, input[type="password"]:focus, select:focus {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: var(--accent-color);
-    box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.2);
+    background: #252525 !important;
+    border-color: var(--accent-color) !important;
+    box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.2) !important;
 }
 
 button.primary {
