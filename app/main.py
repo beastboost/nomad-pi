@@ -136,4 +136,16 @@ if os.path.exists("app/static"):
 if __name__ == "__main__":
     import uvicorn
     # 8000 for dev, 80 for prod (requires sudo on linux)
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False, loop="auto", http="auto")
+    # Optimized settings for better upload performance
+    uvicorn.run(
+        "app.main:app", 
+        host="0.0.0.0", 
+        port=8000, 
+        reload=False, 
+        loop="auto", 
+        http="auto",
+        limit_concurrency=1000,  # Allow more concurrent connections
+        limit_max_requests=10000,  # Prevent memory leaks
+        timeout_keep_alive=75,  # Keep connections alive longer
+        backlog=2048  # Increase connection queue
+    )

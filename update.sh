@@ -46,15 +46,31 @@ fi
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -r requirements.txt
 
-update_status 90 "Update complete. Restarting application..."
-echo "Update complete. Restarting application..."
-# Give the UI a moment to see the 90% status
-sleep 2
-sudo systemctl restart nomad-pi.service
+update_status 90 "Update complete. Preparing to restart..."
+echo "Update complete. Preparing to restart..."
 
-echo "=========================================="
-echo "          Update Complete!                "
-echo "=========================================="
-echo "Nomad Pi has been updated and restarted."
-echo "If you haven't changed your password yet, the default is: nomad"
-echo "=========================================="
+# Write completion marker to log BEFORE restarting
+echo "" >> update.log
+echo "==========================================" >> update.log
+echo "          Update Complete!                " >> update.log
+echo "==========================================" >> update.log
+echo "Nomad Pi has been updated successfully." >> update.log
+echo "Server will restart in 5 seconds..." >> update.log
+echo "==========================================" >> update.log
+
+update_status 100 "Update complete! Restarting in 5 seconds..."
+
+# Give the UI time to read the completion status
+echo "Waiting 5 seconds for UI to update..."
+sleep 5
+
+# Try to restart the service, with fallback if service doesn't exist
+if systemctl is-active --quiet nomad-pi.service; then
+    echo "Restarting nomad-pi service..." >> update.log
+    sudo systemctl restart nomad-pi.service
+elif systemctl is-active --quiet nomad-pi; then
+    echo "Restarting nomad-pi service..." >> update.log
+    sudo systemctl restart nomad-pi
+else
+    echo "Service not found. If running manually, please restart the application." >> update.log
+fi
