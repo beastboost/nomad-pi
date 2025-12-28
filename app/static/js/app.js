@@ -253,7 +253,7 @@ function showSection(id) {
     // Update active nav button
     document.querySelectorAll('nav button').forEach(btn => {
         btn.classList.remove('active');
-        if (btn.innerText.toLowerCase() === id.toLowerCase()) {
+        if (btn.innerText.trim().toLowerCase() === id.toLowerCase()) {
             btn.classList.add('active');
         }
     });
