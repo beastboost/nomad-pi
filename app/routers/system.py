@@ -311,3 +311,172 @@ def system_control(action: str):
             raise HTTPException(status_code=500, detail=str(e))
     else:
         return {"status": f"Simulated {action} (Windows)"}
+
+# WiFi and Hotspot Management
+@router.get("/wifi/status")
+def get_wifi_status():
+    """Get current WiFi connection status"""
+    if platform.system() != "Linux":
+        return {"mode": "unknown", "message": "WiFi management only available on Linux"}
+    
+    try:
+        # Check if connected to WiFi
+        nmcli_output = subprocess.check_output(
+            ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "connection", "show", "--active"],
+            text=True
+        )
+        
+        mode = "disconnected"
+        ssid = None
+        signal = None
+        
+        for line in nmcli_output.strip().split('\n'):
+            if not line:
+                continue
+            parts = line.split(':')
+            if len(parts) >= 3:
+                conn_type, state, conn_name = parts[0], parts[1], parts[2]
+                if conn_type == "802-11-wireless" and state == "activated":
+                    mode = "wifi"
+                    ssid = conn_name
+                    break
+        
+        # Check if hotspot is active
+        if mode == "disconnected":
+            try:
+                hotspot_check = subprocess.check_output(
+                    ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION", "connection", "show", "--active"],
+                    text=True
+                )
+                if "NomadPi" in hotspot_check or "hotspot" in hotspot_check.lower():
+                    mode = "hotspot"
+                    ssid = "NomadPi"
+            except:
+                pass
+        
+        # Get signal strength if on WiFi
+        if mode == "wifi":
+            try:
+                iwconfig_output = subprocess.check_output(["iwconfig", "wlan0"], text=True, stderr=subprocess.DEVNULL)
+                import re
+                signal_match = re.search(r'Signal level=(-?\d+)', iwconfig_output)
+                if signal_match:
+                    signal = int(signal_match.group(1))
+            except:
+                pass
+        
+        return {
+            "mode": mode,
+            "ssid": ssid,
+            "signal": signal,
+            "interface": "wlan0"
+        }
+    except Exception as e:
+        return {"mode": "error", "message": str(e)}
+
+@router.post("/wifi/toggle-hotspot")
+def toggle_hotspot(enable: bool = True):
+    """Toggle hotspot mode on/off"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
+    
+    try:
+        if enable:
+            # Enable hotspot
+            subprocess.run(
+                ["sudo", "nmcli", "connection", "up", "NomadPi"],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            return {
+                "status": "ok",
+                "mode": "hotspot",
+                "message": "Hotspot enabled. Connect to 'NomadPi' network.",
+                "ssid": "NomadPi",
+                "url": "http://10.42.0.1:8000"
+            }
+        else:
+            # Disable hotspot and try to connect to saved WiFi
+            subprocess.run(
+                ["sudo", "nmcli", "connection", "down", "NomadPi"],
+                check=False,
+                capture_output=True
+            )
+            
+            # Try to connect to home WiFi
+            try:
+                subprocess.run(
+                    ["sudo", "nmcli", "connection", "up", "id", os.environ.get("HOME_SSID", "")],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+                return {
+                    "status": "ok",
+                    "mode": "wifi",
+                    "message": "Connected to WiFi"
+                }
+            except:
+                return {
+                    "status": "ok",
+                    "mode": "disconnected",
+                    "message": "Hotspot disabled. No WiFi connection available."
+                }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/dlna/info")
+def get_dlna_info():
+    """Get DLNA server information"""
+    if platform.system() != "Linux":
+        return {"enabled": False, "message": "DLNA only available on Linux"}
+    
+    try:
+        # Check if minidlna is running
+        status = subprocess.run(
+            ["systemctl", "is-active", "minidlna"],
+            capture_output=True,
+            text=True
+        )
+        
+        is_running = status.stdout.strip() == "active"
+        
+        # Get server info
+        info = {
+            "enabled": is_running,
+            "service": "MiniDLNA",
+            "friendly_name": "Nomad Pi",
+            "port": 8200,
+            "url": "http://nomadpi.local:8200",
+            "instructions": {
+                "vlc": "Open VLC → View → Playlist → Local Network → Universal Plug'n'Play → Nomad Pi",
+                "tv": "Open your TV's media player → Look for 'Nomad Pi' in DLNA/Media Servers",
+                "windows": "Open File Explorer → Network → Nomad Pi",
+                "android": "Use a DLNA app like BubbleUPnP or VLC"
+            }
+        }
+        
+        if is_running:
+            info["message"] = "DLNA server is running. Your media is available on the network."
+        else:
+            info["message"] = "DLNA server is not running. Run setup.sh to enable it."
+        
+        return info
+    except Exception as e:
+        return {"enabled": False, "message": str(e)}
+
+@router.post("/dlna/restart")
+def restart_dlna():
+    """Restart DLNA server"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="DLNA only available on Linux")
+    
+    try:
+        subprocess.run(["sudo", "systemctl", "restart", "minidlna"], check=True)
+        # Force rescan
+        subprocess.run(["sudo", "minidlnad", "-R"], check=False)
+        return {"status": "ok", "message": "DLNA server restarted and rescanning media"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
