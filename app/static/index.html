@@ -148,20 +148,50 @@
                     </div>
                     
                     <h4 style="margin-top:20px; margin-bottom:10px;">Wi-Fi Control</h4>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <div class="wifi-controls-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px;">
                         <button id="wifi-toggle-btn" onclick="toggleWifiUI()" class="primary">Checking Wi-Fi...</button>
                         <button onclick="systemControl('wifi_restart')" class="warning">Restart Wi-Fi</button>
                         <button onclick="scanWifi()" class="secondary">Scan Networks</button>
-                        <span id="wifi-status-text" style="font-size: 0.9em; color: var(--text-muted);">Status: Unknown</span>
+                    </div>
+                    
+                    <div id="wifi-status-info" class="glass" style="padding:12px 20px; border-radius:12px; margin-bottom:15px; display:flex; align-items:center; gap:12px;">
+                        <div id="wifi-status-icon" style="font-size:1.5em;">📡</div>
+                        <div>
+                            <div id="wifi-status-text" style="font-weight:bold;">Status: Unknown</div>
+                            <div id="wifi-connection-details" style="font-size:0.85em; color:var(--text-muted);">Initializing...</div>
+                        </div>
                     </div>
 
-                    <div id="wifi-scan-container" class="hidden" style="margin-top:15px; padding:15px; background:rgba(0,0,0,0.4); border-radius:12px; border:1px solid var(--border-color);">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                            <h4 style="margin:0;">Available Networks</h4>
-                            <button onclick="scanWifi()" class="secondary" style="padding: 5px 10px; font-size: 0.8em;">Refresh</button>
+                    <div id="wifi-scan-container" class="hidden animate-fade" style="margin-top:15px; padding:20px; background:rgba(0,0,0,0.4); border-radius:16px; border:1px solid var(--border-color); box-shadow: var(--shadow-md);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                            <h3 style="margin:0; font-size:1.1em; display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:1.2em;">📶</span> Available Networks
+                            </h3>
+                            <button onclick="scanWifi()" class="secondary" style="padding: 6px 12px; font-size: 0.85em; border-radius:8px;">
+                                <span>🔄</span> Refresh
+                            </button>
                         </div>
-                        <div id="wifi-networks-list" style="display:flex; flex-direction:column; gap:8px; max-height:250px; overflow-y:auto;">
+                        <div id="wifi-networks-list" style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto; padding-right:5px;">
                             <!-- Networks will be listed here -->
+                        </div>
+                    </div>
+
+                    <!-- Modern Modal for Password -->
+                    <div id="wifi-modal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;">
+                        <div class="glass animate-fade" style="width:100%; max-width:400px; padding:30px; border-radius:24px; box-shadow:var(--shadow-lg);">
+                            <h3 id="modal-title" style="margin-top:0; margin-bottom:10px;">Connect to Network</h3>
+                            <p id="modal-ssid" style="color:var(--text-muted); margin-bottom:20px;"></p>
+                            
+                            <div style="margin-bottom:20px;">
+                                <label style="display:block; margin-bottom:8px; font-size:0.9em; color:var(--text-muted);">Password</label>
+                                <input type="password" id="wifi-password-input" placeholder="Enter network password" 
+                                    style="width:100%; padding:12px 16px; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); border-radius:12px; color:white; font-size:1em;">
+                            </div>
+                            
+                            <div style="display:flex; gap:12px;">
+                                <button onclick="closeWifiModal()" class="secondary" style="flex:1; padding:12px; border-radius:12px;">Cancel</button>
+                                <button id="modal-connect-btn" class="primary" style="flex:2; padding:12px; border-radius:12px;">Connect</button>
+                            </div>
                         </div>
                     </div>
 

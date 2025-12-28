@@ -1473,12 +1473,15 @@ async function loadWifiStatus() {
         
         const btn = document.getElementById('wifi-toggle-btn');
         const text = document.getElementById('wifi-status-text');
+        const details = document.getElementById('wifi-connection-details');
+        const icon = document.getElementById('wifi-status-icon');
         
         if (btn && text) {
             if (data.status === 'unsupported') {
                 btn.disabled = true;
                 btn.textContent = 'Unsupported';
-                text.textContent = 'Status: Only works on Linux/RPi';
+                text.textContent = 'Status: Unsupported';
+                if (details) details.textContent = 'Only works on Linux/RPi';
                 return;
             }
             
@@ -1486,18 +1489,27 @@ async function loadWifiStatus() {
             btn.textContent = wifiEnabled ? 'Disable Wi-Fi' : 'Enable Wi-Fi';
             btn.className = wifiEnabled ? 'danger' : 'primary';
             text.textContent = `Status: ${wifiEnabled ? 'Enabled' : 'Disabled'}`;
+            if (icon) icon.textContent = wifiEnabled ? '📡' : '🚫';
 
             // If enabled, also get detailed info
             if (wifiEnabled) {
                 const infoRes = await fetch(`${API_BASE}/system/wifi/info`);
                 if (infoRes.ok) {
                     const info = await infoRes.json();
-                    if (info.mode === 'wifi' && info.ssid) {
-                        text.textContent += ` (Connected to: ${info.ssid})`;
-                    } else if (info.mode === 'hotspot') {
-                        text.textContent += ` (Hotspot Active: NomadPi)`;
+                    if (details) {
+                        if (info.mode === 'wifi' && info.ssid) {
+                            details.textContent = `Connected to: ${info.ssid}`;
+                            if (icon) icon.textContent = '📶';
+                        } else if (info.mode === 'hotspot') {
+                            details.textContent = 'Hotspot Active: NomadPi';
+                            if (icon) icon.textContent = '🔥';
+                        } else {
+                            details.textContent = 'Not connected';
+                        }
                     }
                 }
+            } else {
+                if (details) details.textContent = 'Wi-Fi is turned off';
             }
         }
     } catch (e) {
@@ -1511,7 +1523,12 @@ async function scanWifi() {
     if (!container || !list) return;
 
     container.classList.remove('hidden');
-    list.innerHTML = '<div style="padding:20px; text-align:center;">Scanning for networks...</div>';
+    list.innerHTML = `
+        <div style="padding:40px; text-align:center;">
+            <div class="spinner" style="margin: 0 auto 15px auto; width: 30px; height: 30px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <div style="color:var(--text-muted);">Searching for nearby networks...</div>
+        </div>
+    `;
 
     try {
         const res = await fetch(`${API_BASE}/system/wifi/scan`);
@@ -1522,43 +1539,107 @@ async function scanWifi() {
             list.innerHTML = '';
             data.networks.forEach(net => {
                 const div = document.createElement('div');
-                div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:10px; background:rgba(255,255,255,0.05); border-radius:8px;';
+                div.className = 'glass-hover';
+                div.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:15px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px; transition:all 0.2s ease; cursor:pointer;';
+                div.onclick = () => openWifiModal(net.ssid);
+                
+                // Signal strength icon logic
+                let signalIcon = '📶';
+                if (net.signal < 30) signalIcon = '▂';
+                else if (net.signal < 60) signalIcon = '▃';
+                else if (net.signal < 85) signalIcon = '▅';
+                
+                const isEncrypted = net.security && net.security !== 'None';
                 
                 const info = document.createElement('div');
                 info.innerHTML = `
-                    <div style="font-weight:bold;">${net.ssid}</div>
-                    <div style="font-size:0.8em; color:var(--text-muted);">${net.security} • Signal: ${net.signal}%</div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-weight:600; font-size:1.05em;">${net.ssid}</span>
+                        ${isEncrypted ? '<span style="font-size:0.8em; opacity:0.6;">🔒</span>' : ''}
+                    </div>
+                    <div style="font-size:0.85em; color:var(--text-muted); margin-top:4px;">
+                        ${net.security} • Signal: ${net.signal}% ${signalIcon}
+                    </div>
                 `;
                 
-                const connectBtn = document.createElement('button');
-                connectBtn.textContent = 'Connect';
-                connectBtn.className = 'secondary';
-                connectBtn.style.padding = '5px 12px';
-                connectBtn.onclick = () => promptConnect(net.ssid);
+                const connectBtn = document.createElement('div');
+                connectBtn.innerHTML = `
+                    <div style="background:var(--accent-color); color:black; padding:6px 16px; border-radius:8px; font-weight:600; font-size:0.9em;">
+                        Connect
+                    </div>
+                `;
                 
                 div.appendChild(info);
                 div.appendChild(connectBtn);
+                
+                // Hover effect
+                div.onmouseover = () => { div.style.background = 'rgba(255,255,255,0.08)'; div.style.borderColor = 'rgba(255,255,255,0.1)'; };
+                div.onmouseout = () => { div.style.background = 'rgba(255,255,255,0.03)'; div.style.borderColor = 'rgba(255,255,255,0.05)'; };
+                
                 list.appendChild(div);
             });
         } else {
-            list.innerHTML = '<div style="padding:20px; text-align:center;">No networks found.</div>';
+            list.innerHTML = `
+                <div style="padding:40px; text-align:center; color:var(--text-muted);">
+                    <div style="font-size:2em; margin-bottom:10px;">🔍</div>
+                    No networks found. Try refreshing.
+                </div>
+            `;
         }
     } catch (e) {
-        list.innerHTML = `<div style="padding:20px; text-align:center; color:var(--danger-color);">Error: ${e.message}</div>`;
+        list.innerHTML = `
+            <div style="padding:30px; text-align:center; color:var(--danger-color);">
+                <div style="font-size:2em; margin-bottom:10px;">⚠️</div>
+                Error: ${e.message}
+            </div>
+        `;
     }
 }
 
-function promptConnect(ssid) {
-    const password = prompt(`Enter password for ${ssid}:`);
-    if (password === null) return; // User cancelled
+function openWifiModal(ssid) {
+    const modal = document.getElementById('wifi-modal');
+    const ssidLabel = document.getElementById('modal-ssid');
+    const passwordInput = document.getElementById('wifi-password-input');
+    const connectBtn = document.getElementById('modal-connect-btn');
     
-    connectToWifi(ssid, password);
+    if (!modal || !ssidLabel || !passwordInput || !connectBtn) return;
+    
+    ssidLabel.textContent = `Network: ${ssid}`;
+    passwordInput.value = '';
+    modal.classList.remove('hidden');
+    passwordInput.focus();
+    
+    connectBtn.onclick = () => {
+        const password = passwordInput.value;
+        if (!password) {
+            alert('Please enter a password');
+            return;
+        }
+        connectToWifi(ssid, password);
+    };
+
+    // Close on escape
+    const handleEsc = (e) => {
+        if (e.key === 'Escape') {
+            closeWifiModal();
+            window.removeEventListener('keydown', handleEsc);
+        }
+    };
+    window.addEventListener('keydown', handleEsc);
+}
+
+function closeWifiModal() {
+    const modal = document.getElementById('wifi-modal');
+    if (modal) modal.classList.add('hidden');
 }
 
 async function connectToWifi(ssid, password) {
-    const list = document.getElementById('wifi-networks-list');
-    const originalContent = list.innerHTML;
-    list.innerHTML = `<div style="padding:20px; text-align:center;">Connecting to ${ssid}...</div>`;
+    const modal = document.getElementById('wifi-modal');
+    const connectBtn = document.getElementById('modal-connect-btn');
+    const originalText = connectBtn.textContent;
+    
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Connecting...';
 
     try {
         const res = await fetch(`${API_BASE}/system/wifi/connect`, {
@@ -1571,16 +1652,28 @@ async function connectToWifi(ssid, password) {
         const data = await res.json();
         
         if (res.ok) {
-            alert(`Successfully connected to ${ssid}`);
+            closeWifiModal();
+            // Show success toast or alert
+            const toast = document.createElement('div');
+            toast.style.cssText = 'position:fixed; bottom:100px; left:50%; transform:translateX(-50%); background:var(--success-color); color:white; padding:12px 24px; border-radius:12px; z-index:2000; box-shadow:var(--shadow-lg); animation:fadeIn 0.3s ease;';
+            toast.textContent = `Successfully connected to ${ssid}`;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.5s ease';
+                setTimeout(() => toast.remove(), 500);
+            }, 3000);
+            
             document.getElementById('wifi-scan-container').classList.add('hidden');
             loadWifiStatus();
         } else {
             alert(`Failed to connect: ${data.detail || 'Unknown error'}`);
-            list.innerHTML = originalContent;
         }
     } catch (e) {
         alert(`Error: ${e.message}`);
-        list.innerHTML = originalContent;
+    } finally {
+        connectBtn.disabled = false;
+        connectBtn.textContent = originalText;
     }
 }
 
