@@ -5,6 +5,8 @@ let driveScanInterval = null;
 let statsInterval = null;
 let comicPages = [];
 let comicIndex = 0;
+let comicZoom = 1;
+let comicFit = 'width'; // 'width' or 'height'
 let lastNetSample = null;
 const mediaCache = {};
 let showsLibraryCache = null;
@@ -524,7 +526,7 @@ function renderMediaList(category, files) {
                     ${cardDeleteBtn}
                     ${folderHtml}
                     <h3>${escapeHtml(cleanTitle(file.name))}</h3>
-                    <a href="${file.path}" target="_blank" class="download-btn">Open / Download</a>
+                    <button class="play-btn" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(cleanTitle(file.name))}')">View Image</button>
                 `;
             }
             
@@ -703,6 +705,17 @@ function closeViewer() {
     comicIndex = 0;
 }
 
+function openImageViewer(path, title) {
+    const modal = document.getElementById('viewer-modal');
+    const body = document.getElementById('viewer-body');
+    const heading = document.getElementById('viewer-title');
+    if (!modal || !body || !heading) return;
+
+    heading.textContent = title ? String(title) : 'Image';
+    body.innerHTML = `<div class="image-viewer"><img src="${escapeHtml(path)}" style="max-width:100%; max-height:80vh; border-radius:8px;"></div>`;
+    modal.classList.remove('hidden');
+}
+
 function openVideoViewer(path, title, startSeconds = 0) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
@@ -737,8 +750,12 @@ async function openComicViewer(path, title) {
     }
 
     heading.textContent = title ? String(title) : 'Comic';
-    body.innerHTML = `<div class="loading" style="padding:20px;">Loading...</div>`;
+    body.innerHTML = `<div class="loading" style="padding:40px;">
+        <div class="logo animate-fade" style="font-size:1.5rem; margin-bottom:10px;">Loading Comic...</div>
+        <div class="progress-container" style="max-width:200px; margin:0 auto;"><div class="progress-fill" style="width:100%; animation: pulse 1.5s infinite;"></div></div>
+    </div>`;
     modal.classList.remove('hidden');
+    comicZoom = 1;
 
     try {
         const res = await fetch(`${API_BASE}/media/books/comic/pages?path=${encodeURIComponent(path)}`);
@@ -746,20 +763,23 @@ async function openComicViewer(path, title) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
             const msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data || {});
-            body.innerHTML = `<div style="padding:16px;color:#ddd;">${escapeHtml(msg || 'Failed to load comic.')}</div>`;
+            body.innerHTML = `<div style="padding:40px; text-align:center;">
+                <div style="font-size:3rem; margin-bottom:20px;">⚠️</div>
+                <div style="color:#ddd; font-size:1.1rem;">${escapeHtml(msg || 'Failed to load comic.')}</div>
+            </div>`;
             return;
         }
         comicPages = Array.isArray(data.pages) ? data.pages : [];
         comicIndex = 0;
 
         if (comicPages.length === 0) {
-            body.innerHTML = `<div style="padding:16px;color:#ddd;">No pages found in this CBZ.</div>`;
+            body.innerHTML = `<div style="padding:40px; text-align:center; color:#ddd;">No pages found in this comic.</div>`;
             return;
         }
 
         renderComicPage();
     } catch (e) {
-        body.innerHTML = `<div style="padding:16px;color:#ddd;">Failed to load comic.</div>`;
+        body.innerHTML = `<div style="padding:40px; text-align:center; color:#ddd;">Failed to connect to server.</div>`;
     }
 }
 
@@ -777,28 +797,64 @@ function renderComicPage() {
     body.innerHTML = `
         <div class="comic-viewer">
             <div class="comic-controls">
-                <button class="modal-close" onclick="comicPrev()" ${comicIndex === 0 ? 'disabled' : ''}>Prev</button>
+                <button class="comic-btn" onclick="comicPrev()" ${comicIndex === 0 ? 'disabled' : ''}>
+                    <span>←</span> Previous
+                </button>
                 <div class="comic-indicator">${idx} / ${total}</div>
-                <button class="modal-close" onclick="comicNext()" ${comicIndex >= total - 1 ? 'disabled' : ''}>Next</button>
+                <button class="comic-btn primary" onclick="comicNext()" ${comicIndex >= total - 1 ? 'disabled' : ''}>
+                    Next <span>→</span>
+                </button>
             </div>
-            <div class="comic-stage">
-                <img class="comic-page" src="${escapeHtml(url)}" alt="Page ${idx}">
+            <div class="comic-stage" id="comic-stage">
+                <div class="comic-page-wrapper" id="comic-wrapper" style="transform: scale(${comicZoom})">
+                    <img class="comic-page" src="${escapeHtml(url)}" alt="Page ${idx}" 
+                         style="max-width: ${comicFit === 'width' ? '100%' : 'none'}; 
+                                max-height: ${comicFit === 'height' ? '80vh' : 'none'};">
+                </div>
+                <div class="zoom-controls">
+                    <button class="zoom-btn" onclick="changeComicZoom(0.1)" title="Zoom In">+</button>
+                    <button class="zoom-btn" onclick="changeComicZoom(-0.1)" title="Zoom Out">-</button>
+                    <button class="zoom-btn" onclick="toggleComicFit()" title="Toggle Fit">
+                        ${comicFit === 'width' ? '↕️' : '↔️'}
+                    </button>
+                </div>
             </div>
         </div>
     `;
+
+    // Preload next page
+    if (comicIndex < total - 1) {
+        const nextImg = new Image();
+        nextImg.src = comicPages[comicIndex + 1].path || comicPages[comicIndex + 1].url;
+    }
+}
+
+function changeComicZoom(delta) {
+    comicZoom = Math.max(0.5, Math.min(3, comicZoom + delta));
+    const wrapper = document.getElementById('comic-wrapper');
+    if (wrapper) wrapper.style.transform = `scale(${comicZoom})`;
+}
+
+function toggleComicFit() {
+    comicFit = comicFit === 'width' ? 'height' : 'width';
+    renderComicPage();
 }
 
 function comicPrev() {
     if (comicIndex > 0) {
         comicIndex -= 1;
+        comicZoom = 1;
         renderComicPage();
+        document.getElementById('comic-stage')?.scrollTo(0, 0);
     }
 }
 
 function comicNext() {
     if (comicPages && comicIndex < comicPages.length - 1) {
         comicIndex += 1;
+        comicZoom = 1;
         renderComicPage();
+        document.getElementById('comic-stage')?.scrollTo(0, 0);
     }
 }
 
@@ -1120,6 +1176,18 @@ async function loadResume() {
 
 const uploadQueue = [];
 
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
 
@@ -1243,24 +1311,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (moviesSearch) {
-        moviesSearch.addEventListener('input', () => {
+        moviesSearch.addEventListener('input', debounce(() => {
             loadMediaPage('movies', true);
-        });
+        }, 300));
     }
     if (musicSearch) {
-        musicSearch.addEventListener('input', () => {
+        musicSearch.addEventListener('input', debounce(() => {
             loadMediaPage('music', true);
-        });
+        }, 300));
     }
     if (showsSearch) {
-        showsSearch.addEventListener('input', () => {
+        showsSearch.addEventListener('input', debounce(() => {
             if (showsLibraryCache) renderShows();
-        });
+        }, 300));
     }
     if (filesSearch) {
-        filesSearch.addEventListener('input', () => {
+        filesSearch.addEventListener('input', debounce(() => {
             loadMediaPage('files', true);
-        });
+        }, 300));
     }
 });
 
