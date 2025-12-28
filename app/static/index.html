@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nomad Pi</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="css/style.css?v=2">
+</head>
+<body>
+    <div id="login-screen" class="login-container">
+        <div class="login-box">
+            <div class="logo">Nomad Pi</div>
+            <p>Enter password to access your media</p>
+            <input type="password" id="password-input" placeholder="Password (default: nomad)" onkeypress="handleLoginKey(event)">
+            <button onclick="login()" class="primary">Enter</button>
+            <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect password</p>
+        </div>
+    </div>
+
+    <div id="app" class="hidden">
+        <header>
+            <div class="logo">Nomad Pi</div>
+            <nav>
+                <button onclick="showSection('home')">Home</button>
+                <button onclick="showSection('movies')">Movies</button>
+                <button onclick="showSection('shows')">Shows</button>
+                <button onclick="showSection('music')">Music</button>
+                <button onclick="showSection('books')">Books</button>
+                <button onclick="showSection('gallery')">Gallery</button>
+                <button onclick="showSection('files')">Files</button>
+                <button onclick="showSection('admin')">Admin</button>
+                <span id="header-stats" class="header-stats"></span>
+                <button onclick="logout()" class="logout-btn">Logout</button>
+            </nav>
+        </header>
+
+        <main>
+            <section id="home" class="active">
+                <h1>Welcome Home</h1>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Storage</div>
+                        <div id="storage-stats" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">CPU</div>
+                        <div id="cpu-stats" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">RAM</div>
+                        <div id="ram-stats" class="stat-value">Loading...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Network</div>
+                        <div id="net-stats" class="stat-value">Loading...</div>
+                    </div>
+                </div>
+                
+                <div class="menu-grid">
+                    <div class="card" onclick="showSection('movies')">
+                        <div class="icon">🎬</div>
+                        <h3>Movies</h3>
+                    </div>
+                    <div class="card" onclick="showSection('shows')">
+                        <div class="icon">📺</div>
+                        <h3>Shows</h3>
+                    </div>
+                    <div class="card" onclick="showSection('music')">
+                        <div class="icon">🎵</div>
+                        <h3>Music</h3>
+                    </div>
+                    <div class="card" onclick="showSection('books')">
+                         <div class="icon">📚</div>
+                        <h3>Books</h3>
+                    </div>
+                    <div class="card" onclick="showSection('gallery')">
+                        <div class="icon">🖼️</div>
+                        <h3>Gallery</h3>
+                    </div>
+                    <div class="card" onclick="showSection('files')">
+                        <div class="icon">🗂️</div>
+                        <h3>Files</h3>
+                    </div>
+                    <div class="card" onclick="showSection('admin')">
+                        <div class="icon">⚙️</div>
+                        <h3>Admin</h3>
+                    </div>
+                </div>
+
+                <div id="resume-section" class="hidden">
+                    <h2>Continue Watching</h2>
+                    <div id="resume-list" class="media-grid"></div>
+                </div>
+            </section>
+
+
+            <section id="movies" class="hidden">
+                <h2>Movies</h2>
+                <input id="movies-search" type="text" placeholder="Search movies..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div id="movies-list" class="media-grid"></div>
+            </section>
+
+            <section id="shows" class="hidden">
+                <h2>TV Shows</h2>
+                <input id="shows-search" type="text" placeholder="Search shows..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div id="shows-breadcrumb" style="margin:8px 0;color:#aaa;font-size:0.9em;"></div>
+                <div id="shows-continue"></div>
+                <div id="shows-list" class="media-grid"></div>
+            </section>
+
+            <section id="music" class="hidden">
+                <h2>Music</h2>
+                <input id="music-search" type="text" placeholder="Search music..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div id="music-list" class="list-view"></div>
+            </section>
+
+            <section id="books" class="hidden">
+                <h2>Books</h2>
+                <div id="books-list" class="media-grid"></div>
+            </section>
+
+            <section id="gallery" class="hidden">
+                <h2>Gallery</h2>
+                <div id="gallery-list" class="gallery-grid"></div>
+            </section>
+
+            <section id="files" class="hidden">
+                <h2>Files</h2>
+                <input id="files-search" type="text" placeholder="Search files..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div id="files-list" class="list-view"></div>
+            </section>
+
+            <section id="admin" class="hidden">
+                <h2>Admin & Uploads</h2>
+                
+                <div class="admin-panel">
+                    <h3>System Control</h3>
+                    <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
+                    <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>Upload Files</h3>
+                    <div class="upload-controls">
+                        <label>Category:</label>
+                        <select id="upload-category">
+                            <option value="movies">Movies</option>
+                            <option value="shows">Shows</option>
+                            <option value="music">Music</option>
+                            <option value="books">Books</option>
+                            <option value="gallery">Gallery</option>
+                            <option value="files">Files</option>
+                        </select>
+                        <br><br>
+
+                        <div id="shows-upload-options" class="hidden" style="margin-bottom:10px;">
+                            <label for="upload-show-name">Show name (optional):</label>
+                            <input id="upload-show-name" type="text" placeholder="e.g. Bluey" style="width:100%;margin:8px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                            <div style="color:var(--text-muted); font-size:0.85rem;">Helps keep seasons grouped under the right show.</div>
+                        </div>
+                        
+                        <div class="drop-zone" id="drop-zone">
+                            <p>Drag & drop files or folders here</p>
+                            <input type="file" id="file-input" multiple>
+                            <label for="file-input" class="button">Select Files</label>
+                            
+                            <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none">
+                            <label for="folder-input" class="button">Select Folder</label>
+                        </div>
+
+                        <div id="upload-queue" style="margin-top:10px; max-height: 150px; overflow-y: auto;"></div>
+                        
+                        <button onclick="uploadFiles()" class="primary" style="margin-top:10px; width:100%">Start Upload</button>
+                    </div>
+                    <div id="upload-status"></div>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>Storage Management</h3>
+                    <button onclick="loadDrives()">Scan Drives</button>
+                    <div id="drive-list"></div>
+                </div>
+
+                <div class="admin-panel">
+                    <h3>Library Tools (v1.1)</h3>
+                    <button onclick="rescanLibrary()">Rescan Library</button>
+                    <button onclick="organizeShows(true)">Preview Show Organize</button>
+                    <button onclick="organizeShows(false)" class="warning">Apply Show Organize</button>
+                    <button onclick="organizeMovies(true)">Preview Movie Organize</button>
+                    <button onclick="organizeMovies(false)" class="warning">Apply Movie Organize</button>
+                    <div id="organize-status" style="margin-top:10px;"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="viewer-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeViewer()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <div id="viewer-title" class="modal-title"></div>
+                <button class="modal-close" onclick="closeViewer()">Close</button>
+            </div>
+            <div id="viewer-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="player-bar" class="player-bar hidden">
+        <div class="player-title" id="player-title">Not playing</div>
+        <div class="player-controls">
+            <button id="player-prev" class="player-btn">Prev</button>
+            <button id="player-play" class="player-btn">Play</button>
+            <button id="player-next" class="player-btn">Next</button>
+            <button id="player-shuffle" class="player-btn">Shuffle</button>
+        </div>
+        <div class="player-progress">
+            <input id="player-seek" type="range" min="0" max="100" value="0">
+            <div id="player-time" class="player-time">0:00 / 0:00</div>
+        </div>
+        <div class="player-volume">
+            <input id="player-volume" type="range" min="0" max="1" step="0.01" value="1">
+        </div>
+        <audio id="global-audio" preload="metadata"></audio>
+    </div>
+    <script src="js/app.js?v=3"></script>
+</body>
+</html>
