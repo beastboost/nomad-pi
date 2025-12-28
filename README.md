@@ -37,7 +37,41 @@ This project turns your Pi Zero 2W into a portable Wi-Fi Hotspot media center.
 
 3.  **Connect & Enjoy**:
     - Connect your phone/laptop to the `NomadPi` Wi-Fi network.
-    - Open browser to: `http://10.42.0.1:8000` (or `http://<pi-ip>:8000`).
+    - Open browser to: `http://10.42.0.1:8000` (or `http://nomadpi.local:8000`).
+    - **Default Password**: `nomad` (You can change this in the Admin panel).
+
+## Security & Authentication
+
+Nomad Pi is designed to be secure even when used offline.
+
+### Changing the Password
+1. Log in to the Admin panel with the current password.
+2. Go to **Settings** -> **Security Settings**.
+3. Enter your current password and your new desired password.
+
+### Environment Variables
+You can configure authentication behavior using environment variables in your system service or shell:
+
+- `ADMIN_PASSWORD`: Set a plain-text admin password (only used if no password is set in the database).
+- `ADMIN_PASSWORD_HASH`: Set a pre-hashed (bcrypt) admin password (highest priority).
+- `ALLOW_INSECURE_DEFAULT`: Set to `true` (default) to allow the "nomad" password if no other credentials are found. Set to `false` to prevent startup unless a password is explicitly provided via environment variables.
+
+### Fail-Fast Protection
+If you set `ALLOW_INSECURE_DEFAULT=false` and do not provide an environment variable password, the server will fail to start with a clear error message. This is recommended for production environments.
+
+## Updating
+
+To update your Nomad Pi to the latest version:
+
+### On Raspberry Pi (Linux)
+```bash
+./update.sh
+```
+
+### On Windows (Development)
+```powershell
+./update.ps1
+```
 
 ## Usage
 

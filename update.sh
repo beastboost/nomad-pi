@@ -51,3 +51,10 @@ echo "Update complete. Restarting application..."
 # Give the UI a moment to see the 90% status
 sleep 2
 sudo systemctl restart nomad-pi.service
+
+echo "=========================================="
+echo "          Update Complete!                "
+echo "=========================================="
+echo "Nomad Pi has been updated and restarted."
+echo "If you haven't changed your password yet, the default is: nomad"
+echo "=========================================="
