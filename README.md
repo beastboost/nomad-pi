@@ -44,6 +44,14 @@ The easiest way to install Nomad Pi on your Raspberry Pi Zero 2W.
     - Set up the Wi-Fi Hotspot (`NomadPi`, password: `nomadpassword`).
     - Configure the local hostname to `nomadpi.local`.
 
+## Offline / SD Card Transfer
+If your Pi has no internet, you can transfer files via the SD card's boot partition:
+1.  **On your PC**: Copy the `nomad-pi` files or media to the SD card (the only partition Windows/Mac can see).
+2.  **On the Pi**: Run this command to move them to the app folder:
+    ```bash
+    sudo rsync -av --exclude 'data' /boot/firmware/ ~/nomad-pi/ 2>/dev/null || sudo rsync -av --exclude 'data' /boot/ ~/nomad-pi/
+    ```
+
 ## First-Time Run
 
 Once the setup is complete and your Pi has rebooted:
