@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nomad Pi - Admin Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+    <div id="app">
+        <div class="admin-container">
+            <!-- Sidebar Navigation -->
+            <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+                <div class="sidebar-header">
+                    <h1 class="logo">
+                        <i class="fas fa-server"></i>
+                        <span v-if="!sidebarCollapsed">Nomad Pi</span>
+                    </h1>
+                    <button @click="toggleSidebar" class="toggle-btn">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+                <nav class="sidebar-nav">
+                    <a href="#" @click.prevent="currentView = 'dashboard'" 
+                       :class="{ active: currentView === 'dashboard' }" class="nav-item">
+                        <i class="fas fa-chart-line"></i>
+                        <span v-if="!sidebarCollapsed">Dashboard</span>
+                    </a>
+                    <a href="#" @click.prevent="currentView = 'uploads'" 
+                       :class="{ active: currentView === 'uploads' }" class="nav-item">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span v-if="!sidebarCollapsed">Uploads</span>
+                    </a>
+                    <a href="#" @click.prevent="currentView = 'storage'" 
+                       :class="{ active: currentView === 'storage' }" class="nav-item">
+                        <i class="fas fa-hdd"></i>
+                        <span v-if="!sidebarCollapsed">Storage & Mounts</span>
+                    </a>
+                    <a href="#" @click.prevent="currentView = 'system'" 
+                       :class="{ active: currentView === 'system' }" class="nav-item">
+                        <i class="fas fa-cogs"></i>
+                        <span v-if="!sidebarCollapsed">System Control</span>
+                    </a>
+                    <a href="#" @click.prevent="currentView = 'media'" 
+                       :class="{ active: currentView === 'media' }" class="nav-item">
+                        <i class="fas fa-film"></i>
+                        <span v-if="!sidebarCollapsed">Media Library</span>
+                    </a>
+                </nav>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Header -->
+                <header class="header">
+                    <div class="header-left">
+                        <h2>{{ viewTitles[currentView] }}</h2>
+                    </div>
+                    <div class="header-right">
+                        <div class="status-indicator" :class="connectionStatus">
+                            <span class="status-dot"></span>
+                            {{ connectionStatus === 'connected' ? 'Online' : 'Offline' }}
+                        </div>
+                        <button @click="toggleTheme" class="theme-toggle">
+                            <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                        </button>
+                        <div class="user-menu">
+                            <img :src="userAvatar" alt="User" class="user-avatar">
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Content Area -->
+                <div class="content">
+                    <!-- Dashboard View -->
+                    <section v-if="currentView === 'dashboard'" class="view-section">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-icon storage-icon">
+                                    <i class="fas fa-database"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>Storage Used</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.storageUsed) }}</p>
+                                    <p class="stat-subtitle">{{ stats.storagePercent }}% full</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon cpu-icon">
+                                    <i class="fas fa-microchip"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>CPU Usage</h3>
+                                    <p class="stat-value">{{ stats.cpuPercent }}%</p>
+                                    <p class="stat-subtitle">{{ stats.cpuCores }} cores</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon ram-icon">
+                                    <i class="fas fa-memory"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>RAM Usage</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.ramUsed) }}</p>
+                                    <p class="stat-subtitle">{{ stats.ramPercent }}% of {{ formatBytes(stats.ramTotal) }}</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon network-icon">
+                                    <i class="fas fa-network-wired"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>Network</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.networkUp) }}/s</p>
+                                    <p class="stat-subtitle">↓ {{ formatBytes(stats.networkDown) }}/s</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="charts-grid">
+                            <div class="chart-container">
+                                <h3>Storage Usage</h3>
+                                <canvas id="storageChart"></canvas>
+                            </div>
+                            <div class="chart-container">
+                                <h3>System Resources</h3>
+                                <canvas id="resourcesChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Uploads View -->
+                    <section v-if="currentView === 'uploads'" class="view-section">
+                        <div class="section-header">
+                            <h3>File Upload Manager</h3>
+                            <button @click="showUploadModal = true" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> New Upload
+                            </button>
+                        </div>
+
+                        <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop" v-if="!uploads.length">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h4>Drag files here to upload</h4>
+                            <p>or click to select files</p>
+                            <input type="file" hidden ref="fileInput" @change="handleFileSelect" multiple>
+                            <button @click="$refs.fileInput.click()" class="btn btn-secondary">
+                                Select Files
+                            </button>
+                        </div>
+
+                        <div v-if="uploads.length" class="uploads-list">
+                            <div v-for="upload in uploads" :key="upload.id" class="upload-item">
+                                <div class="upload-info">
+                                    <i :class="getFileIcon(upload.name)"></i>
+                                    <div class="upload-details">
+                                        <h4>{{ upload.name }}</h4>
+                                        <p>{{ formatBytes(upload.size) }}</p>
+                                    </div>
+                                </div>
+                                <div class="upload-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" :style="{ width: upload.progress + '%' }"></div>
+                                    </div>
+                                    <span class="progress-text">{{ upload.progress }}%</span>
+                                </div>
+                                <button v-if="upload.status === 'completed'" @click="removeUpload(upload.id)" class="btn-icon">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Storage & Mounts View -->
+                    <section v-if="currentView === 'storage'" class="view-section">
+                        <div class="section-header">
+                            <h3>Storage & Drive Management</h3>
+                            <button @click="scanDrives" class="btn btn-primary">
+                                <i class="fas fa-sync"></i> Scan Drives
+                            </button>
+                        </div>
+
+                        <div class="drives-grid">
+                            <div v-for="drive in drives" :key="drive.device" class="drive-card">
+                                <div class="drive-header">
+                                    <h4>{{ drive.label || drive.device }}</h4>
+                                    <span :class="['drive-status', drive.mounted ? 'mounted' : 'unmounted']">
+                                        {{ drive.mounted ? 'Mounted' : 'Unmounted' }}
+                                    </span>
+                                </div>
+                                <div class="drive-info">
+                                    <p><strong>Device:</strong> {{ drive.device }}</p>
+                                    <p><strong>Type:</strong> {{ drive.fstype }}</p>
+                                    <p><strong>Size:</strong> {{ formatBytes(drive.total) }}</p>
+                                </div>
+                                <div class="drive-usage">
+                                    <div class="usage-bar">
+                                        <div class="usage-fill" :style="{ width: (drive.used / drive.total * 100) + '%' }"></div>
+                                    </div>
+                                    <p>{{ formatBytes(drive.used) }} / {{ formatBytes(drive.total) }}</p>
+                                </div>
+                                <div class="drive-actions">
+                                    <button v-if="!drive.mounted" @click="mountDrive(drive)" class="btn btn-success btn-sm">
+                                        <i class="fas fa-link"></i> Mount
+                                    </button>
+                                    <button v-else @click="unmountDrive(drive)" class="btn btn-warning btn-sm">
+                                        <i class="fas fa-unlink"></i> Unmount
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- System Control View -->
+                    <section v-if="currentView === 'system'" class="view-section">
+                        <div class="section-header">
+                            <h3>System Control & Updates</h3>
+                        </div>
+
+                        <div class="control-panel">
+                            <div class="control-card">
+                                <div class="control-icon update-icon">
+                                    <i class="fas fa-cloud-download-alt"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Update</h4>
+                                    <p>{{ updateStatus.available ? 'Update available' : 'System up to date' }}</p>
+                                </div>
+                                <button @click="checkUpdates" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Check
+                                </button>
+                                <button v-if="updateStatus.available" @click="performUpdate" class="btn btn-success btn-sm">
+                                    <i class="fas fa-download"></i> Update
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon restart-icon">
+                                    <i class="fas fa-power-off"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Reboot</h4>
+                                    <p>Restart the Nomad Pi system</p>
+                                </div>
+                                <button @click="confirmReboot" class="btn btn-warning btn-sm">
+                                    <i class="fas fa-redo"></i> Reboot
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon shutdown-icon">
+                                    <i class="fas fa-stop-circle"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Shutdown</h4>
+                                    <p>Safely shutdown the Nomad Pi</p>
+                                </div>
+                                <button @click="confirmShutdown" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-power-off"></i> Shutdown
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="updateStatus.updating" class="update-progress">
+                            <h4>Update in Progress...</h4>
+                            <div class="progress-bar large">
+                                <div class="progress-fill" :style="{ width: updateStatus.progress + '%' }"></div>
+                            </div>
+                            <p>{{ updateStatus.progress }}% - {{ updateStatus.message }}</p>
+                        </div>
+                    </section>
+
+                    <!-- Media Library View -->
+                    <section v-if="currentView === 'media'" class="view-section">
+                        <div class="section-header">
+                            <h3>Media Library Management</h3>
+                            <button @click="rebuildLibrary" class="btn btn-primary">
+                                <i class="fas fa-sync"></i> Rebuild Index
+                            </button>
+                        </div>
+
+                        <div class="media-stats">
+                            <div class="media-stat">
+                                <i class="fas fa-film"></i>
+                                <div>
+                                    <h4>Movies</h4>
+                                    <p>{{ mediaStats.movies }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-tv"></i>
+                                <div>
+                                    <h4>TV Shows</h4>
+                                    <p>{{ mediaStats.shows }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-music"></i>
+                                <div>
+                                    <h4>Music</h4>
+                                    <p>{{ mediaStats.music }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-book"></i>
+                                <div>
+                                    <h4>Books</h4>
+                                    <p>{{ mediaStats.books }} files</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+
+        <!-- Modal: Confirmation Dialog -->
+        <div v-if="showConfirmModal" class="modal-overlay" @click="showConfirmModal = false">
+            <div class="modal" @click.stop>
+                <div class="modal-header">
+                    <h3>{{ confirmModal.title }}</h3>
+                    <button @click="showConfirmModal = false" class="modal-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>{{ confirmModal.message }}</p>
+                </div>
+                <div class="modal-footer">
+                    <button @click="showConfirmModal = false" class="btn btn-secondary">Cancel</button>
+                    <button @click="confirmModal.action" :class="['btn', confirmModal.actionClass]">
+                        {{ confirmModal.actionText }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container">
+            <div v-for="toast in toasts" :key="toast.id" :class="['toast', toast.type]">
+                <i :class="getToastIcon(toast.type)"></i>
+                {{ toast.message }}
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/admin.js"></script>
+</body>
+</html>
