@@ -1,0 +1,19 @@
+# CodeRabbit Configuration
+# For more info: https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: "en-US"
+reviews:
+  profile: "chill" # Options: chill, assertive, thorough
+  auto_review: true # Automatically review every PR
+  request_review_command: "@coderabbitai review"
+  
+chat:
+  enabled: true
+
+# Custom instructions to make reviews more useful for your Pi Media Server
+instructions: |
+  - This is a FastAPI project running on a low-power Raspberry Pi Zero 2W.
+  - Prioritize performance and memory efficiency.
+  - Suggest C-based libraries (like uvloop, httptools) when relevant for speed.
+  - Ensure any new code doesn't block the main event loop.
+  - Look out for path handling issues (Windows vs Linux compatibility).
