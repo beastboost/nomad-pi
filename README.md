@@ -63,7 +63,11 @@ Once the setup is complete and your Pi has rebooted:
 
 If you want to run Nomad Pi on Windows for development purposes:
 
-1.  **Clone**: `git clone https://github.com/beastboost/nomad-pi.git`
+1.  **Clone**: 
+    ```powershell
+    git clone https://github.com/beastboost/nomad-pi.git
+    cd nomad-pi
+    ```
 2.  **Setup**: Create a `venv`, activate it, and `pip install -r requirements.txt`.
 3.  **Run**: `python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload`
 *Note: Hotspot and hardware-specific features are disabled on Windows.*
