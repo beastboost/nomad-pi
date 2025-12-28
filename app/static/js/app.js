@@ -288,6 +288,7 @@ function showSection(id) {
     }
     if (id === 'admin') {
         loadDrives();
+        loadWifiStatus();
         // Auto-refresh drives every 5 seconds while in admin panel
         driveScanInterval = setInterval(() => {
             // Only refresh if we are not currently interacting (simple check)
@@ -1461,6 +1462,92 @@ async function loadResume() {
 }
 
 const uploadQueue = [];
+let activeUploads = [];
+let wifiEnabled = true;
+
+async function loadWifiStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/system/wifi/status`);
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        
+        const btn = document.getElementById('wifi-toggle-btn');
+        const text = document.getElementById('wifi-status-text');
+        
+        if (btn && text) {
+            if (data.status === 'unsupported') {
+                btn.disabled = true;
+                btn.textContent = 'Unsupported';
+                text.textContent = 'Status: Only works on Linux/RPi';
+                return;
+            }
+            
+            wifiEnabled = data.enabled;
+            btn.textContent = wifiEnabled ? 'Disable Wi-Fi' : 'Enable Wi-Fi';
+            btn.className = wifiEnabled ? 'danger' : 'primary';
+            text.textContent = `Status: ${wifiEnabled ? 'Enabled' : 'Disabled'}`;
+        }
+    } catch (e) {
+        console.error('Failed to load Wi-Fi status:', e);
+    }
+}
+
+async function toggleWifiUI() {
+    const btn = document.getElementById('wifi-toggle-btn');
+    if (!btn) return;
+    
+    const newState = !wifiEnabled;
+    btn.disabled = true;
+    btn.textContent = newState ? 'Enabling...' : 'Disabling...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/system/wifi/toggle?enable=${newState}`, { method: 'POST' });
+        if (res.status === 401) { logout(); return; }
+        
+        if (res.ok) {
+            await loadWifiStatus();
+        } else {
+            const data = await res.json();
+            alert(`Error: ${data.detail || 'Failed to toggle Wi-Fi'}`);
+            await loadWifiStatus();
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+        await loadWifiStatus();
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function cancelUpload() {
+    if (activeUploads.length === 0) return;
+    
+    if (confirm('Are you sure you want to cancel all active uploads?')) {
+        console.log(`Cancelling ${activeUploads.length} uploads...`);
+        activeUploads.forEach(xhr => {
+            try {
+                xhr.abort();
+            } catch (e) {
+                console.error('Error aborting XHR:', e);
+            }
+        });
+        activeUploads = [];
+        
+        const statusDiv = document.getElementById('upload-status');
+        if (statusDiv) {
+            statusDiv.innerHTML = '<span style="color:var(--warning-color)">Upload cancelled by user.</span>';
+        }
+        
+        const cancelBtn = document.getElementById('cancel-upload-btn');
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+        
+        const startBtn = document.getElementById('start-upload-btn');
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Upload';
+        }
+    }
+}
 
 function debounce(func, wait) {
     let timeout;
@@ -1709,6 +1796,15 @@ async function uploadFiles() {
         return;
     }
     
+    // Show cancel button
+    const cancelBtn = document.getElementById('cancel-upload-btn');
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
+    const startBtn = document.getElementById('start-upload-btn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Uploading...';
+    }
+    
     const concurrency = 3; // Reduced concurrency for better stability on low-power devices like Pi Zero 2W
     const loadedByIndex = new Array(totalFiles).fill(0);
 
@@ -1788,6 +1884,7 @@ async function uploadFiles() {
                     reject('Network Error (Check Connection/Permissions)');
                 };
                 
+                activeUploads.push(xhr);
                 xhr.send(file);
             });
             completed++;
@@ -1798,6 +1895,9 @@ async function uploadFiles() {
             errors++;
             errorList.push(`${displayName}: ${e}`);
             loadedByIndex[index] = 0;
+        } finally {
+            // Remove this XHR from activeUploads
+            activeUploads = activeUploads.filter(x => x.readyState !== 4 && x.readyState !== 0);
         }
 
         processed++;
@@ -1822,6 +1922,15 @@ async function uploadFiles() {
         }
     });
     await Promise.all(workers);
+
+    // Hide cancel button
+    const cancelBtn = document.getElementById('cancel-upload-btn');
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    const startBtn = document.getElementById('start-upload-btn');
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Upload';
+    }
 
     if (errors === 0) {
         statusDiv.innerHTML = `<span style="color:#4caf50">Success! Uploaded ${completed} files.</span>`;
@@ -2030,6 +2139,24 @@ async function changePassword() {
 }
 
 async function systemControl(action) {
+    if (action === 'wifi_restart') {
+        if (!confirm('Are you sure you want to restart Wi-Fi? This will temporarily disconnect all wireless connections.')) return;
+        try {
+            const res = await fetch(`${API_BASE}/system/wifi/restart`, { method: 'POST' });
+            if (res.status === 401) { logout(); return; }
+            if (res.ok) {
+                alert('Wi-Fi restart initiated.');
+                loadWifiStatus();
+            } else {
+                const data = await res.json();
+                alert(`Error: ${data.detail || 'Failed to restart Wi-Fi'}`);
+            }
+        } catch (e) {
+            alert(`Error: ${e.message}`);
+        }
+        return;
+    }
+
     if (action === 'update') {
         const container = document.getElementById('update-log-container');
         const logView = document.getElementById('update-log-view');

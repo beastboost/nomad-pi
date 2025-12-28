@@ -264,6 +264,67 @@ def unmount_drive(target: str):
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
 
+@router.get("/wifi/status")
+def get_wifi_status():
+    if platform.system() != "Linux":
+        return {"status": "unsupported", "enabled": True}
+    
+    try:
+        result = subprocess.run(["nmcli", "radio", "wifi"], capture_output=True, text=True)
+        if result.returncode == 0:
+            status = result.stdout.strip()
+            return {"status": "ok", "enabled": status == "enabled"}
+        
+        # Fallback to rfkill
+        result = subprocess.run(["rfkill", "list", "wifi"], capture_output=True, text=True)
+        if "Soft blocked: yes" in result.stdout:
+            return {"status": "ok", "enabled": False}
+        return {"status": "ok", "enabled": True}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.post("/wifi/toggle")
+def toggle_wifi(enable: bool):
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
+    
+    try:
+        action = "on" if enable else "off"
+        # Try nmcli first
+        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True)
+        if result.returncode == 0:
+            return {"status": "success", "enabled": enable}
+        
+        # Fallback to rfkill
+        action = "unblock" if enable else "block"
+        subprocess.run(["sudo", "rfkill", action, "wifi"], check=True)
+        return {"status": "success", "enabled": enable}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/wifi/restart")
+def restart_wifi():
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
+    
+    try:
+        # Try nmcli restart
+        subprocess.run(["nmcli", "radio", "wifi", "off"], check=True)
+        import time
+        time.sleep(2)
+        subprocess.run(["nmcli", "radio", "wifi", "on"], check=True)
+        return {"status": "success", "message": "Wi-Fi restarted"}
+    except Exception as e:
+        # Fallback to ifdown/ifup or rfkill toggle
+        try:
+            subprocess.run(["sudo", "rfkill", "block", "wifi"], check=True)
+            import time
+            time.sleep(2)
+            subprocess.run(["sudo", "rfkill", "unblock", "wifi"], check=True)
+            return {"status": "success", "message": "Wi-Fi restarted via rfkill"}
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"Failed to restart Wi-Fi: {str(e2)}")
+
 @router.get("/update/check")
 def check_update():
     if platform.system() == "Linux":

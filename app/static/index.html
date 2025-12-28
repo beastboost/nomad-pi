@@ -146,6 +146,14 @@
                         <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
                         <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
                     </div>
+                    
+                    <h4 style="margin-top:20px; margin-bottom:10px;">Wi-Fi Control</h4>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                        <button id="wifi-toggle-btn" onclick="toggleWifiUI()" class="primary">Checking Wi-Fi...</button>
+                        <button onclick="systemControl('wifi_restart')" class="warning">Restart Wi-Fi</button>
+                        <span id="wifi-status-text" style="font-size: 0.9em; color: var(--text-muted);">Status: Unknown</span>
+                    </div>
+
                     <div id="update-log-container" class="hidden" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px solid var(--border-color);">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                             <h4 style="margin:0;">Update Progress</h4>
@@ -186,7 +194,10 @@
 
                         <div id="upload-queue" style="margin-top:10px; max-height: 150px; overflow-y: auto;"></div>
                         
-                        <button onclick="uploadFiles()" class="primary" style="margin-top:10px; width:100%">Start Upload</button>
+                        <div style="display: flex; gap: 10px;">
+                            <button id="start-upload-btn" onclick="uploadFiles()" class="primary" style="margin-top:10px; flex-grow: 1;">Start Upload</button>
+                            <button id="cancel-upload-btn" onclick="cancelUpload()" class="danger hidden" style="margin-top:10px; flex-grow: 0;">Cancel</button>
+                        </div>
                     </div>
                     <div id="upload-status"></div>
                 </div>
