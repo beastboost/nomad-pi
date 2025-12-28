@@ -338,7 +338,6 @@ def create_session(token: str):
     conn.close()
 
 def get_session(token: str) -> Optional[dict]:
-    cleanup_sessions() # Run cleanup when checking sessions
     conn = get_db()
     c = conn.cursor()
     # Only return session if it hasn't expired
@@ -348,15 +347,11 @@ def get_session(token: str) -> Optional[dict]:
         WHERE token = ? AND created_at >= datetime('now', '-' || ? || ' days')
     ''', (token, SESSION_MAX_AGE_DAYS))
     row = c.fetchone()
+    conn.close()
     
     if not row:
-        # If no row found, it might have expired. Try to delete it just in case.
-        c.execute('DELETE FROM sessions WHERE token = ?', (token,))
-        conn.commit()
-        conn.close()
         return None
         
-    conn.close()
     return dict(row)
 
 def delete_session(token: str):
