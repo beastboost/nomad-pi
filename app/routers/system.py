@@ -443,6 +443,7 @@ def toggle_hotspot(enable: bool = True):
                 "mode": "hotspot",
                 "message": "Hotspot enabled. Connect to 'NomadPi' network.",
                 "ssid": "NomadPi",
+                "password": "nomadpassword",
                 "url": "http://10.42.0.1:8000"
             }
         else:
@@ -473,6 +474,116 @@ def toggle_hotspot(enable: bool = True):
                     "mode": "disconnected",
                     "message": "Hotspot disabled. No WiFi connection available."
                 }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/wifi/reconnect")
+def reconnect_wifi(ssid: str = None):
+    """Reconnect to WiFi network"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
+    
+    try:
+        # First, disable hotspot if active
+        subprocess.run(
+            ["sudo", "nmcli", "connection", "down", "NomadPi"],
+            check=False,
+            capture_output=True
+        )
+        
+        # If SSID provided, try to connect to it
+        if ssid:
+            result = subprocess.run(
+                ["sudo", "nmcli", "connection", "up", "id", ssid],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            return {
+                "status": "ok",
+                "mode": "wifi",
+                "ssid": ssid,
+                "message": f"Connected to {ssid}"
+            }
+        else:
+            # Try HOME_SSID from environment
+            home_ssid = os.environ.get("HOME_SSID", "")
+            if home_ssid:
+                result = subprocess.run(
+                    ["sudo", "nmcli", "connection", "up", "id", home_ssid],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+                return {
+                    "status": "ok",
+                    "mode": "wifi",
+                    "ssid": home_ssid,
+                    "message": f"Connected to {home_ssid}"
+                }
+            else:
+                # List available connections
+                result = subprocess.run(
+                    ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+                    capture_output=True,
+                    text=True
+                )
+                connections = []
+                for line in result.stdout.strip().split('\n'):
+                    if '802-11-wireless' in line and 'NomadPi' not in line:
+                        conn_name = line.split(':')[0]
+                        connections.append(conn_name)
+                
+                if connections:
+                    # Try first available WiFi connection
+                    first_conn = connections[0]
+                    subprocess.run(
+                        ["sudo", "nmcli", "connection", "up", "id", first_conn],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=15
+                    )
+                    return {
+                        "status": "ok",
+                        "mode": "wifi",
+                        "ssid": first_conn,
+                        "message": f"Connected to {first_conn}"
+                    }
+                else:
+                    raise HTTPException(status_code=404, detail="No saved WiFi connections found")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="Connection timeout")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect: {e.stderr if e.stderr else str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/wifi/saved")
+def get_saved_wifi():
+    """Get list of saved WiFi connections"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
+    
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
+            capture_output=True,
+            text=True
+        )
+        
+        connections = []
+        for line in result.stdout.strip().split('\n'):
+            if '802-11-wireless' in line and 'NomadPi' not in line:
+                conn_name = line.split(':')[0]
+                connections.append(conn_name)
+        
+        return {
+            "connections": connections,
+            "count": len(connections)
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
