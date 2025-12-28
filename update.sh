@@ -2,7 +2,8 @@
 # Nomad Pi Update Script
 
 echo "Pulling latest code from GitHub..."
-git pull
+git fetch origin
+git reset --hard origin/main
 
 echo "Updating Python dependencies..."
 source venv/bin/activate
