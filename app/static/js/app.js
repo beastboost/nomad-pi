@@ -290,7 +290,92 @@ function showSection(id) {
 }
 
 async function loadMedia(category) {
+    if (category === 'files') {
+        loadFileBrowser(mediaState.path || '/data');
+        return;
+    }
     await loadMediaPage(category, true);
+}
+
+async function loadFileBrowser(path) {
+    const container = document.getElementById('files-list');
+    if (!container) return;
+
+    container.innerHTML = '<div class="loading">Loading files...</div>';
+    try {
+        const res = await fetch(`${API_BASE}/media/browse?path=${encodeURIComponent(path)}`);
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        
+        container.innerHTML = '';
+        
+        // Add "Back" button if not at root
+        if (path !== '/data') {
+            const parentPath = path.substring(0, path.lastIndexOf('/'));
+            const backDiv = document.createElement('div');
+            backDiv.className = 'media-item folder';
+            backDiv.innerHTML = `
+                <div class="media-card glass" onclick="loadFileBrowser('${parentPath || '/data'}')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back)</h3>
+                    </div>
+                </div>
+            `;
+            container.appendChild(backDiv);
+        }
+
+        data.items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'media-item' + (item.is_dir ? ' folder' : '');
+            
+            if (item.is_dir) {
+                div.innerHTML = `
+                    <div class="media-card glass" onclick="loadFileBrowser('${item.path}')">
+                        <div class="media-info">
+                            <h3>📁 ${escapeHtml(item.name)}</h3>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const ext = item.name.split('.').pop().toLowerCase();
+                let icon = '📄';
+                if (['mp4', 'mkv', 'avi'].includes(ext)) icon = '🎬';
+                if (['mp3', 'flac', 'wav'].includes(ext)) icon = '🎵';
+                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = '🖼️';
+                if (['pdf', 'epub', 'cbz'].includes(ext)) icon = '📚';
+
+                div.innerHTML = `
+                    <div class="media-card glass" onclick="openFile('${item.path}')">
+                        <div class="media-info">
+                            <h3>${icon} ${escapeHtml(item.name)}</h3>
+                            <p>${formatBytes(item.size)}</p>
+                        </div>
+                    </div>
+                `;
+            }
+            container.appendChild(div);
+        });
+        
+        mediaState.path = path;
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = '<p>Error loading directory.</p>';
+    }
+}
+
+function openFile(path) {
+    const ext = path.split('.').pop().toLowerCase();
+    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) {
+        openVideoPlayer(path);
+    } else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+        openImageViewer(path);
+    } else if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) {
+        openComicViewer(path);
+    } else if (['mp3', 'flac', 'wav', 'm4a'].includes(ext)) {
+        playAudio(path);
+    } else {
+        window.open(path, '_blank');
+    }
 }
 
 function renderMediaFromCache(category) {

@@ -469,6 +469,43 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     stored = database.get_file_metadata(path)
     return {"configured": True, "cached": True, **(stored or {})}
 
+@router.get("/browse")
+def browse_files(path: str = Query(default="/data")):
+    if not path.startswith("/data"):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    
+    try:
+        fs_path = safe_fs_path_from_web_path(path) if path != "/data" else BASE_DIR
+    except HTTPException:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not os.path.isdir(fs_path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    items = []
+    try:
+        for item in os.listdir(fs_path):
+            if item.startswith('.'):
+                continue
+            
+            full_path = os.path.join(fs_path, item)
+            is_dir = os.path.isdir(full_path)
+            
+            rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
+            web_path = f"/data/{rel_path}"
+            
+            items.append({
+                "name": item,
+                "path": web_path,
+                "is_dir": is_dir,
+                "size": os.path.getsize(full_path) if not is_dir else None
+            })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+    return {"path": path, "items": items}
+
 @router.get("/list_paged/{category}")
 def list_media_paged(category: str, offset: int = Query(default=0), limit: int = Query(default=60), q: str = Query(default=""), rebuild: bool = Query(default=False)):
     if category not in ["movies", "shows", "music", "books", "gallery", "files"]:
