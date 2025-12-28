@@ -71,6 +71,17 @@ fi
 
 # 3. Python Environment
 echo "[3/9] Setting up Python environment..."
+
+# Check if venv exists but is broken (e.g. moved from /root)
+if [ -d "venv" ]; then
+    # Check if the python interpreter inside venv is accessible and in the right place
+    VENV_PYTHON_PATH=$(readlink -f ./venv/bin/python3 2>/dev/null || true)
+    if [[ -n "$VENV_PYTHON_PATH" && "$VENV_PYTHON_PATH" != "$SCRIPT_DIR"* ]]; then
+        echo "Virtual environment appears to be moved or broken (Points to $VENV_PYTHON_PATH). Recreating..."
+        rm -rf venv
+    fi
+fi
+
 if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
