@@ -21,9 +21,17 @@ update_status() {
     mv "$tmp_file" "$STATUS_FILE"
 }
 
+update_status 5 "Configuring Git..."
+echo "Optimizing Git configuration..."
+# Hardcode the public URL to avoid password prompts
+git remote set-url origin https://github.com/beastboost/nomad-pi.git
+git config credential.helper 'cache --timeout=2592000'
+
 update_status 10 "Pulling latest changes from Git..."
 echo "Pulling latest changes from Git..."
-git pull
+# Force reset to origin/main to solve any local change conflicts automatically
+git fetch origin
+git reset --hard origin/main
 
 # Fix permissions immediately after pull
 chmod +x *.sh
