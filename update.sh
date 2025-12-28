@@ -25,6 +25,10 @@ update_status 10 "Pulling latest changes from Git..."
 echo "Pulling latest changes from Git..."
 git pull
 
+# Fix permissions immediately after pull
+chmod +x *.sh
+find . -name "*.sh" -exec chmod +x {} +
+
 update_status 40 "Installing dependencies..."
 echo "Installing dependencies..."
 if [ ! -d "venv" ]; then

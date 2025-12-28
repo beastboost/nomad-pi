@@ -14,8 +14,9 @@ if [[ "$SCRIPT_DIR" == /boot* ]]; then
         sudo rm -rf "$HOME/nomad-pi/app" || true
         sudo cp -r "$SCRIPT_DIR/app" "$HOME/nomad-pi/" || true
     fi
-    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/requirements.txt" "$HOME/nomad-pi/" || true
+    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$HOME/nomad-pi/" || true
     sudo chown -R "$USER:$USER" "$HOME/nomad-pi"
+    sudo chmod +x "$HOME/nomad-pi/setup.sh" "$HOME/nomad-pi/update.sh"
     exec bash "$HOME/nomad-pi/setup.sh"
 fi
 
@@ -26,6 +27,7 @@ if [[ "$SCRIPT_DIR" == /root* ]]; then
     sudo mkdir -p "$TARGET_DIR"
     sudo cp -r "$SCRIPT_DIR/." "$TARGET_DIR/"
     sudo chown -R "$USER:$USER" "$TARGET_DIR"
+    sudo chmod +x "$TARGET_DIR/setup.sh" "$TARGET_DIR/update.sh"
     echo "Moved to $TARGET_DIR. Restarting setup from new location..."
     cd "$TARGET_DIR"
     exec bash "./setup.sh"
@@ -33,7 +35,9 @@ fi
 
 cd "$SCRIPT_DIR"
 
-# Fix Windows line endings for other files just in case
+# Ensure all scripts are executable and have correct line endings
+chmod +x *.sh 2>/dev/null || true
+find . -name "*.sh" -exec chmod +x {} +
 find app -name "*.py" -exec sed -i 's/\r$//' {} +
 find . -maxdepth 1 -name "*.txt" -exec sed -i 's/\r$//' {} +
 sed -i 's/\r$//' requirements.txt || true
