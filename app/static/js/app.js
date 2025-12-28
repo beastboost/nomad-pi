@@ -271,7 +271,8 @@ function showSection(id) {
         driveScanInterval = null;
     }
 
-    if (['movies', 'music', 'books', 'gallery', 'files'].includes(id)) loadMedia(id);
+    if (['movies', 'music', 'books', 'gallery'].includes(id)) loadMedia(id);
+    if (id === 'files') loadMedia('files');
     if (id === 'shows') loadShowsLibrary();
     if (id === 'home') {
         loadResume();
@@ -298,24 +299,31 @@ async function loadMedia(category) {
 }
 
 async function loadFileBrowser(path) {
+    console.log('loadFileBrowser called with path:', path);
     const container = document.getElementById('files-list');
-    if (!container) return;
+    if (!container) {
+        console.error('files-list container not found');
+        return;
+    }
 
     container.innerHTML = '<div class="loading">Loading files...</div>';
     try {
-        const res = await fetch(`${API_BASE}/media/browse?path=${encodeURIComponent(path)}`);
+        const url = `${API_BASE}/media/browse?path=${encodeURIComponent(path)}`;
+        console.log('Fetching from URL:', url);
+        const res = await fetch(url);
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
+        console.log('Received data:', data);
         
         container.innerHTML = '';
         
         // Add "Back" button if not at root
         if (path !== '/data') {
-            const parentPath = path.substring(0, path.lastIndexOf('/'));
+            const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '/data';
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('${parentPath || '/data'}')">
+                <div class="media-card glass" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
                     <div class="media-info">
                         <h3>📁 .. (Back)</h3>
                     </div>
@@ -324,42 +332,48 @@ async function loadFileBrowser(path) {
             container.appendChild(backDiv);
         }
 
-        data.items.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'media-item' + (item.is_dir ? ' folder' : '');
-            
-            if (item.is_dir) {
-                div.innerHTML = `
-                    <div class="media-card glass" onclick="loadFileBrowser('${item.path}')">
-                        <div class="media-info">
-                            <h3>📁 ${escapeHtml(item.name)}</h3>
-                        </div>
-                    </div>
-                `;
-            } else {
-                const ext = item.name.split('.').pop().toLowerCase();
-                let icon = '📄';
-                if (['mp4', 'mkv', 'avi'].includes(ext)) icon = '🎬';
-                if (['mp3', 'flac', 'wav'].includes(ext)) icon = '🎵';
-                if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) icon = '🖼️';
-                if (['pdf', 'epub', 'cbz'].includes(ext)) icon = '📚';
+        if (!data.items || data.items.length === 0) {
+            container.innerHTML = '<p style="padding:20px; text-align:center; color:var(--text-muted);">This folder is empty.</p>';
+        } else {
+            data.items.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'media-item' + (item.is_dir ? ' folder' : '');
+                
+                const itemPath = item.path.replaceAll('\\', '\\\\');
 
-                div.innerHTML = `
-                    <div class="media-card glass" onclick="openFile('${item.path}')">
-                        <div class="media-info">
-                            <h3>${icon} ${escapeHtml(item.name)}</h3>
-                            <p>${formatBytes(item.size)}</p>
+                if (item.is_dir) {
+                    div.innerHTML = `
+                        <div class="media-card glass" onclick="loadFileBrowser('${itemPath}')">
+                            <div class="media-info">
+                                <h3>📁 ${escapeHtml(item.name)}</h3>
+                            </div>
                         </div>
-                    </div>
-                `;
-            }
-            container.appendChild(div);
-        });
+                    `;
+                } else {
+                    const ext = item.name.split('.').pop().toLowerCase();
+                    let icon = '📄';
+                    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) icon = '🎬';
+                    if (['mp3', 'flac', 'wav', 'm4a'].includes(ext)) icon = '🎵';
+                    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) icon = '🖼️';
+                    if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
+
+                    div.innerHTML = `
+                        <div class="media-card glass" onclick="openFile('${itemPath}')">
+                            <div class="media-info">
+                                <h3>${icon} ${escapeHtml(item.name)}</h3>
+                                <p>${formatBytes(item.size)}</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                container.appendChild(div);
+            });
+        }
         
         mediaState.path = path;
     } catch (e) {
-        console.error(e);
-        container.innerHTML = '<p>Error loading directory.</p>';
+        console.error('Error in loadFileBrowser:', e);
+        container.innerHTML = `<p>Error loading directory: ${e.message}</p>`;
     }
 }
 
@@ -1834,7 +1848,7 @@ async function loadDrives(silent = false) {
                 html += `<div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;margin-top:5px;">
                     <span class="badge success" style="margin-right:auto;">Mounted: ${escapeHtml(dev.mountpoint)}</span>
                     <button class="primary small" onclick="prepareDrive('${escapeHtml(dev.mountpoint)}')">Prepare</button>
-                    <button class="secondary small" onclick="mediaState.path='${escapeHtml(dev.mountpoint).replaceAll('\\', '\\\\')}';showSection('files');loadMedia('files');">Browse</button>
+                    <button class="secondary small" onclick="mediaState.path='${escapeHtml(dev.mountpoint).replaceAll('\\', '\\\\')}';showSection('files');">Browse</button>
                     <button class="danger small drive-unmount" data-mountpoint="${escapeHtml(dev.mountpoint)}">Unmount</button>
                 </div>`;
             } else if ((dev.type === 'part' || dev.fstype) && !dev.children) {
