@@ -767,8 +767,20 @@ function playMusicAt(idx) {
     musicIndex = idx;
     const track = musicQueue[musicIndex];
     if (titleEl) titleEl.textContent = cleanTitle(track.name);
-    audio.src = track.path;
-    audio.play().catch(() => {});
+    
+    // Ensure the path is correctly encoded for the audio source
+    const encodedPath = track.path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    audio.src = encodedPath;
+    
+    console.log('Playing music:', track.name, 'at', encodedPath);
+    
+    audio.load(); // Force reload to ensure the new source is picked up
+    audio.play().catch(err => {
+        console.error('Audio play error:', err);
+        // If it fails, try to skip to the next track after a short delay
+        setTimeout(() => musicNext(), 2000);
+    });
+    
     const playBtn = document.getElementById('player-play');
     if (playBtn) playBtn.textContent = 'Pause';
 }

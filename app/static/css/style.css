@@ -484,6 +484,41 @@ h1, h2, h3 {
         margin-top: 12px;
         height: calc(100vh - 24px);
     }
+
+    /* Mobile Player Bar Fixes */
+    .player-bar {
+        grid-template-columns: 1fr;
+        grid-template-areas: 
+            "title"
+            "progress"
+            "controls";
+        gap: 10px;
+        padding: 12px;
+        bottom: 8px;
+        left: 8px;
+        right: 8px;
+    }
+
+    .player-title {
+        grid-area: title;
+        text-align: center;
+        font-size: 0.9rem;
+    }
+
+    .player-progress {
+        grid-area: progress;
+        width: 100%;
+    }
+
+    .player-controls {
+        grid-area: controls;
+        justify-content: center;
+        width: 100%;
+    }
+
+    .player-volume {
+        display: none; /* Hide volume on mobile to save space, use system volume */
+    }
 }
 
 /* Home Grid */
