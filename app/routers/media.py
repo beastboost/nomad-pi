@@ -74,18 +74,50 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'([0-9]+)', s)]
 
 def guess_title_year(name: str):
+    # Remove extension
     s = os.path.splitext(os.path.basename(name or ""))[0]
-    s = re.sub(r'[\._]+', ' ', s)
-    s = re.sub(r'[\[\(].*?[\]\)]', ' ', s)
-    s = re.sub(r'\b(480p|720p|1080p|2160p|4k|hdr|hevc|x265|x264|h265|h264|aac|ac3|dts|web[- ]dl|webrip|bluray|brrip|dvdrip|remux)\b', ' ', s, flags=re.I)
-    s = re.sub(r'\s+', ' ', s).strip()
+    
+    # 1. Aggressively remove common scene/rip tags FIRST to clean the string
+    # This helps find the year if it's buried inside brackets
+    tags = [
+        r'480p', r'720p', r'1080p', r'2160p', r'4k', r'8k',
+        r'hdr', r'hevc', r'h265', r'x265', r'h264', r'x264', r'avc',
+        r'aac', r'ac3', r'dts', r'dd5 1', r'5 1', r'7 1',
+        r'web[- ]dl', r'webrip', r'bluray', r'brrip', r'bdrip', r'dvdrip', r'remux', r'hdtv',
+        r'yify', r'yts', r'rarbg', r'ettv', r'psa', r'tgx', r'qxr', r'utp', r'vxt',
+        r'dual[- ]audio', r'multi[- ]audio', r'multi', r'hindi', r'english', r'subbed', r'subs',
+        r'proper', r'repack', r'extended', r'director s cut', r'uncut', r'remastered'
+    ]
+    
+    # Pre-clean dots/underscores to spaces for tag matching
+    s_clean = re.sub(r'[\._\-]+', ' ', s)
+    for tag in tags:
+        s_clean = re.sub(rf'\b{tag}\b', ' ', s_clean, flags=re.I)
+    
+    # 2. Extract year (4 digits starting with 19 or 20)
+    # We look for a year that is preceded by a space or a bracket
     year = None
-    m = re.search(r'\b(19\d{2}|20\d{2})\b', s)
+    m = re.search(r'(?:\s|[\(\[])(19\d{2}|20\d{2})(?:\s|[\]\)])', s_clean)
+    if not m:
+        # Fallback to any 4 digit year
+        m = re.search(r'\b(19\d{2}|20\d{2})\b', s_clean)
+        
     if m:
         year = m.group(1)
-        s = re.sub(r'\b(19\d{2}|20\d{2})\b', ' ', s).strip()
-        s = re.sub(r'\s+', ' ', s).strip()
-    return s, year
+        # The title is everything before the year
+        idx = s_clean.find(year)
+        title = s_clean[:idx].strip()
+        if not title:
+            title = s_clean.replace(year, '').strip()
+    else:
+        title = s_clean
+        
+    # 3. Final cleanup of title (remove trailing brackets/dashes)
+    title = re.sub(r'[\[\(].*?[\]\)]', ' ', title)
+    title = re.sub(r'[\._\-]+', ' ', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+    
+    return title or s, year
 
 def normalize_title(s: str):
     s = re.sub(r'[\._]+', ' ', str(s or ''))
@@ -475,37 +507,68 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
         fs_path = None
 
     title_guess, year_guess = guess_title_year(os.path.basename(fs_path or path))
-    try:
-        meta = omdb_fetch(title=title_guess, year=year_guess, media_type=media_type)
-    except HTTPException as e:
-        if e.status_code != 404:
-            raise
-        search = omdb_search(query=title_guess, year=year_guess, media_type=media_type)
-        results = search.get("Search") or []
-        if not isinstance(results, list) or not results:
-            raise
+    
+    # Try multiple search variations if the first one fails
+    search_queries = [
+        (title_guess, year_guess),
+        (title_guess, None),  # Try without year if year might be wrong
+    ]
+    
+    # If title has multiple words, try stripping the last one if first match fails
+    if ' ' in title_guess:
+        shorter = ' '.join(title_guess.split()[:-1])
+        if len(shorter) > 2:
+            search_queries.append((shorter, year_guess))
+            search_queries.append((shorter, None))
 
-        want = normalize_title(title_guess)
-        best = None
-        best_score = -1
-        for r in results[:10]:
-            t = r.get("Title")
-            y = r.get("Year")
-            if not t:
+    meta = None
+    last_error = None
+
+    for q_title, q_year in search_queries:
+        try:
+            # Try direct fetch first
+            meta = omdb_fetch(title=q_title, year=q_year, media_type=media_type)
+            if meta: break
+        except HTTPException as e:
+            if e.status_code != 404:
+                last_error = e
                 continue
-            score = 0
-            if normalize_title(t) == want:
-                score += 10
-            if year_guess and y and str(y).startswith(str(year_guess)):
-                score += 5
-            if best is None or score > best_score:
-                best = r
-                best_score = score
-        imdb_id = best.get("imdbID") if isinstance(best, dict) else None
-        if imdb_id:
-            meta = omdb_fetch(imdb_id=imdb_id, media_type=media_type)
-        else:
-            meta = omdb_fetch(title=title_guess, year=year_guess, media_type=media_type)
+            
+            # Try search if direct fetch fails
+            try:
+                search = omdb_search(query=q_title, year=q_year, media_type=media_type)
+                results = search.get("Search") or []
+                if results:
+                    # Score and pick best
+                    want = normalize_title(q_title)
+                    best = None
+                    best_score = -1
+                    for r in results[:5]:
+                        t = r.get("Title")
+                        y = r.get("Year")
+                        if not t: continue
+                        
+                        score = 0
+                        norm_t = normalize_title(t)
+                        if norm_t == want: score += 20
+                        elif want in norm_t or norm_t in want: score += 10
+                        
+                        if q_year and y and str(y).startswith(str(q_year)):
+                            score += 10
+                            
+                        if best is None or score > best_score:
+                            best = r
+                            best_score = score
+                    
+                    if best and best_score >= 10:
+                        meta = omdb_fetch(imdb_id=best.get("imdbID"), media_type=media_type)
+                        break
+            except Exception:
+                continue
+
+    if not meta:
+        if last_error: raise last_error
+        raise HTTPException(status_code=404, detail="Could not find metadata for this file. Try renaming it to a cleaner title.")
 
     cached_poster = cache_remote_poster(meta.get("Poster"))
     if cached_poster:
