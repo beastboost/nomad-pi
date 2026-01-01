@@ -20,7 +20,7 @@ def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.create_collation("NATURAL", natural_compare)
+    conn.create_collation("NATSORT", natural_compare)
     return conn
 
 def init_db():
@@ -294,9 +294,9 @@ def query_library_index(category: str, q: str, offset: int, limit: int):
     conn = get_db()
     c = conn.cursor()
     
-    order_by = 'folder COLLATE NATURAL, name COLLATE NATURAL'
+    order_by = 'folder COLLATE NATSORT, name COLLATE NATSORT'
     if category == 'movies':
-        order_by = 'name COLLATE NATURAL'
+        order_by = 'name COLLATE NATSORT'
     
     if q:
         like = f"%{q}%"
