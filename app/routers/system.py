@@ -111,6 +111,7 @@ def get_stats():
             pass
 
     return {
+        "hostname": platform.node(),
         "cpu": psutil.cpu_percent(interval=0.1),
         "cores": psutil.cpu_count(),
         "cpu_freq": cpu_freq,

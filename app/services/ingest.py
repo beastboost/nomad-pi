@@ -178,12 +178,13 @@ def start_ingest_service():
         _observer.schedule(IngestHandler(is_direct=False), ingest_dir, recursive=False)
         
         # 2. Watch direct upload folders for immediate indexing
-        # Note: We watch recursively to catch files in subfolders
+        # Note: We watch NON-RECURSIVELY to avoid crashing the Pi with too many watches.
+        # Files in subfolders will be picked up by the background scanner or manual refresh.
         watch_folders = ["movies", "shows", "music", "books"]
         for folder in watch_folders:
             folder_path = os.path.join(media.BASE_DIR, folder)
             os.makedirs(folder_path, exist_ok=True)
-            _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=True)
+            _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=False)
             
         _observer.start()
         logger.info(f"Ingest service started watching {ingest_dir} and direct folders")

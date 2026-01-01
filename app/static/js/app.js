@@ -2466,6 +2466,12 @@ async function loadStorageStats() {
         updateText('storage-stats', `${diskPercent.toFixed(0)}%`);
         updateProgress('disk-progress', diskPercent);
         updateText('disk-details', `${diskUsedGB.toFixed(1)}/${diskTotalGB.toFixed(1)} GB used • ${diskFreeGB.toFixed(1)} GB free`);
+        
+        // Update welcome message with hostname
+        const welcomeEl = document.querySelector('#home h1');
+        if (welcomeEl && data.hostname) {
+            welcomeEl.innerText = `Welcome to ${data.hostname}`;
+        }
 
         // CPU Card
         let cpuValStr = `${cpuPercent.toFixed(0)}%`;
@@ -2517,7 +2523,9 @@ async function loadStorageStats() {
         // Header Stats
         const headerEl = document.getElementById('header-stats');
         if (headerEl) {
-            headerEl.innerText = `CPU ${cpuPercent.toFixed(0)}% • RAM ${ramPercent.toFixed(0)}%${downRate === null ? '' : ` • ↓ ${formatRate(downRate)}`}`;
+            let headerText = `${data.hostname ? data.hostname + ' • ' : ''}CPU ${cpuPercent.toFixed(0)}% • RAM ${ramPercent.toFixed(0)}%`;
+            if (downRate !== null) headerText += ` • ↓ ${formatRate(downRate)}`;
+            headerEl.innerText = headerText;
         }
 
     } catch (e) {
@@ -2591,6 +2599,19 @@ async function changePassword() {
         console.error(e);
         statusEl.textContent = 'Error: ' + e.message;
         statusEl.style.color = 'var(--danger-color)';
+    }
+}
+
+async function rebuildLibrary() {
+    try {
+        const res = await fetch(`${API_BASE}/media/rebuild`, { method: 'POST' });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        alert(data.status || 'Library scan started in background');
+        // Refresh stats after a short delay
+        setTimeout(loadStorageStats, 2000);
+    } catch (err) {
+        alert('Failed to start scan: ' + err);
     }
 }
 
