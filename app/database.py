@@ -16,12 +16,19 @@ def natural_compare(a, b):
     if ka > kb: return 1
     return 0
 
+_db_conn = None
+
 def get_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.create_collation("NATSORT", natural_compare)
-    return conn
+    global _db_conn
+    if _db_conn is None:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _db_conn.row_factory = sqlite3.Row
+        _db_conn.create_collation("NATSORT", natural_compare)
+        # Enable WAL mode for better concurrency
+        _db_conn.execute("PRAGMA journal_mode=WAL")
+        _db_conn.execute("PRAGMA synchronous=NORMAL")
+    return _db_conn
 
 def init_db():
     conn = get_db()
@@ -84,7 +91,6 @@ def init_db():
         )
     ''')
     conn.commit()
-    conn.close()
 
 def set_setting(key: str, value: str):
     conn = get_db()
@@ -97,14 +103,12 @@ def set_setting(key: str, value: str):
             updated_at = CURRENT_TIMESTAMP
     ''', (key, value))
     conn.commit()
-    conn.close()
 
 def get_setting(key: str) -> Optional[str]:
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT value FROM settings WHERE key = ?', (key,))
     row = c.fetchone()
-    conn.close()
     if row:
         return row['value']
     return None
@@ -121,14 +125,12 @@ def update_progress(path: str, current_time: float, duration: float):
             last_played = CURRENT_TIMESTAMP
     ''', (path, current_time, duration))
     conn.commit()
-    conn.close()
 
 def get_progress(path: str) -> Optional[dict]:
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT current_time, duration, last_played FROM progress WHERE path = ?', (path,))
     row = c.fetchone()
-    conn.close()
     if row:
         return dict(row)
     return None
@@ -138,7 +140,6 @@ def get_all_progress():
     c = conn.cursor()
     c.execute('SELECT path, current_time, duration, last_played FROM progress')
     rows = c.fetchall()
-    conn.close()
     return {row['path']: dict(row) for row in rows}
 
 def get_file_metadata(path: str) -> Optional[dict]:
@@ -146,7 +147,6 @@ def get_file_metadata(path: str) -> Optional[dict]:
     c = conn.cursor()
     c.execute('SELECT * FROM file_metadata WHERE path = ?', (path,))
     row = c.fetchone()
-    conn.close()
     if not row:
         return None
     data = dict(row)
@@ -190,7 +190,6 @@ def upsert_file_metadata(path: str, media_type: str, meta: dict):
             fetched_at = CURRENT_TIMESTAMP
     ''', (path, media_type, title, year, imdb_id, poster, plot, rated, runtime, genre, meta_json))
     conn.commit()
-    conn.close()
 
 def upsert_library_index_item(item: dict):
     conn = get_db()
@@ -218,14 +217,12 @@ def upsert_library_index_item(item: dict):
         item.get("size"),
     ))
     conn.commit()
-    conn.close()
 
 def delete_library_index_item(path: str):
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM library_index WHERE path = ?", (path,))
     conn.commit()
-    conn.close()
 
 def upsert_library_index_items(items: list):
     if not items:
@@ -255,7 +252,6 @@ def upsert_library_index_items(items: list):
         it.get("size"),
     ) for it in items))
     conn.commit()
-    conn.close()
 
 def clear_library_index_category(category: str):
     conn = get_db()
@@ -263,7 +259,6 @@ def clear_library_index_category(category: str):
     c.execute('DELETE FROM library_index WHERE category = ?', (category,))
     c.execute('DELETE FROM library_index_state WHERE category = ?', (category,))
     conn.commit()
-    conn.close()
 
 def set_library_index_state(category: str, item_count: int):
     conn = get_db()
@@ -276,14 +271,12 @@ def set_library_index_state(category: str, item_count: int):
             item_count = excluded.item_count
     ''', (category, int(item_count or 0)))
     conn.commit()
-    conn.close()
 
 def get_library_index_state(category: str) -> Optional[dict]:
     conn = get_db()
     c = conn.cursor()
     c.execute('SELECT category, scanned_at, item_count FROM library_index_state WHERE category = ?', (category,))
     row = c.fetchone()
-    conn.close()
     return dict(row) if row else None
 
 def query_library_index(category: str, q: str, offset: int, limit: int):
@@ -331,7 +324,6 @@ def query_library_index(category: str, q: str, offset: int, limit: int):
         c.execute('SELECT COUNT(1) AS cnt FROM library_index WHERE category = ?', (category,))
     total = int(c.fetchone()["cnt"])
 
-    conn.close()
     return [dict(r) for r in rows], total
 
 def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
@@ -391,7 +383,6 @@ def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
         c.execute('UPDATE library_index SET path = ?, name = ?, folder = ? WHERE path = ?', (new_path, new_name, new_folder, old_path))
     
     conn.commit()
-    conn.close()
 
 SESSION_MAX_AGE_DAYS = int(os.environ.get("SESSION_MAX_AGE_DAYS", 30))
 
@@ -400,7 +391,6 @@ def create_session(token: str):
     c = conn.cursor()
     c.execute('INSERT INTO sessions (token) VALUES (?)', (token,))
     conn.commit()
-    conn.close()
 
 def get_session(token: str) -> Optional[dict]:
     conn = get_db()
@@ -412,7 +402,6 @@ def get_session(token: str) -> Optional[dict]:
         WHERE token = ? AND created_at >= datetime('now', '-' || ? || ' days')
     ''', (token, SESSION_MAX_AGE_DAYS))
     row = c.fetchone()
-    conn.close()
     
     if not row:
         return None
@@ -424,7 +413,6 @@ def delete_session(token: str):
     c = conn.cursor()
     c.execute('DELETE FROM sessions WHERE token = ?', (token,))
     conn.commit()
-    conn.close()
 
 def cleanup_sessions():
     """Remove sessions older than the configured max_age."""
@@ -436,6 +424,5 @@ def cleanup_sessions():
             WHERE created_at < datetime('now', '-' || ? || ' days')
         ''', (SESSION_MAX_AGE_DAYS,))
         conn.commit()
-        conn.close()
     except Exception as e:
         print(f"Error cleaning up sessions: {e}")
