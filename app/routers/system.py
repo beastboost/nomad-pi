@@ -28,7 +28,18 @@ def save_omdb_key(request: OmdbKeyRequest):
 
 @router.get("/stats")
 def get_stats():
-    disk_path = "/" if platform.system() == "Linux" else os.getcwd()
+    # Use the directory of the app for disk usage calculation on Linux
+    # This ensures we're looking at the actual storage where the media lives
+    if platform.system() == "Linux":
+        # Get the path where the app is running
+        app_path = os.getcwd()
+        # Find the mount point for this path to get accurate usage
+        disk_path = app_path
+        while not os.path.ismount(disk_path) and disk_path != "/":
+            disk_path = os.path.dirname(disk_path)
+    else:
+        disk_path = os.getcwd()
+
     disk = psutil.disk_usage(disk_path)
     mem = psutil.virtual_memory()
     net = psutil.net_io_counters()
@@ -122,7 +133,14 @@ def get_stats():
 
 @router.get("/storage/info")
 def get_storage_info():
-    disk_path = "/" if platform.system() == "Linux" else os.getcwd()
+    if platform.system() == "Linux":
+        app_path = os.getcwd()
+        disk_path = app_path
+        while not os.path.ismount(disk_path) and disk_path != "/":
+            disk_path = os.path.dirname(disk_path)
+    else:
+        disk_path = os.getcwd()
+        
     disk = psutil.disk_usage(disk_path)
     
     drives = []
@@ -200,7 +218,14 @@ def get_services():
 
 @router.get("/storage")
 def get_storage():
-    disk_path = "/" if platform.system() == "Linux" else os.getcwd()
+    if platform.system() == "Linux":
+        app_path = os.getcwd()
+        disk_path = app_path
+        while not os.path.ismount(disk_path) and disk_path != "/":
+            disk_path = os.path.dirname(disk_path)
+    else:
+        disk_path = os.getcwd()
+        
     disk = psutil.disk_usage(disk_path)
     mem = psutil.virtual_memory()
     net = psutil.net_io_counters()

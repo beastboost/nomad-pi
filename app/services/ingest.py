@@ -17,6 +17,9 @@ _workers_lock = threading.Lock()
 _stop_event = threading.Event()
 
 class IngestHandler(FileSystemEventHandler):
+    def __init__(self, is_direct=False):
+        self.is_direct = is_direct
+
     def on_created(self, event):
         if event.is_directory:
             return
@@ -44,67 +47,89 @@ class IngestHandler(FileSystemEventHandler):
 
             # Check extensions
             ext = os.path.splitext(filename)[1].lower()
-            if ext not in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg']:
-                return # Ignore non-video files
+            allowed_video = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg']
+            allowed_music = ['.mp3', '.flac', '.wav', '.m4a']
+            allowed_books = ['.pdf', '.epub', '.mobi', '.cbz', '.cbr']
+            
+            all_allowed = allowed_video + allowed_music + allowed_books
+            if ext not in all_allowed:
+                return 
 
             # Wait for file to be ready (size stability check)
             if not self.wait_for_file_ready(file_path):
                 logger.warning(f"File {filename} not ready or removed.")
                 return
 
-            # Logic:
-            # 1. Try to parse as Show (SxxExx)
-            # 2. If not, assume Movie
-            
-            is_show = False
-            # Use public media wrappers
-            s, e = media.parse_season_episode(filename)
-            if s is not None:
-                is_show = True
-            elif media.parse_episode_only(filename) is not None:
-                is_show = True
-            
-            category = "shows" if is_show else "movies"
-            
-            try:
-                # Calculate destination
-                dest_rel = media.auto_dest_rel(category, filename)
-                dest_abs = os.path.join(media.BASE_DIR, category, dest_rel)
+            if not self.is_direct:
+                # Logic for ingest folder:
+                # 1. Try to parse as Show (SxxExx)
+                # 2. If not, assume Movie
+                is_show = False
+                s, e = media.parse_season_episode(filename)
+                if s is not None:
+                    is_show = True
+                elif media.parse_episode_only(filename) is not None:
+                    is_show = True
                 
-                # Ensure unique destination
-                dest_abs = media.pick_unique_dest(dest_abs)
+                category = "shows" if is_show else "movies"
                 
-                # Ensure destination directory exists
-                os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
-                
-                # Move file
-                shutil.move(file_path, dest_abs)
-                logger.info(f"Ingested {filename} -> {dest_abs}")
-                
-                # Update DB
                 try:
-                    # Construct web path
-                    rel_path = os.path.relpath(dest_abs, media.BASE_DIR).replace(os.sep, '/')
-                    web_path = f"/data/{rel_path}"
-                    folder = os.path.dirname(rel_path)
+                    # Calculate destination
+                    dest_rel = media.auto_dest_rel(category, filename)
+                    dest_abs = os.path.join(media.BASE_DIR, category, dest_rel)
                     
-                    st = os.stat(dest_abs)
-                    item = {
-                        "path": web_path,
-                        "category": category,
-                        "name": os.path.basename(dest_abs),
-                        "folder": folder,
-                        "source": "local",
-                        "poster": None,
-                        "mtime": float(getattr(st, "st_mtime", 0.0) or 0.0),
-                        "size": int(getattr(st, "st_size", 0) or 0),
-                    }
-                    media.database.upsert_library_index_item(item)
-                except Exception as e:
-                    logger.warning(f"Failed to update index for {filename}: {e}")
+                    # Ensure unique destination
+                    dest_abs = media.pick_unique_dest(dest_abs)
+                    
+                    # Ensure destination directory exists
+                    os.makedirs(os.path.dirname(dest_abs), exist_ok=True)
+                    
+                    # Move file
+                    shutil.move(file_path, dest_abs)
+                    logger.info(f"Ingested {filename} -> {dest_abs}")
+                    target_abs = dest_abs
+                except Exception:
+                    logger.exception(f"Failed to ingest {filename}")
+                    return
+            else:
+                # For direct uploads, we just need to determine the category based on the path
+                target_abs = file_path
+                category = "movies"
+                if "shows" in file_path.lower():
+                    category = "shows"
+                elif "music" in file_path.lower():
+                    category = "music"
+                elif "books" in file_path.lower():
+                    category = "books"
+
+            # Update DB for the final file location
+            try:
+                # Construct web path
+                rel_path = os.path.relpath(target_abs, media.BASE_DIR).replace(os.sep, '/')
+                web_path = f"/data/{rel_path}"
                 
-            except Exception:
-                logger.exception(f"Failed to ingest {filename}")
+                # For movies/shows, the folder is relative to the category root
+                try:
+                    cat_root = os.path.join(media.BASE_DIR, category)
+                    folder = os.path.relpath(os.path.dirname(target_abs), cat_root).replace(os.sep, '/')
+                except:
+                    folder = "."
+                
+                st = os.stat(target_abs)
+                item = {
+                    "path": web_path,
+                    "category": category,
+                    "name": os.path.basename(target_abs),
+                    "folder": folder,
+                    "source": "local",
+                    "poster": None,
+                    "mtime": float(getattr(st, "st_mtime", 0.0) or 0.0),
+                    "size": int(getattr(st, "st_size", 0) or 0),
+                }
+                media.database.upsert_library_index_item(item)
+                logger.info(f"Indexed {category} file: {web_path}")
+            except Exception as e:
+                logger.warning(f"Failed to update index for {filename}: {e}")
         finally:
             with _workers_lock:
                 if threading.current_thread() in _active_workers:
@@ -148,9 +173,20 @@ def start_ingest_service():
         
         _stop_event.clear()
         _observer = Observer()
-        _observer.schedule(IngestHandler(), ingest_dir, recursive=False)
+        
+        # 1. Watch ingest folder for moving/auto-sorting
+        _observer.schedule(IngestHandler(is_direct=False), ingest_dir, recursive=False)
+        
+        # 2. Watch direct upload folders for immediate indexing
+        # Note: We watch recursively to catch files in subfolders
+        watch_folders = ["movies", "shows", "music", "books"]
+        for folder in watch_folders:
+            folder_path = os.path.join(media.BASE_DIR, folder)
+            os.makedirs(folder_path, exist_ok=True)
+            _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=True)
+            
         _observer.start()
-        logger.info(f"Ingest service started watching {ingest_dir}")
+        logger.info(f"Ingest service started watching {ingest_dir} and direct folders")
 
 def stop_ingest_service():
     global _observer
