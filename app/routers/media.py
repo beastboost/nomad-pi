@@ -580,6 +580,69 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
 from fastapi.responses import FileResponse, StreamingResponse
 import mimetypes
 
+@router.get("/info")
+def get_media_info(path: str = Query(...)):
+    """Get technical info about a media file using ffprobe."""
+    try:
+        fs_path = safe_fs_path_from_web_path(path)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not os.path.isfile(fs_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        cmd = [
+            "ffprobe", 
+            "-v", "quiet", 
+            "-print_format", "json", 
+            "-show_format", 
+            "-show_streams", 
+            fs_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return {"error": "ffprobe failed", "details": result.stderr}
+        
+        info = json.loads(result.stdout)
+        
+        # Simplify info for the UI
+        streams = info.get("streams", [])
+        video_stream = next((s for s in streams if s.get("codec_type") == "video"), {})
+        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+        
+        # Check compatibility (Basic checks)
+        video_codec = video_stream.get("codec_name", "unknown")
+        is_h265 = video_codec in ["hevc", "h265"]
+        
+        audio_info = []
+        has_ac3_dts = False
+        for a in audio_streams:
+            codec = a.get("codec_name", "unknown")
+            audio_info.append(codec)
+            if codec in ["ac3", "dts", "eac3", "truehd"]:
+                has_ac3_dts = True
+
+        return {
+            "format": info.get("format", {}).get("format_long_name"),
+            "duration": float(info.get("format", {}).get("duration", 0)),
+            "size": int(info.get("format", {}).get("size", 0)),
+            "video": {
+                "codec": video_codec,
+                "width": video_stream.get("width"),
+                "height": video_stream.get("height"),
+                "pix_fmt": video_stream.get("pix_fmt"),
+                "compatible": not is_h265 # H265 is often problematic
+            },
+            "audio": {
+                "codecs": audio_info,
+                "compatible": not has_ac3_dts # AC3/DTS is often problematic
+            },
+            "full_info": info if os.environ.get("DEBUG") else None
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.get("/stream")
 async def stream_media(path: str = Query(...), token: str = Query(None)):
     # The middleware already checks for token, but we can double check here if needed
