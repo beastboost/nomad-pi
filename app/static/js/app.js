@@ -460,9 +460,9 @@ async function loadFileBrowser(path) {
 
 function openFile(path) {
     const ext = path.split('.').pop().toLowerCase();
-    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) {
+    if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg'].includes(ext)) {
         openVideoViewer(path);
-    } else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+    } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
         openImageViewer(path);
     } else if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) {
         openComicViewer(path);
@@ -574,6 +574,9 @@ function renderMediaList(category, files) {
     }
 
     files.sort((a, b) => {
+        if (category === 'movies') {
+            return naturalCompare(a.name, b.name);
+        }
         if ((a.folder || '.') === (b.folder || '.')) return naturalCompare(a.name, b.name);
         return naturalCompare((a.folder || '.'), (b.folder || '.'));
     });
@@ -603,14 +606,21 @@ function renderMediaList(category, files) {
                     <span>${title}</span>
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
+                    <button class="modal-close rename-btn" title="Rename">✏️</button>
                     <button class="modal-close music-play">Play</button>
                     ${deleteBtn}
                 </div>
             `;
-            const btn = div.querySelector('.music-play');
-            if (btn) {
-                btn.addEventListener('click', () => {
+            const playBtn = div.querySelector('.music-play');
+            if (playBtn) {
+                playBtn.addEventListener('click', () => {
                     startMusicQueue(files, files.indexOf(file));
+                });
+            }
+            const renameBtn = div.querySelector('.rename-btn');
+            if (renameBtn) {
+                renameBtn.addEventListener('click', () => {
+                    promptRename(file.path, file.name, () => loadMediaPage('music', true));
                 });
             }
         } else if (category === 'files') {
@@ -620,27 +630,23 @@ function renderMediaList(category, files) {
                     <span>${file.name}</span>
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
-                    <button class="modal-close rename-btn">Rename</button>
+                    <button class="modal-close rename-btn" title="Rename">✏️</button>
                     <a href="${file.path}" target="_blank" class="download-btn">Open</a>
                     ${deleteBtn}
                 </div>
             `;
             const renameBtn = div.querySelector('.rename-btn');
             if (renameBtn) {
-                renameBtn.addEventListener('click', async () => {
-                    const newName = prompt('New filename:', file.name || '');
-                    if (!newName) return;
-                    const parts = String(file.path || '').split('/');
-                    parts.pop();
-                    const dest = `${parts.join('/')}/${newName}`.replaceAll('//', '/');
-                    await renameMediaPath(file.path, dest);
-                    loadMediaPage('files', true);
+                renameBtn.addEventListener('click', () => {
+                    promptRename(file.path, file.name, () => loadMediaPage('files', true));
                 });
             }
         } else if (category === 'gallery') {
+            const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
             if (file.name.match(/\.(jpg|jpeg|png|gif)$/i)) {
                 div.innerHTML = `
                     ${cardDeleteBtn}
+                    ${renameBtnHtml}
                     ${folderHtml}
                     <img src="${file.path}" loading="lazy" alt="${file.name}" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(file.name)}')">
                     <div class="caption">${file.name}</div>
@@ -648,10 +654,18 @@ function renderMediaList(category, files) {
             } else {
                 div.innerHTML = `
                     ${cardDeleteBtn}
+                    ${renameBtnHtml}
                     ${folderHtml}
                     <video controls preload="metadata" src="${file.path}"></video>
                     <div class="caption">${file.name}</div>
                 `;
+            }
+            const renameBtn = div.querySelector('.rename-btn-card');
+            if (renameBtn) {
+                renameBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    promptRename(file.path, file.name, () => loadMediaPage('gallery', true));
+                });
             }
         } else if (category === 'books') {
             const isPdf = /\.pdf$/i.test(file.name || '');
@@ -661,9 +675,11 @@ function renderMediaList(category, files) {
             const folder = file.folder && file.folder !== '.' ? `<div style="color:#aaa;font-size:0.85em;">${escapeHtml(file.folder)}</div>` : '';
             const canView = isPdf || isCbz || isCbr;
             const viewBtn = canView ? `<button class="modal-close view-btn">View</button>` : '';
+            const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
 
             div.innerHTML = `
                 ${cardDeleteBtn}
+                ${renameBtnHtml}
                 ${folder}
                 <h3>${title}</h3>
                 <div style="display:flex; gap:10px; padding: 0 10px 12px 10px; align-items:center; justify-content:space-between;">
@@ -679,9 +695,34 @@ function renderMediaList(category, files) {
                     else openComicViewer(file.path, file.name || 'Comic');
                 });
             }
+            const renameBtn = div.querySelector('.rename-btn-card');
+            if (renameBtn) {
+                renameBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    promptRename(file.path, file.name, () => loadMediaPage('books', true));
+                });
+            }
         } else {
-            let mediaElement = '';
-            const isVideo = /\.(mp4|webm|mkv|mov)$/i.test(file.name || '');
+            // This is for movies, shows, etc.
+            div.style.cursor = 'pointer';
+            const isVideo = /\.(mp4|webm|mkv|mov|avi|m4v|ts|wmv|flv|3gp|mpg|mpeg)$/i.test(file.name || '');
+            
+            // Add a default click listener for the whole card
+            div.addEventListener('click', (e) => {
+                if (e.target.closest('button')) return;
+                if (isVideo) {
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                } else {
+                    openImageViewer(file.path, cleanTitle(file.name));
+                }
+            });
+
+            let progressHtml = '';
+            if (file.progress && file.progress.current_time > 0) {
+                const pct = (file.progress.current_time / file.progress.duration) * 100;
+                progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+            }
+
             if (category === 'movies' && isVideo) {
                 div.className = 'media-item media-card';
                 const metaTitle = file.omdb?.title || file.omdb?.meta?.Title || cleanTitle(file.name);
@@ -694,8 +735,12 @@ function renderMediaList(category, files) {
                 const poster = file.poster
                     ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : (metaPoster ? `<img class="poster-img" src="${metaPoster}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
+                
+                const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
+
                 div.innerHTML = `
                     ${cardDeleteBtn}
+                    ${renameBtnHtml}
                     <div class="poster-shell">
                         ${poster}
                         <button class="poster-play">Play</button>
@@ -704,13 +749,25 @@ function renderMediaList(category, files) {
                         <div class="card-title">${escapeHtml(metaTitle)}</div>
                         <div class="card-subtitle">${subtitle}</div>
                     </div>
+                    ${progressHtml}
                 `;
-                const btn = div.querySelector('.poster-play');
-                if (btn) {
-                    btn.addEventListener('click', () => {
+
+                const playBtn = div.querySelector('.poster-play');
+                if (playBtn) {
+                    playBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
                         openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                 }
+
+                const renameBtn = div.querySelector('.rename-btn-card');
+                if (renameBtn) {
+                    renameBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await promptRename(file.path, file.name, () => loadMediaPage(category, true));
+                    });
+                }
+
                 div.__movieFile = file;
                 const obs = getMovieMetaObserver();
                 if (obs) obs.observe(div);
@@ -724,25 +781,85 @@ function renderMediaList(category, files) {
                     <div style="padding: 0 10px 12px 10px;">
                         <button class="modal-close play-btn">Play</button>
                     </div>
+                    ${progressHtml}
                 `;
-                const btn = div.querySelector('.play-btn');
-                if (btn) btn.addEventListener('click', () => openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0));
+                const playBtn = div.querySelector('.play-btn');
+                if (playBtn) {
+                    playBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    });
+                }
             } else {
                 div.innerHTML = `
                     ${cardDeleteBtn}
                     ${folderHtml}
                     <h3>${escapeHtml(cleanTitle(file.name))}</h3>
-                    <button class="play-btn" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(cleanTitle(file.name))}')">View Image</button>
+                    <button class="play-btn">View Image</button>
                 `;
-            }
-            
-            if (file.progress && file.progress.current_time > 0) {
-                const pct = (file.progress.current_time / file.progress.duration) * 100;
-                div.innerHTML += `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+                const playBtn = div.querySelector('.play-btn');
+                if (playBtn) {
+                    playBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openImageViewer(file.path, cleanTitle(file.name));
+                    });
+                }
             }
         }
         container.appendChild(div);
     });
+}
+
+async function promptRename(oldPath, oldName, refreshCallback) {
+    const dotIdx = oldName.lastIndexOf('.');
+    const isFile = dotIdx !== -1 && dotIdx > oldName.lastIndexOf('/');
+    const ext = isFile ? oldName.substring(dotIdx) : '';
+    const base = isFile ? oldName.substring(0, dotIdx) : oldName;
+    
+    const newBase = prompt(`Rename ${isFile ? 'File' : 'Folder'} (extension will be preserved):`, base);
+    if (!newBase || newBase === base) return;
+    
+    const newName = newBase + ext;
+    const parts = oldPath.split('/');
+    parts.pop();
+    const newPath = `${parts.join('/')}/${newName}`.replaceAll('//', '/');
+    
+    try {
+        await renameMediaPath(oldPath, newPath);
+        if (refreshCallback) refreshCallback();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function promptRenameShowPart(oldPath, oldName) {
+    const dotIdx = oldName.lastIndexOf('.');
+    const isFile = dotIdx !== -1 && dotIdx > oldName.lastIndexOf('/');
+    const ext = isFile ? oldName.substring(dotIdx) : '';
+    const base = isFile ? oldName.substring(0, dotIdx) : oldName;
+    
+    const newBase = prompt(`Rename ${isFile ? 'File' : 'Folder'} (extension will be preserved):`, base);
+    if (!newBase || newBase === base) return;
+    
+    const newName = newBase + ext;
+    const parts = oldPath.split('/');
+    parts.pop();
+    const newPath = `${parts.join('/')}/${newName}`.replaceAll('//', '/');
+    
+    try {
+        await renameMediaPath(oldPath, newPath);
+        
+        // If we renamed the current show or season, update the state
+        if (showsState.level !== 'shows' && showsState.showName === oldName) {
+            showsState.showName = newBase;
+        } else if (showsState.level === 'episodes' && showsState.seasonName === oldName) {
+            showsState.seasonName = newBase;
+        }
+        
+        await loadShowsLibrary();
+    } catch (err) {
+        alert(err.message);
+    }
 }
 
 async function renameMediaPath(oldPath, newPath) {
@@ -1230,7 +1347,8 @@ function renderShows() {
     container.innerHTML = '';
     if (continueEl) continueEl.innerHTML = '';
 
-    const getDelBtn = (path) => `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="event.stopPropagation(); deleteItem('${escapeHtml(path)}')">×</button>`;
+    const getDelBtn = (path) => path ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="event.stopPropagation(); deleteItem('${escapeHtml(path)}')">×</button>` : '';
+    const getRenameBtn = (path, name) => path ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename" onclick="event.stopPropagation(); promptRenameShowPart('${escapeHtml(path)}', '${escapeHtml(name)}')">✏️</button>` : '';
 
     if (!showsLibraryCache || showsLibraryCache.length === 0) {
         container.innerHTML = '<p>No shows found.</p>';
@@ -1279,19 +1397,45 @@ function renderShows() {
 
                 cont.forEach(item => {
                     const div = document.createElement('div');
-                    div.className = 'media-item';
+                    div.className = 'media-item media-card';
+                    div.style.cursor = 'pointer';
+                    
                     const start = Number(item.progress?.current_time || 0);
-                    div.innerHTML = `
-                        <div style="color:#aaa;font-size:0.85em;margin-bottom:6px;">${escapeHtml(item.showName)} • ${escapeHtml(item.seasonName)}</div>
-                        <h3 style="margin-top:0;">${escapeHtml(item.name)}</h3>
-                        <video width="100%" controls preload="metadata" 
-                            src="${item.path}#t=${start}"
-                            ontimeupdate="updateProgress(this, '${item.path}')"></video>
-                    `;
+                    const posterHtml = item.poster 
+                        ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
+                        : `<div class="poster-placeholder"></div>`;
+
+                    let progressHtml = '';
                     if (item.progress?.duration) {
                         const pct = (Number(item.progress.current_time || 0) / Number(item.progress.duration || 1)) * 100;
-                        div.innerHTML += `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+                        progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
                     }
+
+                    div.innerHTML = `
+                        <div class="poster-shell">
+                            ${posterHtml}
+                            <button class="poster-play">Play</button>
+                        </div>
+                        <div class="card-meta">
+                            <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${escapeHtml(item.showName)} • ${escapeHtml(item.seasonName)}</div>
+                            <div class="card-title">${escapeHtml(item.name)}</div>
+                        </div>
+                        ${progressHtml}
+                    `;
+
+                    div.addEventListener('click', (e) => {
+                        if (e.target.closest('button')) return;
+                        openVideoViewer(item.path, item.name, start);
+                    });
+
+                    const playBtn = div.querySelector('.poster-play');
+                    if (playBtn) {
+                        playBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            openVideoViewer(item.path, item.name, start);
+                        });
+                    }
+
                     grid.appendChild(div);
                 });
 
@@ -1307,6 +1451,7 @@ function renderShows() {
                 : `<div class="show-poster" style="background: radial-gradient(circle at 30% 20%, rgba(229, 9, 20, 0.35), rgba(20, 20, 20, 0.95) 60%);"></div>`;
             div.innerHTML = `
                 ${getDelBtn(show.path)}
+                ${getRenameBtn(show.path, show.name)}
                 ${poster}
                 <div class="show-meta">
                     <h3 class="show-title">${escapeHtml(show.name)}</h3>
@@ -1334,6 +1479,7 @@ function renderShows() {
             div.style.position = 'relative';
             div.innerHTML = `
                 ${getDelBtn(season.path)}
+                ${getRenameBtn(season.path, season.name)}
                 <h3>${escapeHtml(season.name)}</h3>
                 <div style="color:#aaa;font-size:0.9em;">${season.episodes.length} episode(s)</div>
             `;
@@ -1359,24 +1505,45 @@ function renderShows() {
     episodes.forEach(ep => {
         const div = document.createElement('div');
         div.className = 'media-item media-card';
+        div.style.cursor = 'pointer';
+        
+        const posterHtml = ep.poster 
+            ? `<img class="poster-img" src="${ep.poster}" loading="lazy" alt="${escapeHtml(ep.name)}">`
+            : `<div class="poster-placeholder"></div>`;
+
+        let progressHtml = '';
+        if (ep.progress && ep.progress.current_time > 0) {
+            const pct = (ep.progress.current_time / ep.progress.duration) * 100;
+            progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+        }
+
         div.innerHTML = `
             ${getDelBtn(ep.path)}
+            ${getRenameBtn(ep.path, ep.name)}
             <div class="poster-shell">
-                <div class="poster-placeholder"></div>
+                ${posterHtml}
                 <button class="poster-play">Play</button>
             </div>
             <div class="card-meta">
                 <div class="card-title">${escapeHtml(ep.name)}</div>
                 <div class="card-subtitle">${escapeHtml(show.name)} • ${escapeHtml(season.name)}</div>
             </div>
+            ${progressHtml}
         `;
 
-        if (ep.progress && ep.progress.current_time > 0) {
-            const pct = (ep.progress.current_time / ep.progress.duration) * 100;
-            div.innerHTML += `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
-        }
+        div.addEventListener('click', (e) => {
+            if (e.target.closest('button')) return;
+            openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+        });
+
         const btn = div.querySelector('.poster-play');
-        if (btn) btn.addEventListener('click', () => openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0));
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+            });
+        }
+
         container.appendChild(div);
     });
 }
@@ -1434,22 +1601,55 @@ async function loadResume() {
             watching.forEach(file => {
                  const div = document.createElement('div');
                  div.className = 'media-item media-card';
+                 div.style.cursor = 'pointer';
                  const label = file.type ? escapeHtml(file.type) : 'Video';
+                 
+                 const posterHtml = file.poster 
+                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    : `<div class="poster-placeholder"></div>`;
+
+                 const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
+
+                 let progressHtml = '';
+                 if (file.progress && file.progress.duration) {
+                    const pct = (file.progress.current_time / file.progress.duration) * 100;
+                    progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+                 }
+
                  div.innerHTML = `
+                    ${renameBtnHtml}
                     <div class="poster-shell">
-                        <div class="poster-placeholder"></div>
+                        ${posterHtml}
                         <button class="poster-play">Play</button>
                     </div>
                     <div class="card-meta">
-                        <div class="card-title">${escapeHtml(file.name)}</div>
+                        <div class="card-title">${escapeHtml(cleanTitle(file.name))}</div>
                         <div class="card-subtitle">${label}</div>
                     </div>
+                    ${progressHtml}
                  `;
+                 
+                 div.addEventListener('click', (e) => {
+                    if (e.target.closest('button')) return;
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                 });
+
                  const btn = div.querySelector('.poster-play');
-                 if (btn) btn.addEventListener('click', () => openVideoViewer(file.path, file.name, file.progress?.current_time || 0));
-                 if (file.progress?.duration) {
-                    div.innerHTML += `<div class="progress-bar"><div class="fill" style="width:${(file.progress.current_time/file.progress.duration)*100}%"></div></div>`;
+                 if (btn) {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    });
                  }
+
+                 const renameBtn = div.querySelector('.rename-btn-card');
+                 if (renameBtn) {
+                    renameBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await promptRename(file.path, file.name, loadResume);
+                    });
+                 }
+
                  container.appendChild(div);
             });
         } else {

@@ -44,7 +44,7 @@ class IngestHandler(FileSystemEventHandler):
 
             # Check extensions
             ext = os.path.splitext(filename)[1].lower()
-            if ext not in ['.mp4', '.mkv', '.avi', '.mov', '.webm']:
+            if ext not in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg']:
                 return # Ignore non-video files
 
             # Wait for file to be ready (size stability check)

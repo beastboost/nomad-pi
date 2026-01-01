@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Query, BackgroundTasks
+from fastapi.responses import FileResponse
 from typing import List, Dict
 import os
 import posixpath
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 BASE_DIR = "data"
-POSTER_CACHE_DIR = os.path.join(BASE_DIR, ".cache", "posters")
+POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
+os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
 INDEX_TTL = timedelta(hours=12)
 _index_lock = threading.Lock()
 _index_building = {}
@@ -32,6 +34,11 @@ database.init_db()
 
 def get_scan_paths(category: str):
     paths = [os.path.join(BASE_DIR, category)]
+    # Also check data/media/category
+    media_cat_path = os.path.join(BASE_DIR, "media", category)
+    if os.path.exists(media_cat_path):
+        paths.append(media_cat_path)
+
     external_dir = os.path.join(BASE_DIR, "external")
     if os.path.exists(external_dir):
         try:
@@ -250,7 +257,7 @@ def build_library_index(category: str):
 
     allowed = None
     if category in ['movies', 'shows']:
-        allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm'}
+        allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg'}
     elif category == 'music':
         allowed = {'.mp3', '.flac', '.wav', '.m4a'}
     elif category == 'books':
@@ -369,7 +376,7 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
 
     allowed = None
     if category in ['movies', 'shows']:
-        allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm'}
+        allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg'}
     elif category == 'music':
         allowed = {'.mp3', '.flac', '.wav', '.m4a'}
     elif category == 'books':
@@ -787,11 +794,12 @@ def rename_media(data: Dict = Body(...)):
     old_fs = safe_fs_path_from_web_path(old_path)
     new_fs = safe_fs_path_from_web_path(new_path)
 
-    if not os.path.isfile(old_fs):
-        raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.exists(old_fs):
+        raise HTTPException(status_code=404, detail="Path not found")
     if os.path.exists(new_fs):
         raise HTTPException(status_code=409, detail="Destination already exists")
 
+    is_dir = os.path.isdir(old_fs)
     os.makedirs(os.path.dirname(new_fs), exist_ok=True)
     try:
         shutil.move(old_fs, new_fs)
@@ -799,7 +807,7 @@ def rename_media(data: Dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Rename failed: {e}")
 
     try:
-        database.rename_media_path(old_path, new_path)
+        database.rename_media_path(old_path, new_path, is_dir=is_dir)
     except Exception:
         pass
 
@@ -1572,7 +1580,28 @@ def shows_library():
                 shows[show_name][season_name],
                 key=lambda e: (e.get("episode_number") is None, e.get("episode_number") or 0, e["name"].lower())
             )
-            seasons.append({"name": season_name, "season_number": season_number, "episodes": episodes})
-        library.append({"name": show_name, "poster": find_show_poster(show_name) if show_name != "Unsorted" else None, "seasons": seasons})
+            # Find a representative path for the season
+            season_path = None
+            if episodes:
+                # The folder of the first episode is the season folder
+                ep_path = episodes[0]["path"]
+                season_path = "/".join(ep_path.split("/")[:-1])
+            
+            seasons.append({"name": season_name, "season_number": season_number, "episodes": episodes, "path": season_path})
+        
+        # Find a representative path for the show
+        show_path = None
+        if seasons:
+            # The folder of the first season is the show folder
+            s_path = seasons[0]["path"]
+            if s_path:
+                show_path = "/".join(s_path.split("/")[:-1])
+
+        library.append({
+            "name": show_name, 
+            "path": show_path,
+            "poster": find_show_poster(show_name) if show_name != "Unsorted" else None, 
+            "seasons": seasons
+        })
 
     return {"shows": library, "index": idx_info}

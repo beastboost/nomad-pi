@@ -1,14 +1,26 @@
 import sqlite3
 import os
 import json
-from typing import Optional
+import re
+from typing import List, Dict, Optional
 
 DB_PATH = "data/nomad.db"
+
+def natural_sort_key_list(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'([0-9]+)', str(s or ''))]
+
+def natural_compare(a, b):
+    ka = natural_sort_key_list(a)
+    kb = natural_sort_key_list(b)
+    if ka < kb: return -1
+    if ka > kb: return 1
+    return 0
 
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.create_collation("NATURAL", natural_compare)
     return conn
 
 def init_db():
@@ -281,22 +293,27 @@ def query_library_index(category: str, q: str, offset: int, limit: int):
 
     conn = get_db()
     c = conn.cursor()
+    
+    order_by = 'folder COLLATE NATURAL, name COLLATE NATURAL'
+    if category == 'movies':
+        order_by = 'name COLLATE NATURAL'
+    
     if q:
         like = f"%{q}%"
-        c.execute('''
+        c.execute(f'''
             SELECT path, category, name, folder, source, poster, mtime, size
             FROM library_index
             WHERE category = ?
               AND (LOWER(name) LIKE ? OR LOWER(folder) LIKE ?)
-            ORDER BY LOWER(folder), LOWER(name)
+            ORDER BY {order_by}
             LIMIT ? OFFSET ?
         ''', (category, like, like, limit, offset))
     else:
-        c.execute('''
+        c.execute(f'''
             SELECT path, category, name, folder, source, poster, mtime, size
             FROM library_index
             WHERE category = ?
-            ORDER BY LOWER(folder), LOWER(name)
+            ORDER BY {order_by}
             LIMIT ? OFFSET ?
         ''', (category, limit, offset))
 
@@ -317,14 +334,62 @@ def query_library_index(category: str, q: str, offset: int, limit: int):
     conn.close()
     return [dict(r) for r in rows], total
 
-def rename_media_path(old_path: str, new_path: str):
+def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
     if not old_path or not new_path or old_path == new_path:
         return
+    
     conn = get_db()
     c = conn.cursor()
-    c.execute('UPDATE progress SET path = ? WHERE path = ?', (new_path, old_path))
-    c.execute('UPDATE file_metadata SET path = ? WHERE path = ?', (new_path, old_path))
-    c.execute('UPDATE library_index SET path = ? WHERE path = ?', (new_path, old_path))
+    
+    if is_dir:
+        # Update directory path and all children
+        # format: /data/category/folder/...
+        c.execute('UPDATE progress SET path = ? || SUBSTR(path, ?) WHERE path LIKE ? || "/%"', (new_path, len(old_path) + 1, old_path))
+        c.execute('UPDATE file_metadata SET path = ? || SUBSTR(path, ?) WHERE path LIKE ? || "/%"', (new_path, len(old_path) + 1, old_path))
+        
+        # For library_index, we need to update 'path' and 'folder' columns
+        # First, find the category and old folder prefix
+        # old_path looks like /data/category/old_folder_prefix
+        path_parts = old_path.split('/')
+        if len(path_parts) >= 3:
+            category = path_parts[2]
+            # old_folder is relative to /data/category/
+            old_folder_prefix = "/".join(path_parts[3:])
+            
+            new_path_parts = new_path.split('/')
+            new_folder_prefix = "/".join(new_path_parts[3:])
+            
+            if old_folder_prefix:
+                # Update folder column for children
+                # If folder was 'ShowName/Season 1' and we rename 'ShowName' to 'NewShowName'
+                # folder should become 'NewShowName/Season 1'
+                c.execute('''
+                    UPDATE library_index 
+                    SET folder = ? || SUBSTR(folder, ?) 
+                    WHERE category = ? AND (folder = ? OR folder LIKE ? || "/%")
+                ''', (new_folder_prefix, len(old_folder_prefix) + 1, category, old_folder_prefix, old_folder_prefix))
+                
+                # Update name if the directory itself is indexed (rare but possible)
+                c.execute('UPDATE library_index SET name = ? WHERE path = ?', (new_path_parts[-1], old_path))
+
+        c.execute('UPDATE library_index SET path = ? || SUBSTR(path, ?) WHERE path LIKE ? || "/%"', (new_path, len(old_path) + 1, old_path))
+        
+        # Also update the directory itself if it exists in the index
+        c.execute('UPDATE library_index SET path = ? WHERE path = ?', (new_path, old_path))
+    else:
+        # Single file rename
+        parts = new_path.split('/')
+        new_name = parts[-1] if parts else ""
+        new_folder = "."
+        if len(parts) > 3:
+            new_folder = "/".join(parts[3:-1])
+        if not new_folder:
+            new_folder = "."
+
+        c.execute('UPDATE progress SET path = ? WHERE path = ?', (new_path, old_path))
+        c.execute('UPDATE file_metadata SET path = ? WHERE path = ?', (new_path, old_path))
+        c.execute('UPDATE library_index SET path = ?, name = ?, folder = ? WHERE path = ?', (new_path, new_name, new_folder, old_path))
+    
     conn.commit()
     conn.close()
 
