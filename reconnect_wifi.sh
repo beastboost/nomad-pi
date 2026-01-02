@@ -29,10 +29,13 @@ if nmcli connection show --active | grep -q "NomadPi"; then
         sleep 3
         
         # Try to connect to home WiFi
-        HOME_SSID="${HOME_SSID:-}"
+        if [ -f "/etc/nomadpi.env" ]; then
+            source "/etc/nomadpi.env" 2>/dev/null || true
+        fi
+        
         if [ -n "$HOME_SSID" ]; then
-            echo "Attempting to connect to '$HOME_SSID'..."
-            sudo nmcli connection up id "$HOME_SSID"
+            echo "Attempting to connect to '$HOME_SSID' from config..."
+            sudo nmcli connection up id "$HOME_SSID" || sudo nmcli dev wifi connect "$HOME_SSID" password "$HOME_PASS"
         else
             echo "No HOME_SSID set. Listing available WiFi networks..."
             echo ""

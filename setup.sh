@@ -190,9 +190,14 @@ echo "[7/9] Configuring Network..."
 if command -v nmcli &> /dev/null; then
     echo "NetworkManager found."
     
-    # 7a. Hardcoded Home Wi-Fi Setup (giganet6e)
-    HOME_SSID="giganet6e"
-    HOME_PASS="Elijah161030"
+    # 7a. Home Wi-Fi Setup (Optional)
+    # To set a home Wi-Fi, set HOME_SSID and HOME_PASS in /etc/nomadpi.env
+    HOME_SSID=""
+    HOME_PASS=""
+
+    if [ -f "/etc/nomadpi.env" ]; then
+        source "/etc/nomadpi.env" 2>/dev/null || true
+    fi
 
     WIFI_DEV="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
     if [ -z "$WIFI_DEV" ]; then
