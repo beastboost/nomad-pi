@@ -72,7 +72,6 @@ createApp({
             
             // System Control
             services: [],
-            logs: [],
             
             // Update State
             updateStatus: {

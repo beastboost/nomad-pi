@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 from app import database
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 class OmdbKeyRequest(BaseModel):
@@ -429,8 +431,8 @@ def get_logs(lines: int = 100):
             )
             if result.returncode == 0:
                 return {"logs": result.stdout.splitlines()}
-        except:
-            pass
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as e:
+            logger.error(f"Failed to get logs from journalctl (lines={lines}): {e}")
             
     # Fallback: check if a local log file exists
     log_file = "nomad-pi.log"
@@ -440,8 +442,8 @@ def get_logs(lines: int = 100):
                 # Read all lines and take the last N
                 all_lines = f.readlines()
                 return {"logs": [line.strip() for line in all_lines[-lines:]]}
-        except:
-            pass
+        except (OSError, IOError, UnicodeDecodeError) as e:
+            logger.error(f"Failed to read local log file {log_file} (lines={lines}): {e}")
             
     return {"logs": ["No logs available. Check if nomad-pi.log exists or if journalctl is accessible."]}
 

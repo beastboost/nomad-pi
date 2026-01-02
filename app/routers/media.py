@@ -1510,7 +1510,10 @@ def scan_library(background_tasks: BackgroundTasks):
 def find_file_poster(web_path: str):
     try:
         fs_path = safe_fs_path_from_web_path(web_path)
-    except:
+    except HTTPException:
+        return None
+    except Exception as e:
+        logger.warning(f"Unexpected error in find_file_poster for {web_path}: {e}")
         return None
     
     dir_path = os.path.dirname(fs_path)
