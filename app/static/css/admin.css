@@ -351,6 +351,48 @@ body {
     to { opacity: 1; transform: translateX(0); }
 }
 
+/* Log Viewer */
+.log-viewer {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    height: 500px;
+    overflow-y: auto;
+    font-family: 'Fira Code', 'Courier New', Courier, monospace;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+    margin-top: 1rem;
+}
+
+.log-content {
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.log-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.header-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.form-select {
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
 /* Drives & Uploads */
 .drives-grid {
     display: grid;

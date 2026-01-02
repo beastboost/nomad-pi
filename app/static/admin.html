@@ -55,6 +55,11 @@
                         <i class="fas fa-sliders-h"></i>
                         <span v-if="!sidebarCollapsed">Settings</span>
                     </a>
+                    <a href="#" @click.prevent="currentView = 'logs'"
+                       :class="{ active: currentView === 'logs' }" class="nav-item">
+                        <i class="fas fa-terminal"></i>
+                        <span v-if="!sidebarCollapsed">Logs</span>
+                    </a>
                 </nav>
             </aside>
 
@@ -324,6 +329,32 @@
 
                     <!-- Settings View -->
                     <section v-if="currentView === 'settings'" class="view-section">
+                        <!-- existing settings content -->
+                    </section>
+
+                    <!-- Logs View -->
+                    <section v-if="currentView === 'logs'" class="view-section">
+                        <div class="section-header">
+                            <h3>System Logs</h3>
+                            <div class="header-actions">
+                                <select v-model="logLines" @change="fetchLogs" class="form-select">
+                                    <option :value="50">Last 50 lines</option>
+                                    <option :value="100">Last 100 lines</option>
+                                    <option :value="500">Last 500 lines</option>
+                                    <option :value="1000">Last 1000 lines</option>
+                                </select>
+                                <button @click="fetchLogs" class="btn btn-primary">
+                                    <i class="fas fa-sync"></i> Refresh
+                                </button>
+                            </div>
+                        </div>
+                        <div class="log-viewer">
+                            <div v-if="logs.length === 0" class="log-empty">
+                                No logs available.
+                            </div>
+                            <pre v-else class="log-content"><code v-for="(line, index) in logs" :key="index">{{ line }}<br></code></pre>
+                        </div>
+                    </section>
                         <div class="settings-grid">
                             <!-- Security Section -->
                             <div class="settings-card">

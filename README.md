@@ -7,13 +7,17 @@ This project turns your Pi Zero 2W into a portable Wi-Fi Hotspot media center.
 ## Features
 
 - **Offline Streaming**: Creates its own Wi-Fi Hotspot (`NomadPi`). No internet required.
-- **Media Support**: Movies, TV Shows, Music, Books (PDF/EPUB), and **Gallery** (Images/Videos).
-- **Resume Playback**: Automatically tracks progress for Movies and Shows.
+- **Modern Plex-like UI**: Dark mode, responsive grid layout, and metadata cards with hover effects and progress bars.
+- **Offline Metadata & Posters**: Automatically fetches and caches movie/show posters locally for 100% offline access.
+- **Advanced Metadata Parsing**: Intelligent parsing for scene-named files (e.g., `Show.S01E01.1080p...`) and hyphenated titles.
+- **Auto-Organization**: One-click cleanup that moves files into standardized `Show/Season/Episode` or `Movie (Year)` folders.
+- **System Logs Viewer**: Real-time system log monitoring directly from the Admin panel for easier debugging.
+- **Media Support**: Movies, TV Shows, Music, Books (PDF/EPUB/CBR/CBZ), and **Gallery** (Images/Videos).
+- **Resume Playback**: Automatically tracks progress for Movies and Shows across all devices.
 - **Admin Panel**: 
   - **Upload** files directly from the browser.
   - **Mount** external USB drives/sticks on the fly.
-  - **System Control** (Shutdown/Reboot) from the UI.
-- **Modern UI**: Dark mode, responsive grid layout, mobile-friendly.
+  - **System Control** (Shutdown/Reboot) and Wi-Fi/Hotspot management.
 
 ## Installation & Setup (Raspberry Pi)
 

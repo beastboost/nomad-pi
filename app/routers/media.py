@@ -77,7 +77,17 @@ def guess_title_year(name: str):
     # Remove extension
     s = os.path.splitext(os.path.basename(name or ""))[0]
     
-    # 1. Aggressively remove common scene/rip tags FIRST to clean the string
+    # 1. Truncate at common show markers if it looks like a TV show episode
+    show_m = re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b", s)
+    if not show_m:
+        show_m = re.search(r"(?i)\b(\d{1,3})x(\d{1,3})\b", s)
+    if not show_m:
+        show_m = re.search(r"(?i)\bseason\s*(\d{1,3})\s*[\.\-_\s]*\s*episode\s*(\d{1,3})\b", s)
+    
+    if show_m:
+        s = s[:show_m.start()].strip()
+
+    # 2. Aggressively remove common scene/rip tags FIRST to clean the string
     # This helps find the year if it's buried inside brackets
     tags = [
         r'480p', r'720p', r'1080p', r'2160p', r'4k', r'8k',
@@ -86,15 +96,16 @@ def guess_title_year(name: str):
         r'web[- ]dl', r'webrip', r'bluray', r'brrip', r'bdrip', r'dvdrip', r'remux', r'hdtv',
         r'yify', r'yts', r'rarbg', r'ettv', r'psa', r'tgx', r'qxr', r'utp', r'vxt',
         r'dual[- ]audio', r'multi[- ]audio', r'multi', r'hindi', r'english', r'subbed', r'subs',
-        r'proper', r'repack', r'extended', r'director s cut', r'uncut', r'remastered'
+        r'proper', r'repack', r'extended', r'director s cut', r'uncut', r'remastered',
+        r'ctrlhd', r'dimension', r'lol', r'fleet', r'batv', r'asap', r'immerse', r'avs', r'evolve', r'publicHD'
     ]
     
-    # Pre-clean dots/underscores to spaces for tag matching
+    # Pre-clean dots/underscores/hyphens to spaces for tag matching
     s_clean = re.sub(r'[\._\-]+', ' ', s)
     for tag in tags:
         s_clean = re.sub(rf'\b{tag}\b', ' ', s_clean, flags=re.I)
     
-    # 2. Extract year (4 digits starting with 19 or 20)
+    # 3. Extract year (4 digits starting with 19 or 20)
     # We look for a year that is preceded by a space or a bracket
     year = None
     m = re.search(r'(?:\s|[\(\[])(19\d{2}|20\d{2})(?:\s|[\]\)])', s_clean)
@@ -112,9 +123,12 @@ def guess_title_year(name: str):
     else:
         title = s_clean
         
-    # 3. Final cleanup of title (remove trailing brackets/dashes)
+    # 4. Final cleanup of title (remove trailing brackets/dashes)
     title = re.sub(r'[\[\(].*?[\]\)]', ' ', title)
-    title = re.sub(r'[\._\-]+', ' ', title)
+    # Special handling for hyphenated titles: don't replace hyphens if they are surrounded by letters
+    # This preserves "Half-Blood" but cleans "Title - 1080p"
+    title = re.sub(r'(?<!\w)-(?!\w)', ' ', title)
+    title = re.sub(r'[\._]+', ' ', title)
     title = re.sub(r'\s+', ' ', title).strip()
     
     return title or s, year
@@ -480,9 +494,18 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
     return matched[offset: offset + limit]
 
 @router.get("/meta")
-def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default="movie")):
+def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None)):
     if not isinstance(path, str) or not path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid path")
+
+    # Infer media_type if not provided
+    if not media_type:
+        if "/shows/" in path.lower():
+            media_type = "series"
+        elif "/movies/" in path.lower():
+            media_type = "movie"
+        else:
+            media_type = "movie"
 
     cached = database.get_file_metadata(path)
     if cached and not fetch:
@@ -506,8 +529,15 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     except HTTPException:
         fs_path = None
 
-    title_guess, year_guess = guess_title_year(os.path.basename(fs_path or path))
+    filename = os.path.basename(fs_path or path)
+    title_guess, year_guess = guess_title_year(filename)
     
+    # If it's a show, we might want to try both "series" and "movie" (some miniseries are listed as movies)
+    # or if it has SxxExx, definitely try series
+    is_show_pattern = bool(re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b|\b(\d{1,3})x(\d{1,3})\b", filename))
+    if is_show_pattern:
+        media_type = "series"
+
     # Try multiple search variations if the first one fails
     search_queries = [
         (title_guess, year_guess),
@@ -516,8 +546,9 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     
     # If title has multiple words, try stripping the last one if first match fails
     if ' ' in title_guess:
-        shorter = ' '.join(title_guess.split()[:-1])
-        if len(shorter) > 2:
+        words = title_guess.split()
+        if len(words) > 2:
+            shorter = ' '.join(words[:-1])
             search_queries.append((shorter, year_guess))
             search_queries.append((shorter, None))
 
@@ -534,6 +565,13 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
                 last_error = e
                 continue
             
+            # If we tried series and failed, try movie just in case
+            if media_type == "series":
+                try:
+                    meta = omdb_fetch(title=q_title, year=q_year, media_type="movie")
+                    if meta: break
+                except: pass
+
             # Try search if direct fetch fails
             try:
                 search = omdb_search(query=q_title, year=q_year, media_type=media_type)
@@ -969,15 +1007,35 @@ def _infer_show_name_from_filename(path_or_name: str):
 
 def _parse_season_episode(filename: str):
     base = os.path.splitext(os.path.basename(filename or ""))[0]
+    
+    # S01E01, S1E1, S01.E01, S01_E01, S01-E01
     m = re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b", base)
     if m:
         return int(m.group(1)), int(m.group(2))
+        
+    # 1x01, 01x01
     m = re.search(r"(?i)\b(\d{1,3})x(\d{1,3})\b", base)
     if m:
         return int(m.group(1)), int(m.group(2))
+        
+    # Season 1 Episode 1
     m = re.search(r"(?i)\bseason\s*(\d{1,3})\s*[\.\-_\s]*\s*episode\s*(\d{1,3})\b", base)
     if m:
         return int(m.group(1)), int(m.group(2))
+        
+    # [1.01] or (1.01)
+    m = re.search(r"[\[\(](\d{1,2})\.(\d{1,2})[\]\)]", base)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # 101, 1101 (Only if it's 3 or 4 digits and looks like a season/episode)
+    # This is risky, but common for some scene releases
+    m = re.search(r"\b(\d{1,2})(\d{2})\b", base)
+    if m:
+        s, e = int(m.group(1)), int(m.group(2))
+        if 0 < s < 50 and 0 < e < 100:
+            return s, e
+
     return None, None
 
 def _parse_episode_only(filename: str):
@@ -1449,6 +1507,33 @@ def scan_library(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_scan)
     return {"status": "ok", "message": "Library scan started in background."}
 
+def find_file_poster(web_path: str):
+    try:
+        fs_path = safe_fs_path_from_web_path(web_path)
+    except:
+        return None
+    
+    dir_path = os.path.dirname(fs_path)
+    candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
+    
+    # Check current directory
+    for name in candidates:
+        p = os.path.join(dir_path, name)
+        if os.path.isfile(p):
+            rel = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
+            return f"/data/{rel}"
+            
+    # If it's a show episode, check parent directory (show level)
+    parent_dir = os.path.dirname(dir_path)
+    if "/shows/" in web_path.lower():
+        for name in candidates:
+            p = os.path.join(parent_dir, name)
+            if os.path.isfile(p):
+                rel = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
+                return f"/data/{rel}"
+    
+    return None
+
 @router.get("/resume")
 def resume(limit: int = 12):
     all_progress = database.get_all_progress()
@@ -1473,7 +1558,13 @@ def resume(limit: int = 12):
         rel = os.path.relpath(fs_path, BASE_DIR).replace(os.sep, "/")
         parts = rel.split("/")
         media_type = parts[0] if parts else "media"
-        items.append({"name": name, "path": web_path, "type": media_type, "progress": prog})
+        items.append({
+            "name": name, 
+            "path": web_path, 
+            "type": media_type, 
+            "progress": prog,
+            "poster": find_file_poster(web_path)
+        })
 
     def last_played(item):
         lp = item.get("progress", {}).get("last_played")
@@ -1612,6 +1703,19 @@ def shows_library():
         show_poster_cache[show_name] = None
         return None
 
+    def find_season_poster(show_name: str, season_name: str):
+        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
+        for base in paths_to_scan:
+            season_dir = os.path.join(base, show_name, season_name)
+            if not os.path.isdir(season_dir):
+                continue
+            for name in candidates:
+                p = os.path.join(season_dir, name)
+                if os.path.isfile(p):
+                    rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
+                    return f"/data/{rel_from_data}"
+        return find_show_poster(show_name)
+
     idx_info = maybe_start_index_build("shows", force=False)
     offset = 0
     limit = 500
@@ -1644,6 +1748,7 @@ def shows_library():
                 "folder": folder if folder else ".",
                 "source": r.get("source") or ("external" if "external" in (web_path or "") else "local"),
                 "episode_number": parse_episode_number(name),
+                "poster": find_season_poster(show_name, season_name)
             }
             if web_path in all_progress:
                 episode["progress"] = all_progress[web_path]
@@ -1686,7 +1791,8 @@ def shows_library():
                         "path": web_path,
                         "folder": "/".join(parts[:-1]) if len(parts) > 1 else ".",
                         "source": "external" if "external" in rel_from_data else "local",
-                        "episode_number": parse_episode_number(f)
+                        "episode_number": parse_episode_number(f),
+                        "poster": find_season_poster(show_name, season_name)
                     }
                     if web_path in all_progress:
                         episode["progress"] = all_progress[web_path]
@@ -1713,7 +1819,13 @@ def shows_library():
                 ep_path = episodes[0]["path"]
                 season_path = "/".join(ep_path.split("/")[:-1])
             
-            seasons.append({"name": season_name, "season_number": season_number, "episodes": episodes, "path": season_path})
+            seasons.append({
+                "name": season_name, 
+                "season_number": season_number, 
+                "episodes": episodes, 
+                "path": season_path,
+                "poster": find_season_poster(show_name, season_name)
+            })
         
         # Find a representative path for the show
         show_path = None

@@ -743,6 +743,10 @@ function renderMediaList(category, files) {
                     ${renameBtnHtml}
                     <div class="poster-shell">
                         ${poster}
+                        <div class="media-info">
+                            <h3>${escapeHtml(metaTitle)}</h3>
+                            <div class="media-details">${subtitle}</div>
+                        </div>
                         <button class="poster-play">Play</button>
                     </div>
                     <div class="card-meta">
@@ -773,17 +777,24 @@ function renderMediaList(category, files) {
                 if (obs) obs.observe(div);
             } else if (isVideo) {
                 const subtitle = file.folder && file.folder !== '.' ? escapeHtml(file.folder) : '';
+                div.className = 'media-item media-card';
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${folderHtml}
-                    <h3>${escapeHtml(cleanTitle(file.name))}</h3>
-                    ${subtitle ? `<div style="color:#aaa;font-size:0.85em;padding:0 10px 10px 10px;">${subtitle}</div>` : ''}
-                    <div style="padding: 0 10px 12px 10px;">
-                        <button class="modal-close play-btn">Play</button>
+                    <div class="poster-shell">
+                        <div class="poster-placeholder"></div>
+                        <div class="media-info">
+                            <h3>${escapeHtml(cleanTitle(file.name))}</h3>
+                            <div class="media-details">${subtitle || 'Video'}</div>
+                        </div>
+                        <button class="poster-play">Play</button>
+                    </div>
+                    <div class="card-meta">
+                        <div class="card-title">${escapeHtml(cleanTitle(file.name))}</div>
+                        <div class="card-subtitle">${subtitle}</div>
                     </div>
                     ${progressHtml}
                 `;
-                const playBtn = div.querySelector('.play-btn');
+                const playBtn = div.querySelector('.poster-play');
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -1319,7 +1330,8 @@ function collectContinueEpisodes(showName = null) {
                         seasonName: season.name,
                         name: ep.name,
                         path: ep.path,
-                        progress: ep.progress
+                        progress: ep.progress,
+                        poster: ep.poster
                     });
                 }
             }
@@ -1411,13 +1423,19 @@ function renderShows() {
                         progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
                     }
 
+                    const subtitle = `${escapeHtml(item.showName)} • ${escapeHtml(item.seasonName)}`;
+
                     div.innerHTML = `
                         <div class="poster-shell">
                             ${posterHtml}
+                            <div class="media-info">
+                                <h3>${escapeHtml(item.name)}</h3>
+                                <div class="media-details">${subtitle}</div>
+                            </div>
                             <button class="poster-play">Play</button>
                         </div>
                         <div class="card-meta">
-                            <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${escapeHtml(item.showName)} • ${escapeHtml(item.seasonName)}</div>
+                            <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${subtitle}</div>
                             <div class="card-title">${escapeHtml(item.name)}</div>
                         </div>
                         ${progressHtml}
@@ -1449,13 +1467,22 @@ function renderShows() {
             const poster = show.poster
                 ? `<img class="show-poster" src="${show.poster}" loading="lazy" alt="${escapeHtml(show.name)}">`
                 : `<div class="show-poster" style="background: radial-gradient(circle at 30% 20%, rgba(229, 9, 20, 0.35), rgba(20, 20, 20, 0.95) 60%);"></div>`;
+            
+            const subtitle = `${(show.seasons || []).length} season(s)`;
+            
             div.innerHTML = `
                 ${getDelBtn(show.path)}
                 ${getRenameBtn(show.path, show.name)}
-                ${poster}
+                <div class="poster-shell">
+                    ${poster}
+                    <div class="media-info">
+                        <h3>${escapeHtml(show.name)}</h3>
+                        <div class="media-details">${subtitle}</div>
+                    </div>
+                </div>
                 <div class="show-meta">
                     <h3 class="show-title">${escapeHtml(show.name)}</h3>
-                    <div class="show-subtitle">${(show.seasons || []).length} season(s)</div>
+                    <div class="show-subtitle">${subtitle}</div>
                 </div>
             `;
             div.style.cursor = 'pointer';
@@ -1475,15 +1502,30 @@ function renderShows() {
         const seasons = q ? show.seasons.filter(s => s.name.toLowerCase().includes(q)) : show.seasons;
         seasons.forEach(season => {
             const div = document.createElement('div');
-            div.className = 'media-item';
-            div.style.position = 'relative';
+            div.className = 'media-item media-card';
+            div.style.cursor = 'pointer';
+            
+            const posterHtml = season.poster 
+                ? `<img class="poster-img" src="${season.poster}" loading="lazy" alt="${escapeHtml(season.name)}">`
+                : `<div class="poster-placeholder"></div>`;
+
+            const subtitle = `${season.episodes.length} episode(s)`;
+
             div.innerHTML = `
                 ${getDelBtn(season.path)}
                 ${getRenameBtn(season.path, season.name)}
-                <h3>${escapeHtml(season.name)}</h3>
-                <div style="color:#aaa;font-size:0.9em;">${season.episodes.length} episode(s)</div>
+                <div class="poster-shell">
+                    ${posterHtml}
+                    <div class="media-info">
+                        <h3>${escapeHtml(season.name)}</h3>
+                        <div class="media-details">${subtitle}</div>
+                    </div>
+                </div>
+                <div class="card-meta">
+                    <div class="card-title">${escapeHtml(season.name)}</div>
+                    <div class="card-subtitle">${subtitle}</div>
+                </div>
             `;
-            div.style.cursor = 'pointer';
             div.onclick = () => setShowsLevel('episodes', show.name, season.name);
             container.appendChild(div);
         });
@@ -1517,16 +1559,22 @@ function renderShows() {
             progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
         }
 
+        const subtitle = `${escapeHtml(show.name)} • ${escapeHtml(season.name)}`;
+
         div.innerHTML = `
             ${getDelBtn(ep.path)}
             ${getRenameBtn(ep.path, ep.name)}
             <div class="poster-shell">
                 ${posterHtml}
+                <div class="media-info">
+                    <h3>${escapeHtml(ep.name)}</h3>
+                    <div class="media-details">${subtitle}</div>
+                </div>
                 <button class="poster-play">Play</button>
             </div>
             <div class="card-meta">
                 <div class="card-title">${escapeHtml(ep.name)}</div>
-                <div class="card-subtitle">${escapeHtml(show.name)} • ${escapeHtml(season.name)}</div>
+                <div class="card-subtitle">${subtitle}</div>
             </div>
             ${progressHtml}
         `;
@@ -1620,6 +1668,10 @@ async function loadResume() {
                     ${renameBtnHtml}
                     <div class="poster-shell">
                         ${posterHtml}
+                        <div class="media-info">
+                            <h3>${escapeHtml(cleanTitle(file.name))}</h3>
+                            <div class="media-details">${label}</div>
+                        </div>
                         <button class="poster-play">Play</button>
                     </div>
                     <div class="card-meta">

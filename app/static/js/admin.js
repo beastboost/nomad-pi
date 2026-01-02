@@ -22,13 +22,18 @@ createApp({
                 storage: 'Storage & Mounts',
                 system: 'System Control',
                 media: 'Media Library',
-                settings: 'Settings'
+                settings: 'Settings',
+                logs: 'System Logs'
             },
 
             // Authentication
             isAuthenticated: false,
             currentUser: null,
             apiToken: localStorage.getItem('adminToken') || null,
+
+            // Logs State
+            logLines: 100,
+            logs: [],
 
             // System Stats
             stats: {
@@ -210,6 +215,16 @@ createApp({
                 this.settings.omdb_key = response.key;
             } catch (error) {
                 console.error('Error loading settings:', error);
+            }
+        },
+
+        async fetchLogs() {
+            try {
+                const response = await this.apiCall(`/api/system/logs?lines=${this.logLines}`, 'GET');
+                this.logs = response.logs || [];
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                this.showNotification('Failed to fetch logs', 'error');
             }
         },
 
@@ -581,6 +596,9 @@ createApp({
                     if (this.currentView === 'dashboard') {
                         this.loadSystemStats();
                         this.loadStorageInfo();
+                    }
+                    if (this.currentView === 'logs') {
+                        this.fetchLogs();
                     }
                 }, this.settings.refreshInterval);
             }

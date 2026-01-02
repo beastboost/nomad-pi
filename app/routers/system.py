@@ -414,6 +414,37 @@ def get_update_log():
             return {"log": [f"Error reading log: {str(e)}"]}
     return {"log": ["No update log found."]}
 
+@router.get("/logs")
+def get_logs(lines: int = 100):
+    """Retrieve the last N lines of the application log"""
+    # Assuming logs are written to nomad-pi.log or we get them from journalctl on Linux
+    if platform.system() == "Linux":
+        try:
+            # Try to get logs from journalctl for the service
+            result = subprocess.run(
+                ["journalctl", "-u", "nomad-pi", "-n", str(lines), "--no-pager"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return {"logs": result.stdout.splitlines()}
+        except:
+            pass
+            
+    # Fallback: check if a local log file exists
+    log_file = "nomad-pi.log"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                # Read all lines and take the last N
+                all_lines = f.readlines()
+                return {"logs": [line.strip() for line in all_lines[-lines:]]}
+        except:
+            pass
+            
+    return {"logs": ["No logs available. Check if nomad-pi.log exists or if journalctl is accessible."]}
+
 @router.post("/control/{action}")
 def system_control(action: str):
     if action not in ["shutdown", "reboot", "update"]:
@@ -1058,7 +1089,7 @@ def get_processes():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/logs")
+@router.get("/logs/all")
 def get_system_logs(lines: int = 50):
     """Get recent system logs"""
     if platform.system() != "Linux":
