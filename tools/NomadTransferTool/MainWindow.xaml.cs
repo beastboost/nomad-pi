@@ -74,8 +74,9 @@ namespace NomadTransferTool
 
         private void OmdbKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
+            if (OMDB_API_KEY == OmdbKeyBox.Password) return;
             OMDB_API_KEY = OmdbKeyBox.Password;
-            File.WriteAllText("omdb.txt", OMDB_API_KEY);
+            try { File.WriteAllText("omdb.txt", OMDB_API_KEY); } catch { }
         }
 
         private void RefreshDrives()
@@ -91,25 +92,12 @@ namespace NomadTransferTool
                         Name = drive.Name,
                         Label = string.IsNullOrEmpty(drive.VolumeLabel) ? "USB Drive" : drive.VolumeLabel,
                         TotalSize = drive.TotalSize,
-                        AvailableFreeSpace = drive.AvailableFreeSpace,
-                        IsMounted = CheckIfMounted(drive.Name)
+                        AvailableFreeSpace = drive.AvailableFreeSpace
                     };
                     Drives.Add(model);
                     if (model.Name == selectedName) DriveList.SelectedItem = model;
                 }
             }
-        }
-
-        private bool CheckIfMounted(string driveLetter)
-        {
-            if (string.IsNullOrEmpty(mediaServerDataPath)) return false;
-            string externalDir = Path.Combine(mediaServerDataPath, "external");
-            if (!Directory.Exists(externalDir)) return false;
-
-            string folderName = "USB_" + driveLetter.Replace(":\\", "").Replace(":", "");
-            string junctionPath = Path.Combine(externalDir, folderName);
-            
-            return Directory.Exists(junctionPath);
         }
 
         private void StartDriveWatcher()
@@ -139,7 +127,6 @@ namespace NomadTransferTool
                     }
                     
                     MessageBox.Show("Drive prepared with standard folders!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-                    RefreshDrives();
                 }
                 catch (Exception ex)
                 {
@@ -160,13 +147,12 @@ namespace NomadTransferTool
                     try
                     {
                         string driveLetter = drive.Name.Replace(":\\", "");
-                        // format <drive> /FS:exFAT /Q /V:NOMAD /Y
                         var process = new Process();
                         process.StartInfo.FileName = "cmd.exe";
                         process.StartInfo.Arguments = $"/c format {driveLetter}: /FS:exFAT /Q /V:NOMAD /Y";
-                        process.StartInfo.CreateNoWindow = false; // Show window for progress
+                        process.StartInfo.CreateNoWindow = false; 
                         process.StartInfo.UseShellExecute = true;
-                        process.StartInfo.Verb = "runas"; // Requires admin
+                        process.StartInfo.Verb = "runas"; 
                         process.Start();
                         process.WaitForExit();
                         
@@ -179,60 +165,6 @@ namespace NomadTransferTool
                     }
                 }
             }
-        }
-
-        private void MountDrive_Click(object sender, RoutedEventArgs e)
-        {
-            if (DriveList.SelectedItem is DriveInfoModel drive)
-            {
-                MountDrive(drive);
-                RefreshDrives();
-            }
-        }
-
-        private void MountDrive(DriveInfoModel drive)
-        {
-            if (string.IsNullOrEmpty(mediaServerDataPath))
-            {
-                MessageBox.Show("Could not locate Media Server data directory. Please ensure the tool is in the media server project folder.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            string externalDir = Path.Combine(mediaServerDataPath, "external");
-            if (!Directory.Exists(externalDir)) Directory.CreateDirectory(externalDir);
-
-            string folderName = "USB_" + drive.Name.Replace(":\\", "").Replace(":", "");
-            string junctionPath = Path.Combine(externalDir, folderName);
-
-            if (Directory.Exists(junctionPath)) return;
-
-            // Create junction using mklink /J
-            try
-            {
-                var process = new Process();
-                process.StartInfo.FileName = "cmd.exe";
-                process.StartInfo.Arguments = $"/c mklink /J \"{junctionPath}\" \"{drive.Name}\"";
-                process.StartInfo.CreateNoWindow = true;
-                process.StartInfo.UseShellExecute = true; 
-                process.StartInfo.Verb = "runas"; 
-                process.Start();
-                process.WaitForExit();
-                
-                TriggerScan();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to mount drive: {ex.Message}. You may need to run this tool as Administrator.", "Mount Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private async void TriggerScan()
-        {
-            try
-            {
-                await client.PostAsync($"{API_BASE}/media/scan", null);
-            }
-            catch { /* API might be down */ }
         }
 
         private async void Transfer_Drop(object sender, DragEventArgs e)
@@ -256,6 +188,8 @@ namespace NomadTransferTool
                         {
                             try
                             {
+                                if (!File.Exists(file)) continue;
+
                                 string fileName = Path.GetFileName(file);
                                 CurrentStatus = $"Processing: {fileName}";
                                 processedFiles++;
@@ -268,16 +202,21 @@ namespace NomadTransferTool
                                     var meta = await FetchOMDBMetadata(fileName, category);
                                     if (meta != null)
                                     {
-                                        string title = meta.Title;
-                                        string year = meta.Year;
-                                        string cleanTitle = string.Join("_", title.Split(Path.GetInvalidFileNameChars()));
+                                        string metaTitle = meta.Title;
+                                        string metaYear = meta.Year;
+                                        
+                                        // Sanitize title for filesystem
+                                        string safeTitle = string.Join("_", metaTitle.Split(Path.GetInvalidFileNameChars()));
                                         
                                         if (category == "movies")
                                         {
-                                            string folderName = $"{cleanTitle} ({year})";
+                                            // Folder name: "Title (Year)"
+                                            string folderName = $"{safeTitle} ({metaYear})";
                                             string movieFolder = Path.Combine(destBase, folderName);
                                             Directory.CreateDirectory(movieFolder);
-                                            finalDest = Path.Combine(movieFolder, $"{cleanTitle} ({year}){Path.GetExtension(file)}");
+                                            
+                                            // File name: "Title (Year).ext" - this is standard for Plex/Emby/Nomad
+                                            finalDest = Path.Combine(movieFolder, $"{safeTitle} ({metaYear}){Path.GetExtension(file)}");
                                             posterUrl = meta.Poster;
                                             
                                             if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
@@ -287,8 +226,11 @@ namespace NomadTransferTool
                                         }
                                         else if (category == "shows")
                                         {
-                                            string showFolder = Path.Combine(destBase, cleanTitle);
+                                            // Show folder name: "Title"
+                                            string showFolder = Path.Combine(destBase, safeTitle);
                                             Directory.CreateDirectory(showFolder);
+                                            
+                                            // Keep original filename for shows (preserves Season/Episode info)
                                             finalDest = Path.Combine(showFolder, fileName);
                                             posterUrl = meta.Poster;
                                             
@@ -314,7 +256,7 @@ namespace NomadTransferTool
                         TransferSpeed = "";
                         await Task.Delay(2000);
                         IsTransferring = false;
-                        TriggerScan();
+                        Dispatcher.Invoke(RefreshDrives);
                     });
                 }
                 else
@@ -353,14 +295,46 @@ namespace NomadTransferTool
         {
             try
             {
-                string title = Path.GetFileNameWithoutExtension(fileName);
-                title = Regex.Replace(title, @"\b(1080p|720p|4k|2160p|bluray|web-dl|x264|h264|x265|hevc|aac|dts)\b.*", "", RegexOptions.IgnoreCase).Trim();
+                string cleanName = Path.GetFileNameWithoutExtension(fileName);
                 
+                // 1. Extract Year (looks for 4 digits in brackets or preceded by dot/space)
+                string year = "";
+                var yearMatch = Regex.Match(cleanName, @"(?<=[ \.\(\[])(19|20)\d{2}(?=[ \.\)\]]|$)");
+                if (yearMatch.Success)
+                {
+                    year = yearMatch.Value;
+                }
+
+                // 2. Clean Title
+                // Remove everything after the year if found
+                string titlePart = yearMatch.Success ? cleanName.Substring(0, yearMatch.Index) : cleanName;
+                
+                // Replace dots, underscores, hyphens with spaces
+                titlePart = Regex.Replace(titlePart, @"[\._\-]", " ");
+                
+                // Remove common scene/quality tags
+                titlePart = Regex.Replace(titlePart, @"\b(1080p|720p|4k|2160p|bluray|web-dl|x264|h264|x265|hevc|aac|dts|remux|multi|subs|dual|extended|unrated|director.*cut)\b.*", "", RegexOptions.IgnoreCase).Trim();
+                
+                // Final trim and collapse spaces
+                string title = Regex.Replace(titlePart, @"\s+", " ").Trim();
+                
+                if (string.IsNullOrEmpty(title)) return null;
+
                 string type = category == "movies" ? "movie" : "series";
                 string url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
+                if (!string.IsNullOrEmpty(year)) url += $"&y={year}";
                 
                 var response = await client.GetStringAsync(url);
                 var result = JsonConvert.DeserializeObject<OmdbResult>(response);
+                
+                // If we didn't get a result and had a year, try without the year as a fallback
+                if ((result == null || result.Response != "True") && !string.IsNullOrEmpty(year))
+                {
+                    url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
+                    response = await client.GetStringAsync(url);
+                    result = JsonConvert.DeserializeObject<OmdbResult>(response);
+                }
+
                 return result?.Response == "True" ? result : null;
             }
             catch { return null; }
@@ -383,27 +357,6 @@ namespace NomadTransferTool
             public string Year { get; set; } = "";
             public string Poster { get; set; } = "";
             public string Response { get; set; } = "";
-        }
-
-        private void Unmount_Click(object sender, RoutedEventArgs e)
-        {
-             if (string.IsNullOrWhiteSpace(mediaServerDataPath) || !Directory.Exists(Path.Combine(mediaServerDataPath, "external")))
-             {
-                 MessageBox.Show("Could not find media server external directory. Unmount failed.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                 return;
-             }
-
-             if (DriveList.SelectedItem is DriveInfoModel drive)
-             {
-                 string folderName = "USB_" + drive.Name.Replace(":\\", "").Replace(":", "");
-                 string junctionPath = Path.Combine(mediaServerDataPath, "external", folderName);
-                 if (Directory.Exists(junctionPath))
-                 {
-                     Directory.Delete(junctionPath);
-                     RefreshDrives();
-                     TriggerScan();
-                 }
-             }
         }
     }
 
