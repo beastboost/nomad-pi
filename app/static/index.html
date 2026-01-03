@@ -116,18 +116,53 @@
                     <h2>Continue Watching</h2>
                     <div id="resume-list" class="media-grid"></div>
                 </div>
+
+                <div id="recent-section" class="hidden">
+                    <h2>Recently Added</h2>
+                    <div id="recent-list" class="media-grid"></div>
+                </div>
             </section>
 
 
             <section id="movies" class="hidden">
                 <h2>Movies</h2>
-                <input id="movies-search" type="text" placeholder="Search movies..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="filter-bar">
+                    <input id="movies-search" type="text" placeholder="Search movies..." style="flex: 1; min-width: 200px;">
+                    <select id="movies-sort" onchange="loadMovies(true)">
+                        <option value="name">Sort: Name (A-Z)</option>
+                        <option value="newest">Sort: Recently Added</option>
+                        <option value="year_desc">Sort: Year (Newest)</option>
+                        <option value="year_asc">Sort: Year (Oldest)</option>
+                        <option value="top_watched">Sort: Most Watched</option>
+                        <option value="recently_played">Sort: Recently Played</option>
+                    </select>
+                    <select id="movies-genre" onchange="loadMovies(true)">
+                        <option value="">All Genres</option>
+                    </select>
+                    <select id="movies-year" onchange="loadMovies(true)">
+                        <option value="">All Years</option>
+                    </select>
+                </div>
                 <div id="movies-list" class="media-grid"></div>
             </section>
 
             <section id="shows" class="hidden">
                 <h2>TV Shows</h2>
-                <input id="shows-search" type="text" placeholder="Search shows..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="filter-bar">
+                    <input id="shows-search" type="text" placeholder="Search shows..." style="flex: 1; min-width: 200px;">
+                    <select id="shows-sort" onchange="loadShows(true)">
+                        <option value="name">Sort: Name (A-Z)</option>
+                        <option value="newest">Sort: Recently Added</option>
+                        <option value="top_watched">Sort: Most Watched</option>
+                        <option value="recently_played">Sort: Recently Played</option>
+                    </select>
+                    <select id="shows-genre" onchange="loadShows(true)">
+                        <option value="">All Genres</option>
+                    </select>
+                    <select id="shows-year" onchange="loadShows(true)">
+                        <option value="">All Years</option>
+                    </select>
+                </div>
                 <div id="shows-breadcrumb" style="margin:8px 0;color:#aaa;font-size:0.9em;"></div>
                 <div id="shows-continue"></div>
                 <div id="shows-list" class="media-grid"></div>

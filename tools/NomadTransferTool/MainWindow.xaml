@@ -1,0 +1,110 @@
+<Window x:Class="NomadTransferTool.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Nomad Media Transfer Tool" Height="500" Width="700"
+        Background="#1e1e1e" Foreground="White">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <local:BooleanToColorConverter xmlns:local="clr-namespace:NomadTransferTool" x:Key="BooleanToColorConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Nomad Media Transfer Tool" FontSize="24" FontWeight="Bold" Foreground="#e91e63"/>
+                <TextBlock Text="Manage external drives and transfer media effortlessly." Foreground="#aaa"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="OMDb Key:" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#888"/>
+                <PasswordBox x:Name="OmdbKeyBox" Width="150" Background="#2d2d2d" Foreground="White" 
+                             BorderBrush="#3f3f3f" PasswordChanged="OmdbKeyBox_PasswordChanged"/>
+            </StackPanel>
+        </Grid>
+
+        <Separator Grid.Row="1" Background="#333" Margin="0,0,0,15"/>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Drive List -->
+            <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="Connected USB Drives" FontWeight="Bold" Margin="0,0,0,10"/>
+                <ListBox x:Name="DriveList" ItemsSource="{Binding Drives}" Height="220" 
+                         Background="#2d2d2d" BorderBrush="#3f3f3f" Foreground="White">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="5">
+                                <TextBlock Text="{Binding Label}" FontWeight="Bold"/>
+                                <TextBlock Text="{Binding Name}" FontSize="10" Foreground="#888"/>
+                                <TextBlock Text="{Binding SizeDisplay}" FontSize="11"/>
+                                <TextBlock Text="{Binding StatusDisplay}" FontSize="11" 
+                                           Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                
+                <UniformGrid Columns="2" Margin="0,10,0,0">
+                    <Button Content="Prepare Folders" Click="PrepareDrive_Click" Background="#333" Foreground="White" Margin="2"/>
+                    <Button Content="Format Drive" Click="FormatDrive_Click" Background="#c62828" Foreground="White" Margin="2"/>
+                    <Button Content="Mount to Pi" Click="MountDrive_Click" Background="#333" Foreground="White" Margin="2"/>
+                    <Button Content="Unmount" Click="Unmount_Click" Background="#333" Foreground="White" Margin="2"/>
+                </UniformGrid>
+            </StackPanel>
+
+            <!-- Transfer Area -->
+            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <TextBlock Text="Transfer Files" FontWeight="Bold" Margin="0,0,0,10"/>
+                
+                <TextBlock Text="1. Select Category" Margin="0,5"/>
+                <ComboBox x:Name="CategoryCombo" SelectedIndex="0" Background="#2d2d2d" Foreground="White">
+                    <ComboBox.Resources>
+                        <Style TargetType="ComboBoxItem">
+                            <Setter Property="Background" Value="#2d2d2d"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Style>
+                    </ComboBox.Resources>
+                    <ComboBoxItem Content="Movies" Tag="movies"/>
+                    <ComboBoxItem Content="TV Shows" Tag="shows"/>
+                    <ComboBoxItem Content="Music" Tag="music"/>
+                    <ComboBoxItem Content="Books" Tag="books"/>
+                    <ComboBoxItem Content="Gallery" Tag="gallery"/>
+                    <ComboBoxItem Content="General Files" Tag="files"/>
+                </ComboBox>
+
+                <TextBlock Text="2. Drag &amp; Drop Files Below" Margin="0,15,0,5"/>
+                <Border Background="#2d2d2d" BorderBrush="#e91e63" BorderThickness="2" 
+                        CornerRadius="8" Height="150" AllowDrop="True" Drop="Transfer_Drop">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="📥" FontSize="48" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Drop media files here to transfer" HorizontalAlignment="Center" Foreground="#aaa"/>
+                    </StackPanel>
+                </Border>
+                
+                <TextBlock Text="Note: Files will be copied directly to the selected drive and category. A library scan will trigger automatically." 
+                           FontSize="10" Foreground="#777" Margin="0,10" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Footer -->
+        <StatusBar Grid.Row="2" Background="Transparent" Foreground="#555" Margin="0,10,0,0">
+            <StatusBarItem>
+                <TextBlock Text="Ready"/>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

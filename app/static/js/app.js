@@ -284,8 +284,29 @@ function showSection(id) {
     if (id === 'shows') loadShowsLibrary();
     if (id === 'home') {
         loadResume();
+        loadRecent();
         loadStorageStats();
     }
+
+    // Setup search listeners
+    ['movies', 'shows', 'music', 'files'].forEach(cat => {
+        const input = document.getElementById(`${cat}-search`);
+        if (input && !input._listenerAttached) {
+            let timeout = null;
+            input.addEventListener('input', () => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    if (cat === 'movies') loadMovies(true);
+                    else if (cat === 'shows') {
+                        if (showsState.level === 'shows') loadShows(true);
+                        else renderShows(); 
+                    }
+                    else if (cat === 'music' || cat === 'files') loadMedia(cat);
+                }, 500);
+            });
+            input._listenerAttached = true;
+        }
+    });
     if (id === 'admin') {
         loadDrives();
         loadWifiStatus();
@@ -498,12 +519,23 @@ async function loadMediaPage(category, reset) {
     if (!container) return;
 
     const searchInput = document.getElementById(`${category}-search`);
+    const sortSelect = document.getElementById(`${category}-sort`);
+    const genreSelect = document.getElementById(`${category}-genre`);
+    const yearSelect = document.getElementById(`${category}-year`);
+    
     const q = (searchInput?.value || '').trim();
+    const sort = sortSelect?.value || 'name';
+    const genre = genreSelect?.value || '';
+    const year = yearSelect?.value || '';
+    
     const state = getPageState(category);
     if (reset) {
         state.items = [];
         state.offset = 0;
         state.q = q;
+        state.sort = sort;
+        state.genre = genre;
+        state.year = year;
         state.hasMore = true;
         mediaCache[category] = null;
         container.innerHTML = '<div class="loading">Loading...</div>';
@@ -513,7 +545,12 @@ async function loadMediaPage(category, reset) {
     state.loading = true;
 
     try {
-        const res = await fetch(`${API_BASE}/media/list_paged/${category}?offset=${state.offset}&limit=${state.limit}&q=${encodeURIComponent(state.q || '')}`);
+        let url = `${API_BASE}/media/library/${category}?offset=${state.offset}&limit=${state.limit}&q=${encodeURIComponent(state.q || '')}`;
+        if (state.sort) url += `&sort=${state.sort}`;
+        if (state.genre) url += `&genre=${encodeURIComponent(state.genre)}`;
+        if (state.year) url += `&year=${state.year}`;
+        
+        const res = await fetch(url);
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.detail || 'Failed to load media');
@@ -524,11 +561,69 @@ async function loadMediaPage(category, reset) {
         state.hasMore = Boolean(data.has_more);
         mediaCache[category] = state.items;
         renderMediaListPaged(category, state.items, state.hasMore);
+        
+        // Populate filters if they are empty
+        if (reset && (category === 'movies' || category === 'shows')) {
+            updateFilters(category);
+        }
     } catch (e) {
         console.error(e);
         container.innerHTML = '<p>Error loading media.</p>';
     } finally {
         state.loading = false;
+    }
+}
+
+async function updateFilters(category) {
+    const genreSelect = document.getElementById(`${category}-genre`);
+    const yearSelect = document.getElementById(`${category}-year`);
+    if (!genreSelect && !yearSelect) return;
+
+    try {
+        // Fetch genres
+        if (genreSelect) {
+            const gRes = await fetch(`${API_BASE}/media/genres?category=${category}`);
+            if (gRes.ok) {
+                const genres = await gRes.json();
+                const currentGenre = genreSelect.value;
+                genreSelect.innerHTML = '<option value="">All Genres</option>';
+                genres.forEach(g => {
+                    const opt = document.createElement('option');
+                    opt.value = g;
+                    opt.textContent = g;
+                    if (g === currentGenre) opt.selected = true;
+                    genreSelect.appendChild(opt);
+                });
+            }
+        }
+
+        // Fetch years
+        if (yearSelect) {
+            const yRes = await fetch(`${API_BASE}/media/years?category=${category}`);
+            if (yRes.ok) {
+                const years = await yRes.json();
+                const currentYear = yearSelect.value;
+                yearSelect.innerHTML = '<option value="">All Years</option>';
+                years.forEach(y => {
+                    const opt = document.createElement('option');
+                    opt.value = y;
+                    opt.textContent = y;
+                    if (y === currentYear) opt.selected = true;
+                    yearSelect.appendChild(opt);
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load filters", e);
+    }
+}
+
+function loadMovies(reset) { loadMediaPage('movies', reset); }
+function loadShows(reset) { 
+    if (showsState.level === 'shows') {
+        loadMediaPage('shows', reset); 
+    } else {
+        renderShowsLevel();
     }
 }
 
@@ -573,13 +668,12 @@ function renderMediaList(category, files) {
         return;
     }
 
-    files.sort((a, b) => {
-        if (category === 'movies') {
-            return naturalCompare(a.name, b.name);
-        }
-        if ((a.folder || '.') === (b.folder || '.')) return naturalCompare(a.name, b.name);
-        return naturalCompare((a.folder || '.'), (b.folder || '.'));
-    });
+    if (category !== 'movies' && category !== 'shows') {
+        files.sort((a, b) => {
+            if ((a.folder || '.') === (b.folder || '.')) return naturalCompare(a.name, b.name);
+            return naturalCompare((a.folder || '.'), (b.folder || '.'));
+        });
+    }
 
     files.forEach(file => {
         const div = document.createElement('div');
@@ -705,6 +799,47 @@ function renderMediaList(category, files) {
         } else {
             // This is for movies, shows, etc.
             div.style.cursor = 'pointer';
+
+            if (category === 'shows' && showsState.level === 'shows') {
+                // Root level shows view (using data from query_shows)
+                div.className = 'media-item media-card';
+                const poster = file.poster 
+                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    : `<div class="poster-placeholder"></div>`;
+                
+                const subtitle = `${file.episode_count || 0} episodes` + (file.year ? ` • ${file.year}` : '');
+                
+                div.innerHTML = `
+                    <div class="poster-shell">
+                        ${poster}
+                        <div class="media-info">
+                            <h3>${escapeHtml(file.name)}</h3>
+                            <div class="media-details">${subtitle}</div>
+                        </div>
+                        <button class="poster-play">View Seasons</button>
+                    </div>
+                    <div class="card-meta">
+                        <div class="card-title">${escapeHtml(file.name)}</div>
+                        <div class="card-subtitle">${subtitle}</div>
+                    </div>
+                `;
+
+                div.addEventListener('click', (e) => {
+                    if (e.target.closest('button')) return;
+                    setShowsLevel('seasons', file.name);
+                });
+
+                const viewBtn = div.querySelector('.poster-play');
+                if (viewBtn) {
+                    viewBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        setShowsLevel('seasons', file.name);
+                    });
+                }
+                container.appendChild(div);
+                return; // Done with this item
+            }
+
             const isVideo = /\.(mp4|webm|mkv|mov|avi|m4v|ts|wmv|flv|3gp|mpg|mpeg)$/i.test(file.name || '');
             
             // Add a default click listener for the whole card
@@ -1325,10 +1460,37 @@ async function loadShowsLibrary() {
     }
 }
 
+function renderShowsLevel() {
+    const filterBar = document.getElementById('shows-filter-bar');
+    if (filterBar) filterBar.style.display = 'none';
+    
+    const breadcrumb = document.getElementById('shows-breadcrumb');
+    if (breadcrumb) breadcrumb.style.display = 'block';
+    
+    const continueSection = document.getElementById('shows-continue');
+    if (continueSection) continueSection.style.display = 'block';
+    
+    renderShows();
+}
+
 function setShowsLevel(level, showName = null, seasonName = null) {
     showsState = { level, showName, seasonName };
     saveShowsState();
-    renderShows();
+    
+    if (level === 'shows') {
+        const filterBar = document.getElementById('shows-filter-bar');
+        if (filterBar) filterBar.style.display = 'flex';
+        
+        const breadcrumb = document.getElementById('shows-breadcrumb');
+        if (breadcrumb) breadcrumb.style.display = 'none';
+        
+        const continueSection = document.getElementById('shows-continue');
+        if (continueSection) continueSection.style.display = 'none';
+        
+        loadMediaPage('shows', true);
+    } else {
+        renderShowsLevel();
+    }
 }
 
 function shouldContinue(progress) {
@@ -1732,6 +1894,74 @@ async function loadResume() {
 
     } catch(e) {
         console.error(e);
+    }
+}
+
+async function loadRecent() {
+    const container = document.getElementById('recent-list');
+    const section = document.getElementById('recent-section');
+    if (!container) return;
+
+    try {
+        const [mRes, sRes] = await Promise.all([
+            fetch(`${API_BASE}/media/library/movies?sort=newest&limit=6`),
+            fetch(`${API_BASE}/media/library/shows?sort=newest&limit=6`)
+        ]);
+
+        const mData = await mRes.json();
+        const sData = await sRes.json();
+
+        const movies = (mData.items || []).map(m => ({...m, category: 'movies'}));
+        const shows = (sData.items || []).map(s => ({...s, category: 'shows'}));
+
+        const all = [...movies, ...shows].sort((a, b) => {
+            return new Date(b.mtime) - new Date(a.mtime);
+        }).slice(0, 12);
+
+        if (all.length > 0) {
+            section.classList.remove('hidden');
+            container.innerHTML = '';
+            
+            all.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'media-item media-card';
+                div.style.cursor = 'pointer';
+                
+                const title = item.category === 'movies' ? (item.omdb?.title || cleanTitle(item.name)) : item.name;
+                const subtitle = item.category === 'movies' ? 'Movie' : 'TV Show';
+                const poster = item.poster 
+                    ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(title)}">`
+                    : `<div class="poster-placeholder"></div>`;
+
+                div.innerHTML = `
+                    <div class="poster-shell">
+                        ${poster}
+                        <div class="media-info">
+                            <h3>${escapeHtml(title)}</h3>
+                            <div class="media-details">${subtitle}</div>
+                        </div>
+                    </div>
+                    <div class="card-meta">
+                        <div class="card-title">${escapeHtml(title)}</div>
+                        <div class="card-subtitle">${subtitle}</div>
+                    </div>
+                `;
+
+                div.addEventListener('click', () => {
+                    if (item.category === 'movies') {
+                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0);
+                    } else {
+                        showSection('shows');
+                        setShowsLevel('seasons', item.name);
+                    }
+                });
+                container.appendChild(div);
+            });
+        } else {
+            section.classList.add('hidden');
+        }
+    } catch (e) {
+        console.error("Failed to load recent", e);
     }
 }
 

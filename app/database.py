@@ -38,6 +38,7 @@ def init_db():
             path TEXT PRIMARY KEY,
             current_time REAL,
             duration REAL,
+            play_count INTEGER DEFAULT 0,
             last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -67,6 +68,8 @@ def init_db():
             poster TEXT,
             mtime REAL,
             size INTEGER,
+            genre TEXT,
+            year TEXT,
             indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -90,6 +93,20 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Migrations for existing tables
+    try:
+        c.execute("ALTER TABLE progress ADD COLUMN play_count INTEGER DEFAULT 0")
+    except sqlite3.OperationalError: pass
+    
+    try:
+        c.execute("ALTER TABLE library_index ADD COLUMN genre TEXT")
+    except sqlite3.OperationalError: pass
+    
+    try:
+        c.execute("ALTER TABLE library_index ADD COLUMN year TEXT")
+    except sqlite3.OperationalError: pass
+
     conn.commit()
 
 def set_setting(key: str, value: str):
@@ -116,14 +133,38 @@ def get_setting(key: str) -> Optional[str]:
 def update_progress(path: str, current_time: float, duration: float):
     conn = get_db()
     c = conn.cursor()
+    
+    # Check if we should increment play count (e.g., if we reached > 90% and it wasn't already marked)
+    # This is a bit complex for a single query, so we'll just update it.
+    # Frontend will typically send progress updates.
+    
     c.execute('''
-        INSERT INTO progress (path, current_time, duration, last_played)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO progress (path, current_time, duration, last_played, play_count)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)
         ON CONFLICT(path) DO UPDATE SET
             current_time = excluded.current_time,
             duration = excluded.duration,
             last_played = CURRENT_TIMESTAMP
     ''', (path, current_time, duration))
+    
+    # If progress > 90%, we can consider it "played" once. 
+    # But we don't want to increment every time a ping comes.
+    # Maybe the frontend should explicitly call an "increment_play_count" endpoint.
+    # For now, let's just stick to updating progress.
+    
+    conn.commit()
+
+def increment_play_count(path: str):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        UPDATE progress SET play_count = play_count + 1 WHERE path = ?
+    ''', (path,))
+    if c.rowcount == 0:
+        c.execute('''
+            INSERT INTO progress (path, current_time, duration, play_count, last_played)
+            VALUES (?, 0, 0, 1, CURRENT_TIMESTAMP)
+        ''', (path,))
     conn.commit()
 
 def get_progress(path: str) -> Optional[dict]:
@@ -195,8 +236,8 @@ def upsert_library_index_item(item: dict):
     conn = get_db()
     c = conn.cursor()
     c.execute('''
-        INSERT INTO library_index (path, category, name, folder, source, poster, mtime, size, indexed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO library_index (path, category, name, folder, source, poster, mtime, size, genre, year, indexed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(path) DO UPDATE SET
             category = excluded.category,
             name = excluded.name,
@@ -205,6 +246,8 @@ def upsert_library_index_item(item: dict):
             poster = excluded.poster,
             mtime = excluded.mtime,
             size = excluded.size,
+            genre = excluded.genre,
+            year = excluded.year,
             indexed_at = CURRENT_TIMESTAMP
     ''', (
         item.get("path"),
@@ -215,6 +258,8 @@ def upsert_library_index_item(item: dict):
         item.get("poster"),
         item.get("mtime"),
         item.get("size"),
+        item.get("genre"),
+        item.get("year"),
     ))
     conn.commit()
 
@@ -230,8 +275,8 @@ def upsert_library_index_items(items: list):
     conn = get_db()
     c = conn.cursor()
     c.executemany('''
-        INSERT INTO library_index (path, category, name, folder, source, poster, mtime, size, indexed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO library_index (path, category, name, folder, source, poster, mtime, size, genre, year, indexed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(path) DO UPDATE SET
             category = excluded.category,
             name = excluded.name,
@@ -240,6 +285,8 @@ def upsert_library_index_items(items: list):
             poster = excluded.poster,
             mtime = excluded.mtime,
             size = excluded.size,
+            genre = excluded.genre,
+            year = excluded.year,
             indexed_at = CURRENT_TIMESTAMP
     ''', ((
         it.get("path"),
@@ -250,6 +297,8 @@ def upsert_library_index_items(items: list):
         it.get("poster"),
         it.get("mtime"),
         it.get("size"),
+        it.get("genre"),
+        it.get("year"),
     ) for it in items))
     conn.commit()
 
@@ -279,7 +328,30 @@ def get_library_index_state(category: str) -> Optional[dict]:
     row = c.fetchone()
     return dict(row) if row else None
 
-def query_library_index(category: str, q: str, offset: int, limit: int):
+def get_unique_genres(category: str) -> List[str]:
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT DISTINCT genre FROM library_index WHERE category = ? AND genre IS NOT NULL', (category,))
+    rows = c.fetchall()
+    genres = set()
+    for r in rows:
+        if r['genre']:
+            # Genres are often comma separated: "Action, Adventure"
+            parts = [p.strip() for p in r['genre'].split(',')]
+            genres.update(parts)
+    return sorted(list(genres))
+
+def get_unique_years(category: str) -> List[str]:
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT DISTINCT year FROM library_index WHERE category = ? AND year IS NOT NULL ORDER BY year DESC', (category,))
+    return [r['year'] for r in c.fetchall() if r['year']]
+
+def query_library_index(category: str, q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+    if category == 'shows' and offset == 0 and not q and not genre and not year and sort == 'name':
+        # Optional: We could call query_shows here, but let's keep it separate for now
+        pass
+
     q = (q or "").strip().lower()
     offset = max(0, int(offset or 0))
     limit = max(1, min(int(limit or 50), 200))
@@ -287,44 +359,160 @@ def query_library_index(category: str, q: str, offset: int, limit: int):
     conn = get_db()
     c = conn.cursor()
     
-    order_by = 'folder COLLATE NATSORT, name COLLATE NATSORT'
-    if category == 'movies':
-        order_by = 'name COLLATE NATSORT'
+    # Base query joins with progress for sorting by last_played or play_count
+    sql = '''
+        SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
+        FROM library_index l
+        LEFT JOIN progress p ON l.path = p.path
+        WHERE l.category = ?
+    '''
+    params = [category]
     
     if q:
-        like = f"%{q}%"
-        c.execute(f'''
-            SELECT path, category, name, folder, source, poster, mtime, size
-            FROM library_index
-            WHERE category = ?
-              AND (LOWER(name) LIKE ? OR LOWER(folder) LIKE ?)
-            ORDER BY {order_by}
-            LIMIT ? OFFSET ?
-        ''', (category, like, like, limit, offset))
+        sql += ' AND (LOWER(l.name) LIKE ? OR LOWER(l.folder) LIKE ?)'
+        params.extend([f"%{q}%", f"%{q}%"])
+    
+    if genre:
+        sql += ' AND l.genre LIKE ?'
+        params.append(f"%{genre}%")
+        
+    if year:
+        sql += ' AND l.year = ?'
+        params.append(year)
+        
+    # Sorting
+    if sort == 'name':
+        sql += ' ORDER BY l.name COLLATE NATSORT'
+    elif sort == 'newest':
+        sql += ' ORDER BY l.mtime DESC'
+    elif sort == 'oldest':
+        sql += ' ORDER BY l.mtime ASC'
+    elif sort == 'year_desc':
+        sql += ' ORDER BY l.year DESC, l.name COLLATE NATSORT'
+    elif sort == 'year_asc':
+        sql += ' ORDER BY l.year ASC, l.name COLLATE NATSORT'
+    elif sort == 'recently_played':
+        sql += ' ORDER BY p.last_played DESC'
+    elif sort == 'top_watched':
+        sql += ' ORDER BY p.play_count DESC, l.name COLLATE NATSORT'
     else:
-        c.execute(f'''
-            SELECT path, category, name, folder, source, poster, mtime, size
-            FROM library_index
-            WHERE category = ?
-            ORDER BY {order_by}
-            LIMIT ? OFFSET ?
-        ''', (category, limit, offset))
-
+        # Default sort
+        if category == 'movies':
+            sql += ' ORDER BY l.name COLLATE NATSORT'
+        else:
+            sql += ' ORDER BY l.folder COLLATE NATSORT, l.name COLLATE NATSORT'
+            
+    sql += ' LIMIT ? OFFSET ?'
+    params.extend([limit, offset])
+    
+    c.execute(sql, params)
     rows = c.fetchall()
 
+    # Get total count for pagination (reuse filter logic)
+    count_sql = 'SELECT COUNT(1) AS cnt FROM library_index l WHERE l.category = ?'
+    count_params = [category]
     if q:
-        like = f"%{q}%"
-        c.execute('''
-            SELECT COUNT(1) AS cnt
-            FROM library_index
-            WHERE category = ?
-              AND (LOWER(name) LIKE ? OR LOWER(folder) LIKE ?)
-        ''', (category, like, like))
-    else:
-        c.execute('SELECT COUNT(1) AS cnt FROM library_index WHERE category = ?', (category,))
+        count_sql += ' AND (LOWER(l.name) LIKE ? OR LOWER(l.folder) LIKE ?)'
+        count_params.extend([f"%{q}%", f"%{q}%"])
+    if genre:
+        count_sql += ' AND l.genre LIKE ?'
+        count_params.append(f"%{genre}%")
+    if year:
+        count_sql += ' AND l.year = ?'
+        count_params.append(year)
+        
+    c.execute(count_sql, count_params)
     total = int(c.fetchone()["cnt"])
 
     return [dict(r) for r in rows], total
+
+def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Subquery to extract show name and include relevant columns
+    sql_base = '''
+        FROM (
+            SELECT 
+                CASE 
+                    WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
+                    WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
+                    ELSE folder 
+                END as show_name,
+                folder, path, poster, mtime, genre, year, play_count
+            FROM library_index
+            WHERE category = 'shows'
+        ) l
+        LEFT JOIN progress p ON l.path = p.path
+    '''
+    
+    where_clauses = []
+    params = []
+    
+    if q:
+        where_clauses.append('l.show_name LIKE ?')
+        params.append(f"%{q}%")
+    
+    if genre:
+        where_clauses.append('l.genre LIKE ?')
+        params.append(f"%{genre}%")
+        
+    if year:
+        where_clauses.append('l.year = ?')
+        params.append(year)
+        
+    where_sql = ""
+    if where_clauses:
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+        
+    # Grouping query
+    group_sql = f'''
+        SELECT 
+            show_name as name,
+            MAX(l.poster) as poster,
+            MAX(l.mtime) as mtime,
+            MAX(p.last_played) as last_played,
+            COUNT(*) as episode_count,
+            SUM(l.play_count) as total_plays,
+            GROUP_CONCAT(DISTINCT l.genre) as genres,
+            MIN(l.year) as year
+        {sql_base}
+        {where_sql}
+        GROUP BY show_name
+    '''
+    
+    # Get total count for pagination
+    count_sql = f"SELECT COUNT(DISTINCT show_name) {sql_base} {where_sql}"
+    c.execute(count_sql, params)
+    total = c.fetchone()[0]
+    
+    # Sorting
+    order_by = "name COLLATE NATSORT ASC"
+    if sort == 'newest':
+        order_by = "mtime DESC"
+    elif sort == 'top_watched':
+        order_by = "total_plays DESC, episode_count DESC"
+    elif sort == 'recently_played':
+        order_by = "last_played DESC"
+        
+    final_sql = f"{group_sql} ORDER BY {order_by} LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    c.execute(final_sql, params)
+    rows = c.fetchall()
+    
+    items = []
+    for r in rows:
+        item = dict(r)
+        # Clean up genres
+        if item.get('genres'):
+            gs = set()
+            for g_str in item['genres'].split(','):
+                gs.update([p.strip() for p in g_str.split(',')])
+            item['genres'] = sorted(list(gs))
+        items.append(item)
+        
+    return items, total
 
 def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
     if not old_path or not new_path or old_path == new_path:

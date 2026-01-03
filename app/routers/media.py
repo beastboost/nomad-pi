@@ -42,6 +42,7 @@ def get_scan_paths(category: str):
     external_dir = os.path.join(BASE_DIR, "external")
     if os.path.exists(external_dir):
         try:
+            # Check for actual mount points or subfolders in external
             for item in os.listdir(external_dir):
                 drive_path = os.path.join(external_dir, item)
                 if os.path.isdir(drive_path):
@@ -53,6 +54,25 @@ def get_scan_paths(category: str):
                             break
         except Exception:
             pass
+            
+    # Add auto-mounting logic for Linux (Pi)
+    if platform.system() == "Linux":
+        # Check /media/pi or /media/ (standard mount points)
+        for mount_root in ["/media/pi", "/media"]:
+            if os.path.exists(mount_root):
+                try:
+                    for drive in os.listdir(mount_root):
+                        drive_path = os.path.join(mount_root, drive)
+                        if os.path.ismount(drive_path) or os.path.isdir(drive_path):
+                             # Check for category folder
+                             for cat_name in [category, category.capitalize(), category.upper()]:
+                                cat_path = os.path.join(drive_path, cat_name)
+                                if os.path.exists(cat_path):
+                                    if cat_path not in paths:
+                                        paths.append(cat_path)
+                                    break
+                except Exception:
+                    pass
     return paths
 
 def safe_fs_path_from_web_path(web_path: str):
@@ -248,6 +268,77 @@ def cache_remote_poster(poster_url: str):
     rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
     return f"/data/{rel}"
 
+@router.get("/shows/library")
+def get_shows_library():
+    items, total = database.query_library_index("shows", limit=1000000)
+    all_progress = database.get_all_progress()
+    
+    shows_dict = {}
+    
+    def parse_ep_num(name):
+        # Try SxxExx or just Exx
+        m = re.search(r"(?i)\bE(\d{1,3})\b", name)
+        if m: return int(m.group(1))
+        # Try 1x01
+        m = re.search(r"(?i)\b\d+x(\d{1,3})\b", name)
+        if m: return int(m.group(1))
+        # Try just number
+        m = re.search(r"(?i)\b(\d{1,3})\b", name)
+        if m: return int(m.group(1))
+        return 999
+
+    for r in items:
+        web_path = r.get("path")
+        # Extract show and season from folder column: "ShowName/Season 1"
+        folder = r.get("folder") or ""
+        parts = folder.split('/')
+        
+        show_name = parts[0] if len(parts) >= 1 else "Unsorted"
+        season_name = parts[1] if len(parts) >= 2 else "Season 1"
+        
+        # IMPROVEMENT: If show_name contains "Season X", try to split it
+        # This handles folders like "Family Guy Season 14" instead of "Family Guy/Season 14"
+        season_match = re.search(r"(?i)(.*)\s+Season\s+(\d+)", show_name)
+        if season_match and len(parts) == 1:
+            show_name = season_match.group(1).strip()
+            season_name = f"Season {season_match.group(2)}"
+        
+        if show_name not in shows_dict:
+            shows_dict[show_name] = {
+                "name": show_name,
+                "seasons": {}
+            }
+        
+        if season_name not in shows_dict[show_name]["seasons"]:
+            shows_dict[show_name]["seasons"][season_name] = {
+                "name": season_name,
+                "episodes": []
+            }
+            
+        ep = {
+            "name": r.get("name"),
+            "path": web_path,
+            "poster": r.get("poster"),
+            "progress": all_progress.get(web_path),
+            "ep_num": parse_ep_num(r.get("name") or "")
+        }
+        shows_dict[show_name]["seasons"][season_name]["episodes"].append(ep)
+        
+    # Convert to list structure
+    out = []
+    for s_name in sorted(shows_dict.keys(), key=database.natural_sort_key_list):
+        show = shows_dict[s_name]
+        seasons = []
+        for sea_name in sorted(show["seasons"].keys(), key=database.natural_sort_key_list):
+            season = show["seasons"][sea_name]
+            # Sort episodes by episode number, then by natural name
+            season["episodes"].sort(key=lambda x: (x["ep_num"], database.natural_sort_key_list(x["name"])))
+            seasons.append(season)
+        show["seasons"] = seasons
+        out.append(show)
+        
+    return {"shows": out}
+
 @router.get("/stats")
 def get_media_stats():
     stats = {
@@ -260,16 +351,8 @@ def get_media_stats():
     for category in stats.keys():
         try:
             # Check library index
-            index = database.get_library_index(category)
-            if category == "shows":
-                # For shows, count episodes
-                count = 0
-                for show in index:
-                    for season in show.get("seasons", []):
-                        count += len(season.get("episodes", []))
-                stats[category] = count
-            else:
-                stats[category] = len(index)
+            items, total = database.query_library_index(category, limit=1)
+            stats[category] = total
         except Exception:
             # Fallback to file count if index doesn't exist
             count = 0
@@ -353,16 +436,37 @@ def build_library_index(category: str):
                 except Exception:
                     folder = "."
 
+                # Poster lookup
+                p_url = None
+                if category == "movies":
+                    p_url = find_local_poster(root)
+                elif category == "shows":
+                    p_url = find_local_poster(root)
+                    if not p_url:
+                        # Try show-level folder
+                        parent = os.path.dirname(root)
+                        if parent != base and parent != BASE_DIR:
+                            p_url = find_local_poster(parent)
+
                 item = {
                     "path": web_path,
                     "category": category,
                     "name": f,
                     "folder": folder,
                     "source": "external" if "external" in rel_path else "local",
-                    "poster": find_local_poster(root) if category == "movies" else None,
+                    "poster": p_url,
                     "mtime": float(getattr(st, "st_mtime", 0.0) or 0.0),
                     "size": int(getattr(st, "st_size", 0) or 0),
+                    "genre": None,
+                    "year": None
                 }
+                
+                # Try to get genre and year from cached metadata
+                meta = database.get_file_metadata(web_path)
+                if meta:
+                    item["genre"] = meta.get("genre")
+                    item["year"] = meta.get("year")
+                
                 batch.append(item)
                 if len(batch) >= 100:
                     database.upsert_library_index_items(batch)
@@ -507,6 +611,57 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
     matched.sort(key=lambda x: (natural_sort_key(x.get("folder") or "."), natural_sort_key(x.get("name") or "")))
     return matched[offset: offset + limit]
 
+@router.get("/genres")
+def get_genres(category: str = Query(...)):
+    return database.get_unique_genres(category)
+
+@router.get("/years")
+def get_years(category: str = Query(...)):
+    return database.get_unique_years(category)
+
+@router.post("/play_count")
+def increment_play_count(path: str = Body(..., embed=True)):
+    database.increment_play_count(path)
+    return {"status": "success"}
+
+@router.get("/library/{category}")
+def get_library(
+    category: str, 
+    q: str = Query(default=None), 
+    offset: int = Query(default=0), 
+    limit: int = Query(default=50),
+    sort: str = Query(default='name'),
+    genre: str = Query(default=None),
+    year: str = Query(default=None)
+):
+    # Try to use database index if available
+    try:
+        if category == 'shows':
+            items, total = database.query_shows(q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year)
+        else:
+            items, total = database.query_library_index(category, q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year)
+            
+        if total > 0 or q or genre or year:
+            return {
+                "items": items, 
+                "total": total, 
+                "next_offset": offset + len(items),
+                "has_more": (offset + len(items)) < total,
+                "source": "database"
+            }
+    except Exception as e:
+        logger.error(f"Database query failed for {category}: {e}")
+
+    # Fallback to filesystem scan (less features)
+    items = scan_media_page(category, q, offset, limit)
+    return {
+        "items": items, 
+        "total": len(items), 
+        "next_offset": offset + len(items),
+        "has_more": len(items) >= limit,
+        "source": "filesystem"
+    }
+
 @router.get("/meta")
 def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None)):
     if not isinstance(path, str) or not path.startswith("/data/"):
@@ -534,7 +689,7 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
             try:
                 ts = datetime.fromisoformat(fetched_at)
                 if datetime.now() - ts < timedelta(days=30):
-                    return {"configured": True, "cached": True, **cached}
+                    return {"configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), "cached": True, **cached}
             except Exception:
                 pass
 
@@ -546,6 +701,16 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     filename = os.path.basename(fs_path or path)
     title_guess, year_guess = guess_title_year(filename)
     
+    # IMPROVEMENT: If title_guess is very short or generic (like 'movie' or 'video'),
+    # try to use the parent folder name if we are in the movies directory.
+    if "/movies/" in path.lower() and (len(title_guess) < 3 or title_guess.lower() in ["movie", "video", "film"]):
+        parts = [p for p in path.split("/") if p]
+        if len(parts) >= 3: # /data/movies/FolderName/file.mkv
+            folder_name = parts[-2]
+            f_title, f_year = guess_title_year(folder_name)
+            if len(f_title) > len(title_guess):
+                title_guess, year_guess = f_title, f_year or year_guess
+
     # If it's a show, we might want to try both "series" and "movie" (some miniseries are listed as movies)
     # or if it has SxxExx, definitely try series
     is_show_pattern = bool(re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b|\b(\d{1,3})x(\d{1,3})\b", filename))
@@ -558,15 +723,34 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
         (title_guess, None),  # Try without year if year might be wrong
     ]
     
-    # If title looks like a part of a series (e.g. "Toy Story 2"), 
-    # and the direct match fails, we'll try variations in the search scoring.
-    
     # Add variations for titles with numbers at the end (common for sequels)
     m_sequel = re.search(r'(.*)\s+(\d+)$', title_guess)
     if m_sequel:
-        # e.g. "Toy Story 2" -> search "Toy Story" as well
-        search_queries.append((m_sequel.group(1), year_guess))
-        search_queries.append((m_sequel.group(1), None))
+        # e.g. "Toy Story 2" -> search "Toy Story 2" (already in), but also "Toy Story II"
+        base_title = m_sequel.group(1)
+        num = int(m_sequel.group(2))
+        roman = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][num] if num <= 10 else ""
+        if roman:
+            search_queries.append((f"{base_title} {roman}", year_guess))
+            search_queries.append((f"{base_title} {roman}", None))
+        
+        # Also try "Toy Story" as fallback
+        search_queries.append((base_title, year_guess))
+        search_queries.append((base_title, None))
+
+    # Add variation for "The " prefix
+    if title_guess.lower().startswith("the "):
+        no_the = title_guess[4:]
+        search_queries.append((no_the, year_guess))
+        search_queries.append((no_the, None))
+    
+    # Add variation for Harry Potter specific (Philosopher's vs Sorcerer's)
+    if "sorcerer's stone" in title_guess.lower():
+        alt = title_guess.lower().replace("sorcerer's stone", "philosopher's stone")
+        search_queries.append((alt, year_guess))
+    elif "philosopher's stone" in title_guess.lower():
+        alt = title_guess.lower().replace("philosopher's stone", "sorcerer's stone")
+        search_queries.append((alt, year_guess))
 
     # If title has multiple words, try stripping the last one if first match fails
     if ' ' in title_guess:
@@ -661,12 +845,28 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
         if last_error: raise last_error
         raise HTTPException(status_code=404, detail="Could not find metadata for this file. Try renaming it to a cleaner title.")
 
-    cached_poster = cache_remote_poster(meta.get("Poster"))
-    if cached_poster:
-        meta["Poster"] = cached_poster
+    # Cache poster if available
+    if meta.get("Poster") and meta["Poster"] != "N/A":
+        cached_poster = cache_remote_poster(meta["Poster"])
+        if cached_poster:
+            meta["Poster"] = cached_poster
+
     database.upsert_file_metadata(path, media_type, meta)
+    
+    # Also update the library index with genre, year and poster
+    try:
+        database.upsert_library_index_item({
+            "path": path,
+            "genre": meta.get("Genre"),
+            "year": meta.get("Year"),
+            "poster": meta.get("Poster")
+        })
+    except Exception:
+        pass
+
     stored = database.get_file_metadata(path)
     return {"configured": True, "cached": True, **(stored or {})}
+
 
 from fastapi.responses import FileResponse, StreamingResponse
 import mimetypes
@@ -827,12 +1027,21 @@ def browse_files(path: str = Query(default="/data")):
     return {"path": path, "items": items}
 
 @router.get("/list_paged/{category}")
-def list_media_paged(category: str, offset: int = Query(default=0), limit: int = Query(default=60), q: str = Query(default=""), rebuild: bool = Query(default=False)):
+def list_media_paged(
+    category: str, 
+    offset: int = Query(default=0), 
+    limit: int = Query(default=60), 
+    q: str = Query(default=""), 
+    rebuild: bool = Query(default=False),
+    sort: str = Query(default='name'),
+    genre: str = Query(default=None),
+    year: str = Query(default=None)
+):
     if category not in ["movies", "shows", "music", "books", "gallery", "files"]:
         raise HTTPException(status_code=400, detail="Invalid category")
 
     idx_info = maybe_start_index_build(category, force=bool(rebuild))
-    items, total = database.query_library_index(category, q, offset, limit)
+    items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year)
 
     all_progress = database.get_all_progress()
     out = []
@@ -1197,7 +1406,7 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
     moved = 0
     skipped = 0
     errors = 0
-    shows_processed = set()  # Track which shows we've fetched metadata for
+    shows_processed = {}  # Track which shows we've fetched metadata for: name -> meta
 
     for root, _, filenames in os.walk(base):
         for f in filenames:
@@ -1214,12 +1423,23 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                 continue
 
             show_name = ""
+            season_num_from_folder = None
             if len(parts) >= 2:
                 first = parts[0]
                 first_l = first.lower()
-                season_like = first_l.startswith("season") or first_l.startswith("series") or re.match(r"^s\d{1,3}$", first_l or "")
-                if not season_like:
-                    show_name = first
+                
+                # Check for combined show-season folder name (e.g. "Family Guy - Season 14" or "Family Guy Season 14")
+                season_match = re.search(r'(?i)(.*?)\s*(?:[-_]\s*)?(season\s*(\d+)|series\s*(\d+)|\bs(\d+)\b)', first)
+                if season_match:
+                    show_name = season_match.group(1).strip()
+                    # Try to get season number from match groups
+                    s_num_str = season_match.group(3) or season_match.group(4) or season_match.group(5)
+                    if s_num_str:
+                        season_num_from_folder = int(s_num_str)
+                else:
+                    season_like = first_l.startswith("season") or first_l.startswith("series") or re.match(r"^s\d{1,3}$", first_l or "")
+                    if not season_like:
+                        show_name = first
 
             if not show_name:
                 show_name = _infer_show_name_from_filename(f) or "Unsorted"
@@ -1228,7 +1448,10 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
             season_part = parts[1] if len(parts) >= 3 else ""
             season_num, episode_num = _parse_season_episode(f)
             if season_num is None:
-                season_num = _infer_season_from_parts([season_part]) or 1
+                if season_num_from_folder is not None:
+                    season_num = season_num_from_folder
+                else:
+                    season_num = _infer_season_from_parts([season_part]) or 1
             if episode_num is None:
                 episode_num = _parse_episode_only(f)
 
@@ -1273,12 +1496,13 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                 pass
 
             # Fetch OMDB metadata and poster for the show (once per show)
-            if use_omdb and show_name != "Unsorted" and show_name not in shows_processed:
-                shows_processed.add(show_name)
+            meta = shows_processed.get(show_name)
+            if use_omdb and show_name != "Unsorted" and not meta:
                 if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
                     try:
                         # Fetch show metadata
                         meta = omdb_fetch(title=show_name, media_type="series")
+                        shows_processed[show_name] = meta
                         
                         # Cache poster if available
                         poster_url = meta.get("Poster")
@@ -1305,6 +1529,12 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                             logger.warning(f"Failed to fetch OMDB data for {show_name}: {e.detail}")
                     except Exception as e:
                         logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
+
+            if meta:
+                try:
+                    database.upsert_file_metadata(plan["to"], "series", meta)
+                except Exception:
+                    pass
 
             moved += 1
             if moved >= limit:
@@ -1338,20 +1568,83 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
             rel_under = os.path.relpath(src_fs, base).replace(os.sep, "/")
 
             title_guess, year_guess = guess_title_year(f)
+            
+            # IMPROVEMENT: If filename is generic, try parent folder
+            if len(title_guess) < 3 or title_guess.lower() in ["movie", "video", "film", "index"]:
+                parts = [p for p in rel_under.split("/") if p]
+                if len(parts) >= 2: # Folder/file.mkv
+                    folder_name = parts[-2]
+                    f_title, f_year = guess_title_year(folder_name)
+                    if len(f_title) > len(title_guess):
+                        title_guess, year_guess = f_title, f_year or year_guess
+
             title = title_guess
             year = year_guess
             meta = None
             if use_omdb and (os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")):
-                try:
-                    meta = omdb_fetch(title=title_guess, year=year_guess, media_type="movie")
+                # Try variations for common tricky titles
+                search_queries = [title_guess]
+                
+                t_low = title_guess.lower()
+                if "harry potter" in t_low:
+                    if "philosopher" in t_low or "sorcerer" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Sorcerer's Stone")
+                    elif "chamber of secrets" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Chamber of Secrets")
+                    elif "prisoner of azkaban" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Prisoner of Azkaban")
+                    elif "goblet of fire" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Goblet of Fire")
+                    elif "order of the phoenix" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Order of the Phoenix")
+                    elif "half blood prince" in t_low:
+                        search_queries.insert(0, "Harry Potter and the Half-Blood Prince")
+                    elif "deathly hallows" in t_low:
+                        if "1" in t_low or "part 1" in t_low or "i" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 1")
+                        elif "2" in t_low or "part 2" in t_low or "ii" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 2")
+
+                if "toy story" in t_low:
+                    if "2" in t_low or "ii" in t_low: search_queries.insert(0, "Toy Story 2")
+                    elif "3" in t_low or "iii" in t_low: search_queries.insert(0, "Toy Story 3")
+                    elif "4" in t_low or "iv" in t_low: search_queries.insert(0, "Toy Story 4")
+
+                # Try fetching
+                for query in search_queries:
+                    try:
+                        meta = omdb_fetch(title=query, year=year_guess, media_type="movie")
+                        break
+                    except Exception:
+                        try:
+                            # Try without year if it failed with year
+                            if year_guess:
+                                meta = omdb_fetch(title=query, media_type="movie")
+                                break
+                        except Exception:
+                            continue
+                
+                # Final fallback: Search
+                if not meta:
+                    try:
+                        search_res = omdb_search(title_guess, year=year_guess, media_type="movie")
+                        if search_res.get("Search"):
+                            meta = omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
+                    except Exception:
+                        pass
+
+                if meta:
                     t = meta.get("Title")
                     y = meta.get("Year")
                     if isinstance(t, str) and t.strip():
                         title = t.strip()
                     if isinstance(y, str) and y.strip():
-                        year = y.strip()
-                except Exception:
-                    meta = None
+                        # Clean year (sometimes "2010–2015")
+                        y_match = re.search(r"\b(19\d{2}|20\d{2})\b", y)
+                        if y_match:
+                            year = y_match.group(1)
+                        else:
+                            year = y.strip()
 
             title = _sanitize_movie_part(title) or "Movie"
             folder = f"{title} ({year})" if year else title
@@ -1728,241 +2021,3 @@ def comic_pages(path: str):
         raise HTTPException(status_code=500, detail=f"Failed to read comic: {e}")
 
 
-@router.get("/shows/library")
-def shows_library():
-    all_progress = database.get_all_progress()
-    shows: Dict[str, Dict[str, List[Dict]]] = {}
-
-    def parse_season_number(season: str):
-        m = re.search(r'(?i)(?:season|series)\s*(\d{1,3})', season)
-        if m:
-            return int(m.group(1))
-        m = re.search(r'(?i)\bs(\d{1,3})\b', season)
-        if m:
-            return int(m.group(1))
-        m = re.search(r'(\d{1,3})', season)
-        if m:
-            return int(m.group(1))
-        return None
-
-    def parse_episode_number(filename: str):
-        _, ep = _parse_season_episode(filename)
-        if ep is not None:
-            return ep
-        return _parse_episode_only(filename)
-
-    paths_to_scan = get_scan_paths("shows")
-    show_poster_cache: Dict[str, str] = {}
-
-    def find_show_poster(show_name: str):
-        if show_name in show_poster_cache:
-            return show_poster_cache[show_name]
-        
-        # 1. Check for local files first
-        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
-        for base in paths_to_scan:
-            show_dir = os.path.join(base, show_name)
-            if not os.path.isdir(show_dir):
-                continue
-            for name in candidates:
-                p = os.path.join(show_dir, name)
-                if os.path.isfile(p):
-                    rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                    show_poster_cache[show_name] = f"/data/{rel_from_data}"
-                    return show_poster_cache[show_name]
-        
-        # 2. Check metadata database for any episode in this show that has a cached poster
-        try:
-            conn = database.get_db()
-            c = conn.cursor()
-            # Find any episode path that contains this show name and has a poster
-            # This is a bit of a heuristic but works well for organized libraries
-            query = f"/data/shows/{show_name}/%"
-            c.execute("SELECT poster FROM file_metadata WHERE path LIKE ? AND poster IS NOT NULL AND poster != 'N/A' LIMIT 1", (query,))
-            row = c.fetchone()
-            if row and row['poster']:
-                show_poster_cache[show_name] = row['poster']
-                return show_poster_cache[show_name]
-        except Exception as e:
-            logger.debug(f"Failed to find show poster in DB for {show_name}: {e}")
-
-        show_poster_cache[show_name] = None
-        return None
-
-    def find_season_poster(show_name: str, season_name: str):
-        # 1. Check local season folder
-        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
-        for base in paths_to_scan:
-            season_dir = os.path.join(base, show_name, season_name)
-            if not os.path.isdir(season_dir):
-                continue
-            for name in candidates:
-                p = os.path.join(season_dir, name)
-                if os.path.isfile(p):
-                    rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                    return f"/data/{rel_from_data}"
-        
-        # 2. Check metadata database for any episode in this season
-        try:
-            conn = database.get_db()
-            c = conn.cursor()
-            query = f"/data/shows/{show_name}/{season_name}/%"
-            c.execute("SELECT poster FROM file_metadata WHERE path LIKE ? AND poster IS NOT NULL AND poster != 'N/A' LIMIT 1", (query,))
-            row = c.fetchone()
-            if row and row['poster']:
-                return row['poster']
-        except Exception as e:
-            logger.debug(f"Failed to find season poster in DB for {show_name}/{season_name}: {e}")
-
-        # 3. Fallback to show poster
-        return find_show_poster(show_name)
-
-    idx_info = maybe_start_index_build("shows", force=False)
-    offset = 0
-    limit = 500
-    total = 0
-    while True:
-        rows, total = database.query_library_index("shows", "", offset, limit)
-        if not rows:
-            break
-        for r in rows:
-            web_path = r.get("path")
-            if not web_path:
-                continue
-            folder = (r.get("folder") or ".").replace("\\", "/")
-            name = r.get("name") or os.path.basename(web_path)
-
-            folder_parts = [p for p in folder.split("/") if p and p != "."]
-            
-            # Smart Show/Season Detection
-            show_name = "Unsorted"
-            season_name = "Season 1"
-            
-            if len(folder_parts) >= 2:
-                # Standard: ShowName/SeasonName/File.mkv
-                show_name = folder_parts[0]
-                season_name = folder_parts[1]
-            elif len(folder_parts) == 1:
-                # Flat: ShowName/File.mkv -> Try to find season in filename
-                potential_show = folder_parts[0]
-                if re.search(r'(?i)season\s*\d+|series\s*\d+|\bs\d+\b', potential_show):
-                    # Folder IS the season name, parent might be show? 
-                    # But index only gives us relative folder from 'shows' base
-                    show_name = "Unsorted"
-                    season_name = potential_show
-                else:
-                    show_name = potential_show
-                    season_name = "Season 1"
-            
-            # If still Unsorted, try to infer show name from filename if it has SxxExx
-            if show_name == "Unsorted":
-                inferred = infer_show_name(name)
-                if inferred:
-                    show_name = inferred
-                    
-            # Normalize Season Name (e.g. "S14" -> "Season 14")
-            s_num = parse_season_number(season_name)
-            if s_num is not None and not season_name.lower().startswith("season"):
-                season_name = f"Season {s_num}"
-
-            episode = {
-                "name": name,
-                "path": web_path,
-                "folder": folder if folder else ".",
-                "source": r.get("source") or ("external" if "external" in (web_path or "") else "local"),
-                "episode_number": parse_episode_number(name),
-                "poster": find_season_poster(show_name, season_name)
-            }
-            if web_path in all_progress:
-                episode["progress"] = all_progress[web_path]
-            shows.setdefault(show_name, {}).setdefault(season_name, []).append(episode)
-        offset += len(rows)
-        if offset >= int(total or 0):
-            break
-
-    if not shows and int(total or 0) == 0:
-        for path in paths_to_scan:
-            if not os.path.exists(path):
-                continue
-            for root, _, filenames in os.walk(path):
-                for f in filenames:
-                    if f.startswith('.'):
-                        continue
-                    ext = f.split('.')[-1].lower()
-                    if ext not in ['mp4', 'mkv', 'avi', 'mov', 'webm']:
-                        continue
-
-                    full_path = os.path.join(root, f)
-                    rel_under_category = os.path.relpath(full_path, path).replace(os.sep, "/")
-                    parts = [p for p in rel_under_category.split("/") if p]
-
-                    if len(parts) >= 3:
-                        show_name = parts[0]
-                        season_name = parts[1]
-                    elif len(parts) == 2:
-                        show_name = parts[0]
-                        season_name = "Season 1"
-                    else:
-                        show_name = "Unsorted"
-                        season_name = "Season 1"
-
-                    rel_from_data = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
-                    web_path = f"/data/{rel_from_data}"
-
-                    episode = {
-                        "name": f,
-                        "path": web_path,
-                        "folder": "/".join(parts[:-1]) if len(parts) > 1 else ".",
-                        "source": "external" if "external" in rel_from_data else "local",
-                        "episode_number": parse_episode_number(f),
-                        "poster": find_season_poster(show_name, season_name)
-                    }
-                    if web_path in all_progress:
-                        episode["progress"] = all_progress[web_path]
-
-                    shows.setdefault(show_name, {}).setdefault(season_name, []).append(episode)
-
-    library = []
-    for show_name in sorted(shows.keys(), key=lambda s: s.lower()):
-        seasons = []
-        season_items = []
-        for season_name in shows[show_name].keys():
-            season_items.append((parse_season_number(season_name), season_name))
-
-        season_items.sort(key=lambda t: (t[0] is None, t[0] or 0, t[1].lower()))
-        for season_number, season_name in season_items:
-            episodes = sorted(
-                shows[show_name][season_name],
-                key=lambda e: (e.get("episode_number") is None, e.get("episode_number") or 0, e["name"].lower())
-            )
-            # Find a representative path for the season
-            season_path = None
-            if episodes:
-                # The folder of the first episode is the season folder
-                ep_path = episodes[0]["path"]
-                season_path = "/".join(ep_path.split("/")[:-1])
-            
-            seasons.append({
-                "name": season_name, 
-                "season_number": season_number, 
-                "episodes": episodes, 
-                "path": season_path,
-                "poster": find_season_poster(show_name, season_name)
-            })
-        
-        # Find a representative path for the show
-        show_path = None
-        if seasons:
-            # The folder of the first season is the show folder
-            s_path = seasons[0]["path"]
-            if s_path:
-                show_path = "/".join(s_path.split("/")[:-1])
-
-        library.append({
-            "name": show_name, 
-            "path": show_path,
-            "poster": find_show_poster(show_name) if show_name != "Unsorted" else None, 
-            "seasons": seasons
-        })
-
-    return {"shows": library, "index": idx_info}
