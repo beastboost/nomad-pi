@@ -13,6 +13,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
+using System.IO.Compression;
+using Microsoft.Win32;
+using System.Windows.Forms;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 using Newtonsoft.Json;
 
 namespace NomadTransferTool
@@ -31,13 +36,19 @@ namespace NomadTransferTool
         private string _fileProgress = "";
         private double _totalProgress;
         private string _appStatus = "Nomad v1.3 - Connected";
+        private ObservableCollection<string> _transcodeQueue = new ObservableCollection<string>();
+        private double _currentFileProgress;
+        private bool _isHandbrakeAvailable;
 
         public bool IsTransferring { get => _isTransferring; set { _isTransferring = value; OnPropertyChanged(); } }
         public string CurrentStatus { get => _currentStatus; set { _currentStatus = value; OnPropertyChanged(); } }
         public string TransferSpeed { get => _transferSpeed; set { _transferSpeed = value; OnPropertyChanged(); } }
         public string FileProgress { get => _fileProgress; set { _fileProgress = value; OnPropertyChanged(); } }
         public double TotalProgress { get => _totalProgress; set { _totalProgress = value; OnPropertyChanged(); } }
+        public double CurrentFileProgress { get => _currentFileProgress; set { _currentFileProgress = value; OnPropertyChanged(); } }
         public string AppStatus { get => _appStatus; set { _appStatus = value; OnPropertyChanged(); } }
+        public ObservableCollection<string> TranscodeQueue { get => _transcodeQueue; set { _transcodeQueue = value; OnPropertyChanged(); } }
+        public bool IsHandbrakeAvailable { get => _isHandbrakeAvailable; set { _isHandbrakeAvailable = value; OnPropertyChanged(); } }
 
         public ObservableCollection<DriveInfoModel> Drives { get; set; } = new ObservableCollection<DriveInfoModel>();
 
@@ -67,6 +78,71 @@ namespace NomadTransferTool
 
             RefreshDrives();
             StartDriveWatcher();
+            CheckHandbrakeStatus();
+        }
+
+        private void CheckHandbrakeStatus()
+        {
+            string hbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HandbrakeCLI.exe");
+            IsHandbrakeAvailable = File.Exists(hbPath);
+            if (!IsHandbrakeAvailable)
+            {
+                AppStatus = "HandbrakeCLI missing. Click 'Download' to enable transcoding.";
+            }
+        }
+
+        private async Task DownloadHandbrake()
+        {
+            try
+            {
+                CurrentStatus = "Downloading HandbrakeCLI...";
+                IsTransferring = true;
+                TotalProgress = 0;
+
+                string url = "https://github.com/HandBrake/HandBrake/releases/download/1.8.2/HandBrakeCLI-1.8.2-x86_64-Win_Gui.zip";
+                string zipPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "hb.zip");
+
+                using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                {
+                    var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                    {
+                        var buffer = new byte[8192];
+                        var totalRead = 0L;
+                        int read;
+                        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, read);
+                            totalRead += read;
+                            if (totalBytes != -1)
+                            {
+                                TotalProgress = (double)totalRead / totalBytes * 100;
+                                FileProgress = $"Downloading: {totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB";
+                            }
+                        }
+                    }
+                }
+
+                CurrentStatus = "Extracting HandbrakeCLI...";
+                ZipFile.ExtractToDirectory(zipPath, AppDomain.CurrentDomain.BaseDirectory, true);
+                File.Delete(zipPath);
+
+                CheckHandbrakeStatus();
+                CurrentStatus = "HandbrakeCLI Ready!";
+                IsTransferring = false;
+                FileProgress = "";
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Failed to download Handbrake: {ex.Message}");
+                IsTransferring = false;
+            }
+        }
+
+        private async void DownloadHandbrake_Click(object sender, RoutedEventArgs e)
+        {
+            await DownloadHandbrake();
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -126,11 +202,11 @@ namespace NomadTransferTool
                         if (!Directory.Exists(path)) Directory.CreateDirectory(path);
                     }
                     
-                    MessageBox.Show("Drive prepared with standard folders!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                    System.Windows.MessageBox.Show("Drive prepared with standard folders!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Error preparing drive: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show($"Error preparing drive: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
         }
@@ -139,7 +215,7 @@ namespace NomadTransferTool
         {
             if (DriveList.SelectedItem is DriveInfoModel drive)
             {
-                var result = MessageBox.Show($"Are you sure you want to format {drive.Name} ({drive.Label})? ALL DATA WILL BE LOST. We recommend exFAT for compatibility with Pi.", 
+                var result = System.Windows.MessageBox.Show($"Are you sure you want to format {drive.Name} ({drive.Label})? ALL DATA WILL BE LOST. We recommend exFAT for compatibility with Pi.", 
                     "Confirm Format", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                 
                 if (result == MessageBoxResult.Yes)
@@ -157,112 +233,182 @@ namespace NomadTransferTool
                         process.WaitForExit();
                         
                         RefreshDrives();
-                        MessageBox.Show("Format complete. Now click 'Prepare Folders'.");
+                        System.Windows.MessageBox.Show("Format complete. Now click 'Prepare Folders'.");
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show($"Format failed: {ex.Message}");
+                        System.Windows.MessageBox.Show($"Format failed: {ex.Message}");
                     }
                 }
             }
         }
 
-        private async void Transfer_Drop(object sender, DragEventArgs e)
+        private void SelectFiles_Click(object sender, RoutedEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            var dialog = new OpenFileDialog();
+            dialog.Multiselect = true;
+            dialog.Filter = "Media Files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.mp3;*.flac;*.jpg;*.png|All Files|*.*";
+            if (dialog.ShowDialog() == true)
             {
-                string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
-                if (DriveList.SelectedItem is DriveInfoModel drive)
+                ProcessInputs(dialog.FileNames);
+            }
+        }
+
+        private void SelectFolder_Click(object sender, RoutedEventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 {
-                    string category = (CategoryCombo.SelectedItem as FrameworkElement)?.Tag?.ToString() ?? "files";
-                    string destBase = Path.Combine(drive.Name, category);
-                    if (!Directory.Exists(destBase)) Directory.CreateDirectory(destBase);
+                    ProcessInputs(new[] { dialog.SelectedPath });
+                }
+            }
+        }
 
-                    IsTransferring = true;
-                    TotalProgress = 0;
-                    int totalFiles = files.Length;
-                    int processedFiles = 0;
+        private void Transfer_Drop(object sender, System.Windows.DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
+            {
+                string[] inputs = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop);
+                ProcessInputs(inputs);
+            }
+        }
 
-                    await Task.Run(async () => {
-                        foreach (var file in files)
+        private async void ProcessInputs(string[] inputs)
+        {
+            if (DriveList.SelectedItem is DriveInfoModel drive)
+            {
+                string category = (CategoryCombo.SelectedItem as FrameworkElement)?.Tag?.ToString() ?? "files";
+                string destBase = Path.Combine(drive.Name, category);
+                if (!Directory.Exists(destBase)) Directory.CreateDirectory(destBase);
+
+                bool useHandbrake = Dispatcher.Invoke(() => HandbrakeCheck.IsChecked == true);
+                bool autoMove = Dispatcher.Invoke(() => AutoMoveCheck.IsChecked == true);
+
+                // Collect all files recursively if folders were selected
+                List<string> allFiles = new List<string>();
+                foreach (var input in inputs)
+                {
+                    if (Directory.Exists(input))
+                    {
+                        allFiles.AddRange(Directory.GetFiles(input, "*.*", SearchOption.AllDirectories));
+                    }
+                    else if (File.Exists(input))
+                    {
+                        allFiles.Add(input);
+                    }
+                }
+
+                if (allFiles.Count == 0) return;
+
+                IsTransferring = true;
+                TotalProgress = 0;
+                TranscodeQueue.Clear();
+                if (useHandbrake)
+                {
+                    foreach (var f in allFiles) if (IsVideoFile(f)) TranscodeQueue.Add(Path.GetFileName(f));
+                }
+
+                int totalFiles = allFiles.Count;
+                int processedFiles = 0;
+
+                await Task.Run(async () => {
+                    string tempDir = Path.Combine(Path.GetTempPath(), "NomadTransferTemp");
+                    if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+
+                    foreach (var file in allFiles)
+                    {
+                        try
                         {
-                            try
+                            string fileName = Path.GetFileName(file);
+                            CurrentStatus = useHandbrake && IsVideoFile(file) ? $"Transcoding: {fileName}" : $"Processing: {fileName}";
+                            CurrentFileProgress = 0;
+                            
+                            string finalDest = Path.Combine(destBase, fileName);
+                            string? posterUrl = null;
+
+                            // Metadata Lookups (unchanged)
+                            if (!string.IsNullOrEmpty(OMDB_API_KEY) && (category == "movies" || category == "shows"))
                             {
-                                if (!File.Exists(file)) continue;
-
-                                string fileName = Path.GetFileName(file);
-                                CurrentStatus = $"Processing: {fileName}";
-                                processedFiles++;
-                                
-                                string finalDest = Path.Combine(destBase, fileName);
-                                string? posterUrl = null;
-
-                                if (!string.IsNullOrEmpty(OMDB_API_KEY) && (category == "movies" || category == "shows"))
+                                var meta = await FetchOMDBMetadata(fileName, category);
+                                if (meta != null)
                                 {
-                                    var meta = await FetchOMDBMetadata(fileName, category);
-                                    if (meta != null)
+                                    string metaTitle = meta.Title;
+                                    string metaYear = meta.Year;
+                                    string safeTitle = string.Join("_", metaTitle.Split(Path.GetInvalidFileNameChars()));
+                                    
+                                    if (category == "movies")
                                     {
-                                        string metaTitle = meta.Title;
-                                        string metaYear = meta.Year;
-                                        
-                                        // Sanitize title for filesystem
-                                        string safeTitle = string.Join("_", metaTitle.Split(Path.GetInvalidFileNameChars()));
-                                        
-                                        if (category == "movies")
-                                        {
-                                            // Folder name: "Title (Year)"
-                                            string folderName = $"{safeTitle} ({metaYear})";
-                                            string movieFolder = Path.Combine(destBase, folderName);
-                                            Directory.CreateDirectory(movieFolder);
-                                            
-                                            // File name: "Title (Year).ext" - this is standard for Plex/Emby/Nomad
-                                            finalDest = Path.Combine(movieFolder, $"{safeTitle} ({metaYear}){Path.GetExtension(file)}");
-                                            posterUrl = meta.Poster;
-                                            
-                                            if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
-                                            {
-                                                await DownloadPoster(posterUrl, Path.Combine(movieFolder, "poster.jpg"));
-                                            }
-                                        }
-                                        else if (category == "shows")
-                                        {
-                                            // Show folder name: "Title"
-                                            string showFolder = Path.Combine(destBase, safeTitle);
-                                            Directory.CreateDirectory(showFolder);
-                                            
-                                            // Keep original filename for shows (preserves Season/Episode info)
-                                            finalDest = Path.Combine(showFolder, fileName);
-                                            posterUrl = meta.Poster;
-                                            
-                                            if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
-                                            {
-                                                await DownloadPoster(posterUrl, Path.Combine(showFolder, "poster.jpg"));
-                                            }
-                                        }
+                                        string folderName = $"{safeTitle} ({metaYear})";
+                                        string movieFolder = Path.Combine(destBase, folderName);
+                                        Directory.CreateDirectory(movieFolder);
+                                        string ext = useHandbrake ? ".mp4" : Path.GetExtension(file);
+                                        finalDest = Path.Combine(movieFolder, $"{safeTitle} ({metaYear}){ext}");
+                                        posterUrl = meta.Poster;
+                                        if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
+                                            await DownloadPoster(posterUrl, Path.Combine(movieFolder, "poster.jpg"));
+                                    }
+                                    else if (category == "shows")
+                                    {
+                                        string showFolder = Path.Combine(destBase, safeTitle);
+                                        Directory.CreateDirectory(showFolder);
+                                        string ext = useHandbrake ? ".mp4" : Path.GetExtension(file);
+                                        finalDest = Path.Combine(showFolder, Path.GetFileNameWithoutExtension(fileName) + ext);
+                                        posterUrl = meta.Poster;
+                                        if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
+                                            await DownloadPoster(posterUrl, Path.Combine(showFolder, "poster.jpg"));
                                     }
                                 }
+                            }
 
-                                await CopyFileWithProgress(file, finalDest);
-                                TotalProgress = (double)processedFiles / totalFiles * 100;
-                            }
-                            catch (Exception ex)
+                            // Processing
+                            if (useHandbrake && IsVideoFile(file))
                             {
-                                Dispatcher.Invoke(() => MessageBox.Show($"Error processing {file}: {ex.Message}"));
+                                string tempFile = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(file) + ".mp4");
+                                await TranscodeWithHandbrake(file, tempFile);
+                                
+                                Dispatcher.Invoke(() => {
+                                    if (TranscodeQueue.Count > 0) TranscodeQueue.RemoveAt(0);
+                                });
+
+                                if (autoMove)
+                                {
+                                    CurrentStatus = $"Moving to USB: {fileName}";
+                                    if (File.Exists(finalDest)) File.Delete(finalDest);
+                                    await Task.Run(() => File.Move(tempFile, finalDest));
+                                }
+                                else
+                                {
+                                    CurrentStatus = $"Transcode Complete (Temp): {fileName}";
+                                }
                             }
+                            else
+                            {
+                                await CopyFileWithProgress(file, finalDest);
+                            }
+
+                            processedFiles++;
+                            TotalProgress = (double)processedFiles / totalFiles * 100;
                         }
-                        
-                        CurrentStatus = "Transfer Complete!";
-                        FileProgress = "";
-                        TransferSpeed = "";
-                        await Task.Delay(2000);
-                        IsTransferring = false;
-                        Dispatcher.Invoke(RefreshDrives);
-                    });
-                }
-                else
-                {
-                    MessageBox.Show("Please select a target drive first.");
-                }
+                        catch (Exception ex)
+                        {
+                            Dispatcher.Invoke(() => System.Windows.MessageBox.Show($"Error processing {file}: {ex.Message}"));
+                        }
+                    }
+                    
+                    CurrentStatus = "Process Complete!";
+                    FileProgress = "";
+                    TransferSpeed = "";
+                    TotalProgress = 100;
+                    CurrentFileProgress = 100;
+                    await Task.Delay(2000);
+                    IsTransferring = false;
+                    Dispatcher.Invoke(RefreshDrives);
+                });
+            }
+            else
+            {
+                System.Windows.MessageBox.Show("Please select a target drive first.");
             }
         }
 
@@ -285,6 +431,7 @@ namespace NomadTransferTool
                     double progress = (double)totalRead / totalBytes * 100;
                     double speed = totalRead / 1024.0 / 1024.0 / sw.Elapsed.TotalSeconds;
                     
+                    CurrentFileProgress = progress;
                     FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
                     TransferSpeed = $"{speed:F1} MB/s";
                 }
@@ -351,6 +498,73 @@ namespace NomadTransferTool
             catch { }
         }
 
+        private bool IsVideoFile(string file)
+        {
+            string ext = Path.GetExtension(file).ToLower();
+            string[] videoExts = { ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".flv" };
+            return videoExts.Contains(ext);
+        }
+
+        private async Task TranscodeWithHandbrake(string source, string dest)
+        {
+            try
+            {
+                // Find HandbrakeCLI.exe - assume it's in the same folder or in PATH
+                string hbPath = "HandbrakeCLI.exe";
+                if (!File.Exists(hbPath))
+                {
+                    // Check project root as fallback
+                    string fallback = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HandbrakeCLI.exe");
+                    if (File.Exists(fallback)) hbPath = fallback;
+                    else
+                    {
+                        throw new FileNotFoundException("HandbrakeCLI.exe not found. Please place it in the tool folder.");
+                    }
+                }
+
+                // Preset: "Fast 1080p30" is a good balance for Pi compatibility and size
+                string args = $"-i \"{source}\" -o \"{dest}\" --preset=\"Fast 1080p30\"";
+                
+                var process = new Process();
+                process.StartInfo.FileName = hbPath;
+                process.StartInfo.Arguments = args;
+                process.StartInfo.CreateNoWindow = true;
+                process.StartInfo.UseShellExecute = false;
+                process.StartInfo.RedirectStandardError = true;
+                process.StartInfo.RedirectStandardOutput = true;
+
+                process.OutputDataReceived += (s, e) => {
+                    if (e.Data != null)
+                    {
+                        // Look for progress like: "Encoding: task 1 of 1, 12.34 %"
+                        var match = Regex.Match(e.Data, @"(\d+\.\d+)\s*%");
+                        if (match.Success)
+                        {
+                            if (double.TryParse(match.Groups[1].Value, out double progress))
+                            {
+                                CurrentFileProgress = progress;
+                                FileProgress = $"Transcoding: {progress:F1}%";
+                            }
+                        }
+                    }
+                };
+
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                await process.WaitForExitAsync();
+
+                if (process.ExitCode != 0)
+                {
+                    throw new Exception($"Handbrake failed with exit code {process.ExitCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Transcode error: {ex.Message}");
+            }
+        }
+
         public class OmdbResult
         {
             public string Title { get; set; } = "";
@@ -376,8 +590,20 @@ namespace NomadTransferTool
     {
         public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            if (value is bool b && b) return System.Windows.Media.Brushes.LightGreen;
-            return System.Windows.Media.Brushes.Gray;
+            if (value is bool b)
+                return b ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80)) : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(244, 67, 54));
+            return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100));
+        }
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
+    }
+
+    public class InverseBooleanToVisibilityConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            if (value is bool b)
+                return b ? Visibility.Collapsed : Visibility.Visible;
+            return Visibility.Visible;
         }
         public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
     }
