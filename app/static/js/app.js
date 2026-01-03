@@ -1133,11 +1133,17 @@ function openVideoViewer(path, title, startSeconds = 0) {
     const fullUrl = window.location.origin + streamUrl;
     const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
 
+    // Sanitize title and filename
+    const safeTitle = title ? escapeHtml(String(title)) : 'Video';
+    const extMatch = path.match(/\.([a-z0-9]+)$/i);
+    const safeExt = extMatch ? extMatch[0] : '.mp4';
+    const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
+
     heading.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px; width:100%;">
-            <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${title ? String(title) : 'Video'}</span>
+            <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</span>
             <div class="external-player-btns" style="display:flex; gap:8px;">
-                <a href="${streamUrl}" download="${title}.mp4" class="player-action-btn" title="Download for offline playback">
+                <a href="${streamUrl}" download="${escapeHtml(downloadName)}" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
                 </a>
                 <a href="${vlcUrl}" class="player-action-btn vlc-btn" title="Open in VLC (Fixes playback issues)">
