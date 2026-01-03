@@ -6,6 +6,35 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <local:BooleanToColorConverter xmlns:local="clr-namespace:NomadTransferTool" x:Key="BooleanToColorConverter"/>
+        
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#eeeeee"/>
+        </Style>
+        
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#3a3a3a"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <ColorAnimation Storyboard.TargetProperty="(Button.Background).(SolidColorBrush.Color)" To="#555555" Duration="0:0:0.2"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <ColorAnimation Storyboard.TargetProperty="(Button.Background).(SolidColorBrush.Color)" To="#3a3a3a" Duration="0:0:0.2"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.ExitActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -13,6 +42,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -22,17 +52,17 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="Nomad Media Transfer Tool" FontSize="24" FontWeight="Bold" Foreground="#e91e63"/>
-                <TextBlock Text="Manage external drives and transfer media effortlessly." Foreground="#aaa"/>
+                <TextBlock Text="Nomad Media Transfer Tool" FontSize="24" FontWeight="Bold" Foreground="#ff4081"/>
+                <TextBlock Text="Manage external drives and transfer media effortlessly." Foreground="#bbbbbb"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="OMDb Key:" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#888"/>
-                <PasswordBox x:Name="OmdbKeyBox" Width="150" Background="#2d2d2d" Foreground="White" 
-                             BorderBrush="#3f3f3f" PasswordChanged="OmdbKeyBox_PasswordChanged"/>
+                <TextBlock Text="OMDb Key:" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#cccccc"/>
+                <PasswordBox x:Name="OmdbKeyBox" Width="150" Background="#333333" Foreground="White" 
+                             BorderBrush="#444444" PasswordChanged="OmdbKeyBox_PasswordChanged"/>
             </StackPanel>
         </Grid>
 
-        <Separator Grid.Row="1" Background="#333" Margin="0,0,0,15"/>
+        <Separator Grid.Row="1" Background="#444" Margin="0,0,0,15"/>
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
@@ -42,39 +72,41 @@
 
             <!-- Drive List -->
             <StackPanel Grid.Column="0" Margin="0,0,10,0">
-                <TextBlock Text="Connected USB Drives" FontWeight="Bold" Margin="0,0,0,10"/>
-                <ListBox x:Name="DriveList" ItemsSource="{Binding Drives}" Height="220" 
-                         Background="#2d2d2d" BorderBrush="#3f3f3f" Foreground="White">
+                <TextBlock Text="Connected USB Drives" FontWeight="Bold" Margin="0,0,0,10" Foreground="White"/>
+                <ListBox x:Name="DriveList" ItemsSource="{Binding Drives}" Height="200" 
+                         Background="#252525" BorderBrush="#444" Foreground="White">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Margin="5">
-                                <TextBlock Text="{Binding Label}" FontWeight="Bold"/>
-                                <TextBlock Text="{Binding Name}" FontSize="10" Foreground="#888"/>
-                                <TextBlock Text="{Binding SizeDisplay}" FontSize="11"/>
-                                <TextBlock Text="{Binding StatusDisplay}" FontSize="11" 
-                                           Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
-                            </StackPanel>
+                            <Border BorderBrush="#333" BorderThickness="0,0,0,1" Padding="5">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="13" Foreground="White"/>
+                                    <TextBlock Text="{Binding Name}" FontSize="10" Foreground="#999"/>
+                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="11" Foreground="#ccc"/>
+                                    <TextBlock Text="{Binding StatusDisplay}" FontSize="11" FontWeight="Medium"
+                                               Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
+                                </StackPanel>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
                 
                 <UniformGrid Columns="2" Margin="0,10,0,0">
-                    <Button Content="Prepare Folders" Click="PrepareDrive_Click" Background="#333" Foreground="White" Margin="2"/>
-                    <Button Content="Format Drive" Click="FormatDrive_Click" Background="#c62828" Foreground="White" Margin="2"/>
-                    <Button Content="Mount to Pi" Click="MountDrive_Click" Background="#333" Foreground="White" Margin="2"/>
-                    <Button Content="Unmount" Click="Unmount_Click" Background="#333" Foreground="White" Margin="2"/>
+                    <Button Content="Prepare Folders" Click="PrepareDrive_Click" Margin="2"/>
+                    <Button Content="Format Drive" Click="FormatDrive_Click" Background="#d32f2f" Margin="2"/>
+                    <Button Content="Mount to Pi" Click="MountDrive_Click" Margin="2"/>
+                    <Button Content="Unmount" Click="Unmount_Click" Margin="2"/>
                 </UniformGrid>
             </StackPanel>
 
             <!-- Transfer Area -->
             <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                <TextBlock Text="Transfer Files" FontWeight="Bold" Margin="0,0,0,10"/>
+                <TextBlock Text="Transfer Files" FontWeight="Bold" Margin="0,0,0,10" Foreground="White"/>
                 
-                <TextBlock Text="1. Select Category" Margin="0,5"/>
-                <ComboBox x:Name="CategoryCombo" SelectedIndex="0" Background="#2d2d2d" Foreground="White">
+                <TextBlock Text="1. Select Category" Margin="0,5" Foreground="#ccc"/>
+                <ComboBox x:Name="CategoryCombo" SelectedIndex="0" Background="#333" Foreground="White" BorderBrush="#444">
                     <ComboBox.Resources>
                         <Style TargetType="ComboBoxItem">
-                            <Setter Property="Background" Value="#2d2d2d"/>
+                            <Setter Property="Background" Value="#333"/>
                             <Setter Property="Foreground" Value="White"/>
                         </Style>
                     </ComboBox.Resources>
@@ -86,24 +118,35 @@
                     <ComboBoxItem Content="General Files" Tag="files"/>
                 </ComboBox>
 
-                <TextBlock Text="2. Drag &amp; Drop Files Below" Margin="0,15,0,5"/>
-                <Border Background="#2d2d2d" BorderBrush="#e91e63" BorderThickness="2" 
-                        CornerRadius="8" Height="150" AllowDrop="True" Drop="Transfer_Drop">
+                <TextBlock Text="2. Drag &amp; Drop Files Below" Margin="0,15,0,5" Foreground="#ccc"/>
+                <Border Background="#252525" BorderBrush="#ff4081" BorderThickness="2" 
+                        CornerRadius="8" Height="120" AllowDrop="True" Drop="Transfer_Drop">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="📥" FontSize="48" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Drop media files here to transfer" HorizontalAlignment="Center" Foreground="#aaa"/>
+                        <TextBlock Text="📥" FontSize="40" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Drop media files here" HorizontalAlignment="Center" Foreground="#999"/>
                     </StackPanel>
                 </Border>
                 
-                <TextBlock Text="Note: Files will be copied directly to the selected drive and category. A library scan will trigger automatically." 
-                           FontSize="10" Foreground="#777" Margin="0,10" TextWrapping="Wrap"/>
+                <TextBlock Text="Note: Files are organized by OMDb data. Movies get folders + posters automatically." 
+                           FontSize="10" Foreground="#888" Margin="0,10" TextWrapping="Wrap"/>
             </StackPanel>
         </Grid>
 
+        <!-- Progress Area -->
+        <StackPanel Grid.Row="3" Margin="0,10,0,0" Visibility="{Binding IsTransferring, Converter={StaticResource BoolToVis}}">
+            <Grid Margin="0,0,0,5">
+                <TextBlock x:Name="StatusText" Text="{Binding CurrentStatus}" Foreground="#eee"/>
+                <TextBlock x:Name="SpeedText" Text="{Binding TransferSpeed}" HorizontalAlignment="Right" Foreground="#aaa"/>
+            </Grid>
+            <ProgressBar x:Name="MainProgress" Height="15" Value="{Binding TotalProgress}" 
+                         Background="#333" Foreground="#ff4081" BorderThickness="0"/>
+            <TextBlock x:Name="FileProgressText" Text="{Binding FileProgress}" FontSize="11" Foreground="#888" Margin="0,2,0,0"/>
+        </StackPanel>
+
         <!-- Footer -->
-        <StatusBar Grid.Row="2" Background="Transparent" Foreground="#555" Margin="0,10,0,0">
+        <StatusBar Grid.Row="4" Background="Transparent" Foreground="#666" Margin="0,5,0,0">
             <StatusBarItem>
-                <TextBlock Text="Ready"/>
+                <TextBlock Text="{Binding AppStatus}"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

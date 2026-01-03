@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj": {}
+    "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj": {}
   },
   "projects": {
-    "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj": {
+    "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
+        "projectUniqueName": "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
         "projectName": "NomadTransferTool",
-        "projectPath": "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
+        "projectPath": "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
         "packagesPath": "C:\\Users\\conne\\.nuget\\packages\\",
-        "outputPath": "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\obj\\",
+        "outputPath": "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\conne\\AppData\\Roaming\\NuGet\\NuGet.Config"

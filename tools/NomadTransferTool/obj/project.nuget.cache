@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "RkoDGIHFy2w=",
+  "dgSpecHash": "5vzx7b9mkW0=",
   "success": true,
-  "projectFilePath": "c:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
+  "projectFilePath": "C:\\Users\\conne\\Documents\\trae_projects\\media server\\tools\\NomadTransferTool\\NomadTransferTool.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\conne\\.nuget\\packages\\communitytoolkit.mvvm\\8.2.2\\communitytoolkit.mvvm.8.2.2.nupkg.sha512",
     "C:\\Users\\conne\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.22\\microsoft.net.illink.tasks.8.0.22.nupkg.sha512",

@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -14,12 +17,27 @@ using Newtonsoft.Json;
 
 namespace NomadTransferTool
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : Window, INotifyPropertyChanged
     {
         private static readonly HttpClient client = new HttpClient();
         private const string API_BASE = "http://localhost:8000/api";
         private string OMDB_API_KEY = "";
         private string mediaServerDataPath = "";
+
+        // UI State
+        private bool _isTransferring;
+        private string _currentStatus = "Ready";
+        private string _transferSpeed = "";
+        private string _fileProgress = "";
+        private double _totalProgress;
+        private string _appStatus = "Nomad v1.3 - Connected";
+
+        public bool IsTransferring { get => _isTransferring; set { _isTransferring = value; OnPropertyChanged(); } }
+        public string CurrentStatus { get => _currentStatus; set { _currentStatus = value; OnPropertyChanged(); } }
+        public string TransferSpeed { get => _transferSpeed; set { _transferSpeed = value; OnPropertyChanged(); } }
+        public string FileProgress { get => _fileProgress; set { _fileProgress = value; OnPropertyChanged(); } }
+        public double TotalProgress { get => _totalProgress; set { _totalProgress = value; OnPropertyChanged(); } }
+        public string AppStatus { get => _appStatus; set { _appStatus = value; OnPropertyChanged(); } }
 
         public ObservableCollection<DriveInfoModel> Drives { get; set; } = new ObservableCollection<DriveInfoModel>();
 
@@ -50,6 +68,9 @@ namespace NomadTransferTool
             RefreshDrives();
             StartDriveWatcher();
         }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        protected void OnPropertyChanged([CallerMemberName] string name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
         private void OmdbKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
@@ -140,7 +161,7 @@ namespace NomadTransferTool
                     {
                         string driveLetter = drive.Name.Replace(":\\", "");
                         // format <drive> /FS:exFAT /Q /V:NOMAD /Y
-                        var process = new System.Diagnostics.Process();
+                        var process = new Process();
                         process.StartInfo.FileName = "cmd.exe";
                         process.StartInfo.Arguments = $"/c format {driveLetter}: /FS:exFAT /Q /V:NOMAD /Y";
                         process.StartInfo.CreateNoWindow = false; // Show window for progress
@@ -186,15 +207,14 @@ namespace NomadTransferTool
             if (Directory.Exists(junctionPath)) return;
 
             // Create junction using mklink /J
-            // Requires process start because there's no native .NET way to create junctions easily
             try
             {
-                var process = new System.Diagnostics.Process();
+                var process = new Process();
                 process.StartInfo.FileName = "cmd.exe";
                 process.StartInfo.Arguments = $"/c mklink /J \"{junctionPath}\" \"{drive.Name}\"";
                 process.StartInfo.CreateNoWindow = true;
-                process.StartInfo.UseShellExecute = true; // UseShellExecute true for potential elevation if needed
-                process.StartInfo.Verb = "runas"; // Request admin if needed for symlink/junction
+                process.StartInfo.UseShellExecute = true; 
+                process.StartInfo.Verb = "runas"; 
                 process.Start();
                 process.WaitForExit();
                 
@@ -226,11 +246,10 @@ namespace NomadTransferTool
                     string destBase = Path.Combine(drive.Name, category);
                     if (!Directory.Exists(destBase)) Directory.CreateDirectory(destBase);
 
-                    if (string.IsNullOrEmpty(OMDB_API_KEY))
-                    {
-                        var result = MessageBox.Show("No OMDB API Key found. Files will be copied as-is. Would you like to enter a key first?", "OMDB Key Missing", MessageBoxButton.YesNo);
-                        if (result == MessageBoxResult.Yes) return;
-                    }
+                    IsTransferring = true;
+                    TotalProgress = 0;
+                    int totalFiles = files.Length;
+                    int processedFiles = 0;
 
                     await Task.Run(async () => {
                         foreach (var file in files)
@@ -238,6 +257,9 @@ namespace NomadTransferTool
                             try
                             {
                                 string fileName = Path.GetFileName(file);
+                                CurrentStatus = $"Processing: {fileName}";
+                                processedFiles++;
+                                
                                 string finalDest = Path.Combine(destBase, fileName);
                                 string? posterUrl = null;
 
@@ -267,7 +289,7 @@ namespace NomadTransferTool
                                         {
                                             string showFolder = Path.Combine(destBase, cleanTitle);
                                             Directory.CreateDirectory(showFolder);
-                                            finalDest = Path.Combine(showFolder, fileName); // Keep original filename for episodes usually
+                                            finalDest = Path.Combine(showFolder, fileName);
                                             posterUrl = meta.Poster;
                                             
                                             if (!string.IsNullOrEmpty(posterUrl) && posterUrl != "N/A")
@@ -278,14 +300,20 @@ namespace NomadTransferTool
                                     }
                                 }
 
-                                File.Copy(file, finalDest, true);
+                                await CopyFileWithProgress(file, finalDest);
+                                TotalProgress = (double)processedFiles / totalFiles * 100;
                             }
                             catch (Exception ex)
                             {
                                 Dispatcher.Invoke(() => MessageBox.Show($"Error processing {file}: {ex.Message}"));
                             }
                         }
-                        Dispatcher.Invoke(() => MessageBox.Show("Transfer & Organization Complete!", "Done"));
+                        
+                        CurrentStatus = "Transfer Complete!";
+                        FileProgress = "";
+                        TransferSpeed = "";
+                        await Task.Delay(2000);
+                        IsTransferring = false;
                         TriggerScan();
                     });
                 }
@@ -296,12 +324,36 @@ namespace NomadTransferTool
             }
         }
 
+        private async Task CopyFileWithProgress(string source, string dest)
+        {
+            byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
+            long totalBytes = new FileInfo(source).Length;
+            long totalRead = 0;
+            
+            using (var sourceStream = File.OpenRead(source))
+            using (var destStream = File.Create(dest))
+            {
+                Stopwatch sw = Stopwatch.StartNew();
+                int read;
+                while ((read = await sourceStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await destStream.WriteAsync(buffer, 0, read);
+                    totalRead += read;
+                    
+                    double progress = (double)totalRead / totalBytes * 100;
+                    double speed = totalRead / 1024.0 / 1024.0 / sw.Elapsed.TotalSeconds;
+                    
+                    FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
+                    TransferSpeed = $"{speed:F1} MB/s";
+                }
+            }
+        }
+
         private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category)
         {
             try
             {
                 string title = Path.GetFileNameWithoutExtension(fileName);
-                // Basic cleanup
                 title = Regex.Replace(title, @"\b(1080p|720p|4k|2160p|bluray|web-dl|x264|h264|x265|hevc|aac|dts)\b.*", "", RegexOptions.IgnoreCase).Trim();
                 
                 string type = category == "movies" ? "movie" : "series";
