@@ -74,6 +74,33 @@ Once the setup is complete and your Pi has rebooted:
 5.  **Add Media**:
     - Use the **Upload** tab to add files.
     - Or plug in a USB drive and use **Admin -> Storage Management** to mount it.
+6.  **Transfer via Windows (Samba)**:
+    - You can map the Nomad Pi as a network drive on Windows for easy file transfers.
+    - Open File Explorer and enter `\\192.168.0.158\nomadpi` (replace with your Pi's current IP).
+    - Use username `beastboost` and your Samba password.
+
+## Network Management
+
+Nomad Pi includes a powerful network configuration tool to handle different environments.
+
+### Using the Network Config Tool
+Run this command on the Pi to manage connections:
+```bash
+chmod +x network_config.sh
+./network_config.sh
+```
+**Options:**
+- **Lock to Hotspot Mode**: Disables all other Wi-Fi connections to ensure the `NomadPi` hotspot is always available.
+- **Configure Home Wi-Fi**: Easily connect to your home router.
+- **Lock to Current Wi-Fi**: Stops the Pi from "hopping" to other saved networks.
+- **Reset Networking**: Clears all saved Wi-Fi credentials and restarts the hotspot.
+
+## External Player Support
+
+If you encounter playback issues on iOS or mobile browsers (e.g., audio codec not supported), use the external player options:
+1. Open any video.
+2. Click the **VLC** button in the header to open the stream directly in the VLC app.
+3. Or click **Download** to save the file for offline viewing.
 
 ## Development & Windows Usage
 

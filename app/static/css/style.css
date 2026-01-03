@@ -724,6 +724,47 @@ h1, h2, h3 {
     margin-bottom: 4px;
 }
 
+/* External Player Buttons */
+.player-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: #fff;
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.player-action-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-2px);
+}
+
+.vlc-btn {
+    background: rgba(255, 128, 0, 0.2);
+    border-color: rgba(255, 128, 0, 0.3);
+}
+
+.vlc-btn:hover {
+    background: rgba(255, 128, 0, 0.4);
+    border-color: rgba(255, 128, 0, 0.6);
+}
+
+@media (max-width: 600px) {
+    .player-action-btn .btn-text {
+        display: none;
+    }
+    .player-action-btn {
+        padding: 8px;
+    }
+}
+
 /* Home Grid */
 .menu-grid {
     display: grid;

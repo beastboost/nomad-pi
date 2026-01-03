@@ -108,9 +108,10 @@ def guess_title_year(name: str):
     # 3. Extract year (4 digits starting with 19 or 20)
     # We look for a year that is preceded by a space or a bracket
     year = None
-    m = re.search(r'(?:\s|[\(\[])(19\d{2}|20\d{2})(?:\s|[\]\)])', s_clean)
+    # Enhanced year regex to handle double brackets like ((2010)) or ( (2010)
+    m = re.search(r'(?:[\s\(\[])+(19\d{2}|20\d{2})(?:[\s\s\)\]])+', s_clean)
     if not m:
-        # Fallback to any 4 digit year
+        # Fallback to any 4 digit year that looks like a year
         m = re.search(r'\b(19\d{2}|20\d{2})\b', s_clean)
         
     if m:
@@ -124,11 +125,16 @@ def guess_title_year(name: str):
         title = s_clean
         
     # 4. Final cleanup of title (remove trailing brackets/dashes)
+    # Clean up empty brackets first (often left by year extraction)
+    title = re.sub(r'\(\s*\)|\s*\[\s*\]', ' ', title)
     title = re.sub(r'[\[\(].*?[\]\)]', ' ', title)
     # Special handling for hyphenated titles: don't replace hyphens if they are surrounded by letters
     # This preserves "Half-Blood" but cleans "Title - 1080p"
     title = re.sub(r'(?<!\w)-(?!\w)', ' ', title)
     title = re.sub(r'[\._]+', ' ', title)
+    
+    # Final trim of any remaining leading/trailing junk
+    title = title.strip(' -_()[]')
     title = re.sub(r'\s+', ' ', title).strip()
     
     return title or s, year
@@ -138,6 +144,14 @@ def normalize_title(s: str):
     s = re.sub(r'[\W_]+', ' ', s, flags=re.UNICODE)
     s = re.sub(r'\s+', ' ', s).strip().lower()
     return s
+
+def infer_show_name(filename: str):
+    # Try to extract show name from S01E01 style
+    m = re.search(r'^(.*?)(?:\bS\d{1,3}\s*[\.\-_\s]*\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b)', filename, re.I)
+    if m:
+        name = m.group(1).replace('.', ' ').replace('_', ' ').strip()
+        if name: return name
+    return None
 
 def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, media_type: str = None):
     api_key = os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")
@@ -544,6 +558,16 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
         (title_guess, None),  # Try without year if year might be wrong
     ]
     
+    # If title looks like a part of a series (e.g. "Toy Story 2"), 
+    # and the direct match fails, we'll try variations in the search scoring.
+    
+    # Add variations for titles with numbers at the end (common for sequels)
+    m_sequel = re.search(r'(.*)\s+(\d+)$', title_guess)
+    if m_sequel:
+        # e.g. "Toy Story 2" -> search "Toy Story" as well
+        search_queries.append((m_sequel.group(1), year_guess))
+        search_queries.append((m_sequel.group(1), None))
+
     # If title has multiple words, try stripping the last one if first match fails
     if ' ' in title_guess:
         words = title_guess.split()
@@ -551,6 +575,15 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
             shorter = ' '.join(words[:-1])
             search_queries.append((shorter, year_guess))
             search_queries.append((shorter, None))
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_queries = []
+    for q in search_queries:
+        if q not in seen:
+            unique_queries.append(q)
+            seen.add(q)
+    search_queries = unique_queries
 
     meta = None
     last_error = None
@@ -581,24 +614,44 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
                     want = normalize_title(q_title)
                     best = None
                     best_score = -1
-                    for r in results[:5]:
+                    for r in results[:10]: # Increase to top 10 for better coverage
                         t = r.get("Title")
                         y = r.get("Year")
                         if not t: continue
                         
                         score = 0
                         norm_t = normalize_title(t)
-                        if norm_t == want: score += 20
-                        elif want in norm_t or norm_t in want: score += 10
                         
-                        if q_year and y and str(y).startswith(str(q_year)):
+                        # Exact match is highest priority
+                        if norm_t == want: 
+                            score += 50
+                        # Sequel match (e.g. "Toy Story 2" matches "Toy Story 2")
+                        elif want in norm_t or norm_t in want: 
+                            score += 20
+                        
+                        # Year matching is very important for series
+                        if q_year and y:
+                            # Handle "2001–2004" or "2001-" year formats from OMDb
+                            y_str = str(y)
+                            if q_year in y_str:
+                                score += 30
+                            elif any(char.isdigit() for char in y_str):
+                                # Check if the year is within a reasonable range (e.g. +/- 1 year)
+                                try:
+                                    y_val = int(re.search(r'\d{4}', y_str).group())
+                                    if abs(y_val - int(q_year)) <= 1:
+                                        score += 15
+                                except: pass
+                            
+                        # Boost movies/series based on the inferred type
+                        if r.get("Type") == media_type:
                             score += 10
                             
                         if best is None or score > best_score:
                             best = r
                             best_score = score
                     
-                    if best and best_score >= 10:
+                    if best and best_score >= 20: # Higher threshold for better accuracy
                         meta = omdb_fetch(imdb_id=best.get("imdbID"), media_type=media_type)
                         break
             except Exception:
@@ -999,9 +1052,15 @@ def _sanitize_show_part(s: str):
 def _infer_show_name_from_filename(path_or_name: str):
     base = os.path.basename(str(path_or_name or ""))
     name = os.path.splitext(base)[0]
-    m = re.match(r"^(.*?)(?:\bS\d{1,3}\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b|\bEpisode\s*\d{1,3}\b)", name, flags=re.IGNORECASE)
+    # Handle dots, underscores, hyphens as spaces for extraction
+    clean_name = re.sub(r'[\._\-]+', ' ', name)
+    m = re.match(r"^(.*?)(?:\bS\d{1,3}\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b|\bEpisode\s*\d{1,3}\b)", clean_name, flags=re.IGNORECASE)
     if not m or not m.group(1):
-        return ""
+        # Try a more aggressive match if no standard SxxExx
+        # e.g. "Family Guy 14x01" or "Family Guy S14E01"
+        m = re.search(r"^(.*?)(?:\bS\d{1,3}|\b\d{1,3}x)", clean_name, flags=re.IGNORECASE)
+        if not m or not m.group(1):
+            return ""
     cleaned = _sanitize_show_part(m.group(1))
     return cleaned if len(cleaned) >= 2 else ""
 
@@ -1017,6 +1076,12 @@ def _parse_season_episode(filename: str):
     m = re.search(r"(?i)\b(\d{1,3})x(\d{1,3})\b", base)
     if m:
         return int(m.group(1)), int(m.group(2))
+
+    # Just E01 or Episode 01 (often in season folders)
+    m = re.search(r"(?i)\bE(\d{1,3})\b|\bEpisode\s*(\d{1,3})\b", base)
+    if m:
+        ep_val = m.group(1) or m.group(2)
+        return None, int(ep_val)
         
     # Season 1 Episode 1
     m = re.search(r"(?i)\bseason\s*(\d{1,3})\s*[\.\-_\s]*\s*episode\s*(\d{1,3})\b", base)
@@ -1692,6 +1757,8 @@ def shows_library():
     def find_show_poster(show_name: str):
         if show_name in show_poster_cache:
             return show_poster_cache[show_name]
+        
+        # 1. Check for local files first
         candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
         for base in paths_to_scan:
             show_dir = os.path.join(base, show_name)
@@ -1703,10 +1770,27 @@ def shows_library():
                     rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
                     show_poster_cache[show_name] = f"/data/{rel_from_data}"
                     return show_poster_cache[show_name]
+        
+        # 2. Check metadata database for any episode in this show that has a cached poster
+        try:
+            conn = database.get_db()
+            c = conn.cursor()
+            # Find any episode path that contains this show name and has a poster
+            # This is a bit of a heuristic but works well for organized libraries
+            query = f"/data/shows/{show_name}/%"
+            c.execute("SELECT poster FROM file_metadata WHERE path LIKE ? AND poster IS NOT NULL AND poster != 'N/A' LIMIT 1", (query,))
+            row = c.fetchone()
+            if row and row['poster']:
+                show_poster_cache[show_name] = row['poster']
+                return show_poster_cache[show_name]
+        except Exception as e:
+            logger.debug(f"Failed to find show poster in DB for {show_name}: {e}")
+
         show_poster_cache[show_name] = None
         return None
 
     def find_season_poster(show_name: str, season_name: str):
+        # 1. Check local season folder
         candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
         for base in paths_to_scan:
             season_dir = os.path.join(base, show_name, season_name)
@@ -1717,6 +1801,20 @@ def shows_library():
                 if os.path.isfile(p):
                     rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
                     return f"/data/{rel_from_data}"
+        
+        # 2. Check metadata database for any episode in this season
+        try:
+            conn = database.get_db()
+            c = conn.cursor()
+            query = f"/data/shows/{show_name}/{season_name}/%"
+            c.execute("SELECT poster FROM file_metadata WHERE path LIKE ? AND poster IS NOT NULL AND poster != 'N/A' LIMIT 1", (query,))
+            row = c.fetchone()
+            if row and row['poster']:
+                return row['poster']
+        except Exception as e:
+            logger.debug(f"Failed to find season poster in DB for {show_name}/{season_name}: {e}")
+
+        # 3. Fallback to show poster
         return find_show_poster(show_name)
 
     idx_info = maybe_start_index_build("shows", force=False)
@@ -1735,15 +1833,37 @@ def shows_library():
             name = r.get("name") or os.path.basename(web_path)
 
             folder_parts = [p for p in folder.split("/") if p and p != "."]
+            
+            # Smart Show/Season Detection
+            show_name = "Unsorted"
+            season_name = "Season 1"
+            
             if len(folder_parts) >= 2:
+                # Standard: ShowName/SeasonName/File.mkv
                 show_name = folder_parts[0]
                 season_name = folder_parts[1]
             elif len(folder_parts) == 1:
-                show_name = folder_parts[0]
-                season_name = "Season 1"
-            else:
-                show_name = "Unsorted"
-                season_name = "Season 1"
+                # Flat: ShowName/File.mkv -> Try to find season in filename
+                potential_show = folder_parts[0]
+                if re.search(r'(?i)season\s*\d+|series\s*\d+|\bs\d+\b', potential_show):
+                    # Folder IS the season name, parent might be show? 
+                    # But index only gives us relative folder from 'shows' base
+                    show_name = "Unsorted"
+                    season_name = potential_show
+                else:
+                    show_name = potential_show
+                    season_name = "Season 1"
+            
+            # If still Unsorted, try to infer show name from filename if it has SxxExx
+            if show_name == "Unsorted":
+                inferred = infer_show_name(name)
+                if inferred:
+                    show_name = inferred
+                    
+            # Normalize Season Name (e.g. "S14" -> "Season 14")
+            s_num = parse_season_number(season_name)
+            if s_num is not None and not season_name.lower().startswith("season"):
+                season_name = f"Season {s_num}"
 
             episode = {
                 "name": name,

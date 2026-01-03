@@ -1,4 +1,4 @@
-console.log("App v1.1 loaded - Cache cleared");
+console.log("App v1.2 loaded - Plex-style UI & External Players");
 const API_BASE = '/api';
 
 function getCookie(name) {
@@ -1125,12 +1125,28 @@ function openVideoViewer(path, title, startSeconds = 0) {
         return;
     }
 
-    heading.textContent = title ? String(title) : 'Video';
-    body.innerHTML = '';
-
     const token = getCookie('auth_token');
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
     if (token) streamUrl += '&token=' + token;
+
+    // Build the full URL for external players
+    const fullUrl = window.location.origin + streamUrl;
+    const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
+
+    heading.innerHTML = `
+        <div style="display:flex; align-items:center; gap:12px; width:100%;">
+            <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${title ? String(title) : 'Video'}</span>
+            <div class="external-player-btns" style="display:flex; gap:8px;">
+                <a href="${streamUrl}" download="${title}.mp4" class="player-action-btn" title="Download for offline playback">
+                    <span>💾</span><span class="btn-text">Download</span>
+                </a>
+                <a href="${vlcUrl}" class="player-action-btn vlc-btn" title="Open in VLC (Fixes playback issues)">
+                    <span>🧡</span><span class="btn-text">VLC</span>
+                </a>
+            </div>
+        </div>
+    `;
+    body.innerHTML = '';
 
     console.log('Opening video:', path, 'at', streamUrl);
 
