@@ -214,39 +214,39 @@ namespace NomadTransferTool
                     }
                 }
 
-                // 3. Verify Checksum (Optional but recommended)
+                // 3. Verify Checksum
                 if (!string.IsNullOrEmpty(checksumUrl))
                 {
-                    try
+                    CurrentStatus = "Verifying checksum...";
+                    string expectedHash = "";
+                    var hashData = await client.GetStringAsync(checksumUrl);
+                    string zipName = Path.GetFileName(downloadUrl) ?? "";
+                    
+                    foreach (var line in hashData.Split('\n'))
                     {
-                        CurrentStatus = "Verifying checksum...";
-                        string expectedHash = "";
-                        var hashData = await client.GetStringAsync(checksumUrl);
-                        string zipName = Path.GetFileName(downloadUrl) ?? "";
-                        
-                        foreach (var line in hashData.Split('\n'))
+                        if (!string.IsNullOrEmpty(zipName) && line.Contains(zipName))
                         {
-                            if (!string.IsNullOrEmpty(zipName) && line.Contains(zipName))
-                            {
-                                expectedHash = line.Split(' ')[0].Trim().ToLower();
-                                break;
-                            }
+                            expectedHash = line.Split(' ')[0].Trim().ToLower();
+                            break;
                         }
+                    }
 
-                        if (!string.IsNullOrEmpty(expectedHash))
+                    if (!string.IsNullOrEmpty(expectedHash))
+                    {
+                        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                        using (var stream = File.OpenRead(zipPath))
                         {
-                            using (var sha256 = System.Security.Cryptography.SHA256.Create())
-                            using (var stream = File.OpenRead(zipPath))
+                            var hashBytes = sha256.ComputeHash(stream);
+                            string actualHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+                            if (actualHash != expectedHash) 
                             {
-                                var hashBytes = sha256.ComputeHash(stream);
-                                string actualHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
-                                if (actualHash != expectedHash) throw new Exception("Checksum verification failed! The downloaded file may be corrupted or tampered with.");
+                                throw new Exception("Checksum verification failed! The downloaded file may be corrupted or tampered with. Extraction aborted.");
                             }
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        Debug.WriteLine($"Checksum verification skipped/failed: {ex.Message}");
+                        Debug.WriteLine("Warning: Could not find matching hash in checksum file, but continuing as checksum was present.");
                     }
                 }
 
