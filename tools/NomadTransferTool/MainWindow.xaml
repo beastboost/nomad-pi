@@ -9,186 +9,332 @@
         <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
         <local:BooleanToColorConverter x:Key="BooleanToColorConverter"/>
         
+        <!-- Modern Colors -->
+        <SolidColorBrush x:Key="PrimaryColor" Color="#FF4081"/>
+        <SolidColorBrush x:Key="SecondaryColor" Color="#4caf50"/>
+        <SolidColorBrush x:Key="BackgroundColor" Color="#121212"/>
+        <SolidColorBrush x:Key="CardColor" Color="#1E1E1E"/>
+        <SolidColorBrush x:Key="BorderColor" Color="#333333"/>
+        <SolidColorBrush x:Key="TextColor" Color="#E0E0E0"/>
+        <SolidColorBrush x:Key="MutedTextColor" Color="#9E9E9E"/>
+
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#eeeeee"/>
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="FontFamily" Value="Segoe UI, Roboto, sans-serif"/>
         </Style>
-        
+
+        <Style x:Key="HeaderBlock" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Foreground" Value="{StaticResource PrimaryColor}"/>
+        </Style>
+
+        <Style x:Key="CardBorder" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardColor}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="15"/>
+            <Setter Property="Margin" Value="5"/>
+        </Style>
+
         <Style TargetType="Button">
-            <Setter Property="Background" Value="#3a3a3a"/>
+            <Setter Property="Background" Value="#2D2D2D"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Padding" Value="12,6"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#3D3D3D"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="#4D4D4D"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource PrimaryColor}"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Trigger.EnterActions>
-                        <BeginStoryboard>
-                            <Storyboard>
-                                <ColorAnimation Storyboard.TargetProperty="(Button.Background).(SolidColorBrush.Color)" To="#555555" Duration="0:0:0.2"/>
-                            </Storyboard>
-                        </BeginStoryboard>
-                    </Trigger.EnterActions>
-                    <Trigger.ExitActions>
-                        <BeginStoryboard>
-                            <Storyboard>
-                                <ColorAnimation Storyboard.TargetProperty="(Button.Background).(SolidColorBrush.Color)" To="#3a3a3a" Duration="0:0:0.2"/>
-                            </Storyboard>
-                        </BeginStoryboard>
-                    </Trigger.ExitActions>
+                    <Setter Property="Background" Value="#F50057"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#252525"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="#1A1A1A"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="5"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        </Style>
+
+        <Style x:Key="QueueItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
+            <Setter Property="Margin" Value="0,5"/>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="25">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,10">
+        <!-- Header Section -->
+        <Grid Grid.Row="0" Margin="0,0,0,20">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="Nomad Media Transfer Tool" FontSize="24" FontWeight="Bold" Foreground="#ff4081"/>
-                <TextBlock Text="Manage external drives and transfer media effortlessly." Foreground="#bbbbbb"/>
+                <TextBlock Text="Nomad Media Transfer Tool" FontSize="28" FontWeight="Bold" Foreground="{StaticResource PrimaryColor}"/>
+                <TextBlock Text="Manage external drives and transcode media for your server" FontSize="14" Foreground="{StaticResource MutedTextColor}" Margin="0,5,0,0"/>
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="OMDb Key:" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#cccccc"/>
-                <PasswordBox x:Name="OmdbKeyBox" Width="150" Background="#333333" Foreground="White" 
-                             BorderBrush="#444444" PasswordChanged="OmdbKeyBox_PasswordChanged"/>
-            </StackPanel>
+            
+            <Border Grid.Column="1" Background="{StaticResource CardColor}" CornerRadius="8" Padding="15,10" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="OMDb API Key" VerticalAlignment="Center" Margin="0,0,15,0" FontWeight="SemiBold"/>
+                    <PasswordBox x:Name="OmdbKeyBox" Width="180" Height="32" 
+                                 Background="#252525" Foreground="White" BorderBrush="{StaticResource BorderColor}"
+                                 VerticalContentAlignment="Center" Padding="5,0"
+                                 PasswordChanged="OmdbKeyBox_PasswordChanged"/>
+                </StackPanel>
+            </Border>
         </Grid>
 
-        <Separator Grid.Row="1" Background="#444" Margin="0,0,0,15"/>
-
-        <Grid Grid.Row="2">
+        <!-- Main Content Area -->
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="1*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Drive List -->
-            <StackPanel Grid.Column="0" Margin="0,0,10,0">
-                <TextBlock Text="Connected USB Drives" FontWeight="Bold" Margin="0,0,0,10" Foreground="White"/>
-                <ListBox x:Name="DriveList" ItemsSource="{Binding Drives}" Height="200" 
-                         Background="#252525" BorderBrush="#444" Foreground="White">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Border BorderBrush="#333" BorderThickness="0,0,0,1" Padding="5">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="13" Foreground="White"/>
-                                    <TextBlock Text="{Binding Name}" FontSize="10" Foreground="#999"/>
-                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="11" Foreground="#ccc"/>
-                                    <TextBlock Text="{Binding StatusDisplay}" FontSize="11" FontWeight="Medium"
-                                               Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-                
-                <UniformGrid Columns="2" Margin="0,10,0,0">
-                    <Button Content="Prepare Folders" Click="PrepareDrive_Click" Margin="2"/>
-                    <Button Content="Format Drive" Click="FormatDrive_Click" Background="#d32f2f" Margin="2"/>
-                </UniformGrid>
+            <!-- Column 1: Drives -->
+            <Border Grid.Column="0" Style="{StaticResource CardBorder}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-                <StackPanel Margin="0,20,0,0" Visibility="{Binding IsHandbrakeAvailable, Converter={StaticResource InverseBoolToVis}}">
-                    <TextBlock Text="Handbrake CLI Missing" Foreground="#ffab00" FontWeight="Bold" HorizontalAlignment="Center"/>
-                    <Button Content="Download Handbrake" Click="DownloadHandbrake_Click" Margin="5" Background="#ffab00" Foreground="Black"/>
-                </StackPanel>
-            </StackPanel>
+                    <TextBlock Grid.Row="0" Text="Connected Drives" Style="{StaticResource HeaderBlock}"/>
+                    
+                    <ListBox Grid.Row="1" x:Name="DriveList" ItemsSource="{Binding Drives}" Margin="0,0,0,15">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1" Padding="10,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="💾" FontSize="24" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="14"/>
+                                            <TextBlock Text="{Binding Name}" FontSize="11" Foreground="{StaticResource MutedTextColor}"/>
+                                            <TextBlock Text="{Binding SizeDisplay}" FontSize="12" Margin="0,2"/>
+                                            <TextBlock Text="{Binding StatusDisplay}" FontSize="12" FontWeight="Bold"
+                                                       Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
 
-            <!-- Transfer Area -->
-            <StackPanel Grid.Column="1" Margin="10,0,10,0">
-                <TextBlock Text="Transfer Files" FontWeight="Bold" Margin="0,0,0,10" Foreground="White"/>
-                
-                <TextBlock Text="1. Select Category" Margin="0,5" Foreground="#ccc"/>
-                <ComboBox x:Name="CategoryCombo" SelectedIndex="0" Background="#333" Foreground="White" BorderBrush="#444">
-                    <ComboBox.Resources>
-                        <Style TargetType="ComboBoxItem">
-                            <Setter Property="Background" Value="#333"/>
-                            <Setter Property="Foreground" Value="White"/>
-                        </Style>
-                    </ComboBox.Resources>
-                    <ComboBoxItem Content="Movies" Tag="movies"/>
-                    <ComboBoxItem Content="TV Shows" Tag="shows"/>
-                    <ComboBoxItem Content="Music" Tag="music"/>
-                    <ComboBoxItem Content="Books" Tag="books"/>
-                    <ComboBoxItem Content="Gallery" Tag="gallery"/>
-                    <ComboBoxItem Content="General Files" Tag="files"/>
-                </ComboBox>
-
-                <TextBlock Text="2. Select Options" Margin="0,15,0,5" Foreground="#ccc"/>
-                <CheckBox x:Name="HandbrakeCheck" Content="Transcode with Handbrake (Save Space)" 
-                          IsEnabled="{Binding IsHandbrakeAvailable}"
-                          Foreground="#eee" Margin="0,2"/>
-                <CheckBox x:Name="AutoMoveCheck" Content="Auto-Move to USB (Delete temp files)" 
-                          IsChecked="True" Foreground="#eee" Margin="0,2"/>
-
-                <TextBlock Text="3. Select Files or Folders" Margin="0,15,0,5" Foreground="#ccc"/>
-                <UniformGrid Columns="2" Margin="0,0,0,10">
-                    <Button Content="Select Files" Click="SelectFiles_Click" Margin="2"/>
-                    <Button Content="Select Folder" Click="SelectFolder_Click" Margin="2"/>
-                </UniformGrid>
-                
-                <Border Background="#252525" BorderBrush="#ff4081" BorderThickness="2" 
-                        CornerRadius="8" Height="120" AllowDrop="True" Drop="Transfer_Drop">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="📥" FontSize="32" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Drop Files or Folders" FontWeight="Bold" HorizontalAlignment="Center" Foreground="White"/>
-                        <TextBlock Text="Recursively processed" FontSize="11" HorizontalAlignment="Center" Foreground="#999"/>
+                    <StackPanel Grid.Row="2">
+                        <UniformGrid Columns="2">
+                            <Button Content="Prepare Folders" Click="PrepareDrive_Click" Margin="0,0,5,0"/>
+                            <Button Content="Format (exFAT)" Click="FormatDrive_Click" Background="#d32f2f" Margin="5,0,0,0"/>
+                        </UniformGrid>
+                        
+                        <Border Margin="0,15,0,0" Padding="15" Background="#2A2A2A" CornerRadius="8" 
+                                Visibility="{Binding IsHandbrakeAvailable, Converter={StaticResource InverseBoolToVis}}">
+                            <StackPanel>
+                                <TextBlock Text="Handbrake CLI Missing" Foreground="#ffab00" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <Button Content="Download Handbrake" Click="DownloadHandbrake_Click" Background="#ffab00" Foreground="Black" Style="{StaticResource PrimaryButton}"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </Border>
-                
-                <TextBlock Text="Note: Movies get folders + posters automatically. TV Shows organized by series name." 
-                           FontSize="10" Foreground="#888" Margin="0,10" TextWrapping="Wrap"/>
-            </StackPanel>
+                </Grid>
+            </Border>
 
-            <!-- Transcode Queue Area -->
-            <StackPanel Grid.Column="2" Margin="10,0,0,0">
-                <TextBlock Text="Transcode Queue" FontWeight="Bold" Margin="0,0,0,10" Foreground="White"/>
-                <ListBox x:Name="QueueList" ItemsSource="{Binding TranscodeQueue}" Height="300" 
-                         Background="#252525" BorderBrush="#444" Foreground="White">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" FontSize="11" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="2"/>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-                <TextBlock Text="{Binding TranscodeQueue.Count, StringFormat='Items in queue: {0}'}" 
-                           HorizontalAlignment="Right" FontSize="11" Foreground="#999" Margin="0,5"/>
-            </StackPanel>
+            <!-- Column 2: Transfer & Options -->
+            <Border Grid.Column="1" Style="{StaticResource CardBorder}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Transfer Configuration" Style="{StaticResource HeaderBlock}"/>
+
+                    <StackPanel Grid.Row="1" Margin="0,0,0,20">
+                        <TextBlock Text="1. Target Category" Margin="0,0,0,8" FontSize="13" Foreground="{StaticResource MutedTextColor}"/>
+                        <ComboBox x:Name="CategoryCombo" SelectedIndex="0" Height="35">
+                            <ComboBoxItem Content="Movies" Tag="movies"/>
+                            <ComboBoxItem Content="TV Shows" Tag="shows"/>
+                            <ComboBoxItem Content="Music" Tag="music"/>
+                            <ComboBoxItem Content="Books" Tag="books"/>
+                            <ComboBoxItem Content="Gallery" Tag="gallery"/>
+                            <ComboBoxItem Content="General Files" Tag="files"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Margin="0,0,0,20">
+                        <TextBlock Text="2. Processing Options" Margin="0,0,0,8" FontSize="13" Foreground="{StaticResource MutedTextColor}"/>
+                        <CheckBox x:Name="HandbrakeCheck" Content="Optimize for Nomad (Transcode)" 
+                                  IsEnabled="{Binding IsHandbrakeAvailable}" Margin="0,5"/>
+                        <CheckBox x:Name="AutoMoveCheck" Content="Auto-Move to USB Drive" 
+                                  IsChecked="True" Margin="0,5"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="3">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        
+                        <TextBlock Grid.Row="0" Text="3. Add Content" Margin="0,0,0,8" FontSize="13" Foreground="{StaticResource MutedTextColor}"/>
+                        
+                        <UniformGrid Grid.Row="1" Columns="2" Margin="0,0,0,15">
+                            <Button Content="Add Files" Click="SelectFiles_Click" Margin="0,0,5,0"/>
+                            <Button Content="Add Folder" Click="SelectFolder_Click" Margin="5,0,0,0"/>
+                        </UniformGrid>
+
+                        <Grid Grid.Row="2" AllowDrop="True" Drop="Transfer_Drop" Margin="0,10">
+                            <Rectangle Stroke="{StaticResource PrimaryColor}" StrokeThickness="2" 
+                                       StrokeDashArray="2 2" RadiusX="12" RadiusY="12" Fill="#1A1A1A"/>
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
+                                <TextBlock Text="📥" FontSize="56" HorizontalAlignment="Center" Margin="0,0,0,15"/>
+                                <TextBlock Text="Drag &amp; Drop Here" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Files and folders will be processed automatically" FontSize="13" Foreground="{StaticResource MutedTextColor}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Grid.Row="4" Text="Tip: Movie metadata and posters are fetched automatically from OMDb." 
+                                   FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,15,0,0" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- Column 3: Queue -->
+            <Border Grid.Column="2" Style="{StaticResource CardBorder}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Processing Queue" Style="{StaticResource HeaderBlock}"/>
+
+                    <ListBox Grid.Row="1" x:Name="QueueList" ItemsSource="{Binding TranscodeQueue}" 
+                             ItemContainerStyle="{StaticResource QueueItemStyle}" BorderThickness="0" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#252525" CornerRadius="6" Padding="12,8" Margin="0,0,0,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="🎬" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Border Grid.Row="2" Background="#2A2A2A" CornerRadius="4" Padding="10,5" Margin="0,10,0,0">
+                        <TextBlock Text="{Binding TranscodeQueue.Count, StringFormat='Pending: {0} items'}" 
+                                   HorizontalAlignment="Center" FontSize="12" FontWeight="SemiBold"/>
+                    </Border>
+                </Grid>
+            </Border>
         </Grid>
 
-        <!-- Bottom Area -->
-        <StackPanel Grid.Row="3" Margin="0,10,0,0">
-            <!-- Progress Area -->
-            <StackPanel Visibility="{Binding IsTransferring, Converter={StaticResource BoolToVis}}">
-                <Grid Margin="0,0,0,5">
-                    <TextBlock x:Name="StatusText" Text="{Binding CurrentStatus}" Foreground="#eee" FontWeight="Bold"/>
-                    <TextBlock x:Name="SpeedText" Text="{Binding TransferSpeed}" HorizontalAlignment="Right" Foreground="#aaa"/>
-                </Grid>
-                
-                <ProgressBar x:Name="FileProgressBar" Height="8" Value="{Binding CurrentFileProgress}" 
-                             Background="#333" Foreground="#4caf50" BorderThickness="0" Margin="0,0,0,5"/>
-                
-                <ProgressBar x:Name="MainProgress" Height="15" Value="{Binding TotalProgress}" 
-                             Background="#333" Foreground="#ff4081" BorderThickness="0"/>
-                
-                <TextBlock x:Name="FileProgressText" Text="{Binding FileProgress}" FontSize="11" Foreground="#888" Margin="0,2,0,0"/>
-            </StackPanel>
+        <!-- Footer / Progress Section -->
+        <Border Grid.Row="2" Margin="0,20,0,0" Background="{StaticResource CardColor}" CornerRadius="12" Padding="20,15">
+            <StackPanel>
+                <!-- Progress UI (Only visible when transferring) -->
+                <Grid Visibility="{Binding IsTransferring, Converter={StaticResource BoolToVis}}" Margin="0,0,0,10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-            <!-- Footer -->
-            <StatusBar Background="Transparent" Foreground="#666" Margin="0,5,0,0">
-                <StatusBarItem>
-                    <TextBlock Text="{Binding AppStatus}"/>
-                </StatusBarItem>
-            </StatusBar>
-        </StackPanel>
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Status:" FontWeight="SemiBold" Margin="0,0,10,0" Foreground="{StaticResource PrimaryColor}"/>
+                            <TextBlock x:Name="StatusText" Text="{Binding CurrentStatus}" FontWeight="Bold"/>
+                        </StackPanel>
+                        <TextBlock x:Name="SpeedText" Text="{Binding TransferSpeed}" HorizontalAlignment="Right" Foreground="{StaticResource SecondaryColor}" FontWeight="SemiBold"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Margin="0,5">
+                        <ProgressBar x:Name="FileProgressBar" Height="6" Value="{Binding CurrentFileProgress}" 
+                                     Background="#1A1A1A" Foreground="{StaticResource SecondaryColor}" BorderThickness="0" Margin="0,0,0,4"/>
+                        <ProgressBar x:Name="MainProgress" Height="14" Value="{Binding TotalProgress}" 
+                                     Background="#1A1A1A" Foreground="{StaticResource PrimaryColor}" BorderThickness="0"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" x:Name="FileProgressText" Text="{Binding FileProgress}" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,4,0,0"/>
+                </Grid>
+
+                <!-- System Status -->
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="System Status:" VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" Foreground="{StaticResource MutedTextColor}"/>
+                        <TextBlock Text="{Binding AppStatus}" VerticalAlignment="Center" FontSize="12" FontWeight="Medium"/>
+                    </StackPanel>
+                    <TextBlock Text="v1.4.0" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" Foreground="#444"/>
+                </Grid>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
