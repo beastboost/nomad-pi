@@ -439,7 +439,7 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
                     WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
                     ELSE folder 
                 END as show_name,
-                folder, path, poster, mtime, genre, year, play_count
+                folder, path, poster, mtime, genre, year
             FROM library_index
             WHERE category = 'shows'
         ) l
@@ -473,7 +473,7 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
             MAX(l.mtime) as mtime,
             MAX(p.last_played) as last_played,
             COUNT(*) as episode_count,
-            SUM(l.play_count) as total_plays,
+            SUM(COALESCE(p.play_count, 0)) as total_plays,
             GROUP_CONCAT(DISTINCT l.genre) as genres,
             MIN(l.year) as year
         {sql_base}

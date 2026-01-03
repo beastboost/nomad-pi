@@ -9,8 +9,8 @@ data/
 *.log
 app/static/data/
 # .NET Build artifacts
-bin/
-obj/
+**/bin/
+**/obj/
 publish/
 *.exe
 *.pdb

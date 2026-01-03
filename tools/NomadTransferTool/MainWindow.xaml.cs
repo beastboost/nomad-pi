@@ -387,6 +387,12 @@ namespace NomadTransferTool
 
         private void Unmount_Click(object sender, RoutedEventArgs e)
         {
+             if (string.IsNullOrWhiteSpace(mediaServerDataPath) || !Directory.Exists(Path.Combine(mediaServerDataPath, "external")))
+             {
+                 MessageBox.Show("Could not find media server external directory. Unmount failed.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                 return;
+             }
+
              if (DriveList.SelectedItem is DriveInfoModel drive)
              {
                  string folderName = "USB_" + drive.Name.Replace(":\\", "").Replace(":", "");

@@ -43,7 +43,6 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0" Margin="0,0,0,10">
@@ -132,22 +131,25 @@
             </StackPanel>
         </Grid>
 
-        <!-- Progress Area -->
-        <StackPanel Grid.Row="3" Margin="0,10,0,0" Visibility="{Binding IsTransferring, Converter={StaticResource BoolToVis}}">
-            <Grid Margin="0,0,0,5">
-                <TextBlock x:Name="StatusText" Text="{Binding CurrentStatus}" Foreground="#eee"/>
-                <TextBlock x:Name="SpeedText" Text="{Binding TransferSpeed}" HorizontalAlignment="Right" Foreground="#aaa"/>
-            </Grid>
-            <ProgressBar x:Name="MainProgress" Height="15" Value="{Binding TotalProgress}" 
-                         Background="#333" Foreground="#ff4081" BorderThickness="0"/>
-            <TextBlock x:Name="FileProgressText" Text="{Binding FileProgress}" FontSize="11" Foreground="#888" Margin="0,2,0,0"/>
-        </StackPanel>
+        <!-- Bottom Area -->
+        <StackPanel Grid.Row="3" Margin="0,10,0,0">
+            <!-- Progress Area -->
+            <StackPanel Visibility="{Binding IsTransferring, Converter={StaticResource BoolToVis}}">
+                <Grid Margin="0,0,0,5">
+                    <TextBlock x:Name="StatusText" Text="{Binding CurrentStatus}" Foreground="#eee"/>
+                    <TextBlock x:Name="SpeedText" Text="{Binding TransferSpeed}" HorizontalAlignment="Right" Foreground="#aaa"/>
+                </Grid>
+                <ProgressBar x:Name="MainProgress" Height="15" Value="{Binding TotalProgress}" 
+                             Background="#333" Foreground="#ff4081" BorderThickness="0"/>
+                <TextBlock x:Name="FileProgressText" Text="{Binding FileProgress}" FontSize="11" Foreground="#888" Margin="0,2,0,0"/>
+            </StackPanel>
 
-        <!-- Footer -->
-        <StatusBar Grid.Row="4" Background="Transparent" Foreground="#666" Margin="0,5,0,0">
-            <StatusBarItem>
-                <TextBlock Text="{Binding AppStatus}"/>
-            </StatusBarItem>
-        </StatusBar>
+            <!-- Footer -->
+            <StatusBar Background="Transparent" Foreground="#666" Margin="0,5,0,0">
+                <StatusBarItem>
+                    <TextBlock Text="{Binding AppStatus}"/>
+                </StatusBarItem>
+            </StatusBar>
+        </StackPanel>
     </Grid>
 </Window>
