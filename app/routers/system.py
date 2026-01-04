@@ -61,6 +61,7 @@ def get_samba_config():
     return {
         "user": user,
         "path": path,
+        "hostname": hostname,
         "is_default_password": database.get_setting("admin_password") in [None, "nomad"]
     }
 

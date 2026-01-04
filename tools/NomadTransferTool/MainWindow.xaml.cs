@@ -161,6 +161,7 @@ namespace NomadTransferTool
                 85 => "Local Device Name Already in Use",
                 86 => "Invalid Network Password",
                 1219 => "Credential Conflict (You are already connected to this server with a different user. Log out of the share in Windows first.)",
+                1203 => "Network Path Not Found / Invalid Format (Ensure path starts with \\\\ and uses the correct IP or hostname)",
                 1326 => "Logon Failure: Unknown user name or bad password.",
                 2250 => "Network Connection Not Found",
                 _ => $"Unknown Windows Error {code}"
@@ -187,12 +188,24 @@ namespace NomadTransferTool
                     {
                         Dispatcher.Invoke(() => {
                             SambaUser = config.user;
-                            // If user is using an IP for ServerIp, use that in the path instead of .local
+                            
+                            // Validate and fix path format
                             string path = config.path;
+                            
+                            // If user is using an IP for ServerIp, use that in the path instead of .local
                             if (Regex.IsMatch(ServerIp, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
                             {
                                 path = $"\\\\{ServerIp}\\data";
                             }
+                            else if (ServerIp.EndsWith(".local") && !path.Contains(".local"))
+                            {
+                                // Ensure .local is present if the server IP uses it
+                                path = path.Replace("\\\\" + (string)config.hostname, "\\\\" + ServerIp);
+                            }
+                            
+                            // Ensure double backslashes for Windows UNC
+                            if (!path.StartsWith("\\\\")) path = "\\\\" + path.TrimStart('\\');
+                            
                             SambaPath = path;
                             
                             if ((bool)config.is_default_password && string.IsNullOrEmpty(SambaPassword))
