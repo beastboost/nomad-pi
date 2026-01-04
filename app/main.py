@@ -25,6 +25,9 @@ except Exception as e:
     LOG_FILE = os.path.join(os.path.expanduser("~"), "nomad-pi.log")
     print(f"Falling back to log file: {LOG_FILE}")
 
+# Export LOG_FILE for other modules
+os.environ["NOMAD_LOG_FILE"] = LOG_FILE
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

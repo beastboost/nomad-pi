@@ -363,8 +363,8 @@ def toggle_wifi(enable: bool):
 @router.get("/logs")
 def get_logs(lines: int = 100):
     """Retrieve the last N lines of the application log"""
-    # Try local app.log first as it's our primary log
-    log_file = "data/app.log"
+    # Try the configured log file first
+    log_file = os.environ.get("NOMAD_LOG_FILE", "data/app.log")
     if os.path.exists(log_file):
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
