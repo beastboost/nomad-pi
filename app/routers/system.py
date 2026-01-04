@@ -79,21 +79,70 @@ def get_health():
     from app.main import ENV_CHECK_RESULTS
     return ENV_CHECK_RESULTS
 
+def get_aggregate_disk_usage():
+    """Calculate aggregate storage stats for all mounted media-relevant drives."""
+    total = 0
+    used = 0
+    free = 0
+    
+    seen_mounts = set()
+    
+    # Get all mounted filesystems
+    if platform.system() == "Linux":
+        # On Linux, try to be smart about what we count
+        # We want to count the root filesystem and any mounted USB/external drives
+        for part in psutil.disk_partitions(all=False):
+            if part.mountpoint in seen_mounts:
+                continue
+            
+            # Skip system/pseudo filesystems
+            if part.fstype in ('tmpfs', 'devtmpfs', 'squashfs', 'iso9660'):
+                continue
+            
+            # Skip read-only mounts that aren't likely media (like loop devices)
+            if 'ro' in part.opts and not part.mountpoint.startswith(('/media', '/mnt')):
+                continue
+                
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                total += usage.total
+                used += usage.used
+                free += usage.free
+                seen_mounts.add(part.mountpoint)
+            except:
+                pass
+    else:
+        # Windows/Other
+        for part in psutil.disk_partitions():
+            if 'fixed' not in part.opts and 'removable' not in part.opts:
+                continue
+            if part.mountpoint in seen_mounts:
+                continue
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                total += usage.total
+                used += usage.used
+                free += usage.free
+                seen_mounts.add(part.mountpoint)
+            except:
+                pass
+                
+    if total == 0:
+        # Fallback to current dir
+        try:
+            usage = psutil.disk_usage(os.getcwd())
+            return usage.total, usage.used, usage.free, usage.percent
+        except:
+            return 0, 0, 0, 0
+            
+    percent = (used / total) * 100 if total > 0 else 0
+    return total, used, free, percent
+
 @router.get("/stats")
 def get_stats():
-    # Use the directory of the app for disk usage calculation on Linux
-    # This ensures we're looking at the actual storage where the media lives
-    if platform.system() == "Linux":
-        # Get the path where the app is running
-        app_path = os.getcwd()
-        # Find the mount point for this path to get accurate usage
-        disk_path = app_path
-        while not os.path.ismount(disk_path) and disk_path != "/":
-            disk_path = os.path.dirname(disk_path)
-    else:
-        disk_path = os.getcwd()
-
-    disk = psutil.disk_usage(disk_path)
+    # Use aggregate disk usage for consistency across panels
+    disk_total, disk_used, disk_free, disk_percent = get_aggregate_disk_usage()
+    
     mem = psutil.virtual_memory()
     net = psutil.net_io_counters()
     
@@ -177,51 +226,79 @@ def get_stats():
         "memory_percent": mem.percent,
         "network_up": net.bytes_sent,
         "network_down": net.bytes_recv,
-        "disk_total": disk.total,
-        "disk_used": disk.used,
-        "disk_free": disk.free,
-        "disk_percent": disk.percent,
+        "disk_total": disk_total,
+        "disk_used": disk_used,
+        "disk_free": disk_free,
+        "disk_percent": disk_percent,
         "temp": temp,
         "uptime": datetime.now().timestamp() - psutil.boot_time()
     }
 
 @router.get("/storage/info")
 def get_storage_info():
-    if platform.system() == "Linux":
-        app_path = os.getcwd()
-        disk_path = app_path
-        while not os.path.ismount(disk_path) and disk_path != "/":
-            disk_path = os.path.dirname(disk_path)
-    else:
-        disk_path = os.getcwd()
-        
-    disk = psutil.disk_usage(disk_path)
+    disk_total, disk_used, disk_free, disk_percent = get_aggregate_disk_usage()
     
     drives = []
     if platform.system() == "Linux":
         try:
-            output = subprocess.check_output(["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,LABEL,FSTYPE"]).decode()
+            # Use -b for bytes
+            output = subprocess.check_output(["lsblk", "-b", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,LABEL,FSTYPE"]).decode()
             data = json.loads(output)
             # Flatten lsblk output for easier consumption
             for dev in data.get("blockdevices", []):
                 if dev.get("type") == "part" or not dev.get("children"):
-                    drives.append({
+                    size_bytes = 0
+                    try:
+                        size_bytes = int(dev.get("size", 0))
+                    except:
+                        pass
+
+                    d = {
                         "device": f"/dev/{dev['name']}",
-                        "total": dev.get("size"),
+                        "total": size_bytes,
                         "mounted": bool(dev.get("mountpoint")),
                         "mountpoint": dev.get("mountpoint"),
                         "label": dev.get("label"),
-                        "fstype": dev.get("fstype")
-                    })
+                        "fstype": dev.get("fstype"),
+                        "free": 0,
+                        "used": 0
+                    }
+                    if d["mounted"]:
+                        try:
+                            usage = psutil.disk_usage(d["mountpoint"])
+                            d["free"] = usage.free
+                            d["used"] = usage.used
+                            d["total"] = usage.total # More accurate than lsblk size
+                        except:
+                            pass
+                    drives.append(d)
+                
                 for child in dev.get("children", []):
-                    drives.append({
+                    size_bytes = 0
+                    try:
+                        size_bytes = int(child.get("size", 0))
+                    except:
+                        pass
+
+                    c = {
                         "device": f"/dev/{child['name']}",
-                        "total": child.get("size"),
+                        "total": size_bytes,
                         "mounted": bool(child.get("mountpoint")),
                         "mountpoint": child.get("mountpoint"),
                         "label": child.get("label"),
-                        "fstype": child.get("fstype")
-                    })
+                        "fstype": child.get("fstype"),
+                        "free": 0,
+                        "used": 0
+                    }
+                    if c["mounted"]:
+                        try:
+                            usage = psutil.disk_usage(c["mountpoint"])
+                            c["free"] = usage.free
+                            c["used"] = usage.used
+                            c["total"] = usage.total
+                        except:
+                            pass
+                    drives.append(c)
         except:
             pass
     else:
@@ -232,6 +309,7 @@ def get_storage_info():
                     "device": p.device,
                     "total": usage.total,
                     "used": usage.used,
+                    "free": usage.free,
                     "mounted": True,
                     "mountpoint": p.mountpoint,
                     "fstype": p.fstype
@@ -240,9 +318,9 @@ def get_storage_info():
                 pass
 
     return {
-        "total": disk.total,
-        "used": disk.used,
-        "percentage": disk.percent,
+        "total": disk_total,
+        "used": disk_used,
+        "percentage": disk_percent,
         "disks": drives
     }
 
@@ -301,11 +379,53 @@ def list_drives():
     drives = []
     if platform.system() == "Linux":
         try:
-            output = subprocess.check_output(["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,LABEL,UUID,FSTYPE,MODEL"]).decode()
+            # Use -b for bytes
+            output = subprocess.check_output(["lsblk", "-b", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,LABEL,UUID,FSTYPE,MODEL"]).decode()
             data = json.loads(output)
-            return data
+            
+            # Flatten lsblk output for easier consumption in the UI
+            flattened = []
+            for dev in data.get("blockdevices", []):
+                # If it's a partition or has no children, it's a candidate
+                if dev.get("type") == "part" or not dev.get("children"):
+                    d = dev.copy()
+                    # Ensure size is a number
+                    try: d["size"] = int(d.get("size", 0))
+                    except: d["size"] = 0
+
+                    # Add free space if mounted
+                    if d.get("mountpoint"):
+                        try:
+                            usage = psutil.disk_usage(d["mountpoint"])
+                            d["free"] = usage.free
+                            d["size"] = usage.total
+                        except:
+                            d["free"] = 0
+                    else:
+                        d["free"] = 0
+                    flattened.append(d)
+                
+                # Check children (partitions)
+                for child in dev.get("children", []):
+                    c = child.copy()
+                    # Ensure size is a number
+                    try: c["size"] = int(c.get("size", 0))
+                    except: c["size"] = 0
+
+                    if c.get("mountpoint"):
+                        try:
+                            usage = psutil.disk_usage(c["mountpoint"])
+                            c["free"] = usage.free
+                            c["size"] = usage.total
+                        except:
+                            c["free"] = 0
+                    else:
+                        c["free"] = 0
+                    flattened.append(c)
+            
+            return {"blockdevices": flattened}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": str(e), "blockdevices": []}
     else:
         partitions = psutil.disk_partitions()
         for p in partitions:
@@ -318,7 +438,8 @@ def list_drives():
                     "fstype": p.fstype,
                     "total": usage.total,
                     "free": usage.free,
-                    "label": p.mountpoint  # Windows doesn't easily give labels via psutil
+                    "size": usage.total,
+                    "label": p.mountpoint
                 })
             except:
                 pass
@@ -347,12 +468,7 @@ def mount_drive(device: str, mount_point: str):
 def unmount_drive(target: str):
     if platform.system() == "Linux":
         try:
-            subprocess.run(["sudo", "-n", "/usr/bin/umount", target], check=True)
-            # Try to remove the directory if it's empty to keep things clean
-            try:
-                os.rmdir(target)
-            except:
-                pass 
+            subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
             return {"status": "unmounted", "target": target}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

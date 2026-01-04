@@ -91,6 +91,17 @@ def get_scan_paths(category: str):
     return paths
 
 def safe_fs_path_from_web_path(web_path: str):
+    # Allow Windows absolute paths
+    if platform.system() == "Windows" and len(web_path) >= 2 and web_path[1] == ":":
+        return os.path.abspath(web_path)
+
+    # Allow Linux absolute paths to /media and /mnt if they exist
+    if platform.system() == "Linux" and (web_path.startswith("/media") or web_path.startswith("/mnt")):
+        abs_path = os.path.abspath(web_path)
+        # Basic safety: ensure it's not trying to access system files
+        if any(abs_path.startswith(p) for p in ["/media", "/mnt"]):
+            return abs_path
+
     if not isinstance(web_path, str) or not web_path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid path")
 
@@ -974,8 +985,37 @@ async def stream_media(path: str = Query(...), token: str = Query(None)):
     # Simple FileResponse for now, it supports range requests
     return FileResponse(fs_path)
 
+def refresh_external_links():
+    """Ensure symlinks in data/external exist for all currently mounted USB drives."""
+    if platform.system() != "Linux":
+        return
+
+    ext_root = os.path.join(BASE_DIR, "external")
+    os.makedirs(ext_root, exist_ok=True)
+    
+    # Check /media/pi or /media/ (standard mount points)
+    for mount_root in ["/media/pi", "/media"]:
+        if os.path.exists(mount_root):
+            try:
+                for drive in os.listdir(mount_root):
+                    drive_path = os.path.join(mount_root, drive)
+                    if os.path.ismount(drive_path) or os.path.isdir(drive_path):
+                        external_link = os.path.join(ext_root, drive)
+                        if not os.path.exists(external_link):
+                            try:
+                                os.symlink(drive_path, external_link)
+                                logger.info(f"Auto-created symlink for USB drive: {drive_path} -> {external_link}")
+                            except Exception as e:
+                                logger.warning(f"Failed to create symlink for {drive_path}: {e}")
+            except Exception:
+                pass
+
 @router.get("/browse")
 def browse_files(path: str = Query(default="/data")):
+    # Proactively refresh external links if browsing /data or /data/external
+    if path == "/data" or path.startswith("/data/external"):
+        refresh_external_links()
+
     # Special handling for log files
     if path == "/update.log":
         log_path = os.path.abspath("update.log")
@@ -983,10 +1023,11 @@ def browse_files(path: str = Query(default="/data")):
             return {"items": [{"name": "update.log", "path": "/update.log", "is_dir": False, "size": os.path.getsize(log_path)}]}
         return {"items": []}
 
-    # Allow Windows absolute paths or paths starting with /data
+    # Allow Windows absolute paths or paths starting with /data or Linux mount points
     is_windows_path = platform.system() == "Windows" and len(path) >= 2 and path[1] == ":"
+    is_linux_mount = platform.system() == "Linux" and (path.startswith("/media") or path.startswith("/mnt"))
     
-    if not path.startswith("/data") and not is_windows_path:
+    if not path.startswith("/data") and not is_windows_path and not is_linux_mount:
         raise HTTPException(status_code=400, detail="Invalid path")
     
     try:
@@ -994,6 +1035,8 @@ def browse_files(path: str = Query(default="/data")):
             fs_path = BASE_DIR
         elif path.startswith("/data/"):
             fs_path = safe_fs_path_from_web_path(path)
+        elif is_linux_mount:
+            fs_path = os.path.abspath(path)
         else:
             # Windows path
             fs_path = os.path.abspath(path)

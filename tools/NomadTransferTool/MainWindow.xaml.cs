@@ -1388,6 +1388,10 @@ namespace NomadTransferTool
                  return (false, GetWNetErrorMessage(errorCode));
              }
              
+             // For local drives, check if directory exists and is accessible
+             bool exists = await Task.Run(() => IsPathAccessible(path));
+             if (!exists) return (false, $"Path '{path}' is not accessible or doesn't exist.");
+
              return (true, "");
          }
 
@@ -1534,7 +1538,14 @@ namespace NomadTransferTool
                             
                             finalDest = Path.Combine(categoryDir, finalName + extension);
 
-                            // We will create the directory and handle posters later, right before moving/copying
+                            // Pre-check target path availability before starting long operations
+                            var (ready, err) = await EnsurePathReady(effectiveTargetPath);
+                            if (!ready)
+                            {
+                                AddLog($"Target path check failed: {err}");
+                                // For local drives, if it's not ready now, it's likely disconnected
+                                if (!UseSamba) throw new Exception($"Target drive '{effectiveTargetPath}' is not accessible.");
+                            }
                         }
 
                         if (willTranscode)
@@ -1547,34 +1558,57 @@ namespace NomadTransferTool
                                 
                                 if (autoMove)
                                 {
+                                    if (string.IsNullOrEmpty(finalDest)) throw new Exception("Destination path could not be determined.");
+
                                     AddLog($"Moving {item.Title} to target...");
                                     CurrentStatus = $"Moving: {item.Title}";
                                     
-                                    // ENSURE SAMBA CONNECTED HERE
+                                    // ENSURE SAMBA CONNECTED HERE (Retry)
                                     var (ready, err) = await EnsurePathReady(effectiveTargetPath);
-                                    if (!ready) throw new Exception($"Target path not ready: {err}");
+                                    if (!ready) throw new Exception($"Target path not ready after transcode: {err}");
 
                                     // CREATE DIRECTORY HERE
                                     string? finalDir = Path.GetDirectoryName(finalDest);
-                                    if (finalDir != null && !Directory.Exists(finalDir)) Directory.CreateDirectory(finalDir);
+                                    if (finalDir != null && !Directory.Exists(finalDir)) 
+                                    {
+                                        AddLog($"Creating directory: {finalDir}");
+                                        Directory.CreateDirectory(finalDir);
+                                    }
 
                                     // Handle Poster if available
                                     if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
                                     {
-                                        var meta = await FetchOMDBMetadata(item.Title, item.Category);
-                                        if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
-                                        {
-                                            string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                            string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
-                                            string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
-                                            string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-                                            if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
-                                            await DownloadPoster(meta.Poster, posterDest);
-                                        }
+                                        try {
+                                            var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                            if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                                            {
+                                                string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                                                string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
+                                                string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                                string posterDest = Path.Combine(posterBase, posterName + ".jpg");
+                                                if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
+                                                await DownloadPoster(meta.Poster, posterDest);
+                                            }
+                                        } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
                                     }
 
                                     if (File.Exists(finalDest)) File.Delete(finalDest);
-                                    await CopyFileWithProgress(item, tempFile, finalDest, token);
+                                    
+                                    // Retry logic for copy
+                                    int retries = 3;
+                                    while (retries > 0)
+                                    {
+                                        try {
+                                            await CopyFileWithProgress(item, tempFile, finalDest, token);
+                                            break;
+                                        } catch (Exception ex) when (retries > 1) {
+                                            retries--;
+                                            AddLog($"Copy failed, retrying ({retries} left): {ex.Message}");
+                                            await Task.Delay(2000, token);
+                                            // Re-check path on retry
+                                            await EnsurePathReady(effectiveTargetPath);
+                                        }
+                                    }
                                     
                                     // Delete temp file after successful transfer
                                     if (File.Exists(tempFile))
@@ -1588,13 +1622,17 @@ namespace NomadTransferTool
                                     string localDest = Path.Combine(Path.GetDirectoryName(item.SourcePath)!, safeTitle + ".mp4");
                                     if (File.Exists(localDest)) File.Delete(localDest);
                                     File.Move(tempFile, localDest);
+                                    
+                                    // Update source path to the transcoded file for consistency
+                                    item.SourcePath = localDest;
+                                    item.FileName = Path.GetFileName(localDest);
                                 }
                             }
                             catch (OperationCanceledException) { throw; }
                             catch (Exception ex)
                             {
-                                AddLog($"Transcode failed for {item.Title}: {ex.Message}");
-                                item.StatusMessage = "Transcode Failed";
+                                AddLog($"Processing failed for {item.Title}: {ex.Message}");
+                                item.StatusMessage = "Error: " + ex.Message;
                                 if (File.Exists(tempFile))
                                 {
                                     try { File.Delete(tempFile); } catch { }
@@ -1610,6 +1648,8 @@ namespace NomadTransferTool
                         }
                         else if (autoMove)
                         {
+                            if (string.IsNullOrEmpty(finalDest)) throw new Exception("Destination path could not be determined.");
+
                             AddLog($"Copying {item.Title} to target...");
                             
                             // ENSURE SAMBA CONNECTED HERE
@@ -1618,24 +1658,46 @@ namespace NomadTransferTool
 
                             // CREATE DIRECTORY HERE
                             string? finalDir = Path.GetDirectoryName(finalDest);
-                            if (finalDir != null && !Directory.Exists(finalDir)) Directory.CreateDirectory(finalDir);
+                            if (finalDir != null && !Directory.Exists(finalDir)) 
+                            {
+                                AddLog($"Creating directory: {finalDir}");
+                                Directory.CreateDirectory(finalDir);
+                            }
 
                             // Handle Poster if available
                              if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
                              {
-                                 var meta = await FetchOMDBMetadata(item.Title, item.Category);
-                                 if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
-                                 {
-                                     string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                     string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
-                                     string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
-                                     string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-                                     if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
-                                     await DownloadPoster(meta.Poster, posterDest);
-                                 }
+                                 try {
+                                     var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                     if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                                     {
+                                         string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                                         string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
+                                         string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                         string posterDest = Path.Combine(posterBase, posterName + ".jpg");
+                                         if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
+                                         await DownloadPoster(meta.Poster, posterDest);
+                                     }
+                                 } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
                              }
 
-                            await CopyFileWithProgress(item, finalDest, token);
+                            if (File.Exists(finalDest)) File.Delete(finalDest);
+                            
+                            // Retry logic for copy
+                            int retries = 3;
+                            while (retries > 0)
+                            {
+                                try {
+                                    await CopyFileWithProgress(item, finalDest, token);
+                                    break;
+                                } catch (Exception ex) when (retries > 1) {
+                                    retries--;
+                                    AddLog($"Copy failed, retrying ({retries} left): {ex.Message}");
+                                    await Task.Delay(2000, token);
+                                    // Re-check path on retry
+                                    await EnsurePathReady(effectiveTargetPath);
+                                }
+                            }
                         }
 
                         processedItems++;

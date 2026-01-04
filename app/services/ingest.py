@@ -30,6 +30,27 @@ class IngestHandler(FileSystemEventHandler):
             return
         self.handle_file(event.dest_path)
 
+    def on_deleted(self, event):
+        if event.is_directory:
+            # Handle directory deletion - remove all items in this folder from index
+            try:
+                rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
+                web_path_prefix = f"/data/{rel_path}/"
+                media.database.delete_library_index_items_by_prefix(web_path_prefix)
+                logger.info(f"Removed items from index for deleted directory: {rel_path}")
+            except Exception as e:
+                logger.warning(f"Failed to handle directory deletion {event.src_path}: {e}")
+            return
+        
+        # Handle file deletion
+        try:
+            rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
+            web_path = f"/data/{rel_path}"
+            media.database.delete_library_index_item(web_path)
+            logger.info(f"Removed file from index: {web_path}")
+        except Exception as e:
+            logger.warning(f"Failed to handle file deletion {event.src_path}: {e}")
+
     def handle_file(self, file_path):
         if _stop_event.is_set():
             return
@@ -178,13 +199,13 @@ def start_ingest_service():
         _observer.schedule(IngestHandler(is_direct=False), ingest_dir, recursive=False)
         
         # 2. Watch direct upload folders for immediate indexing
-        # Note: We watch NON-RECURSIVELY to avoid crashing the Pi with too many watches.
-        # Files in subfolders will be picked up by the background scanner or manual refresh.
+        # We now use recursive=True to detect files in subfolders (e.g. Movie Name (Year)/movie.mkv)
+        # 100,000 inotify watches are configured in setup.sh, which is plenty.
         watch_folders = ["movies", "shows", "music", "books"]
         for folder in watch_folders:
             folder_path = os.path.join(media.BASE_DIR, folder)
             os.makedirs(folder_path, exist_ok=True)
-            _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=False)
+            _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=True)
             
         _observer.start()
         logger.info(f"Ingest service started watching {ingest_dir} and direct folders")

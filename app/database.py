@@ -271,6 +271,27 @@ def delete_library_index_item(path: str):
     c.execute("DELETE FROM progress WHERE path = ?", (path,))
     conn.commit()
 
+def delete_library_index_items_by_prefix(path_prefix: str):
+    """Delete all items from library_index, file_metadata, and progress starting with path_prefix"""
+    conn = get_db()
+    c = conn.cursor()
+    # Ensure prefix ends with / to only match sub-items
+    if not path_prefix.endswith('/'):
+        path_prefix += '/'
+    
+    pattern = path_prefix + '%'
+    c.execute("DELETE FROM library_index WHERE path LIKE ?", (pattern,))
+    c.execute("DELETE FROM file_metadata WHERE path LIKE ?", (pattern,))
+    c.execute("DELETE FROM progress WHERE path LIKE ?", (pattern,))
+    
+    # Also delete the directory itself if it matches the prefix (without trailing slash)
+    dir_path = path_prefix.rstrip('/')
+    c.execute("DELETE FROM library_index WHERE path = ?", (dir_path,))
+    c.execute("DELETE FROM file_metadata WHERE path = ?", (dir_path,))
+    c.execute("DELETE FROM progress WHERE path = ?", (dir_path,))
+    
+    conn.commit()
+
 def upsert_library_index_items(items: list):
     if not items:
         return

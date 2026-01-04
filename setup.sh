@@ -342,10 +342,15 @@ inotify=yes
 presentation_url=http://nomadpi.local:8000/
 EOL
 
-# Fix permissions for MiniDLNA
+# Fix permissions for MiniDLNA - Use group-based permissions instead of changing ownership
+# This ensures the web server user can still write/delete files
 echo "Setting permissions for MiniDLNA..."
-sudo chown -R minidlna:minidlna "$CURRENT_DIR/data"
-sudo chmod -R 755 "$CURRENT_DIR/data"
+# Ensure the data directory is owned by the current user and group
+sudo chown -R $USER:$USER "$CURRENT_DIR/data"
+# Ensure the group has write permissions
+sudo chmod -R 775 "$CURRENT_DIR/data"
+# Add minidlna user to the current user's group so it can read the files
+sudo usermod -a -G $USER minidlna
 
 # Increase inotify watches for large libraries
 sudo sysctl -w fs.inotify.max_user_watches=100000 >/dev/null
