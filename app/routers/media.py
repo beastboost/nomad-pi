@@ -1934,10 +1934,14 @@ def delete_media(path: str):
         # Get metadata before deleting from DB to find poster
         meta = database.get_file_metadata(path)
         
+        logger.info(f"Attempting to delete {fs_path} (from web path {path})")
+        
         if os.path.isdir(fs_path):
             shutil.rmtree(fs_path)
         else:
             os.remove(fs_path)
+            
+        logger.info(f"Successfully deleted {fs_path}")
             
         # Clean up database (now also cleans metadata and progress)
         database.delete_library_index_item(path)

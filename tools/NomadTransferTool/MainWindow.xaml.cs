@@ -1625,7 +1625,6 @@ namespace NomadTransferTool
                                     
                                     // Update source path to the transcoded file for consistency
                                     item.SourcePath = localDest;
-                                    item.FileName = Path.GetFileName(localDest);
                                 }
                             }
                             catch (OperationCanceledException) { throw; }
@@ -2067,9 +2066,10 @@ namespace NomadTransferTool
         private MediaTrack? _selectedAudioTrack;
         private MediaTrack? _selectedSubtitleTrack;
 
-        public string SourcePath { get; set; } = "";
+        public string SourcePath { get => _sourcePath; set { _sourcePath = value; OnPropertyChanged(); OnPropertyChanged(nameof(FileName)); } }
         public string FileName => Path.GetFileName(SourcePath);
         
+        private string _sourcePath = "";
         public string Title { get => _title; set { _title = value; OnPropertyChanged(); } }
         public string Year { get => _year; set { _year = value; OnPropertyChanged(); } }
         public string Category { get => _category; set { _category = value; OnPropertyChanged(); } }

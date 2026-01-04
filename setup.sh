@@ -5,6 +5,9 @@
 
 set -e
 
+# Correctly identify the real user even if run with sudo
+REAL_USER=${SUDO_USER:-$USER}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SCRIPT_DIR" == /boot* ]]; then
     mkdir -p "$HOME/nomad-pi"
@@ -107,16 +110,23 @@ echo "Installing Python dependencies..."
 # 4. Create Directories
 echo "[4/9] Ensuring data directories exist..."
 mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
+
+echo "Ensuring all files in $CURRENT_DIR are owned by $REAL_USER..."
+
 # Fix permissions to ensure user can write
-sudo chown -R $USER:$USER data
-sudo chmod -R 775 data
+sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR"
+sudo chmod -R 775 "$CURRENT_DIR/data"
+# Also ensure the venv and app files are owned by the user
+sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR/venv" 2>/dev/null || true
+sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR/app" 2>/dev/null || true
 
 # 5. Systemd Service Setup
 echo "[5/9] Setting up Systemd service..."
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 CURRENT_DIR=$(pwd)
-USER_NAME=$(whoami)
+# Use REAL_USER defined in step 4
+USER_NAME=$REAL_USER
 ENV_FILE="/etc/nomadpi.env"
 OMDB_KEY_VALUE="${OMDB_API_KEY:-}"
 ADMIN_PASS_VALUE="${ADMIN_PASSWORD:-}"

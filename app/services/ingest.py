@@ -34,18 +34,51 @@ class IngestHandler(FileSystemEventHandler):
         if event.is_directory:
             # Handle directory deletion - remove all items in this folder from index
             try:
-                rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
-                web_path_prefix = f"/data/{rel_path}/"
-                media.database.delete_library_index_items_by_prefix(web_path_prefix)
-                logger.info(f"Removed items from index for deleted directory: {rel_path}")
+                # Try to determine the web path prefix
+                if event.src_path.startswith(os.path.abspath(media.BASE_DIR)):
+                    rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
+                    web_path_prefix = f"/data/{rel_path}/"
+                else:
+                    # External path
+                    web_path_prefix = None
+                    ext_root = os.path.join(media.BASE_DIR, "external")
+                    if os.path.exists(ext_root):
+                        for item in os.listdir(ext_root):
+                            link_path = os.path.join(ext_root, item)
+                            if os.path.islink(link_path):
+                                target = os.path.realpath(link_path)
+                                if event.src_path.startswith(target):
+                                    rel_to_target = os.path.relpath(event.src_path, target).replace(os.sep, '/')
+                                    web_path_prefix = f"/data/external/{item}/{rel_to_target}/"
+                                    break
+                
+                if web_path_prefix:
+                    media.database.delete_library_index_items_by_prefix(web_path_prefix)
+                    logger.info(f"Removed items from index for deleted directory: {web_path_prefix}")
             except Exception as e:
                 logger.warning(f"Failed to handle directory deletion {event.src_path}: {e}")
             return
         
         # Handle file deletion
         try:
-            rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
-            web_path = f"/data/{rel_path}"
+            # Try to determine the web path
+            if event.src_path.startswith(os.path.abspath(media.BASE_DIR)):
+                rel_path = os.path.relpath(event.src_path, media.BASE_DIR).replace(os.sep, '/')
+                web_path = f"/data/{rel_path}"
+            else:
+                # External path
+                web_path = event.src_path # Fallback
+                ext_root = os.path.join(media.BASE_DIR, "external")
+                if os.path.exists(ext_root):
+                    for item in os.listdir(ext_root):
+                        link_path = os.path.join(ext_root, item)
+                        if os.path.islink(link_path):
+                            target = os.path.realpath(link_path)
+                            if event.src_path.startswith(target):
+                                rel_to_target = os.path.relpath(event.src_path, target).replace(os.sep, '/')
+                                web_path = f"/data/external/{item}/{rel_to_target}"
+                                break
+            
             media.database.delete_library_index_item(web_path)
             logger.info(f"Removed file from index: {web_path}")
         except Exception as e:
@@ -113,21 +146,58 @@ class IngestHandler(FileSystemEventHandler):
                     logger.exception(f"Failed to ingest {filename}")
                     return
             else:
-                # For direct uploads, we just need to determine the category based on the path
+                # For direct uploads or external changes, determine category based on path
                 target_abs = file_path
-                category = "movies"
-                if "shows" in file_path.lower():
-                    category = "shows"
-                elif "music" in file_path.lower():
-                    category = "music"
-                elif "books" in file_path.lower():
-                    category = "books"
+                category = "movies" # Default
+                
+                try:
+                    # Case 1: Path is within BASE_DIR (data/)
+                    if file_path.startswith(os.path.abspath(media.BASE_DIR)):
+                        rel_to_base = os.path.relpath(file_path, media.BASE_DIR).replace(os.sep, '/')
+                        parts = rel_to_base.split('/')
+                        if parts[0] in ["movies", "shows", "music", "books", "gallery", "files"]:
+                            category = parts[0]
+                        elif parts[0] == "external" and len(parts) > 2:
+                            # e.g., external/DriveName/movies/file.mp4
+                            if parts[2] in ["movies", "shows", "music", "books", "gallery", "files"]:
+                                category = parts[2]
+                    
+                    # Case 2: Path is in a Linux mount point (/media or /mnt)
+                    elif file_path.startswith(('/media', '/mnt')):
+                        # Check for category keywords in the path
+                        path_lower = file_path.lower()
+                        if "/shows/" in path_lower or "/tv shows/" in path_lower or "/tv/" in path_lower:
+                            category = "shows"
+                        elif "/music/" in path_lower:
+                            category = "music"
+                        elif "/books/" in path_lower:
+                            category = "books"
+                        elif "/gallery/" in path_lower or "/photos/" in path_lower:
+                            category = "gallery"
+                        elif "/movies/" in path_lower:
+                            category = "movies"
+                except Exception as e:
+                    logger.warning(f"Category detection error for {file_path}: {e}")
 
             # Update DB for the final file location
             try:
                 # Construct web path
-                rel_path = os.path.relpath(target_abs, media.BASE_DIR).replace(os.sep, '/')
-                web_path = f"/data/{rel_path}"
+                if target_abs.startswith(os.path.abspath(media.BASE_DIR)):
+                    rel_path = os.path.relpath(target_abs, media.BASE_DIR).replace(os.sep, '/')
+                    web_path = f"/data/{rel_path}"
+                else:
+                    # For files outside data/ (like /media/pi/...), try to find if they are symlinked in data/external
+                    web_path = target_abs # Fallback to absolute path
+                    ext_root = os.path.join(media.BASE_DIR, "external")
+                    if os.path.exists(ext_root):
+                        for item in os.listdir(ext_root):
+                            link_path = os.path.join(ext_root, item)
+                            if os.path.islink(link_path):
+                                target = os.path.realpath(link_path)
+                                if target_abs.startswith(target):
+                                    rel_to_target = os.path.relpath(target_abs, target).replace(os.sep, '/')
+                                    web_path = f"/data/external/{item}/{rel_to_target}"
+                                    break
                 
                 # For movies/shows, the folder is relative to the category root
                 try:
@@ -201,11 +271,22 @@ def start_ingest_service():
         # 2. Watch direct upload folders for immediate indexing
         # We now use recursive=True to detect files in subfolders (e.g. Movie Name (Year)/movie.mkv)
         # 100,000 inotify watches are configured in setup.sh, which is plenty.
-        watch_folders = ["movies", "shows", "music", "books"]
+        watch_folders = ["movies", "shows", "music", "books", "external"]
         for folder in watch_folders:
             folder_path = os.path.join(media.BASE_DIR, folder)
             os.makedirs(folder_path, exist_ok=True)
             _observer.schedule(IngestHandler(is_direct=True), folder_path, recursive=True)
+            
+        # 3. Watch Linux mount points for external drives
+        if os.name != 'nt':
+            for mount_root in ["/media/pi", "/media", "/mnt"]:
+                if os.path.exists(mount_root):
+                    try:
+                        # We watch these recursively too, but only if they are likely to contain media
+                        _observer.schedule(IngestHandler(is_direct=True), mount_root, recursive=True)
+                        logger.info(f"Ingest service watching mount root: {mount_root}")
+                    except Exception as e:
+                        logger.warning(f"Could not watch {mount_root}: {e}")
             
         _observer.start()
         logger.info(f"Ingest service started watching {ingest_dir} and direct folders")
