@@ -18,7 +18,7 @@ if [[ "$SCRIPT_DIR" == /boot* ]]; then
         sudo cp -r "$SCRIPT_DIR/app" "$HOME/nomad-pi/" || true
     fi
     sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$HOME/nomad-pi/" || true
-    sudo chown -R "$USER:$USER" "$HOME/nomad-pi"
+    sudo chown -R "$REAL_USER:$REAL_USER" "$HOME/nomad-pi"
     sudo chmod +x "$HOME/nomad-pi/setup.sh" "$HOME/nomad-pi/update.sh"
     exec bash "$HOME/nomad-pi/setup.sh"
 fi
@@ -29,7 +29,7 @@ if [[ "$SCRIPT_DIR" == /root* ]]; then
     TARGET_DIR="$HOME/nomad-pi"
     sudo mkdir -p "$TARGET_DIR"
     sudo cp -r "$SCRIPT_DIR/." "$TARGET_DIR/"
-    sudo chown -R "$USER:$USER" "$TARGET_DIR"
+    sudo chown -R "$REAL_USER:$REAL_USER" "$TARGET_DIR"
     sudo chmod +x "$TARGET_DIR/setup.sh" "$TARGET_DIR/update.sh"
     echo "Moved to $TARGET_DIR. Restarting setup from new location..."
     cd "$TARGET_DIR"
@@ -37,6 +37,7 @@ if [[ "$SCRIPT_DIR" == /root* ]]; then
 fi
 
 cd "$SCRIPT_DIR"
+CURRENT_DIR=$(pwd)
 
 # Ensure all scripts are executable and have correct line endings
 chmod +x *.sh 2>/dev/null || true
@@ -124,17 +125,16 @@ mkdir -p data/movies data/shows data/music data/books data/files data/external d
 echo "Ensuring all files in $CURRENT_DIR are owned by $REAL_USER..."
 
 # Fix permissions to ensure user can write
-sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR"
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
 sudo chmod -R 775 "$CURRENT_DIR/data"
 # Also ensure the venv and app files are owned by the user
-sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR/venv" 2>/dev/null || true
-sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR/app" 2>/dev/null || true
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/venv" 2>/dev/null || true
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/app" 2>/dev/null || true
 
 # 5. Systemd Service Setup
 echo "[5/9] Setting up Systemd service..."
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
-CURRENT_DIR=$(pwd)
 # Use REAL_USER defined in step 4
 USER_NAME=$REAL_USER
 ENV_FILE="/etc/nomadpi.env"
@@ -366,11 +366,11 @@ EOL
 # This ensures the web server user can still write/delete files
 echo "Setting permissions for MiniDLNA..."
 # Ensure the data directory is owned by the current user and group
-sudo chown -R $USER:$USER "$CURRENT_DIR/data"
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
 # Ensure the group has write permissions
 sudo chmod -R 775 "$CURRENT_DIR/data"
 # Add minidlna user to the current user's group so it can read the files
-sudo usermod -a -G $USER minidlna
+sudo usermod -a -G "$REAL_USER" minidlna
 
 # Increase inotify watches for large libraries
 sudo sysctl -w fs.inotify.max_user_watches=100000 >/dev/null
