@@ -9,7 +9,7 @@ createApp({
     data() {
         return {
             // UI State
-            sidebarCollapsed: false,
+            sidebarCollapsed: window.innerWidth <= 992,
             currentView: 'dashboard',
             isDarkMode: localStorage.getItem('darkMode') === 'true',
             isLoading: false,
@@ -220,11 +220,45 @@ createApp({
         async fetchLogs() {
             try {
                 const response = await this.apiCall(`/api/system/logs?lines=${this.logLines}`, 'GET');
-                this.logs = response.logs || [];
+                this.logs = response.logs || "No logs available.";
+                this.$nextTick(() => {
+                    if (this.$refs.logViewer) {
+                        this.$refs.logViewer.scrollTop = this.$refs.logViewer.scrollHeight;
+                    }
+                });
             } catch (error) {
                 console.error('Error fetching logs:', error);
                 this.showNotification('Failed to fetch logs', 'error');
             }
+        },
+
+        clearLogView() {
+            this.logs = "Log view cleared (fetch again to refresh).";
+        },
+
+        async systemControl(action) {
+            this.showConfirmModal = true;
+            const titles = { reboot: 'Reboot System', shutdown: 'Shutdown System', update: 'Update System' };
+            const messages = { 
+                reboot: 'Are you sure you want to reboot the system? The server will be unavailable for a few minutes.',
+                shutdown: 'Are you sure you want to shutdown the system? You will need to manually power it back on.',
+                update: 'Are you sure you want to update from GitHub? This will pull the latest changes.'
+            };
+            
+            this.confirmModal = {
+                title: titles[action] || 'System Control',
+                message: messages[action] || `Confirm ${action}?`,
+                action: async () => {
+                    try {
+                        const response = await this.apiCall('/api/system/control', 'POST', { action });
+                        this.showNotification(response.message || 'Action initiated', 'success');
+                    } catch (error) {
+                        this.showNotification(`Action failed: ${error.message}`, 'error');
+                    }
+                },
+                actionText: action.charAt(0).toUpperCase() + action.slice(1),
+                actionClass: action === 'shutdown' || action === 'reboot' ? 'btn-danger' : 'btn-primary'
+            };
         },
 
         async loadServices() {
@@ -447,6 +481,13 @@ createApp({
 
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
+        },
+
+        setView(view) {
+            this.currentView = view;
+            if (window.innerWidth <= 992) {
+                this.sidebarCollapsed = true;
+            }
         },
 
         toggleTheme() {

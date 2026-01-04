@@ -8,7 +8,22 @@ from app import database
 import os
 import threading
 import mimetypes
+import logging
 from datetime import datetime
+
+# Configure logging
+LOG_FILE = "data/app.log"
+os.makedirs("data", exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("nomad")
+logger.info("Nomad Pi starting up...")
 
 # Add common media types for Windows compatibility
 mimetypes.add_type('audio/mpeg', '.mp3')

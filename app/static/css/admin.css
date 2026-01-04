@@ -14,6 +14,7 @@
     --warning: #f59e0b;
     --success: #10b981;
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --skeleton: #e2e8f0;
 }
 
 .dark-mode {
@@ -23,7 +24,33 @@
     --text-muted: #94a3b8;
     --border-color: #334155;
     --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2);
+    --skeleton: #334155;
 }
+
+/* Skeleton Loading */
+.skeleton {
+    background: var(--skeleton);
+    background-image: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0,
+        rgba(255, 255, 255, 0.05) 20%,
+        rgba(255, 255, 255, 0.1) 60%,
+        rgba(255, 255, 255, 0)
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+}
+
+@keyframes shimmer {
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+.skeleton-text { height: 1em; margin-bottom: 0.5rem; width: 80%; }
+.skeleton-title { height: 1.5em; margin-bottom: 1rem; width: 50%; }
+.skeleton-circle { border-radius: 50%; width: 48px; height: 48px; }
 
 * {
     box-sizing: border-box;
@@ -349,6 +376,50 @@ body {
 @keyframes slideIn {
     from { opacity: 0; transform: translateX(100%); }
     to { opacity: 1; transform: translateX(0); }
+}
+
+/* Responsive */
+@media (max-width: 992px) {
+    .sidebar {
+        position: fixed;
+        left: 0;
+        z-index: 1000;
+        transform: translateX(0);
+        box-shadow: 10px 0 30px rgba(0,0,0,0.1);
+    }
+    .sidebar.collapsed {
+        transform: translateX(-100%);
+        width: 260px; /* Keep full width when mobile-open */
+    }
+    .main-content {
+        width: 100%;
+    }
+    .header {
+        padding: 0 1rem;
+    }
+    .mobile-toggle-btn {
+        display: block !important;
+    }
+}
+
+@media (max-width: 600px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .header-right .status-indicator span {
+        display: none;
+    }
+    .content {
+        padding: 1rem;
+    }
+    .toast-container {
+        left: 1rem;
+        right: 1rem;
+        bottom: 1rem;
+    }
+    .toast {
+        min-width: 0;
+    }
 }
 
 /* Log Viewer */

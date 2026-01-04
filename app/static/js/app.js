@@ -247,11 +247,60 @@ async function checkAuth() {
     }
 }
 
+function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    let icon = '✨';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    if (type === 'warning') icon = '⚠️';
+
+    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 500);
+    }, duration);
+}
+
+function renderSkeletons(container, count = 8) {
+    if (!container) return;
+    container.innerHTML = '';
+    for (let i = 0; i < count; i++) {
+        const skel = document.createElement('div');
+        skel.className = 'media-item skeleton';
+        skel.style.height = '300px';
+        skel.style.borderRadius = '12px';
+        container.appendChild(skel);
+    }
+}
+
 function handleLoginKey(e) {
     if (e.key === 'Enter') login();
 }
 
+function toggleMobileMenu() {
+    const nav = document.getElementById('main-nav');
+    const btn = document.querySelector('.mobile-menu-btn');
+    if (nav) {
+        nav.classList.toggle('mobile-active');
+        if (btn) btn.innerText = nav.classList.contains('mobile-active') ? '✕' : '☰';
+    }
+}
+
 function showSection(id) {
+    const nav = document.getElementById('main-nav');
+    const btn = document.querySelector('.mobile-menu-btn');
+    if (nav) {
+        nav.classList.remove('mobile-active');
+        if (btn) btn.innerText = '☰';
+    }
+
     document.querySelectorAll('main > section').forEach(sec => {
         sec.classList.add('hidden');
         sec.style.display = 'none'; // Force hide
@@ -288,25 +337,6 @@ function showSection(id) {
         loadStorageStats();
     }
 
-    // Setup search listeners
-    ['movies', 'shows', 'music', 'files'].forEach(cat => {
-        const input = document.getElementById(`${cat}-search`);
-        if (input && !input._listenerAttached) {
-            let timeout = null;
-            input.addEventListener('input', () => {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => {
-                    if (cat === 'movies') loadMovies(true);
-                    else if (cat === 'shows') {
-                        if (showsState.level === 'shows') loadShows(true);
-                        else renderShows(); 
-                    }
-                    else if (cat === 'music' || cat === 'files') loadMedia(cat);
-                }, 500);
-            });
-            input._listenerAttached = true;
-        }
-    });
     if (id === 'admin') {
         loadDrives();
         loadWifiStatus();
@@ -322,17 +352,20 @@ function showSection(id) {
 
 async function loadMedia(category) {
     if (category === 'files') {
-        loadFileBrowser(mediaState.path || '/data');
+        const searchInput = document.getElementById('files-search');
+        const q = (searchInput?.value || '').trim();
+        loadFileBrowser(mediaState.path || '/data', q);
         return;
     }
     await loadMediaPage(category, true);
 }
 
-async function loadFileBrowser(path) {
-    console.log('loadFileBrowser called with path:', path);
+async function loadFileBrowser(path, query = '') {
+    console.log('loadFileBrowser called with path:', path, 'query:', query);
     const container = document.getElementById('files-list');
     if (!container) return;
 
+    const q = (query || '').trim().toLowerCase();
     container.innerHTML = '<div class="loading">Loading files...</div>';
     
     // Check if we should show drive list (Windows)
@@ -341,8 +374,15 @@ async function loadFileBrowser(path) {
             const res = await fetch(`${API_BASE}/system/drives`);
             const data = await res.json();
             container.innerHTML = '<h2>Available Drives</h2>';
-            const drives = data.blockdevices || [];
+            let drives = data.blockdevices || [];
             
+            if (q) {
+                drives = drives.filter(d => 
+                    d.name.toLowerCase().includes(q) || 
+                    (d.mountpoint && d.mountpoint.toLowerCase().includes(q))
+                );
+            }
+
             // Back to /data
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
@@ -435,10 +475,15 @@ async function loadFileBrowser(path) {
             container.appendChild(backDiv);
         }
 
-        if (!data.items || data.items.length === 0) {
-            container.innerHTML += '<p style="padding:20px; text-align:center; color:var(--text-muted);">This folder is empty.</p>';
+        let items = data.items || [];
+        if (q) {
+            items = items.filter(item => item.name.toLowerCase().includes(q));
+        }
+
+        if (items.length === 0) {
+            container.innerHTML += `<p style="padding:20px; text-align:center; color:var(--text-muted);">${q ? 'No matching files found.' : 'This folder is empty.'}</p>`;
         } else {
-            data.items.forEach(item => {
+            items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
                 const itemPath = item.path.replaceAll('\\', '\\\\');
@@ -538,7 +583,7 @@ async function loadMediaPage(category, reset) {
         state.year = year;
         state.hasMore = true;
         mediaCache[category] = null;
-        container.innerHTML = '<div class="loading">Loading...</div>';
+        renderSkeletons(container);
     }
 
     if (state.loading || !state.hasMore) return;
@@ -560,7 +605,7 @@ async function loadMediaPage(category, reset) {
         state.offset = Number(data.next_offset || (state.offset + items.length));
         state.hasMore = Boolean(data.has_more);
         mediaCache[category] = state.items;
-        renderMediaListPaged(category, state.items, state.hasMore);
+        renderMediaListPaged(category, items, state.hasMore, !reset);
         
         // Populate filters if they are empty
         if (reset && (category === 'movies' || category === 'shows')) {
@@ -627,8 +672,8 @@ function loadShows(reset) {
     }
 }
 
-function renderMediaListPaged(category, files, hasMore) {
-    renderMediaList(category, files);
+function renderMediaListPaged(category, files, hasMore, append = false) {
+    renderMediaList(category, files, append);
     const container = document.getElementById(`${category}-list`);
     if (!container) return;
 
@@ -643,15 +688,20 @@ function renderMediaListPaged(category, files, hasMore) {
     btn.style.margin = '14px auto';
     btn.style.display = 'block';
     btn.textContent = 'Load more';
-    btn.addEventListener('click', () => loadMediaPage(category, false));
+    btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Loading...';
+        loadMediaPage(category, false);
+    });
     container.appendChild(btn);
 }
 
-function renderMediaList(category, files) {
+function renderMediaList(category, files, append = false) {
     const container = document.getElementById(`${category}-list`);
-    container.innerHTML = '';
+    if (!container) return;
+    if (!append) container.innerHTML = '';
 
-    if (category === 'music' && files && files.length > 0) {
+    if (category === 'music' && files && files.length > 0 && !append) {
         const shuffleBtn = document.createElement('button');
         shuffleBtn.className = 'primary';
         shuffleBtn.style.marginBottom = '10px';
@@ -1442,7 +1492,7 @@ async function loadShowsLibrary() {
     const container = document.getElementById('shows-list');
     if (!container) return;
 
-    container.innerHTML = '<div class="loading">Loading...</div>';
+    renderSkeletons(container);
     try {
         if (!showsLibraryCache) {
             const res = await fetch(`${API_BASE}/media/shows/library`);
@@ -1825,6 +1875,7 @@ async function loadResume() {
     const section = document.getElementById('resume-section');
     if (!container) return;
     
+    renderSkeletons(container, 4);
     try {
         const res = await fetch(`${API_BASE}/media/resume?limit=12`);
         if (res.status === 401) { logout(); return; }
@@ -1906,6 +1957,7 @@ async function loadRecent() {
     const section = document.getElementById('recent-section');
     if (!container) return;
 
+    renderSkeletons(container, 6);
     try {
         const [mRes, sRes] = await Promise.all([
             fetch(`${API_BASE}/media/library/movies?sort=newest&limit=6`),
@@ -2261,8 +2313,38 @@ function debounce(func, wait) {
     };
 }
 
+function initSearchListeners() {
+    const categories = ['movies', 'shows', 'music', 'files', 'books', 'gallery'];
+    categories.forEach(cat => {
+        const input = document.getElementById(`${cat}-search`);
+        if (input) {
+            let timeout = null;
+            input.addEventListener('input', () => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    console.log(`Searching ${cat}: ${input.value}`);
+                    if (cat === 'movies') {
+                        loadMovies(true);
+                    } else if (cat === 'shows') {
+                        if (showsState.level === 'shows') loadShows(true);
+                        else renderShows(); 
+                    } else if (cat === 'files') {
+                        // File browser search is handled differently if needed, 
+                        // but currently loadMedia('files') calls loadFileBrowser
+                        loadMedia('files');
+                    } else {
+                        // music, books, gallery use loadMediaPage via loadMedia
+                        loadMedia(cat);
+                    }
+                }, 500);
+            });
+        }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
+    initSearchListeners();
 
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
@@ -2400,27 +2482,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (folderInput) {
         folderInput.addEventListener('change', (e) => handleFiles(e.target.files));
-    }
-
-    if (moviesSearch) {
-        moviesSearch.addEventListener('input', debounce(() => {
-            loadMediaPage('movies', true);
-        }, 300));
-    }
-    if (musicSearch) {
-        musicSearch.addEventListener('input', debounce(() => {
-            loadMediaPage('music', true);
-        }, 300));
-    }
-    if (showsSearch) {
-        showsSearch.addEventListener('input', debounce(() => {
-            if (showsLibraryCache) renderShows();
-        }, 300));
-    }
-    if (filesSearch) {
-        filesSearch.addEventListener('input', debounce(() => {
-            loadMediaPage('files', true);
-        }, 300));
     }
 });
 
@@ -3203,16 +3264,17 @@ async function mountDrive(device, name, btn) {
         }
         
         if (result.status === 'mounted' || result.status === 'not_implemented_on_windows') {
+            showToast(`Drive mounted successfully!`, 'success');
             loadDrives(); 
         } else {
-            alert('Error: ' + (result.message || JSON.stringify(result)));
+            showToast('Error: ' + (result.message || JSON.stringify(result)), 'error');
             if (btn) {
                 btn.innerText = 'Mount';
                 btn.disabled = false;
             }
         }
     } catch (e) {
-        alert('Error: ' + e);
+        showToast('Error: ' + e, 'error');
         loadDrives();
     }
 }
@@ -3232,12 +3294,13 @@ async function unmountDrive(mountpoint) {
         }
         
         if (result.status === 'unmounted' || result.status === 'not_implemented_on_windows') {
+            showToast(`Drive unmounted successfully!`, 'success');
             loadDrives();
         } else {
-            alert('Error: ' + (result.message || JSON.stringify(result)));
+            showToast('Error: ' + (result.message || JSON.stringify(result)), 'error');
         }
     } catch (e) {
-        alert('Error: ' + e);
+        showToast('Error: ' + e, 'error');
     }
 }
 
@@ -3247,17 +3310,17 @@ async function changePassword() {
     const confirm = document.getElementById('change-pwd-confirm').value;
 
     if (!current || !newPass || !confirm) {
-        alert('Please fill in all password fields.');
+        showToast('Please fill in all password fields.', 'warning');
         return;
     }
 
     if (newPass !== confirm) {
-        alert('New passwords do not match.');
+        showToast('New passwords do not match.', 'error');
         return;
     }
 
     if (newPass.length < 4) {
-        alert('New password must be at least 4 characters long.');
+        showToast('New password must be at least 4 characters long.', 'warning');
         return;
     }
 
@@ -3273,17 +3336,17 @@ async function changePassword() {
 
         const data = await res.json();
         if (res.ok) {
-            alert('Password updated successfully!');
+            showToast('Password updated successfully!', 'success');
             // Clear fields
             document.getElementById('change-pwd-current').value = '';
             document.getElementById('change-pwd-new').value = '';
             document.getElementById('change-pwd-confirm').value = '';
         } else {
-            alert(data.detail || 'Failed to update password.');
+            showToast(data.detail || 'Failed to update password.', 'error');
         }
     } catch (e) {
         console.error('Error updating password:', e);
-        alert('Error updating password. See console for details.');
+        showToast('Error updating password. See console for details.', 'error');
     }
 }
 
@@ -3296,7 +3359,7 @@ function saveSettings() {
         document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
         document.title = serverName;
     }
-    alert('Settings saved locally! (Backend settings requires environment variables update)');
+    showToast('Settings saved locally!', 'success');
 }
 
 function setTheme(theme) {

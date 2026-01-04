@@ -25,37 +25,37 @@
                     </button>
                 </div>
                 <nav class="sidebar-nav">
-                    <a href="#" @click.prevent="currentView = 'dashboard'" 
+                    <a href="#" @click.prevent="setView('dashboard')" 
                        :class="{ active: currentView === 'dashboard' }" class="nav-item">
                         <i class="fas fa-chart-line"></i>
                         <span v-if="!sidebarCollapsed">Dashboard</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'uploads'" 
+                    <a href="#" @click.prevent="setView('uploads')" 
                        :class="{ active: currentView === 'uploads' }" class="nav-item">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span v-if="!sidebarCollapsed">Uploads</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'storage'" 
+                    <a href="#" @click.prevent="setView('storage')" 
                        :class="{ active: currentView === 'storage' }" class="nav-item">
                         <i class="fas fa-hdd"></i>
                         <span v-if="!sidebarCollapsed">Storage & Mounts</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'system'" 
+                    <a href="#" @click.prevent="setView('system')" 
                        :class="{ active: currentView === 'system' }" class="nav-item">
                         <i class="fas fa-cogs"></i>
                         <span v-if="!sidebarCollapsed">System Control</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'media'" 
+                    <a href="#" @click.prevent="setView('media')" 
                        :class="{ active: currentView === 'media' }" class="nav-item">
                         <i class="fas fa-film"></i>
                         <span v-if="!sidebarCollapsed">Media Library</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'settings'"
+                    <a href="#" @click.prevent="setView('settings')"
                        :class="{ active: currentView === 'settings' }" class="nav-item">
                         <i class="fas fa-sliders-h"></i>
                         <span v-if="!sidebarCollapsed">Settings</span>
                     </a>
-                    <a href="#" @click.prevent="currentView = 'logs'"
+                    <a href="#" @click.prevent="setView('logs')"
                        :class="{ active: currentView === 'logs' }" class="nav-item">
                         <i class="fas fa-terminal"></i>
                         <span v-if="!sidebarCollapsed">Logs</span>
@@ -68,6 +68,9 @@
                 <!-- Header -->
                 <header class="header">
                     <div class="header-left">
+                        <button @click="toggleSidebar" class="mobile-toggle-btn" style="display:none; margin-right: 1rem; background:none; border:none; font-size: 1.25rem; color: var(--text-color); cursor: pointer;">
+                            <i class="fas fa-bars"></i>
+                        </button>
                         <h2>{{ viewTitles[currentView] }}</h2>
                     </div>
                     <div class="header-right">
@@ -88,7 +91,18 @@
                 <div class="content">
                     <!-- Dashboard View -->
                     <section v-if="currentView === 'dashboard'" class="view-section">
-                        <div class="stats-grid">
+                        <div class="stats-grid" v-if="!stats.storageTotal">
+                            <div v-for="i in 4" :key="i" class="stat-card">
+                                <div class="stat-icon skeleton skeleton-circle"></div>
+                                <div class="stat-content" style="flex: 1;">
+                                    <div class="skeleton skeleton-text" style="width: 40%;"></div>
+                                    <div class="skeleton skeleton-title" style="width: 60%;"></div>
+                                    <div class="skeleton skeleton-text" style="width: 30%;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stats-grid" v-else>
                             <div class="stat-card">
                                 <div class="stat-icon storage-icon">
                                     <i class="fas fa-database"></i>
@@ -402,11 +416,27 @@
                             </div>
                         </div>
                     </section>
+                <!-- Logs View -->
+                    <section v-if="currentView === 'logs'" class="view-section">
+                        <div class="section-header">
+                            <h3>System Logs</h3>
+                            <div class="header-actions">
+                                <button @click="fetchLogs" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Refresh
+                                </button>
+                                <button @click="clearLogView" class="btn btn-secondary btn-sm">
+                                    <i class="fas fa-eraser"></i> Clear View
+                                </button>
+                            </div>
+                        </div>
+                        <div class="log-container">
+                            <pre class="log-viewer" ref="logViewer">{{ logs }}</pre>
+                        </div>
+                    </section>
                 </div>
             </main>
         </div>
-
-        <!-- Modal: Confirmation Dialog -->
+    </div>    <!-- Modal: Confirmation Dialog -->
         <div v-if="showConfirmModal" class="modal-overlay" @click="showConfirmModal = false">
             <div class="modal" @click.stop>
                 <div class="modal-header">

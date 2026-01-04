@@ -345,9 +345,42 @@ def toggle_wifi(enable: bool):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/wifi/restart")
-def restart_wifi():
-    if platform.system() != "Linux":
+@router.get("/logs")
+def get_logs(lines: int = 100):
+    log_file = "data/app.log"
+    if not os.path.exists(log_file):
+        return {"logs": "No logs found yet."}
+    
+    try:
+        with open(log_file, "r") as f:
+            content = f.readlines()
+            return {"logs": "".join(content[-lines:])}
+    except Exception as e:
+        return {"logs": f"Error reading logs: {e}"}
+
+@router.post("/control")
+def system_control(action: str):
+    if action == "reboot":
+        if platform.system() == "Linux":
+            os.system("sudo reboot")
+            return {"status": "ok", "message": "Rebooting..."}
+        return {"status": "error", "message": "Reboot not supported on this OS"}
+    
+    elif action == "shutdown":
+        if platform.system() == "Linux":
+            os.system("sudo shutdown -h now")
+            return {"status": "ok", "message": "Shutting down..."}
+        return {"status": "error", "message": "Shutdown not supported on this OS"}
+    
+    elif action == "update":
+        # Simple git pull update
+        try:
+            subprocess.run(["git", "pull"], check=True)
+            return {"status": "ok", "message": "Update pulled. Restart server to apply."}
+        except Exception as e:
+            return {"status": "error", "message": f"Update failed: {e}"}
+            
+    return {"status": "error", "message": f"Unknown action: {action}"}
         raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
     
     try:
