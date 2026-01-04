@@ -76,6 +76,7 @@ namespace NomadTransferTool
         private bool _isTranscodingEnabled = true;
         private string _detectedEncoder = "x264";
         private System.Threading.CancellationTokenSource? _processingCts;
+        private HashSet<string> _connectedSambaPaths = new HashSet<string>();
 
         // Samba Properties
         private bool _useSamba;
@@ -83,8 +84,24 @@ namespace NomadTransferTool
         private string _sambaUser = "";
         private string _sambaPassword = "";
 
-        public bool UseSamba { get => _useSamba; set { _useSamba = value; OnPropertyChanged(); } }
-        public string SambaPath { get => _sambaPath; set { _sambaPath = value; OnPropertyChanged(); } }
+        public bool UseSamba 
+        { 
+            get => _useSamba; 
+            set { 
+                _useSamba = value; 
+                OnPropertyChanged(); 
+                RefreshDrives(); // Refresh drives when toggled
+            } 
+        }
+        public string SambaPath 
+        { 
+            get => _sambaPath; 
+            set { 
+                _sambaPath = value; 
+                OnPropertyChanged(); 
+                RefreshDrives(); // Refresh drives when path changes
+            } 
+        }
         public string SambaUser { get => _sambaUser; set { _sambaUser = value; OnPropertyChanged(); } }
         public string SambaPassword { get => _sambaPassword; set { _sambaPassword = value; OnPropertyChanged(); } }
 
@@ -259,6 +276,10 @@ namespace NomadTransferTool
             
             if (result == 0 || result == 1219) // 0 is success, 1219 is already connected
             {
+                lock (_connectedSambaPaths)
+                {
+                    _connectedSambaPaths.Add(path);
+                }
                 return (true, result);
             }
             return (false, result);
@@ -821,6 +842,8 @@ namespace NomadTransferTool
         {
             var selectedName = (DriveList.SelectedItem as DriveInfoModel)?.Name;
             Drives.Clear();
+
+            // 1. Add Local USB Drives
             foreach (var drive in DriveInfo.GetDrives())
             {
                 if (drive.DriveType == DriveType.Removable && drive.IsReady)
@@ -834,10 +857,47 @@ namespace NomadTransferTool
                         IsMounted = Directory.Exists(Path.Combine(mediaServerDataPath, drive.Name.Replace(":\\", "")))
                     };
                     Drives.Add(model);
-                    if (model.Name == selectedName) DriveList.SelectedItem = model;
                 }
             }
+
+            // 2. Add Samba Share if enabled and path is valid
+            if (UseSamba && !string.IsNullOrEmpty(SambaPath) && SambaPath.StartsWith("\\\\"))
+            {
+                try
+                {
+                    // For UNC paths, DriveInfo doesn't work directly. 
+                    // We can use P/Invoke or simpler: just check if the directory exists and use a helper.
+                    if (Directory.Exists(SambaPath))
+                    {
+                        long freeBytes, totalBytes, totalFreeBytes;
+                        if (GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes))
+                        {
+                            Drives.Add(new DriveInfoModel
+                            {
+                                Name = SambaPath,
+                                Label = "Samba Share (Nomad Pi)",
+                                TotalSize = totalBytes,
+                                AvailableFreeSpace = freeBytes,
+                                IsMounted = true // Always true if we can see it
+                            });
+                        }
+                    }
+                }
+                catch { /* Ignore Samba drive errors */ }
+            }
+
+            if (selectedName != null)
+            {
+                DriveList.SelectedItem = Drives.FirstOrDefault(d => d.Name == selectedName);
+            }
         }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetDiskFreeSpaceEx(string lpDirectoryName,
+            out long lpFreeBytesAvailable,
+            out long lpTotalNumberOfBytes,
+            out long lpTotalNumberOfFreeBytes);
 
         private void StartDriveWatcher()
         {
@@ -1390,9 +1450,12 @@ namespace NomadTransferTool
                     token.ThrowIfCancellationRequested();
 
                     try
-                    {
-                        AddLog($"Processing {item.Title}...");
-                        item.IsProcessing = true;
+                        {
+                            string renamingInfo = item.Category;
+                            if (!string.IsNullOrEmpty(item.Year)) renamingInfo += $" ({item.Year})";
+                            AddLog($"Renaming/Sorting {item.Title} -> {renamingInfo} via OMDb data");
+                            
+                            item.IsProcessing = true;
                         item.StatusMessage = "Starting...";
                         item.Progress = 0;
                         
@@ -1586,9 +1649,13 @@ namespace NomadTransferTool
                 AddLog("Batch processing finished.");
                 
                 // Disconnect Samba if we used it
-                if (UseSamba && !string.IsNullOrEmpty(SambaPath))
+                lock (_connectedSambaPaths)
                 {
-                    try { WNetCancelConnection2(SambaPath, 0, true); } catch { }
+                    foreach (var path in _connectedSambaPaths)
+                    {
+                        try { WNetCancelConnection2(path, 0, true); } catch { }
+                    }
+                    _connectedSambaPaths.Clear();
                 }
             }
         }

@@ -227,10 +227,10 @@
             <!-- Column 1: Drives & Server Status -->
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="2*"/>
-                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="1*"/>
-                </Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="1.5*"/>
+            </Grid.RowDefinitions>
                 
                 <Border Grid.Row="0" Style="{StaticResource CardBorder}">
                     <Grid>
