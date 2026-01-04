@@ -248,17 +248,24 @@ createApp({
 
         async systemControl(action) {
             this.showConfirmModal = true;
-            const titles = { reboot: 'Reboot System', shutdown: 'Shutdown System', update: 'Update System' };
+            const titles = { 
+                reboot: 'Reboot System', 
+                shutdown: 'Shutdown System', 
+                update: 'Update System',
+                restart: 'Restart Service'
+            };
             const messages = { 
                 reboot: 'Are you sure you want to reboot the system? The server will be unavailable for a few minutes.',
                 shutdown: 'Are you sure you want to shutdown the system? You will need to manually power it back on.',
-                update: 'Are you sure you want to update from GitHub? This will pull the latest changes.'
+                update: 'Are you sure you want to update from GitHub? This will pull the latest changes.',
+                restart: 'Are you sure you want to restart the Nomad Pi service? Active uploads may be interrupted.'
             };
             
             this.confirmModal = {
                 title: titles[action] || 'System Control',
                 message: messages[action] || `Confirm ${action}?`,
                 action: async () => {
+                    this.showConfirmModal = false;
                     try {
                         const response = await this.apiCall('/api/system/control', 'POST', { action });
                         this.showNotification(response.message || 'Action initiated', 'success');
@@ -270,6 +277,10 @@ createApp({
                 actionClass: action === 'shutdown' || action === 'reboot' ? 'btn-danger' : 'btn-primary'
             };
         },
+
+        confirmRestart() { this.systemControl('restart'); },
+        confirmReboot() { this.systemControl('reboot'); },
+        confirmShutdown() { this.systemControl('shutdown'); },
 
         async loadServices() {
             try {
