@@ -169,10 +169,11 @@
                 <ColumnDefinition Width="1.2*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Column 1: Drives -->
+            <!-- Column 1: Drives & Server Status -->
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="2*"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="1*"/>
                 </Grid.RowDefinitions>
                 
@@ -227,8 +228,35 @@
                     </Grid>
                 </Border>
 
+                <!-- Server Control Panel -->
+                <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="5,10,5,5">
+                    <StackPanel>
+                        <TextBlock Text="Nomad Pi Status" Style="{StaticResource HeaderBlock}"/>
+                        <Grid Margin="0,5">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding ServerIp, UpdateSourceTrigger=PropertyChanged}" 
+                                     Background="#252525" Foreground="White" BorderBrush="{StaticResource BorderColor}"
+                                     Padding="5" VerticalContentAlignment="Center"/>
+                            <Ellipse Grid.Column="1" Width="12" Height="12" Fill="{Binding ServerStatusColor}" Margin="10,0,0,0" VerticalAlignment="Center" ToolTip="{Binding ServerStatus}"/>
+                        </Grid>
+                        <TextBlock Text="{Binding ServerStatus}" FontSize="11" HorizontalAlignment="Right" Foreground="{Binding ServerStatusColor}"/>
+                        
+                        <UniformGrid Columns="2" Margin="0,10,0,0">
+                            <Button Content="Web UI" Click="OpenWebUI_Click" Margin="0,0,5,0" Padding="5,4" FontSize="11"/>
+                            <Button Content="Health Check" Click="ViewHealth_Click" Margin="5,0,0,0" Padding="5,4" FontSize="11"/>
+                        </UniformGrid>
+                        <UniformGrid Columns="2" Margin="0,5,0,0">
+                            <Button Content="View Logs" Click="ViewRemoteLogs_Click" Margin="0,0,5,0" Padding="5,4" FontSize="11"/>
+                            <Button Content="Restart App" Click="RestartRemoteService_Click" Margin="5,0,0,0" Padding="5,4" FontSize="11" Background="{StaticResource DangerColor}"/>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
                 <!-- Activity Logs -->
-                <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="5,15,5,5">
+                <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="5,5,5,5">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>

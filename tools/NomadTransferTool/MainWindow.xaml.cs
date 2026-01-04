@@ -22,7 +22,7 @@ using Newtonsoft.Json;
 
 namespace NomadTransferTool
 {
-    public class NullToVisibilityConverter : IValueConverter
+    public class NullToVisibilityConverter : System.Windows.Data.IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
@@ -39,7 +39,23 @@ namespace NomadTransferTool
     {
         private const string APP_VERSION = "1.5.0";
         private static readonly HttpClient client = new HttpClient();
-        private const string API_BASE = "http://localhost:8000/api";
+        private string API_BASE => $"http://{ServerIp}:8000/api";
+        private string _serverIp = "nomadpi.local";
+        public string ServerIp 
+        { 
+            get => _serverIp; 
+            set { 
+                _serverIp = value; 
+                OnPropertyChanged(); 
+                OnPropertyChanged(nameof(AppStatus)); 
+            } 
+        }
+
+        private string _serverStatus = "Unknown";
+        public string ServerStatus { get => _serverStatus; set { _serverStatus = value; OnPropertyChanged(); } }
+
+        private System.Windows.Media.Brush _serverStatusColor = System.Windows.Media.Brushes.Gray;
+        public System.Windows.Media.Brush ServerStatusColor { get => _serverStatusColor; set { _serverStatusColor = value; OnPropertyChanged(); } }
         private string OMDB_API_KEY = "";
         private string mediaServerDataPath = "";
 
@@ -92,6 +108,8 @@ namespace NomadTransferTool
         {
             InitializeComponent();
             DataContext = this;
+            
+            _ = MonitorServerStatus();
             
             InitializePresets();
             
@@ -379,6 +397,140 @@ namespace NomadTransferTool
         private async void DownloadHandbrake_Click(object sender, RoutedEventArgs e)
         {
             await DownloadHandbrake();
+        }
+
+        private void OpenWebUI_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo($"http://{ServerIp}:8000") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Could not open browser: {ex.Message}");
+            }
+        }
+
+        private async void ViewHealth_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                AddLog("Running remote health check...");
+                var res = await client.GetAsync($"{API_BASE}/system/health");
+                if (res.IsSuccessStatusCode)
+                {
+                    var content = await res.Content.ReadAsStringAsync();
+                    var data = JsonConvert.DeserializeObject<dynamic>(content);
+                    if (data != null)
+                    {
+                        AddLog($"--- Remote Health: {data.status} ---");
+                        foreach (var check in data.checks)
+                        {
+                            string err = check.error != null ? $" (Error: {check.error})" : "";
+                            AddLog($"[{check.status.ToString().ToUpper()}] {check.name}{err}");
+                        }
+                    }
+                }
+                else
+                {
+                    AddLog($"Health check failed: {res.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Error fetching health: {ex.Message}");
+            }
+        }
+
+        private async void RestartRemoteService_Click(object sender, RoutedEventArgs e)
+        {
+            var result = System.Windows.MessageBox.Show("Are you sure you want to restart the Nomad Pi service? This will disconnect current users.", "Confirm Restart", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes) return;
+
+            try
+            {
+                AddLog("Sending restart command...");
+                // Note: We use the standardized control endpoint. 
+                // We'll add a 'reboot' action or specific 'service_restart' if needed, 
+                // but usually reboot is what's wanted for a clean state.
+                // However, our system.py has 'reboot' which reboots the whole Pi.
+                // Let's check if we want just service restart.
+                
+                // For now, let's trigger a 'restart' of the service
+                var res = await client.PostAsync($"{API_BASE}/system/control/restart", null);
+                if (res.IsSuccessStatusCode)
+                {
+                    AddLog("Restart command accepted. Application is restarting...");
+                    ServerStatus = "Restarting";
+                    ServerStatusColor = System.Windows.Media.Brushes.Orange;
+                }
+                else
+                {
+                    AddLog($"Restart command failed: {res.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Error sending restart command: {ex.Message}");
+            }
+        }
+
+        private async void ViewRemoteLogs_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                AddLog("Fetching remote logs...");
+                var res = await client.GetAsync($"{API_BASE}/system/logs?lines=50");
+                if (res.IsSuccessStatusCode)
+                {
+                    var content = await res.Content.ReadAsStringAsync();
+                    var data = JsonConvert.DeserializeObject<dynamic>(content);
+                    if (data != null && data.logs != null)
+                    {
+                        AddLog("--- Remote Logs Start ---");
+                        foreach (var log in data.logs)
+                        {
+                            AddLog($"REMOTE: {log}");
+                        }
+                        AddLog("--- Remote Logs End ---");
+                    }
+                }
+                else
+                {
+                    AddLog($"Failed to fetch logs: {res.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Error fetching logs: {ex.Message}");
+            }
+        }
+
+        private async Task MonitorServerStatus()
+        {
+            while (true)
+            {
+                try
+                {
+                    var res = await client.GetAsync($"{API_BASE}/system/status");
+                    if (res.IsSuccessStatusCode)
+                    {
+                        ServerStatus = "Online";
+                        ServerStatusColor = System.Windows.Media.Brushes.LightGreen;
+                    }
+                    else
+                    {
+                        ServerStatus = "Error";
+                        ServerStatusColor = System.Windows.Media.Brushes.Orange;
+                    }
+                }
+                catch
+                {
+                    ServerStatus = "Offline";
+                    ServerStatusColor = System.Windows.Media.Brushes.Red;
+                }
+                await Task.Delay(10000); // Check every 10s
+            }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

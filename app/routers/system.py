@@ -28,6 +28,17 @@ def save_omdb_key(request: OmdbKeyRequest):
     os.environ["OMDB_API_KEY"] = request.key
     return {"status": "ok"}
 
+@router.get("/status")
+def get_system_status():
+    """Lightweight endpoint for connectivity checks"""
+    return {"status": "online", "version": "1.5.0"}
+
+@router.get("/health")
+def get_health():
+    """Detailed health check results from startup"""
+    from app.main import ENV_CHECK_RESULTS
+    return ENV_CHECK_RESULTS
+
 @router.get("/stats")
 def get_stats():
     # Use the directory of the app for disk usage calculation on Linux
@@ -347,59 +358,89 @@ def toggle_wifi(enable: bool):
 
 @router.get("/logs")
 def get_logs(lines: int = 100):
+    """Retrieve the last N lines of the application log"""
+    # Try local app.log first as it's our primary log
     log_file = "data/app.log"
-    if not os.path.exists(log_file):
-        return {"logs": "No logs found yet."}
-    
-    try:
-        with open(log_file, "r") as f:
-            content = f.readlines()
-            return {"logs": "".join(content[-lines:])}
-    except Exception as e:
-        return {"logs": f"Error reading logs: {e}"}
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.readlines()
+                return {"logs": [line.strip() for line in content[-lines:]]}
+        except Exception:
+            pass
 
-@router.post("/control")
-def system_control(action: str):
-    if action == "reboot":
-        if platform.system() == "Linux":
-            os.system("sudo reboot")
-            return {"status": "ok", "message": "Rebooting..."}
-        return {"status": "error", "message": "Reboot not supported on this OS"}
-    
-    elif action == "shutdown":
-        if platform.system() == "Linux":
-            os.system("sudo shutdown -h now")
-            return {"status": "ok", "message": "Shutting down..."}
-        return {"status": "error", "message": "Shutdown not supported on this OS"}
-    
-    elif action == "update":
-        # Simple git pull update
+    # On Linux, try journalctl as a backup
+    if platform.system() == "Linux":
         try:
-            subprocess.run(["git", "pull"], check=True)
-            return {"status": "ok", "message": "Update pulled. Restart server to apply."}
-        except Exception as e:
-            return {"status": "error", "message": f"Update failed: {e}"}
+            result = subprocess.run(
+                ["journalctl", "-u", "nomad-pi", "-n", str(lines), "--no-pager"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return {"logs": result.stdout.splitlines()}
+        except Exception:
+            pass
             
-    return {"status": "error", "message": f"Unknown action: {action}"}
-        raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
+    return {"logs": ["No logs available. Check if data/app.log exists or if journalctl is accessible."]}
+
+@router.post("/control/{action}")
+def system_control(action: str):
+    if action not in ["shutdown", "reboot", "update", "restart"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
     
-    try:
-        # Try nmcli restart
-        subprocess.run(["nmcli", "radio", "wifi", "off"], check=True)
-        import time
-        time.sleep(2)
-        subprocess.run(["nmcli", "radio", "wifi", "on"], check=True)
-        return {"status": "success", "message": "Wi-Fi restarted"}
-    except Exception as e:
-        # Fallback to ifdown/ifup or rfkill toggle
+    if action == "restart":
+        if platform.system() == "Linux":
+            try:
+                subprocess.Popen(["sudo", "-n", "/usr/bin/systemctl", "restart", "nomad-pi.service"])
+                return {"status": "ok", "message": "Service restart initiated..."}
+            except Exception as e:
+                return {"status": "error", "message": f"Failed to restart service: {e}"}
+        return {"status": "error", "message": "Service restart not supported on this OS"}
+
+    if action == "update":
+        log_file = os.path.abspath("update.log")
+        # Ensure log file is clean before starting
+        if os.path.exists(log_file):
+            try:
+                os.remove(log_file)
+            except:
+                pass
+        
+        with open(log_file, "w") as f:
+            f.write(f"Update triggered at {datetime.now()}\n")
+
+        if platform.system() == "Linux":
+            # Run the update script in the background
+            try:
+                # Use a shell wrapper to ensure output is flushed and we have a clear completion marker
+                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
+                subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
+                return {"status": "Update initiated. System will restart shortly."}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+        elif platform.system() == "Windows":
+            # Support for testing update on Windows
+            try:
+                # Use powershell to append to log and add completion marker
+                pwsh_cmd = "powershell.exe -ExecutionPolicy Bypass -Command \"& { ./update.ps1 | Out-File -FilePath update.log -Append -Encoding utf8; if ($?) { Add-Content update.log '`nUpdate complete!' } else { Add-Content update.log '`nUpdate failed!' } }\""
+                subprocess.Popen(pwsh_cmd, shell=True, cwd=os.getcwd())
+                return {"status": "Update initiated (Windows)."}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+        else:
+            return {"status": "update_simulated", "message": "Update script would run on Linux or Windows"}
+
+    if platform.system() == "Linux":
+        cmd = ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"] if action == "shutdown" else ["sudo", "-n", "/usr/sbin/reboot"]
         try:
-            subprocess.run(["sudo", "rfkill", "block", "wifi"], check=True)
-            import time
-            time.sleep(2)
-            subprocess.run(["sudo", "rfkill", "unblock", "wifi"], check=True)
-            return {"status": "success", "message": "Wi-Fi restarted via rfkill"}
-        except Exception as e2:
-            raise HTTPException(status_code=500, detail=f"Failed to restart Wi-Fi: {str(e2)}")
+            subprocess.Popen(cmd)
+            return {"status": "ok", "message": f"{action.capitalize()} initiated..."}
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to {action}: {e}"}
+    
+    return {"status": "error", "message": f"{action.capitalize()} not supported on this OS"}
 
 @router.get("/update/check")
 def check_update():
@@ -448,86 +489,6 @@ def get_update_log():
         except Exception as e:
             return {"log": [f"Error reading log: {str(e)}"]}
     return {"log": ["No update log found."]}
-
-@router.get("/logs")
-def get_logs(lines: int = 100):
-    """Retrieve the last N lines of the application log"""
-    # Assuming logs are written to nomad-pi.log or we get them from journalctl on Linux
-    if platform.system() == "Linux":
-        try:
-            # Try to get logs from journalctl for the service
-            result = subprocess.run(
-                ["journalctl", "-u", "nomad-pi", "-n", str(lines), "--no-pager"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0:
-                return {"logs": result.stdout.splitlines()}
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as e:
-            logger.error(f"Failed to get logs from journalctl (lines={lines}): {e}")
-            
-    # Fallback: check if a local log file exists
-    log_file = "nomad-pi.log"
-    if os.path.exists(log_file):
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                # Read all lines and take the last N
-                all_lines = f.readlines()
-                return {"logs": [line.strip() for line in all_lines[-lines:]]}
-        except (OSError, IOError, UnicodeDecodeError) as e:
-            logger.error(f"Failed to read local log file {log_file} (lines={lines}): {e}")
-            
-    return {"logs": ["No logs available. Check if nomad-pi.log exists or if journalctl is accessible."]}
-
-@router.post("/control/{action}")
-def system_control(action: str):
-    if action not in ["shutdown", "reboot", "update"]:
-        raise HTTPException(status_code=400, detail="Invalid action")
-    
-    if action == "update":
-        log_file = os.path.abspath("update.log")
-        # Ensure log file is clean before starting
-        if os.path.exists(log_file):
-            try:
-                os.remove(log_file)
-            except:
-                pass
-        
-        with open(log_file, "w") as f:
-            f.write(f"Update triggered at {datetime.now()}\n")
-
-        if platform.system() == "Linux":
-            # Run the update script in the background
-            try:
-                # Use a shell wrapper to ensure output is flushed and we have a clear completion marker
-                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
-                subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
-                return {"status": "Update initiated. System will restart shortly."}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        elif platform.system() == "Windows":
-            # Support for testing update on Windows
-            try:
-                # Use powershell to append to log and add completion marker
-                # We use -ExecutionPolicy Bypass to ensure the script can run
-                pwsh_cmd = "powershell.exe -ExecutionPolicy Bypass -Command \"& { ./update.ps1 | Out-File -FilePath update.log -Append -Encoding utf8; if ($?) { Add-Content update.log '`nUpdate complete!' } else { Add-Content update.log '`nUpdate failed!' } }\""
-                subprocess.Popen(pwsh_cmd, shell=True, cwd=os.getcwd())
-                return {"status": "Update initiated (Windows)."}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        else:
-            return {"status": "update_simulated", "message": "Update script would run on Linux or Windows"}
-
-    if platform.system() == "Linux":
-        cmd = ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"] if action == "shutdown" else ["sudo", "-n", "/usr/sbin/reboot"]
-        try:
-            subprocess.Popen(cmd)
-            return {"status": f"System {action} initiated"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    else:
-        return {"status": f"Simulated {action} (Windows)"}
 
 # WiFi and Hotspot Management
 @router.get("/wifi/info")

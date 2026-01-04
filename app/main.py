@@ -14,6 +14,17 @@ from datetime import datetime
 # Configure logging
 LOG_FILE = "data/app.log"
 os.makedirs("data", exist_ok=True)
+
+# Ensure log file is writable
+try:
+    with open(LOG_FILE, "a") as f:
+        pass
+except Exception as e:
+    print(f"CRITICAL: Cannot write to log file {LOG_FILE}: {e}")
+    # Fallback to a location we can likely write to
+    LOG_FILE = os.path.join(os.path.expanduser("~"), "nomad-pi.log")
+    print(f"Falling back to log file: {LOG_FILE}")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -24,6 +35,68 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nomad")
 logger.info("Nomad Pi starting up...")
+
+def check_environment():
+    """Perform basic environment checks on startup"""
+    results = {"status": "ok", "checks": []}
+    
+    # 1. Check data directory writability
+    try:
+        test_file = "data/.write_test"
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        logger.info("Environment check: data directory is writable")
+        results["checks"].append({"name": "data_writable", "status": "pass"})
+    except Exception as e:
+        logger.error(f"Environment check FAILED: data directory is NOT writable: {e}")
+        results["checks"].append({"name": "data_writable", "status": "fail", "error": str(e)})
+        results["status"] = "error"
+
+    # 2. Check Database
+    try:
+        from app.database import get_db_connection
+        conn = get_db_connection()
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+        logger.info("Environment check: Database is accessible")
+        results["checks"].append({"name": "database", "status": "pass"})
+    except Exception as e:
+        logger.error(f"Environment check FAILED: Database error: {e}")
+        results["checks"].append({"name": "database", "status": "fail", "error": str(e)})
+        results["status"] = "error"
+        
+    # 3. Check for external tools (Linux only)
+    if os.name != 'nt':
+        # ffmpeg
+        try:
+            import subprocess
+            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Environment check: ffmpeg is available")
+                results["checks"].append({"name": "ffmpeg", "status": "pass"})
+            else:
+                logger.warning("Environment check: ffmpeg is NOT available")
+                results["checks"].append({"name": "ffmpeg", "status": "warn"})
+        except Exception:
+            results["checks"].append({"name": "ffmpeg", "status": "fail"})
+
+        # NetworkManager (for WiFi management)
+        try:
+            result = subprocess.run(["nmcli", "--version"], capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Environment check: nmcli is available")
+                results["checks"].append({"name": "nmcli", "status": "pass"})
+            else:
+                logger.warning("Environment check: nmcli is NOT available")
+                results["checks"].append({"name": "nmcli", "status": "warn"})
+        except Exception:
+            results["checks"].append({"name": "nmcli", "status": "fail"})
+            
+    return results
+
+# Run check and store results for status endpoint
+ENV_CHECK_RESULTS = check_environment()
 
 # Add common media types for Windows compatibility
 mimetypes.add_type('audio/mpeg', '.mp3')

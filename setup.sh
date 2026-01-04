@@ -69,15 +69,19 @@ sudo apt-get update
 sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
 
 # 2. Set Hostname (for http://nomadpi.local:8000)
-echo "[2/9] Configuring Hostname..."
+echo "[2/9] Configuring Hostname and mDNS..."
 CURRENT_HOSTNAME=$(cat /etc/hostname | tr -d " \t\n\r")
 NEW_HOSTNAME="nomadpi"
 if [ "$CURRENT_HOSTNAME" != "$NEW_HOSTNAME" ]; then
     echo "Setting hostname to $NEW_HOSTNAME..."
     sudo hostnamectl set-hostname $NEW_HOSTNAME
     sudo sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$NEW_HOSTNAME/g" /etc/hosts || echo "Could not update /etc/hosts, but hostnamectl ran."
-    echo "Hostname set to 'nomadpi'. You can access the server at http://nomadpi.local:8000"
 fi
+
+# Ensure Avahi is running and configured for nomadpi.local
+sudo systemctl enable avahi-daemon
+sudo systemctl restart avahi-daemon
+echo "Hostname set to 'nomadpi'. You can access the server at http://nomadpi.local:8000"
 
 # 3. Python Environment
 echo "[3/9] Setting up Python environment..."
@@ -109,6 +113,12 @@ sudo chmod -R 775 data
 
 # 5. Systemd Service Setup
 echo "[5/9] Configuring systemd service..."
+
+# Add sudoers rule for service management
+echo "Adding sudoers rule for service management..."
+SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+sudo bash -c "echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/sbin/reboot, /usr/sbin/shutdown' > $SUDOERS_FILE"
+sudo chmod 440 $SUDOERS_FILE
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 CURRENT_DIR=$(pwd)
@@ -158,7 +168,7 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$CURRENT_DIR
 EnvironmentFile=-$ENV_FILE
-ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop uvloop --http httptools --workers 1
+ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
 
