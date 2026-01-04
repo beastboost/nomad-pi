@@ -1485,7 +1485,13 @@ namespace NomadTransferTool
                                     }
 
                                     if (File.Exists(finalDest)) File.Delete(finalDest);
-                                    await Task.Run(() => File.Move(tempFile, finalDest), token);
+                                    await CopyFileWithProgress(item, tempFile, finalDest, token);
+                                    
+                                    // Delete temp file after successful transfer
+                                    if (File.Exists(tempFile))
+                                    {
+                                        try { File.Delete(tempFile); } catch { }
+                                    }
                                 }
                                 else
                                 {
@@ -1589,15 +1595,15 @@ namespace NomadTransferTool
 
 
 
-        private async Task CopyFileWithProgress(MediaItem item, string dest, System.Threading.CancellationToken token)
+        private async Task CopyFileWithProgress(MediaItem item, string source, string dest, System.Threading.CancellationToken token)
         {
             byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
-            long totalBytes = new FileInfo(item.SourcePath).Length;
+            long totalBytes = new FileInfo(source).Length;
             long totalRead = 0;
             
             try
             {
-                using (var sourceStream = File.OpenRead(item.SourcePath))
+                using (var sourceStream = File.OpenRead(source))
                 using (var destStream = File.Create(dest))
                 {
                     Stopwatch sw = Stopwatch.StartNew();
@@ -1613,7 +1619,7 @@ namespace NomadTransferTool
                         double speed = elapsed > 0 ? totalRead / 1024.0 / 1024.0 / elapsed : 0;
                         
                         item.Progress = progress;
-                        item.StatusMessage = $"Copying: {progress:F1}% ({speed:F1} MB/s)";
+                        item.StatusMessage = $"Transferring: {progress:F1}% ({speed:F1} MB/s)";
                         
                         CurrentFileProgress = progress;
                         FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
@@ -1629,6 +1635,11 @@ namespace NomadTransferTool
                 }
                 throw;
             }
+        }
+
+        private async Task CopyFileWithProgress(MediaItem item, string dest, System.Threading.CancellationToken token)
+        {
+            await CopyFileWithProgress(item, item.SourcePath, dest, token);
         }
 
         private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category)
