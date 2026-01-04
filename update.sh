@@ -23,6 +23,11 @@ update_status() {
 
 update_status 5 "Configuring Git..."
 echo "Optimizing Git configuration..."
+# Fix for GnuTLS handshake issues common on some Pi OS versions
+git config --global http.sslVerify true
+git config --global http.version HTTP/1.1
+git config --global http.postBuffer 524288000
+
 # Hardcode the public URL to avoid password prompts
 git remote set-url origin https://github.com/beastboost/nomad-pi.git
 git config credential.helper 'cache --timeout=2592000'

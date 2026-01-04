@@ -52,6 +52,11 @@ echo "=========================================="
 # 0. Check for Updates and Fix Git Remote
 if [ -d ".git" ]; then
     echo "[0/9] Optimizing Git configuration..."
+    # Fix for GnuTLS handshake issues common on some Pi OS versions
+    git config --global http.sslVerify true
+    git config --global http.version HTTP/1.1
+    git config --global http.postBuffer 524288000
+    
     # Switch to clean public URL to avoid password prompts for public repo
     git remote set-url origin https://github.com/beastboost/nomad-pi.git
     # Remember credentials for 1 month if they are ever entered
