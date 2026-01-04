@@ -16,6 +16,7 @@
         <local:CategoryToVisibilityConverter x:Key="CategoryToVis"/>
         <local:IsVideoToVisibilityConverter x:Key="IsVideoToVis"/>
         <local:VideoTranscodeVisibilityConverter x:Key="VideoTranscodeVis"/>
+        <local:LongToVisibilityConverter x:Key="LongToVisibilityConverter"/>
         
         <!-- Modern Colors -->
         <SolidColorBrush x:Key="PrimaryColor" Color="#FF4081"/>
@@ -227,9 +228,9 @@
             <!-- Column 1: Drives & Server Status -->
             <Grid Grid.Column="0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="1*"/>
+                    <RowDefinition Height="1.5*"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="1.5*"/>
+                <RowDefinition Height="1*"/>
             </Grid.RowDefinitions>
                 
                 <Border Grid.Row="0" Style="{StaticResource CardBorder}">
@@ -242,22 +243,26 @@
 
                         <TextBlock Grid.Row="0" Text="Connected Drives" Style="{StaticResource HeaderBlock}"/>
                         
-                        <ListBox Grid.Row="1" x:Name="DriveList" ItemsSource="{Binding Drives}" Margin="0,0,0,15" SelectionChanged="DriveList_SelectionChanged">
+                        <ListBox Grid.Row="1" x:Name="DriveList" ItemsSource="{Binding Drives}" Margin="0,0,0,10" SelectionChanged="DriveList_SelectionChanged" MinHeight="180">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1" Padding="10,8">
+                                    <Border BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1" Padding="5,8">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="💾" FontSize="24" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                                            <TextBlock Text="💾" FontSize="20" VerticalAlignment="Top" Margin="0,2,10,0"/>
                                             <StackPanel Grid.Column="1">
-                                                <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="14"/>
-                                                <TextBlock Text="{Binding Name}" FontSize="11" Foreground="{StaticResource MutedTextColor}"/>
-                                                <ProgressBar Value="{Binding PercentUsed, Mode=OneWay}" Height="4" Margin="0,5" Background="#333" Foreground="{StaticResource PrimaryColor}" BorderThickness="0"/>
-                                                <TextBlock Text="{Binding SizeDisplay}" FontSize="12" Margin="0,2"/>
-                                                <TextBlock Text="{Binding StatusDisplay}" FontSize="12" FontWeight="Bold"
+                                                <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="13" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding Name}" FontSize="10" Foreground="{StaticResource MutedTextColor}" TextWrapping="Wrap"/>
+                                                
+                                                <StackPanel Visibility="{Binding TotalSize, Converter={StaticResource LongToVisibilityConverter}}">
+                                                    <ProgressBar Value="{Binding PercentUsed, Mode=OneWay}" Height="4" Margin="0,5" Background="#333" Foreground="{StaticResource PrimaryColor}" BorderThickness="0"/>
+                                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="11" Margin="0,0,0,2"/>
+                                                </StackPanel>
+                                                
+                                                <TextBlock Text="{Binding StatusDisplay}" FontSize="11" FontWeight="Bold" Margin="0,2,0,0"
                                                            Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
                                             </StackPanel>
                                         </Grid>

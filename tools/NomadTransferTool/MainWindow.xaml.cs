@@ -90,7 +90,7 @@ namespace NomadTransferTool
             set { 
                 _useSamba = value; 
                 OnPropertyChanged(); 
-                RefreshDrives(); // Refresh drives when toggled
+                Dispatcher.BeginInvoke(new Action(() => RefreshDrives())); // Refresh drives when toggled
             } 
         }
         public string SambaPath 
@@ -99,7 +99,7 @@ namespace NomadTransferTool
             set { 
                 _sambaPath = value; 
                 OnPropertyChanged(); 
-                RefreshDrives(); // Refresh drives when path changes
+                Dispatcher.BeginInvoke(new Action(() => RefreshDrives())); // Refresh drives when path changes
             } 
         }
         public string SambaUser { get => _sambaUser; set { _sambaUser = value; OnPropertyChanged(); } }
@@ -840,23 +840,30 @@ namespace NomadTransferTool
 
         private void RefreshDrives()
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(RefreshDrives);
+                return;
+            }
+
             var selectedName = (DriveList.SelectedItem as DriveInfoModel)?.Name;
-            Drives.Clear();
+            
+            // Temporary list to avoid flickering/multiple UI updates
+            var newDrives = new List<DriveInfoModel>();
 
             // 1. Add Local USB Drives
             foreach (var drive in DriveInfo.GetDrives())
             {
                 if (drive.DriveType == DriveType.Removable && drive.IsReady)
                 {
-                    var model = new DriveInfoModel
+                    newDrives.Add(new DriveInfoModel
                     {
                         Name = drive.Name,
                         Label = string.IsNullOrEmpty(drive.VolumeLabel) ? "USB Drive" : drive.VolumeLabel,
                         TotalSize = drive.TotalSize,
                         AvailableFreeSpace = drive.AvailableFreeSpace,
                         IsMounted = Directory.Exists(Path.Combine(mediaServerDataPath, drive.Name.Replace(":\\", "")))
-                    };
-                    Drives.Add(model);
+                    });
                 }
             }
 
@@ -865,30 +872,49 @@ namespace NomadTransferTool
             {
                 try
                 {
-                    // For UNC paths, DriveInfo doesn't work directly. 
-                    // We can use P/Invoke or simpler: just check if the directory exists and use a helper.
-                    if (Directory.Exists(SambaPath))
+                    // For UNC paths, we use GetDiskFreeSpaceEx. 
+                    // We don't use Directory.Exists here because it might block or fail if not authenticated.
+                    // Instead, we try to get the space directly.
+                    long freeBytes, totalBytes, totalFreeBytes;
+                    bool spaceOk = GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes);
+
+                    newDrives.Add(new DriveInfoModel
                     {
-                        long freeBytes, totalBytes, totalFreeBytes;
-                        if (GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes))
-                        {
-                            Drives.Add(new DriveInfoModel
-                            {
-                                Name = SambaPath,
-                                Label = "Samba Share (Nomad Pi)",
-                                TotalSize = totalBytes,
-                                AvailableFreeSpace = freeBytes,
-                                IsMounted = true // Always true if we can see it
-                            });
-                        }
-                    }
+                        Name = SambaPath,
+                        Label = "Nomad Pi Network Share",
+                        TotalSize = spaceOk ? totalBytes : 0,
+                        AvailableFreeSpace = spaceOk ? freeBytes : 0,
+                        IsMounted = true // We consider it "mounted" if Samba is enabled and path is set
+                    });
                 }
                 catch { /* Ignore Samba drive errors */ }
             }
 
-            if (selectedName != null)
+            // Update the ObservableCollection only if something changed
+            bool changed = Drives.Count != newDrives.Count;
+            if (!changed)
             {
-                DriveList.SelectedItem = Drives.FirstOrDefault(d => d.Name == selectedName);
+                for (int i = 0; i < Drives.Count; i++)
+                {
+                    if (Drives[i].Name != newDrives[i].Name || 
+                        Drives[i].AvailableFreeSpace != newDrives[i].AvailableFreeSpace ||
+                        Drives[i].IsMounted != newDrives[i].IsMounted)
+                    {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                Drives.Clear();
+                foreach (var d in newDrives) Drives.Add(d);
+                
+                if (selectedName != null)
+                {
+                    DriveList.SelectedItem = Drives.FirstOrDefault(d => d.Name == selectedName);
+                }
             }
         }
 
@@ -2028,6 +2054,16 @@ namespace NomadTransferTool
 
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
+    public class LongToVisibilityConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            if (value is long l && l > 0) return Visibility.Visible;
+            return Visibility.Collapsed;
+        }
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
     }
 
     public class BooleanToColorConverter : System.Windows.Data.IValueConverter

@@ -334,10 +334,7 @@ sudo systemctl restart nmbd
 echo "[9/9] Configuring MiniDLNA..."
 MINIDLNA_CONF="/etc/minidlna.conf"
 sudo bash -c "cat > $MINIDLNA_CONF" <<EOL
-media_dir=A,$CURRENT_DIR/data/music
-media_dir=V,$CURRENT_DIR/data/movies
-media_dir=V,$CURRENT_DIR/data/shows
-media_dir=P,$CURRENT_DIR/data/gallery
+media_dir=V,$CURRENT_DIR/data
 db_dir=/var/cache/minidlna
 log_dir=/var/log
 friendly_name=Nomad Pi
@@ -345,11 +342,21 @@ inotify=yes
 presentation_url=http://nomadpi.local:8000/
 EOL
 
+# Fix permissions for MiniDLNA
+echo "Setting permissions for MiniDLNA..."
+sudo chown -R minidlna:minidlna "$CURRENT_DIR/data"
+sudo chmod -R 755 "$CURRENT_DIR/data"
+
+# Increase inotify watches for large libraries
 sudo sysctl -w fs.inotify.max_user_watches=100000 >/dev/null
 grep -q "^fs\.inotify\.max_user_watches=100000$" /etc/sysctl.conf || echo "fs.inotify.max_user_watches=100000" | sudo tee -a /etc/sysctl.conf >/dev/null
 
+# Clean start MiniDLNA
+sudo systemctl stop minidlna
+sudo rm -f /var/cache/minidlna/files.db
 sudo systemctl enable minidlna
-sudo systemctl restart minidlna
+sudo systemctl start minidlna
+sudo minidlnad -R
 
 if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; then
     CFG=""
