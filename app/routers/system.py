@@ -53,10 +53,10 @@ def get_samba_config():
     hostname = platform.node()
     # Prefer nomadpi.local if it's the default hostname
     if hostname == "nomadpi" or hostname == "raspberrypi":
-        path = f"\\\\{hostname}.local\\data"
+        path = f"\\\\{hostname}.local"
     else:
         # Fallback to IP if possible, but hostname.local is usually better for mDNS
-        path = f"\\\\{hostname}.local\\data"
+        path = f"\\\\{hostname}.local"
         
     return {
         "user": user,

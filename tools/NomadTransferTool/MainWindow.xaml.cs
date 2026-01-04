@@ -195,7 +195,7 @@ namespace NomadTransferTool
                             // If user is using an IP for ServerIp, use that in the path instead of .local
                             if (Regex.IsMatch(ServerIp, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
                             {
-                                path = $"\\\\{ServerIp}\\data";
+                                path = $"\\\\{ServerIp}";
                             }
                             else if (ServerIp.EndsWith(".local") && !path.Contains(".local"))
                             {
