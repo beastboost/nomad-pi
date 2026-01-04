@@ -22,8 +22,22 @@ using Newtonsoft.Json;
 
 namespace NomadTransferTool
 {
+    public class NullToVisibilityConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            return value != null ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
+        private const string APP_VERSION = "1.5.0";
         private static readonly HttpClient client = new HttpClient();
         private const string API_BASE = "http://localhost:8000/api";
         private string OMDB_API_KEY = "";
@@ -35,7 +49,7 @@ namespace NomadTransferTool
         private string _transferSpeed = "";
         private string _fileProgress = "";
         private double _totalProgress;
-        private string _appStatus = "Nomad v1.5.0 - Connected";
+        private string _appStatus = $"Nomad v{APP_VERSION} - Connected";
         private ObservableCollection<string> _transcodeQueue = new ObservableCollection<string>();
         private ObservableCollection<string> _processingLogs = new ObservableCollection<string>();
         private ObservableCollection<MediaItem> _reviewQueue = new ObservableCollection<MediaItem>();
@@ -228,7 +242,7 @@ namespace NomadTransferTool
                 CurrentStatus = "Checking for latest Handbrake release...";
 
                 // 1. Resolve latest release via GitHub API
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("NomadTransferTool/1.4");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd($"NomadTransferTool/{APP_VERSION}");
                 var apiResponse = await client.GetStringAsync("https://api.github.com/repos/HandBrake/HandBrake/releases/latest");
                 var release = JsonConvert.DeserializeObject<GithubRelease>(apiResponse);
                 if (release == null) throw new Exception("Failed to parse GitHub API response.");
@@ -567,7 +581,6 @@ namespace NomadTransferTool
                 {
                     item.SelectedPreset = SelectedGlobalPreset;
                     item.DurationSeconds = EstimateDuration(file);
-                    _ = ScanTracks(item);
                 }
 
                 // TV Show specific parsing
@@ -1049,63 +1062,6 @@ namespace NomadTransferTool
                 return result?.Response == "True" ? result : null;
             }
             catch { return null; }
-        }
-
-        private async Task ScanTracks(MediaItem item)
-        {
-            try
-            {
-                string hbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "HandbrakeCLI.exe");
-                if (!File.Exists(hbPath)) return;
-
-                var process = new Process();
-                process.StartInfo.FileName = hbPath;
-                process.StartInfo.Arguments = $"--scan -i \"{item.SourcePath}\"";
-                process.StartInfo.CreateNoWindow = true;
-                process.StartInfo.UseShellExecute = false;
-                process.StartInfo.RedirectStandardError = true;
-                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath);
-
-                var output = new StringBuilder();
-                process.ErrorDataReceived += (s, e) => { if (e.Data != null) output.AppendLine(e.Data); };
-                
-                process.Start();
-                process.BeginErrorReadLine();
-                await process.WaitForExitAsync();
-
-                string scanData = output.ToString();
-                
-                // Parse Audio Tracks
-                var audioMatches = Regex.Matches(scanData, @"\+ audio track (?<idx>\d+): (?<name>.*?) \((?<lang>.*?)\)");
-                foreach (Match m in audioMatches)
-                {
-                    var track = new MediaTrack { 
-                        Index = int.Parse(m.Groups["idx"].Value), 
-                        Name = m.Groups["name"].Value.Trim(), 
-                        Language = m.Groups["lang"].Value.Trim(),
-                        Type = "audio"
-                    };
-                    Dispatcher.Invoke(() => item.AudioTracks.Add(track));
-                }
-                if (item.AudioTracks.Count > 0) item.SelectedAudioTrack = item.AudioTracks[0];
-
-                // Parse Subtitle Tracks
-                var subMatches = Regex.Matches(scanData, @"\+ subtitle track (?<idx>\d+): (?<name>.*?) \((?<lang>.*?)\)");
-                foreach (Match m in subMatches)
-                {
-                    var track = new MediaTrack { 
-                        Index = int.Parse(m.Groups["idx"].Value), 
-                        Name = m.Groups["name"].Value.Trim(), 
-                        Language = m.Groups["lang"].Value.Trim(),
-                        Type = "subtitle"
-                    };
-                    Dispatcher.Invoke(() => item.SubtitleTracks.Add(track));
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error scanning tracks for {item.FileName}: {ex.Message}");
-            }
         }
 
         private async Task DownloadPoster(string url, string destPath)

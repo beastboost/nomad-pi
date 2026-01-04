@@ -259,7 +259,16 @@ function showToast(message, type = 'info', duration = 3000) {
     if (type === 'error') icon = '❌';
     if (type === 'warning') icon = '⚠️';
 
-    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = icon;
+    
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = message;
+
+    toast.appendChild(iconSpan);
+    toast.appendChild(document.createTextNode(' '));
+    toast.appendChild(msgSpan);
+    
     container.appendChild(toast);
 
     setTimeout(() => {

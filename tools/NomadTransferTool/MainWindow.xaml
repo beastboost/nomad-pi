@@ -5,6 +5,8 @@
         Title="Nomad Media Transfer Tool" Height="650" Width="1000"
         Background="#1e1e1e" Foreground="White">
     <Window.Resources>
+        <SolidColorBrush x:Key="DangerColor" Color="#f44336"/>
+        <local:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
@@ -269,6 +271,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             
                             <Grid Grid.Row="0">
@@ -429,7 +432,7 @@
                             </ListBox>
 
                             <Border Grid.Row="2" x:Name="DetailsPanel" Background="#333333" Padding="15" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0" 
-                                    Visibility="{Binding SelectedItem, ElementName=ReviewListBox, Converter={StaticResource CountToVisibilityConverter}}">
+                                    Visibility="{Binding SelectedItem, ElementName=ReviewListBox, Converter={StaticResource NullToVisibilityConverter}}">
                                 <StackPanel>
                                     <TextBlock Text="Media Preview" FontWeight="Bold" Foreground="White" Margin="0,0,0,10"/>
                                     <Grid>
@@ -597,7 +600,7 @@
                         <TextBlock Text="System Status:" VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" Foreground="{StaticResource MutedTextColor}"/>
                         <TextBlock Text="{Binding AppStatus}" VerticalAlignment="Center" FontSize="12" FontWeight="Medium"/>
                     </StackPanel>
-                    <TextBlock Text="v1.4.0" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" Foreground="#444"/>
+                    <TextBlock Text="{Binding AppStatus}" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" Foreground="#444"/>
                 </Grid>
             </StackPanel>
         </Border>

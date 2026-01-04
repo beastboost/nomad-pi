@@ -91,12 +91,12 @@
                 <div class="content">
                     <!-- Dashboard View -->
                     <section v-if="currentView === 'dashboard'" class="view-section">
-                        <div class="stats-grid" v-if="!stats.storageTotal">
+                        <div class="stats-grid" v-if="statsLoading">
                             <div v-for="i in 4" :key="i" class="stat-card">
                                 <div class="stat-icon skeleton skeleton-circle"></div>
                                 <div class="stat-content" style="flex: 1;">
-                                    <div class="skeleton skeleton-text" style="width: 40%;"></div>
-                                    <div class="skeleton skeleton-title" style="width: 60%;"></div>
+                                    <div class="skeleton skeleton-title" style="width: 40%;"></div>
+                                    <div class="skeleton skeleton-text" style="width: 60%;"></div>
                                     <div class="skeleton skeleton-text" style="width: 30%;"></div>
                                 </div>
                             </div>
@@ -343,32 +343,6 @@
 
                     <!-- Settings View -->
                     <section v-if="currentView === 'settings'" class="view-section">
-                        <!-- existing settings content -->
-                    </section>
-
-                    <!-- Logs View -->
-                    <section v-if="currentView === 'logs'" class="view-section">
-                        <div class="section-header">
-                            <h3>System Logs</h3>
-                            <div class="header-actions">
-                                <select v-model="logLines" @change="fetchLogs" class="form-select">
-                                    <option :value="50">Last 50 lines</option>
-                                    <option :value="100">Last 100 lines</option>
-                                    <option :value="500">Last 500 lines</option>
-                                    <option :value="1000">Last 1000 lines</option>
-                                </select>
-                                <button @click="fetchLogs" class="btn btn-primary">
-                                    <i class="fas fa-sync"></i> Refresh
-                                </button>
-                            </div>
-                        </div>
-                        <div class="log-viewer">
-                            <div v-if="logs.length === 0" class="log-empty">
-                                No logs available.
-                            </div>
-                            <pre v-else class="log-content"><code v-for="(line, index) in logs" :key="index">{{ line }}<br></code></pre>
-                        </div>
-                    </section>
                         <div class="settings-grid">
                             <!-- Security Section -->
                             <div class="settings-card">
@@ -416,16 +390,23 @@
                             </div>
                         </div>
                     </section>
-                <!-- Logs View -->
+
+                    <!-- Logs View -->
                     <section v-if="currentView === 'logs'" class="view-section">
                         <div class="section-header">
                             <h3>System Logs</h3>
                             <div class="header-actions">
-                                <button @click="fetchLogs" class="btn btn-primary btn-sm">
+                                <select v-model="logLines" @change="fetchLogs" class="form-select">
+                                    <option :value="50">Last 50 lines</option>
+                                    <option :value="100">Last 100 lines</option>
+                                    <option :value="500">Last 500 lines</option>
+                                    <option :value="1000">Last 1000 lines</option>
+                                </select>
+                                <button @click="fetchLogs" class="btn btn-primary">
                                     <i class="fas fa-sync"></i> Refresh
                                 </button>
-                                <button @click="clearLogView" class="btn btn-secondary btn-sm">
-                                    <i class="fas fa-eraser"></i> Clear View
+                                <button @click="clearLogView" class="btn btn-secondary">
+                                    <i class="fas fa-eraser"></i> Clear
                                 </button>
                             </div>
                         </div>
@@ -436,7 +417,8 @@
                 </div>
             </main>
         </div>
-    </div>    <!-- Modal: Confirmation Dialog -->
+
+        <!-- Modal: Confirmation Dialog -->
         <div v-if="showConfirmModal" class="modal-overlay" @click="showConfirmModal = false">
             <div class="modal" @click.stop>
                 <div class="modal-header">

@@ -13,6 +13,7 @@ createApp({
             currentView: 'dashboard',
             isDarkMode: localStorage.getItem('darkMode') === 'true',
             isLoading: false,
+            statsLoading: true,
             connectionStatus: 'connected',
             userAvatar: 'https://ui-avatars.com/api/?name=Admin&background=0D8ABC&color=fff',
             
@@ -182,6 +183,8 @@ createApp({
                 this.updateResourcesChart();
             } catch (error) {
                 console.error('Error loading system stats:', error);
+            } finally {
+                this.statsLoading = false;
             }
         },
 
@@ -220,7 +223,13 @@ createApp({
         async fetchLogs() {
             try {
                 const response = await this.apiCall(`/api/system/logs?lines=${this.logLines}`, 'GET');
-                this.logs = response.logs || "No logs available.";
+                const logData = response.logs;
+                if (Array.isArray(logData)) {
+                    this.logs = logData.join('\n');
+                } else {
+                    this.logs = logData || "No logs available.";
+                }
+                
                 this.$nextTick(() => {
                     if (this.$refs.logViewer) {
                         this.$refs.logViewer.scrollTop = this.$refs.logViewer.scrollHeight;
@@ -229,6 +238,7 @@ createApp({
             } catch (error) {
                 console.error('Error fetching logs:', error);
                 this.showNotification('Failed to fetch logs', 'error');
+                this.logs = "Error fetching logs.";
             }
         },
 
