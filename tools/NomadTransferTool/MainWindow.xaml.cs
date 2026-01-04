@@ -77,6 +77,80 @@ namespace NomadTransferTool
         private string _detectedEncoder = "x264";
         private System.Threading.CancellationTokenSource? _processingCts;
 
+        // Samba Properties
+        private bool _useSamba;
+        private string _sambaPath = "";
+        private string _sambaUser = "";
+        private string _sambaPassword = "";
+
+        public bool UseSamba { get => _useSamba; set { _useSamba = value; OnPropertyChanged(); } }
+        public string SambaPath { get => _sambaPath; set { _sambaPath = value; OnPropertyChanged(); } }
+        public string SambaUser { get => _sambaUser; set { _sambaUser = value; OnPropertyChanged(); } }
+        public string SambaPassword { get => _sambaPassword; set { _sambaPassword = value; OnPropertyChanged(); } }
+
+        [DllImport("mpr.dll")]
+        private static extern int WNetAddConnection2(NetResource netResource, string password, string username, int flags);
+
+        [DllImport("mpr.dll")]
+        private static extern int WNetCancelConnection2(string name, int flags, bool force);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public class NetResource
+        {
+            public int Scope;
+            public int Type;
+            public int DisplayType;
+            public int Usage;
+            public string LocalName;
+            public string RemoteName;
+            public string Comment;
+            public string Provider;
+        }
+
+        private async void TestSamba_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(SambaPath))
+            {
+                System.Windows.MessageBox.Show("Please enter a Samba path.");
+                return;
+            }
+
+            AddLog($"Testing Samba connection to {SambaPath}...");
+            bool success = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
+            
+            if (success)
+            {
+                AddLog("Samba connection successful!");
+                System.Windows.MessageBox.Show("Samba connection successful!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                AddLog("Samba connection failed.");
+                System.Windows.MessageBox.Show("Samba connection failed. Please check path and credentials.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool ConnectToSamba(string path, string user, string pass)
+        {
+            var nr = new NetResource
+            {
+                Type = 1, // RESOURCETYPE_DISK
+                RemoteName = path
+            };
+
+            int result = WNetAddConnection2(nr, pass, user, 0);
+            if (result == 0 || result == 1219) // 0 is success, 1219 is already connected
+            {
+                return true;
+            }
+            return false;
+        }
+
+        private void SambaPassBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            SambaPassword = SambaPassBox.Password;
+        }
+
         public bool IsTransferring { get => _isTransferring; set { _isTransferring = value; OnPropertyChanged(); } }
         public string CurrentStatus { get => _currentStatus; set { _currentStatus = value; OnPropertyChanged(); } }
         public string TransferSpeed { get => _transferSpeed; set { _transferSpeed = value; OnPropertyChanged(); } }
@@ -1075,37 +1149,60 @@ namespace NomadTransferTool
         {
             if (items == null || items.Count == 0) return;
 
-            string? targetDrive = (DriveList.SelectedItem as DriveInfoModel)?.Name;
-            
-            // Disk space check
-            if (targetDrive != null)
+            string? targetPath = null;
+            if (UseSamba)
             {
-                long requiredSpace = 0;
-                foreach (var item in items)
+                if (string.IsNullOrEmpty(SambaPath))
                 {
-                    if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
-                    {
-                        // Use estimated size if transcoding
-                        double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
-                        requiredSpace += (long)(bytes * 1.1); // 10% overhead
-                    }
-                    else
-                    {
-                        requiredSpace += new FileInfo(item.SourcePath).Length;
-                    }
+                    System.Windows.MessageBox.Show("Samba path is required when Samba transfer is enabled.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
                 }
                 
-                var driveInfo = new DriveInfo(targetDrive);
-                if (driveInfo.AvailableFreeSpace < requiredSpace)
+                AddLog($"Connecting to Samba: {SambaPath}...");
+                bool connected = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
+                if (!connected)
                 {
-                    var result = System.Windows.MessageBox.Show(
-                        $"Warning: Selected drive may not have enough space.\nRequired (est): {requiredSpace/1024/1024}MB\nAvailable: {driveInfo.AvailableFreeSpace/1024/1024}MB\n\nContinue anyway?", 
-                        "Insufficient Space", System.Windows.MessageBoxButton.YesNo);
-                    if (result == System.Windows.MessageBoxResult.No) return;
+                    System.Windows.MessageBox.Show("Failed to connect to Samba share. Please check your credentials and path.", "Samba Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
                 }
+                targetPath = SambaPath;
+            }
+            else
+            {
+                targetPath = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+            }
+            
+            // Disk space check (only for local drives for now, or if Samba path is accessible via drive info)
+            if (targetPath != null && !UseSamba)
+            {
+                try {
+                    long requiredSpace = 0;
+                    foreach (var item in items)
+                    {
+                        if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
+                        {
+                            // Use estimated size if transcoding
+                            double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
+                            requiredSpace += (long)(bytes * 1.1); // 10% overhead
+                        }
+                        else
+                        {
+                            requiredSpace += new FileInfo(item.SourcePath).Length;
+                        }
+                    }
+                    
+                    var driveInfo = new DriveInfo(targetPath);
+                    if (driveInfo.AvailableFreeSpace < requiredSpace)
+                    {
+                        var result = System.Windows.MessageBox.Show(
+                            $"Warning: Selected drive may not have enough space.\nRequired (est): {FormatSize(requiredSpace)}\nAvailable: {FormatSize(driveInfo.AvailableFreeSpace)}\n\nContinue anyway?", 
+                            "Insufficient Space", System.Windows.MessageBoxButton.YesNo);
+                        if (result == System.Windows.MessageBoxResult.No) return;
+                    }
+                } catch { /* Ignore space check errors for network/complex paths */ }
             }
 
-            bool autoMove = targetDrive != null;
+            bool autoMove = targetPath != null;
             bool useHandbrake = IsHandbrakeAvailable && IsTranscodingEnabled;
 
             IsTransferring = true;
@@ -1146,9 +1243,9 @@ namespace NomadTransferTool
                         string finalDest = "";
                         string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                         
-                        if (autoMove && targetDrive != null)
+                        if (autoMove && targetPath != null)
                         {
-                            string categoryDir = Path.Combine(targetDrive, item.Category);
+                            string categoryDir = Path.Combine(targetPath, item.Category);
                             if (!Directory.Exists(categoryDir)) Directory.CreateDirectory(categoryDir);
                             
                             string finalName = safeTitle;
@@ -1183,7 +1280,7 @@ namespace NomadTransferTool
                                 var meta = await FetchOMDBMetadata(item.Title, item.Category);
                                 if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                                 {
-                                    string posterBase = item.Category == "shows" ? Path.Combine(targetDrive, item.Category, safeTitle) : categoryDir;
+                                    string posterBase = item.Category == "shows" ? Path.Combine(targetPath, item.Category, safeTitle) : categoryDir;
                                     string posterDest = Path.Combine(posterBase, (item.Category == "shows" ? "poster" : finalName) + ".jpg");
                                     await DownloadPoster(meta.Poster, posterDest);
                                 }
@@ -1200,8 +1297,8 @@ namespace NomadTransferTool
                                 
                                 if (autoMove)
                                 {
-                                    AddLog($"Moving {item.Title} to target drive...");
-                                    CurrentStatus = $"Moving to USB: {item.Title}";
+                                    AddLog($"Moving {item.Title} to target...");
+                                    CurrentStatus = $"Moving: {item.Title}";
                                     if (File.Exists(finalDest)) File.Delete(finalDest);
                                     await Task.Run(() => File.Move(tempFile, finalDest), token);
                                 }
@@ -1233,7 +1330,7 @@ namespace NomadTransferTool
                         }
                         else if (autoMove)
                         {
-                            AddLog($"Copying {item.Title} to target drive...");
+                            AddLog($"Copying {item.Title} to target...");
                             await CopyFileWithProgress(item, finalDest, token);
                         }
 
@@ -1272,6 +1369,12 @@ namespace NomadTransferTool
                 TotalProgress = 0;
                 FileProgress = "";
                 AddLog("Batch processing finished.");
+                
+                // Disconnect Samba if we used it
+                if (UseSamba && !string.IsNullOrEmpty(SambaPath))
+                {
+                    try { WNetCancelConnection2(SambaPath, 0, true); } catch { }
+                }
             }
         }
 
