@@ -23,10 +23,19 @@ update_status() {
 
 update_status 5 "Configuring Git..."
 echo "Optimizing Git configuration..."
-# Fix for GnuTLS handshake issues common on some Pi OS versions
+
+# System update to pick up GnuTLS/security fixes (optional but recommended for handshake issues)
+# sudo apt update && sudo apt full-upgrade -y
+
+# Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
 git config --global http.sslVerify true
+# Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub
 git config --global http.version HTTP/1.1
-git config --global http.postBuffer 524288000
+# Increase postBuffer to 50MB (from default 1MB) for stable large transfers without excessive memory usage
+git config --global http.postBuffer 52428800
+
+# Prefer OpenSSL backend if available in the curl/git build to bypass GnuTLS bugs
+git config --global http.sslBackend openssl 2>/dev/null || true
 
 # Hardcode the public URL to avoid password prompts
 git remote set-url origin https://github.com/beastboost/nomad-pi.git
