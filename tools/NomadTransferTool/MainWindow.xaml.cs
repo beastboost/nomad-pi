@@ -89,7 +89,7 @@ namespace NomadTransferTool
         public string SambaPassword { get => _sambaPassword; set { _sambaPassword = value; OnPropertyChanged(); } }
 
         [DllImport("mpr.dll")]
-        private static extern int WNetAddConnection2(NetResource netResource, string password, string username, int flags);
+        private static extern int WNetAddConnection2(NetResource netResource, string? password, string? username, int flags);
 
         [DllImport("mpr.dll")]
         private static extern int WNetCancelConnection2(string name, int flags, bool force);
@@ -101,10 +101,10 @@ namespace NomadTransferTool
             public int Type;
             public int DisplayType;
             public int Usage;
-            public string LocalName;
-            public string RemoteName;
-            public string Comment;
-            public string Provider;
+            public string? LocalName;
+            public string? RemoteName;
+            public string? Comment;
+            public string? Provider;
         }
 
         private async void TestSamba_Click(object sender, RoutedEventArgs e)
