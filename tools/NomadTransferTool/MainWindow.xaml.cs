@@ -192,19 +192,32 @@ namespace NomadTransferTool
                             // Validate and fix path format
                             string path = config.path;
                             
-                            // If user is using an IP for ServerIp, use that in the path instead of .local
-                            if (Regex.IsMatch(ServerIp, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
+                            // Use the ServerIp if provided, otherwise use the path from config
+                            if (Regex.IsMatch(ServerIp, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$") || ServerIp.EndsWith(".local"))
                             {
-                                path = $"\\\\{ServerIp}";
-                            }
-                            else if (ServerIp.EndsWith(".local") && !path.Contains(".local"))
-                            {
-                                // Ensure .local is present if the server IP uses it
-                                path = path.Replace("\\\\" + (string)config.hostname, "\\\\" + ServerIp);
+                                // If the config path had a share, try to preserve it
+                                string share = "";
+                                if (path.Contains("\\"))
+                                {
+                                    var parts = path.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+                                    if (parts.Length > 1) share = parts[1];
+                                }
+                                
+                                // Default to 'data' share if none found, as that's what setup.sh creates
+                                if (string.IsNullOrEmpty(share)) share = "data";
+                                
+                                path = $"\\\\{ServerIp}\\{share}";
                             }
                             
                             // Ensure double backslashes for Windows UNC
                             if (!path.StartsWith("\\\\")) path = "\\\\" + path.TrimStart('\\');
+                            
+                            // Ensure 'data' is at the end if it's just the root
+                            var pathParts = path.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+                            if (pathParts.Length == 1) // Just hostname/IP
+                            {
+                                path = path.TrimEnd('\\') + "\\data";
+                            }
                             
                             SambaPath = path;
                             
@@ -343,10 +356,18 @@ namespace NomadTransferTool
 
             if (DriveList.SelectedItem is DriveInfoModel drive)
             {
-                if (drive.AvailableFreeSpace < required)
-                    SpaceWarning = $"⚠️ NOT ENOUGH SPACE! Need {FormatSize(required)}, have {FormatSize(drive.AvailableFreeSpace)}";
+                // Only check space if it's a local drive (has a drive letter)
+                if (Regex.IsMatch(drive.Name, @"^[a-zA-Z]:\\"))
+                {
+                    if (drive.AvailableFreeSpace < required)
+                        SpaceWarning = $"⚠️ NOT ENOUGH SPACE! Need {FormatSize(required)}, have {FormatSize(drive.AvailableFreeSpace)}";
+                    else
+                        SpaceWarning = $"Estimated Space: {FormatSize(required)} / {FormatSize(drive.AvailableFreeSpace)} available";
+                }
                 else
-                    SpaceWarning = $"Estimated Space: {FormatSize(required)} / {FormatSize(drive.AvailableFreeSpace)} available";
+                {
+                    SpaceWarning = $"Estimated Space: {FormatSize(required)} (Network/Complex Drive)";
+                }
             }
             else
             {
@@ -1258,6 +1279,32 @@ namespace NomadTransferTool
             AddLog($"Cleaned titles for {selectedItems.Count} items.");
         }
 
+        private async Task<(bool success, string error)> EnsurePathReady(string path)
+         {
+             if (string.IsNullOrEmpty(path)) return (false, "Path is empty");
+             
+             if (path.StartsWith("\\\\"))
+             {
+                 // It's a Samba path
+                 if (await Task.Run(() => IsPathAccessible(path))) return (true, "");
+                 
+                 // Try connecting to the specific path first
+                 var (success, errorCode) = await Task.Run(() => ConnectToSamba(path, SambaUser, SambaPassword));
+                 if (success) return (true, "");
+                 
+                 // If that fails, try the base SambaPath
+                 if (path != SambaPath && !string.IsNullOrEmpty(SambaPath))
+                 {
+                     (success, errorCode) = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
+                     if (success) return (true, "");
+                 }
+                 
+                 return (false, GetWNetErrorMessage(errorCode));
+             }
+             
+             return (true, "");
+         }
+
         private async Task ProcessMediaItems(List<MediaItem> items, System.Threading.CancellationToken token)
         {
             if (items == null || items.Count == 0) return;
@@ -1270,35 +1317,23 @@ namespace NomadTransferTool
                     System.Windows.MessageBox.Show("Samba path is required when Samba transfer is enabled.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-                
-                AddLog($"Connecting to Samba: {SambaPath}...");
-                
-                // Check if already accessible first
-                if (await Task.Run(() => IsPathAccessible(SambaPath)))
+
+                // Ensure the path starts with \\
+                if (!SambaPath.StartsWith("\\\\"))
                 {
-                    AddLog("Samba path is already accessible.");
-                    targetPath = SambaPath;
+                    SambaPath = "\\\\" + SambaPath.TrimStart('\\');
                 }
-                else
-                {
-                    var (success, errorCode) = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
-                    if (!success)
-                    {
-                        string errorMsg = GetWNetErrorMessage(errorCode);
-                        AddLog($"Samba connection failed: {errorMsg} (Code: {errorCode})");
-                        System.Windows.MessageBox.Show($"Failed to connect to Samba share.\n\nError: {errorMsg}\nCode: {errorCode}", "Samba Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        return;
-                    }
-                    targetPath = SambaPath;
-                }
+                
+                // No pre-connection check here anymore. We'll connect right before moving.
+                targetPath = SambaPath;
             }
             else
             {
                 targetPath = (DriveList.SelectedItem as DriveInfoModel)?.Name;
             }
             
-            // Disk space check (only for local drives for now, or if Samba path is accessible via drive info)
-            if (targetPath != null && !UseSamba)
+            // Disk space check (only for local drives - starts with drive letter like C:\)
+            if (targetPath != null && !UseSamba && Regex.IsMatch(targetPath, @"^[a-zA-Z]:\\"))
             {
                 try {
                     long requiredSpace = 0;
@@ -1316,7 +1351,7 @@ namespace NomadTransferTool
                         }
                     }
                     
-                    var driveInfo = new DriveInfo(targetPath);
+                    var driveInfo = new DriveInfo(targetPath.Substring(0, 3));
                     if (driveInfo.AvailableFreeSpace < requiredSpace)
                     {
                         var result = System.Windows.MessageBox.Show(
@@ -1324,7 +1359,7 @@ namespace NomadTransferTool
                             "Insufficient Space", System.Windows.MessageBoxButton.YesNo);
                         if (result == System.Windows.MessageBoxResult.No) return;
                     }
-                } catch { /* Ignore space check errors for network/complex paths */ }
+                } catch { /* Ignore space check errors for complex paths */ }
             }
 
             bool autoMove = targetPath != null;
@@ -1367,23 +1402,34 @@ namespace NomadTransferTool
 
                         string finalDest = "";
                         string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                        string effectiveTargetPath = targetPath ?? "";
                         
                         if (autoMove && targetPath != null)
                         {
-                            string categoryDir = Path.Combine(targetPath, item.Category);
-                            if (!Directory.Exists(categoryDir)) Directory.CreateDirectory(categoryDir);
-                            
+                            // Construct the destination path
+                            // User says: "connect to the main directory... use data/movie"
+                            if (UseSamba)
+                            {
+                                // Ensure path starts with \\
+                                if (!effectiveTargetPath.StartsWith("\\\\")) 
+                                    effectiveTargetPath = "\\\\" + effectiveTargetPath.TrimStart('\\');
+
+                                // Append 'data' if not already in the path
+                                if (!effectiveTargetPath.ToLower().EndsWith("\\data") && !effectiveTargetPath.ToLower().Contains("\\data\\"))
+                                {
+                                    effectiveTargetPath = Path.Combine(effectiveTargetPath, "data");
+                                }
+                            }
+
+                            string categoryDir = Path.Combine(effectiveTargetPath, item.Category);
                             string finalName = safeTitle;
                             
                             // Special handling for TV Shows (folders by Show Name -> Season)
                             if (item.Category == "shows")
                             {
                                 string showDir = Path.Combine(categoryDir, safeTitle);
-                                if (!Directory.Exists(showDir)) Directory.CreateDirectory(showDir);
-                                
                                 string seasonDir = Path.Combine(showDir, $"Season {item.Season.PadLeft(2, '0')}");
                                 if (string.IsNullOrEmpty(item.Season)) seasonDir = showDir;
-                                if (!Directory.Exists(seasonDir)) Directory.CreateDirectory(seasonDir);
                                 
                                 categoryDir = seasonDir;
                                 finalName = $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}";
@@ -1399,17 +1445,7 @@ namespace NomadTransferTool
                             
                             finalDest = Path.Combine(categoryDir, finalName + extension);
 
-                            // Handle Poster if available
-                            if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
-                            {
-                                var meta = await FetchOMDBMetadata(item.Title, item.Category);
-                                if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
-                                {
-                                    string posterBase = item.Category == "shows" ? Path.Combine(targetPath, item.Category, safeTitle) : categoryDir;
-                                    string posterDest = Path.Combine(posterBase, (item.Category == "shows" ? "poster" : finalName) + ".jpg");
-                                    await DownloadPoster(meta.Poster, posterDest);
-                                }
-                            }
+                            // We will create the directory and handle posters later, right before moving/copying
                         }
 
                         if (willTranscode)
@@ -1424,6 +1460,30 @@ namespace NomadTransferTool
                                 {
                                     AddLog($"Moving {item.Title} to target...");
                                     CurrentStatus = $"Moving: {item.Title}";
+                                    
+                                    // ENSURE SAMBA CONNECTED HERE
+                                    var (ready, err) = await EnsurePathReady(effectiveTargetPath);
+                                    if (!ready) throw new Exception($"Target path not ready: {err}");
+
+                                    // CREATE DIRECTORY HERE
+                                    string? finalDir = Path.GetDirectoryName(finalDest);
+                                    if (finalDir != null && !Directory.Exists(finalDir)) Directory.CreateDirectory(finalDir);
+
+                                    // Handle Poster if available
+                                    if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
+                                    {
+                                        var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                        if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                                        {
+                                            string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                                            string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
+                                            string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                            string posterDest = Path.Combine(posterBase, posterName + ".jpg");
+                                            if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
+                                            await DownloadPoster(meta.Poster, posterDest);
+                                        }
+                                    }
+
                                     if (File.Exists(finalDest)) File.Delete(finalDest);
                                     await Task.Run(() => File.Move(tempFile, finalDest), token);
                                 }
@@ -1444,7 +1504,7 @@ namespace NomadTransferTool
                                 {
                                     try { File.Delete(tempFile); } catch { }
                                 }
-                                continue; // Continue with next item instead of throwing
+                                continue; 
                             }
                             finally
                             {
@@ -1456,6 +1516,30 @@ namespace NomadTransferTool
                         else if (autoMove)
                         {
                             AddLog($"Copying {item.Title} to target...");
+                            
+                            // ENSURE SAMBA CONNECTED HERE
+                            var (ready, err) = await EnsurePathReady(effectiveTargetPath);
+                            if (!ready) throw new Exception($"Target path not ready: {err}");
+
+                            // CREATE DIRECTORY HERE
+                            string? finalDir = Path.GetDirectoryName(finalDest);
+                            if (finalDir != null && !Directory.Exists(finalDir)) Directory.CreateDirectory(finalDir);
+
+                            // Handle Poster if available
+                             if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
+                             {
+                                 var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                 if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                                 {
+                                     string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                                     string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
+                                     string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                     string posterDest = Path.Combine(posterBase, posterName + ".jpg");
+                                     if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
+                                     await DownloadPoster(meta.Poster, posterDest);
+                                 }
+                             }
+
                             await CopyFileWithProgress(item, finalDest, token);
                         }
 

@@ -51,12 +51,20 @@ def get_samba_config():
     
     # Construct UNC path
     hostname = platform.node()
-    # Prefer nomadpi.local if it's the default hostname
-    if hostname == "nomadpi" or hostname == "raspberrypi":
-        path = f"\\\\{hostname}.local"
-    else:
-        # Fallback to IP if possible, but hostname.local is usually better for mDNS
-        path = f"\\\\{hostname}.local"
+    # In setup.sh, we configure a [data] share. 
+    # Returning this directly makes the tool "just work" for most users.
+    path = f"\\\\{hostname}.local\\data"
+    
+    # Try to get actual IP if hostname.local might fail in some environments
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        path = f"\\\\{ip}\\data"
+    except:
+        pass
         
     return {
         "user": user,
