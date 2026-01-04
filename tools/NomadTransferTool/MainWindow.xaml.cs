@@ -116,7 +116,16 @@ namespace NomadTransferTool
             }
 
             AddLog($"Testing Samba connection to {SambaPath}...");
-            bool success = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
+            
+            // Check if already accessible first
+            if (await Task.Run(() => IsPathAccessible(SambaPath)))
+            {
+                AddLog("Path is already accessible (likely already connected via Windows).");
+                System.Windows.MessageBox.Show("Samba connection successful (already connected)!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var (success, errorCode) = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
             
             if (success)
             {
@@ -125,9 +134,37 @@ namespace NomadTransferTool
             }
             else
             {
-                AddLog("Samba connection failed.");
-                System.Windows.MessageBox.Show("Samba connection failed. Please check path and credentials.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                string errorMsg = GetWNetErrorMessage(errorCode);
+                AddLog($"Samba connection failed: {errorMsg} (Code: {errorCode})");
+                System.Windows.MessageBox.Show($"Samba connection failed.\n\nError: {errorMsg}\nCode: {errorCode}", "Samba Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private bool IsPathAccessible(string path)
+        {
+            try
+            {
+                return Directory.Exists(path);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string GetWNetErrorMessage(int code)
+        {
+            return code switch
+            {
+                5 => "Access Denied (Check Username/Password)",
+                67 => "Network Name Not Found (Check Path)",
+                85 => "Local Device Name Already in Use",
+                86 => "Invalid Network Password",
+                1219 => "Credential Conflict (You are already connected to this server with a different user. Log out of the share in Windows first.)",
+                1326 => "Logon Failure: Unknown user name or bad password.",
+                2250 => "Network Connection Not Found",
+                _ => $"Unknown Windows Error {code}"
+            };
         }
 
         private async void SyncSamba_Click(object sender, RoutedEventArgs e)
@@ -183,7 +220,7 @@ namespace NomadTransferTool
             }
         }
 
-        private bool ConnectToSamba(string path, string user, string pass)
+        private (bool success, int errorCode) ConnectToSamba(string path, string user, string pass)
         {
             var nr = new NetResource
             {
@@ -191,12 +228,14 @@ namespace NomadTransferTool
                 RemoteName = path
             };
 
-            int result = WNetAddConnection2(nr, pass, user, 0);
+            // If user is empty, try connecting with null (guest/existing)
+            int result = WNetAddConnection2(nr, string.IsNullOrEmpty(pass) ? null : pass, string.IsNullOrEmpty(user) ? null : user, 0);
+            
             if (result == 0 || result == 1219) // 0 is success, 1219 is already connected
             {
-                return true;
+                return (true, result);
             }
-            return false;
+            return (false, result);
         }
 
         private void SambaPassBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -1220,13 +1259,25 @@ namespace NomadTransferTool
                 }
                 
                 AddLog($"Connecting to Samba: {SambaPath}...");
-                bool connected = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
-                if (!connected)
+                
+                // Check if already accessible first
+                if (await Task.Run(() => IsPathAccessible(SambaPath)))
                 {
-                    System.Windows.MessageBox.Show("Failed to connect to Samba share. Please check your credentials and path.", "Samba Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
+                    AddLog("Samba path is already accessible.");
+                    targetPath = SambaPath;
                 }
-                targetPath = SambaPath;
+                else
+                {
+                    var (success, errorCode) = await Task.Run(() => ConnectToSamba(SambaPath, SambaUser, SambaPassword));
+                    if (!success)
+                    {
+                        string errorMsg = GetWNetErrorMessage(errorCode);
+                        AddLog($"Samba connection failed: {errorMsg} (Code: {errorCode})");
+                        System.Windows.MessageBox.Show($"Failed to connect to Samba share.\n\nError: {errorMsg}\nCode: {errorCode}", "Samba Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+                    targetPath = SambaPath;
+                }
             }
             else
             {
