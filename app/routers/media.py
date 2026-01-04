@@ -64,9 +64,24 @@ def get_scan_paths(category: str):
                     for drive in os.listdir(mount_root):
                         drive_path = os.path.join(mount_root, drive)
                         if os.path.ismount(drive_path) or os.path.isdir(drive_path):
+                             # Ensure symlink in data/external exists for playback access
+                             ext_root = os.path.join(BASE_DIR, "external")
+                             os.makedirs(ext_root, exist_ok=True)
+                             external_link = os.path.join(ext_root, drive)
+                             
+                             if not os.path.exists(external_link):
+                                 try:
+                                     os.symlink(drive_path, external_link)
+                                     logger.info(f"Created symlink for USB drive: {drive_path} -> {external_link}")
+                                 except Exception as e:
+                                     logger.warning(f"Failed to create symlink for {drive_path}: {e}")
+                             
+                             # Use the symlinked path for consistency with web /data/ paths
+                             base_to_use = external_link if os.path.exists(external_link) else drive_path
+
                              # Check for category folder
                              for cat_name in [category, category.capitalize(), category.upper()]:
-                                cat_path = os.path.join(drive_path, cat_name)
+                                cat_path = os.path.join(base_to_use, cat_name)
                                 if os.path.exists(cat_path):
                                     if cat_path not in paths:
                                         paths.append(cat_path)
@@ -1410,10 +1425,7 @@ def _auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
 
 @router.post("/organize/shows")
 def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
-    base = os.path.join(BASE_DIR, "shows")
-    if not os.path.isdir(base):
-        raise HTTPException(status_code=404, detail="Shows folder not found")
-
+    show_bases = get_scan_paths("shows")
     limit = max(1, min(int(limit or 250), 5000))
     planned = []
     moved = 0
@@ -1421,136 +1433,159 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
     errors = 0
     shows_processed = {}  # Track which shows we've fetched metadata for: name -> meta
 
-    for root, _, filenames in os.walk(base):
-        for f in filenames:
-            if f.startswith("."):
-                continue
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in [".mp4", ".mkv", ".avi", ".mov", ".webm"]:
-                continue
+    for base in show_bases:
+        if not os.path.isdir(base):
+            continue
+            
+        for root, _, filenames in os.walk(base):
+            for f in filenames:
+                if f.startswith("."):
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                if ext not in [".mp4", ".mkv", ".avi", ".mov", ".webm"]:
+                    continue
 
-            src_fs = os.path.join(root, f)
-            rel_under = os.path.relpath(src_fs, base).replace(os.sep, "/")
-            parts = [p for p in rel_under.split("/") if p]
-            if not parts:
-                continue
+                src_fs = os.path.join(root, f)
+                rel_under = os.path.relpath(src_fs, base).replace(os.sep, "/")
+                parts = [p for p in rel_under.split("/") if p]
+                if not parts:
+                    continue
 
-            show_name = ""
-            season_num_from_folder = None
-            if len(parts) >= 2:
-                first = parts[0]
-                first_l = first.lower()
-                
-                # Check for combined show-season folder name (e.g. "Family Guy - Season 14" or "Family Guy Season 14")
-                season_match = re.search(r'(?i)(.*?)\s*(?:[-_]\s*)?(season\s*(\d+)|series\s*(\d+)|\bs(\d+)\b)', first)
-                if season_match:
-                    show_name = season_match.group(1).strip()
-                    # Try to get season number from match groups
-                    s_num_str = season_match.group(3) or season_match.group(4) or season_match.group(5)
-                    if s_num_str:
-                        season_num_from_folder = int(s_num_str)
-                else:
-                    season_like = first_l.startswith("season") or first_l.startswith("series") or re.match(r"^s\d{1,3}$", first_l or "")
-                    if not season_like:
-                        show_name = first
+                show_name = ""
+                season_num_from_folder = None
+                if len(parts) >= 2:
+                    first = parts[0]
+                    first_l = first.lower()
+                    
+                    # Check for combined show-season folder name (e.g. "Family Guy - Season 14" or "Family Guy Season 14")
+                    season_match = re.search(r'(?i)(.*?)\s*(?:[-_]\s*)?(season\s*(\d+)|series\s*(\d+)|\bs(\d+)\b)', first)
+                    if season_match:
+                        show_name = season_match.group(1).strip()
+                        # Try to get season number from match groups
+                        s_num_str = season_match.group(3) or season_match.group(4) or season_match.group(5)
+                        if s_num_str:
+                            season_num_from_folder = int(s_num_str)
+                    else:
+                        season_like = first_l.startswith("season") or first_l.startswith("series") or re.match(r"^s\d{1,3}$", first_l or "")
+                        if not season_like:
+                            show_name = first
 
-            if not show_name:
-                show_name = _infer_show_name_from_filename(f) or "Unsorted"
-            show_name = _sanitize_show_part(show_name) or "Unsorted"
+                if not show_name:
+                    show_name = _infer_show_name_from_filename(f) or "Unsorted"
+                show_name = _sanitize_show_part(show_name) or "Unsorted"
 
-            season_part = parts[1] if len(parts) >= 3 else ""
-            season_num, episode_num = _parse_season_episode(f)
-            if season_num is None:
-                if season_num_from_folder is not None:
-                    season_num = season_num_from_folder
-                else:
-                    season_num = _infer_season_from_parts([season_part]) or 1
-            if episode_num is None:
-                episode_num = _parse_episode_only(f)
+                season_part = parts[1] if len(parts) >= 3 else ""
+                season_num, episode_num = _parse_season_episode(f)
+                if season_num is None:
+                    if season_num_from_folder is not None:
+                        season_num = season_num_from_folder
+                    else:
+                        season_num = _infer_season_from_parts([season_part]) or 1
+                if episode_num is None:
+                    episode_num = _parse_episode_only(f)
 
-            season_folder = f"Season {int(season_num)}"
-            dest_dir = os.path.join(base, show_name, season_folder)
+                season_folder = f"Season {int(season_num)}"
+                dest_dir = os.path.join(base, show_name, season_folder)
 
-            dest_name = f
-            if rename_files and episode_num is not None:
-                dest_name = f"S{int(season_num):02d}E{int(episode_num):02d}{ext}"
+                dest_name = f
+                if rename_files and episode_num is not None:
+                    dest_name = f"S{int(season_num):02d}E{int(episode_num):02d}{ext}"
 
-            dest_fs = os.path.join(dest_dir, dest_name)
-            dest_fs = _pick_unique_dest(dest_fs) if not dry_run else dest_fs
+                dest_fs = os.path.join(dest_dir, dest_name)
+                if not dry_run:
+                    dest_fs = _pick_unique_dest(dest_fs)
 
-            if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
-                skipped += 1
-                continue
+                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
+                    skipped += 1
+                    continue
 
-            plan = {"from": f"/data/shows/{rel_under}", "to": f"/data/shows/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"}
-            planned.append(plan)
-
-            if dry_run:
-                if len(planned) >= limit:
-                    break
-                continue
-
-            if os.path.exists(dest_fs):
-                errors += 1
-                continue
-
-            os.makedirs(dest_dir, exist_ok=True)
-            try:
-                shutil.move(src_fs, dest_fs)
-                logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
-            except Exception as e:
-                logger.error(f"Failed to move show file {src_fs}: {e}")
-                errors += 1
-                continue
-
-            try:
-                database.rename_media_path(plan["from"], plan["to"])
-            except Exception:
-                pass
-
-            # Fetch OMDB metadata and poster for the show (once per show)
-            meta = shows_processed.get(show_name)
-            if use_omdb and show_name != "Unsorted" and not meta:
-                if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
-                    try:
-                        # Fetch show metadata
-                        meta = omdb_fetch(title=show_name, media_type="series")
-                        shows_processed[show_name] = meta
-                        
-                        # Cache poster if available
-                        poster_url = meta.get("Poster")
-                        if poster_url and poster_url != "N/A" and write_poster:
-                            cached_poster = cache_remote_poster(poster_url)
-                            if cached_poster:
-                                # Also save as poster.jpg in show directory
-                                show_dir = os.path.join(base, show_name)
-                                poster_dest = os.path.join(show_dir, "poster.jpg")
-                                try:
-                                    # Copy from cache to show directory
-                                    cached_fs = safe_fs_path_from_web_path(cached_poster)
-                                    if os.path.exists(cached_fs) and not os.path.exists(poster_dest):
-                                        shutil.copy2(cached_fs, poster_dest)
-                                        logger.info(f"Saved poster for {show_name}")
-                                except Exception as e:
-                                    logger.warning(f"Failed to save poster for {show_name}: {e}")
-                        
-                        logger.info(f"Fetched OMDB metadata for show: {show_name}")
-                    except HTTPException as e:
-                        if e.status_code == 404:
-                            logger.warning(f"Show not found in OMDB: {show_name}")
-                        else:
-                            logger.warning(f"Failed to fetch OMDB data for {show_name}: {e.detail}")
-                    except Exception as e:
-                        logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
-
-            if meta:
+                # Correct web paths relative to BASE_DIR
                 try:
-                    database.upsert_file_metadata(plan["to"], "series", meta)
+                    from_web = f"/data/{os.path.relpath(src_fs, BASE_DIR).replace(os.sep, '/')}"
+                    to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                except Exception:
+                    from_web = f"/data/shows/{rel_under}"
+                    to_web = f"/data/shows/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"
+
+                plan = {"from": from_web, "to": to_web}
+                planned.append(plan)
+
+                if dry_run:
+                    if len(planned) >= limit:
+                        break
+                    continue
+
+                if os.path.exists(dest_fs):
+                    errors += 1
+                    continue
+
+                os.makedirs(dest_dir, exist_ok=True)
+                try:
+                    shutil.move(src_fs, dest_fs)
+                    logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
+                except Exception as e:
+                    logger.error(f"Failed to move show file {src_fs}: {e}")
+                    errors += 1
+                    continue
+
+                try:
+                    database.rename_media_path(plan["from"], to_web)
                 except Exception:
                     pass
 
-            moved += 1
-            if moved >= limit:
+                # Fetch OMDB metadata and poster for the show (once per show)
+                meta = shows_processed.get(show_name)
+                if use_omdb and show_name != "Unsorted" and not meta:
+                    if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
+                        try:
+                            # Fetch show metadata
+                            meta = omdb_fetch(title=show_name, media_type="series")
+                            shows_processed[show_name] = meta
+                            
+                            # Cache poster if available
+                            poster_url = meta.get("Poster")
+                            if poster_url and poster_url != "N/A" and write_poster:
+                                # Check if poster already exists in show directory
+                                show_dir = os.path.join(base, show_name)
+                                poster_dest = os.path.join(show_dir, "poster.jpg")
+                                
+                                if os.path.exists(poster_dest):
+                                    try:
+                                        meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
+                                    except Exception:
+                                        pass
+                                else:
+                                    cached_poster = cache_remote_poster(poster_url)
+                                    if cached_poster:
+                                        # Also save as poster.jpg in show directory
+                                        try:
+                                            # Copy from cache to show directory
+                                            cached_fs = safe_fs_path_from_web_path(cached_poster)
+                                            if os.path.exists(cached_fs):
+                                                shutil.copy2(cached_fs, poster_dest)
+                                                logger.info(f"Saved poster for {show_name}")
+                                        except Exception as e:
+                                            logger.warning(f"Failed to save poster for {show_name}: {e}")
+                            
+                            logger.info(f"Fetched OMDB metadata for show: {show_name}")
+                        except HTTPException as e:
+                            if e.status_code == 404:
+                                logger.warning(f"Show not found in OMDB: {show_name}")
+                            else:
+                                logger.warning(f"Failed to fetch OMDB data for {show_name}: {e.detail}")
+                        except Exception as e:
+                            logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
+
+                if meta:
+                    try:
+                        database.upsert_file_metadata(to_web, "series", meta)
+                    except Exception:
+                        pass
+
+                moved += 1
+                if moved >= limit:
+                    break
+            if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
                 break
         if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
             break
@@ -1559,164 +1594,189 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
 
 @router.post("/organize/movies")
 def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
-    base = os.path.join(BASE_DIR, "movies")
-    if not os.path.isdir(base):
-        raise HTTPException(status_code=404, detail="Movies folder not found")
-
+    movie_bases = get_scan_paths("movies")
     limit = max(1, min(int(limit or 250), 5000))
     planned = []
     moved = 0
     skipped = 0
     errors = 0
 
-    for root, _, filenames in os.walk(base):
-        for f in filenames:
-            if f.startswith("."):
-                continue
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in [".mp4", ".mkv", ".avi", ".mov", ".webm"]:
-                continue
-
-            src_fs = os.path.join(root, f)
-            rel_under = os.path.relpath(src_fs, base).replace(os.sep, "/")
-
-            title_guess, year_guess = guess_title_year(f)
+    for base in movie_bases:
+        if not os.path.isdir(base):
+            continue
             
-            # IMPROVEMENT: If filename is generic, try parent folder
-            if len(title_guess) < 3 or title_guess.lower() in ["movie", "video", "film", "index"]:
-                parts = [p for p in rel_under.split("/") if p]
-                if len(parts) >= 2: # Folder/file.mkv
-                    folder_name = parts[-2]
-                    f_title, f_year = guess_title_year(folder_name)
-                    if len(f_title) > len(title_guess):
-                        title_guess, year_guess = f_title, f_year or year_guess
+        for root, _, filenames in os.walk(base):
+            for f in filenames:
+                if f.startswith("."):
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                if ext not in [".mp4", ".mkv", ".avi", ".mov", ".webm"]:
+                    continue
 
-            title = title_guess
-            year = year_guess
-            meta = None
-            if use_omdb and (os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")):
-                # Try variations for common tricky titles
-                search_queries = [title_guess]
+                src_fs = os.path.join(root, f)
+                rel_under = os.path.relpath(src_fs, base).replace(os.sep, "/")
+
+                title_guess, year_guess = guess_title_year(f)
                 
-                t_low = title_guess.lower()
-                if "harry potter" in t_low:
-                    if "philosopher" in t_low or "sorcerer" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Sorcerer's Stone")
-                    elif "chamber of secrets" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Chamber of Secrets")
-                    elif "prisoner of azkaban" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Prisoner of Azkaban")
-                    elif "goblet of fire" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Goblet of Fire")
-                    elif "order of the phoenix" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Order of the Phoenix")
-                    elif "half blood prince" in t_low:
-                        search_queries.insert(0, "Harry Potter and the Half-Blood Prince")
-                    elif "deathly hallows" in t_low:
-                        if "1" in t_low or "part 1" in t_low or "i" in t_low:
-                            search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 1")
-                        elif "2" in t_low or "part 2" in t_low or "ii" in t_low:
-                            search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 2")
+                # IMPROVEMENT: If filename is generic, try parent folder
+                if len(title_guess) < 3 or title_guess.lower() in ["movie", "video", "film", "index"]:
+                    parts = [p for p in rel_under.split("/") if p]
+                    if len(parts) >= 2: # Folder/file.mkv
+                        folder_name = parts[-2]
+                        f_title, f_year = guess_title_year(folder_name)
+                        if len(f_title) > len(title_guess):
+                            title_guess, year_guess = f_title, f_year or year_guess
 
-                if "toy story" in t_low:
-                    if "2" in t_low or "ii" in t_low: search_queries.insert(0, "Toy Story 2")
-                    elif "3" in t_low or "iii" in t_low: search_queries.insert(0, "Toy Story 3")
-                    elif "4" in t_low or "iv" in t_low: search_queries.insert(0, "Toy Story 4")
+                title = title_guess
+                year = year_guess
+                meta = None
+                if use_omdb and (os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")):
+                    # Try variations for common tricky titles
+                    search_queries = [title_guess]
+                    
+                    t_low = title_guess.lower()
+                    if "harry potter" in t_low:
+                        if "philosopher" in t_low or "sorcerer" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Sorcerer's Stone")
+                        elif "chamber of secrets" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Chamber of Secrets")
+                        elif "prisoner of azkaban" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Prisoner of Azkaban")
+                        elif "goblet of fire" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Goblet of Fire")
+                        elif "order of the phoenix" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Order of the Phoenix")
+                        elif "half blood prince" in t_low:
+                            search_queries.insert(0, "Harry Potter and the Half-Blood Prince")
+                        elif "deathly hallows" in t_low:
+                            if "1" in t_low or "part 1" in t_low or "i" in t_low:
+                                search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 1")
+                            elif "2" in t_low or "part 2" in t_low or "ii" in t_low:
+                                search_queries.insert(0, "Harry Potter and the Deathly Hallows: Part 2")
 
-                # Try fetching
-                for query in search_queries:
-                    try:
-                        meta = omdb_fetch(title=query, year=year_guess, media_type="movie")
-                        break
-                    except Exception:
+                    if "toy story" in t_low:
+                        if "2" in t_low or "ii" in t_low: search_queries.insert(0, "Toy Story 2")
+                        elif "3" in t_low or "iii" in t_low: search_queries.insert(0, "Toy Story 3")
+                        elif "4" in t_low or "iv" in t_low: search_queries.insert(0, "Toy Story 4")
+
+                    # Try fetching
+                    for query in search_queries:
                         try:
-                            # Try without year if it failed with year
-                            if year_guess:
-                                meta = omdb_fetch(title=query, media_type="movie")
-                                break
+                            meta = omdb_fetch(title=query, year=year_guess, media_type="movie")
+                            break
                         except Exception:
-                            continue
+                            try:
+                                # Try without year if it failed with year
+                                if year_guess:
+                                    meta = omdb_fetch(title=query, media_type="movie")
+                                    break
+                            except Exception:
+                                continue
+                    
+                    # Final fallback: Search
+                    if not meta:
+                        try:
+                            search_res = omdb_search(title_guess, year=year_guess, media_type="movie")
+                            if search_res.get("Search"):
+                                meta = omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
+                        except Exception:
+                            pass
+
+                    if meta:
+                        t = meta.get("Title")
+                        y = meta.get("Year")
+                        if isinstance(t, str) and t.strip():
+                            title = t.strip()
+                        if isinstance(y, str) and y.strip():
+                            # Clean year (sometimes "2010–2015")
+                            y_match = re.search(r"\b(19\d{2}|20\d{2})\b", y)
+                            if y_match:
+                                year = y_match.group(1)
+                            else:
+                                year = y.strip()
+
+                title = _sanitize_movie_part(title) or "Movie"
+                folder = f"{title} ({year})" if year else title
+                folder = _sanitize_movie_part(folder) or title
+                dest_dir = os.path.join(base, folder)
+                dest_name = f"{folder}{ext}"
+                dest_fs = os.path.join(dest_dir, dest_name)
+
+                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
+                    skipped += 1
+                    continue
+
+                # Correct web paths relative to BASE_DIR
+                try:
+                    from_web = f"/data/{os.path.relpath(src_fs, BASE_DIR).replace(os.sep, '/')}"
+                    to_web_raw = f"/data/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}" # This is wrong, should be relative to BASE_DIR
+                    # Fix: use the same logic for to_web as from_web
+                    to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                except Exception:
+                    # Fallback if relpath fails (e.g. different drives on Windows)
+                    from_web = f"/data/movies/{rel_under}"
+                    to_web = f"/data/movies/{folder}/{dest_name}"
                 
-                # Final fallback: Search
-                if not meta:
+                plan = {"from": from_web, "to": to_web}
+                planned.append(plan)
+
+                if dry_run:
+                    if len(planned) >= limit:
+                        break
+                    continue
+
+                os.makedirs(dest_dir, exist_ok=True)
+                dest_fs = _pick_unique_dest(dest_fs)
+                # Re-calculate to_web after picking unique dest
+                try:
+                    to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                except Exception:
+                    to_web = f"/data/movies/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"
+
+                try:
+                    shutil.move(src_fs, dest_fs)
+                    logger.info(f"Organized movie file: {src_fs} -> {dest_fs}")
+                except Exception as e:
+                    logger.error(f"Failed to move movie file {src_fs}: {e}")
+                    errors += 1
+                    continue
+
+                try:
+                    database.rename_media_path(plan["from"], to_web)
+                except Exception:
+                    pass
+
+                if meta and write_poster:
                     try:
-                        search_res = omdb_search(title_guess, year=year_guess, media_type="movie")
-                        if search_res.get("Search"):
-                            meta = omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
+                        poster_out = os.path.join(dest_dir, "poster.jpg")
+                        # IMPROVEMENT: Check if poster already exists in destination folder
+                        if os.path.exists(poster_out):
+                            try:
+                                meta["Poster"] = f"/data/{os.path.relpath(poster_out, BASE_DIR).replace(os.sep, '/')}"
+                            except Exception:
+                                pass
+                        else:
+                            cached = cache_remote_poster(meta.get("Poster"))
+                            if cached and cached.startswith("/data/"):
+                                meta["Poster"] = cached
+                                cached_fs = safe_fs_path_from_web_path(cached)
+                                if os.path.isfile(cached_fs):
+                                    shutil.copy2(cached_fs, poster_out)
                     except Exception:
                         pass
 
                 if meta:
-                    t = meta.get("Title")
-                    y = meta.get("Year")
-                    if isinstance(t, str) and t.strip():
-                        title = t.strip()
-                    if isinstance(y, str) and y.strip():
-                        # Clean year (sometimes "2010–2015")
-                        y_match = re.search(r"\b(19\d{2}|20\d{2})\b", y)
-                        if y_match:
-                            year = y_match.group(1)
-                        else:
-                            year = y.strip()
+                    try:
+                        database.upsert_file_metadata(to_web, "movie", meta)
+                    except Exception:
+                        pass
 
-            title = _sanitize_movie_part(title) or "Movie"
-            folder = f"{title} ({year})" if year else title
-            folder = _sanitize_movie_part(folder) or title
-            dest_dir = os.path.join(base, folder)
-            dest_name = f"{folder}{ext}"
-            dest_fs = os.path.join(dest_dir, dest_name)
-
-            if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
-                skipped += 1
-                continue
-
-            plan = {"from": f"/data/movies/{rel_under}", "to": f"/data/movies/{folder}/{dest_name}"}
-            planned.append(plan)
-
-            if dry_run:
-                if len(planned) >= limit:
+                moved += 1
+                if moved >= limit:
                     break
-                continue
 
-            os.makedirs(dest_dir, exist_ok=True)
-            dest_fs = _pick_unique_dest(dest_fs)
-
-            try:
-                shutil.move(src_fs, dest_fs)
-                print(f"Organized movie file: {src_fs} -> {dest_fs}")
-            except Exception as e:
-                print(f"Failed to move movie file {src_fs}: {e}")
-                errors += 1
-                continue
-
-            to_web = f"/data/movies/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"
-            try:
-                database.rename_media_path(plan["from"], to_web)
-            except Exception:
-                pass
-
-            if meta and write_poster:
-                try:
-                    cached = cache_remote_poster(meta.get("Poster"))
-                    if cached and cached.startswith("/data/"):
-                        meta["Poster"] = cached
-                        cached_fs = safe_fs_path_from_web_path(cached)
-                        poster_out = os.path.join(dest_dir, "poster.jpg")
-                        if os.path.isfile(cached_fs) and not os.path.exists(poster_out):
-                            shutil.copy2(cached_fs, poster_out)
-                except Exception:
-                    pass
-
-            if meta:
-                try:
-                    database.upsert_file_metadata(to_web, "movie", meta)
-                except Exception:
-                    pass
-
-            moved += 1
-            if moved >= limit:
+            if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
                 break
-
         if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
             break
 
