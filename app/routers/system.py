@@ -37,6 +37,33 @@ def get_system_status():
     """Lightweight endpoint for connectivity checks"""
     return {"status": "online", "version": "1.5.0"}
 
+@public_router.get("/samba/config")
+def get_samba_config():
+    """Get Samba configuration for NomadTransferTool auto-setup"""
+    user = "beastboost" # Default fallback
+    if platform.system() == "Linux":
+        try:
+            import getpass
+            user = getpass.getuser()
+        except:
+            # Fallback to env or whoami
+            user = os.environ.get("USER") or subprocess.check_output(["whoami"], text=True).strip()
+    
+    # Construct UNC path
+    hostname = platform.node()
+    # Prefer nomadpi.local if it's the default hostname
+    if hostname == "nomadpi" or hostname == "raspberrypi":
+        path = f"\\\\{hostname}.local\\data"
+    else:
+        # Fallback to IP if possible, but hostname.local is usually better for mDNS
+        path = f"\\\\{hostname}.local\\data"
+        
+    return {
+        "user": user,
+        "path": path,
+        "is_default_password": database.get_setting("admin_password") in [None, "nomad"]
+    }
+
 @public_router.get("/health")
 def get_health():
     """Detailed health check results from startup"""

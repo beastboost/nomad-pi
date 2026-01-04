@@ -130,6 +130,59 @@ namespace NomadTransferTool
             }
         }
 
+        private async void SyncSamba_Click(object sender, RoutedEventArgs e)
+        {
+            await SyncSambaSettings(true);
+        }
+
+        private async Task SyncSambaSettings(bool showMessages = false)
+        {
+            try
+            {
+                AddLog("Syncing Samba settings from Nomad Pi...");
+                var res = await client.GetAsync($"{API_BASE}/system/samba/config");
+                if (res.IsSuccessStatusCode)
+                {
+                    var content = await res.Content.ReadAsStringAsync();
+                    var config = JsonConvert.DeserializeObject<dynamic>(content);
+                    
+                    if (config != null)
+                    {
+                        Dispatcher.Invoke(() => {
+                            SambaUser = config.user;
+                            // If user is using an IP for ServerIp, use that in the path instead of .local
+                            string path = config.path;
+                            if (Regex.IsMatch(ServerIp, @"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"))
+                            {
+                                path = $"\\\\{ServerIp}\\data";
+                            }
+                            SambaPath = path;
+                            
+                            if ((bool)config.is_default_password && string.IsNullOrEmpty(SambaPassword))
+                            {
+                                SambaPassword = "nomad";
+                                SambaPassBox.Password = "nomad";
+                            }
+                            
+                            UseSamba = true;
+                        });
+                        
+                        AddLog("Samba settings synchronized successfully.");
+                        if (showMessages) System.Windows.MessageBox.Show("Samba settings synchronized!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                }
+                else if (showMessages)
+                {
+                    System.Windows.MessageBox.Show($"Failed to sync: {res.StatusCode}", "Sync Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Sync failed: {ex.Message}");
+                if (showMessages) System.Windows.MessageBox.Show($"Error syncing: {ex.Message}", "Sync Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private bool ConnectToSamba(string path, string user, string pass)
         {
             var nr = new NetResource
@@ -645,11 +698,19 @@ namespace NomadTransferTool
                         var content = await res.Content.ReadAsStringAsync();
                         var data = JsonConvert.DeserializeObject<dynamic>(content);
                         
+                        bool wasOffline = ServerStatus != "Online";
+                        
                         Dispatcher.Invoke(() => {
                             ServerStatus = "Online";
                             ServerStatusColor = System.Windows.Media.Brushes.LightGreen;
                             AppStatus = $"Nomad v{data?.version ?? APP_VERSION} - Connected";
                         });
+
+                        // Auto-sync Samba if not set
+                        if (wasOffline && string.IsNullOrEmpty(SambaPath))
+                        {
+                            _ = SyncSambaSettings(false);
+                        }
                     }
                     else
                     {
