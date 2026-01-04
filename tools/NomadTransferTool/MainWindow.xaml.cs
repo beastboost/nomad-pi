@@ -5,7 +5,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Management;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -16,7 +15,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.IO.Compression;
 using Microsoft.Win32;
-using System.Windows.Forms;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 using Newtonsoft.Json;
@@ -134,7 +132,7 @@ namespace NomadTransferTool
             }
 
             RefreshDrives();
-            StartDriveWatcher();
+            // StartDriveWatcher();
             CheckHandbrakeStatus();
         }
 
@@ -583,6 +581,7 @@ namespace NomadTransferTool
 
         private void StartDriveWatcher()
         {
+            /* 
             try
             {
                 ManagementEventWatcher watcher = new ManagementEventWatcher();
@@ -591,7 +590,8 @@ namespace NomadTransferTool
                 watcher.Query = query;
                 watcher.Start();
             }
-            catch { /* Ignore if management not available */ }
+            catch { }
+            */
         }
 
         private void PrepareDrive_Click(object sender, RoutedEventArgs e)

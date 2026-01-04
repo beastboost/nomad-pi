@@ -200,7 +200,7 @@
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="{Binding Label}" FontWeight="Bold" FontSize="14"/>
                                                 <TextBlock Text="{Binding Name}" FontSize="11" Foreground="{StaticResource MutedTextColor}"/>
-                                                <ProgressBar Value="{Binding PercentUsed}" Height="4" Margin="0,5" Background="#333" Foreground="{StaticResource PrimaryColor}" BorderThickness="0"/>
+                                                <ProgressBar Value="{Binding PercentUsed, Mode=OneWay}" Height="4" Margin="0,5" Background="#333" Foreground="{StaticResource PrimaryColor}" BorderThickness="0"/>
                                                 <TextBlock Text="{Binding SizeDisplay}" FontSize="12" Margin="0,2"/>
                                                 <TextBlock Text="{Binding StatusDisplay}" FontSize="12" FontWeight="Bold"
                                                            Foreground="{Binding IsMounted, Converter={StaticResource BooleanToColorConverter}}"/>
