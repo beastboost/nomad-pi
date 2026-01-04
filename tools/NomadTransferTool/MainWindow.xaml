@@ -10,6 +10,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
+        <local:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
         <local:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
         <local:BooleanToColorConverter x:Key="BooleanToColorConverter"/>
         <local:CategoryToVisibilityConverter x:Key="CategoryToVis"/>
@@ -21,9 +22,10 @@
         <SolidColorBrush x:Key="SecondaryColor" Color="#4caf50"/>
         <SolidColorBrush x:Key="BackgroundColor" Color="#121212"/>
         <SolidColorBrush x:Key="CardColor" Color="#1E1E1E"/>
-        <SolidColorBrush x:Key="BorderColor" Color="#333333"/>
-        <SolidColorBrush x:Key="TextColor" Color="#E0E0E0"/>
-        <SolidColorBrush x:Key="MutedTextColor" Color="#9E9E9E"/>
+        <SolidColorBrush x:Key="BorderColor" Color="#444444"/>
+        <SolidColorBrush x:Key="TextColor" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="MutedTextColor" Color="#BDBDBD"/>
+        <SolidColorBrush x:Key="InputBackground" Color="#2A2A2A"/>
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextColor}"/>
@@ -306,9 +308,25 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="Review Media Details" Style="{StaticResource HeaderBlock}"/>
-                                <Button Grid.Column="1" Content="Clear All" Click="ClearReviewQueue_Click" 
+                                
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Bulk:" VerticalAlignment="Center" Margin="0,0,5,0" FontSize="11" Foreground="{StaticResource MutedTextColor}"/>
+                                    <ComboBox x:Name="BulkCategoryCombo" Width="80" Height="24" FontSize="11">
+                                        <ComboBoxItem Content="movies" Tag="movies" IsSelected="True"/>
+                                        <ComboBoxItem Content="shows" Tag="shows"/>
+                                        <ComboBoxItem Content="music" Tag="music"/>
+                                        <ComboBoxItem Content="books" Tag="books"/>
+                                        <ComboBoxItem Content="gallery" Tag="gallery"/>
+                                        <ComboBoxItem Content="files" Tag="files"/>
+                                    </ComboBox>
+                                    <Button Content="Set" Click="ApplyBulkCategory_Click" Padding="8,2" Margin="4,0" FontSize="11" Height="24"/>
+                                    <Button Content="Clean" Click="BulkCleanTitles_Click" Padding="8,2" FontSize="11" Height="24" Background="#3D3D3D" ToolTip="Clean selected titles"/>
+                                </StackPanel>
+
+                                <Button Grid.Column="2" Content="Clear All" Click="ClearReviewQueue_Click" 
                                         Background="Transparent" BorderThickness="0" Foreground="{StaticResource MutedTextColor}" 
                                         VerticalAlignment="Center" Margin="0,0,10,0" Cursor="Hand">
                                     <Button.Style>
@@ -350,7 +368,7 @@
                                                 
                                                 <StackPanel Grid.Column="1" Margin="0,0,10,0">
                                                     <TextBlock Text="Title" FontSize="10" Foreground="{StaticResource MutedTextColor}"/>
-                                                    <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Background="#2D2D2D" Foreground="White" BorderThickness="0,0,0,1"/>
+                                                    <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0,0,0,1" BorderBrush="{StaticResource PrimaryColor}"/>
                                                     
                                                     <!-- Item Progress -->
                                                     <Grid Margin="0,5,0,0" Visibility="{Binding IsProcessing, Converter={StaticResource BoolToVis}}">
@@ -364,22 +382,22 @@
 
                                                 <StackPanel Grid.Column="2" Margin="0,0,10,0">
                                                     <TextBlock Text="Year" FontSize="10" Foreground="{StaticResource MutedTextColor}"/>
-                                                    <TextBox Text="{Binding Year, UpdateSourceTrigger=PropertyChanged}" Background="#2D2D2D" Foreground="White" BorderThickness="0,0,0,1"/>
+                                                    <TextBox Text="{Binding Year, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0,0,0,1" BorderBrush="{StaticResource PrimaryColor}"/>
                                                 </StackPanel>
 
                                                 <StackPanel Grid.Column="3" Margin="0,0,5,0" Visibility="{Binding Category, Converter={StaticResource CategoryToVis}, ConverterParameter=shows}">
                                                     <TextBlock Text="S" FontSize="10" Foreground="{StaticResource MutedTextColor}"/>
-                                                    <TextBox Text="{Binding Season, UpdateSourceTrigger=PropertyChanged}" Background="#2D2D2D" Foreground="White" BorderThickness="0,0,0,1"/>
+                                                    <TextBox Text="{Binding Season, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0,0,0,1" BorderBrush="{StaticResource PrimaryColor}"/>
                                                 </StackPanel>
 
                                                 <StackPanel Grid.Column="4" Margin="0,0,10,0" Visibility="{Binding Category, Converter={StaticResource CategoryToVis}, ConverterParameter=shows}">
                                                     <TextBlock Text="E" FontSize="10" Foreground="{StaticResource MutedTextColor}"/>
-                                                    <TextBox Text="{Binding Episode, UpdateSourceTrigger=PropertyChanged}" Background="#2D2D2D" Foreground="White" BorderThickness="0,0,0,1"/>
+                                                    <TextBox Text="{Binding Episode, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0,0,0,1" BorderBrush="{StaticResource PrimaryColor}"/>
                                                 </StackPanel>
 
                                                 <StackPanel Grid.Column="5" Margin="0,0,10,0">
                                                     <TextBlock Text="Category" FontSize="10" Foreground="{StaticResource MutedTextColor}"/>
-                                                    <ComboBox SelectedValue="{Binding Category}" SelectedValuePath="Tag" Background="#2D2D2D" Foreground="White" BorderThickness="0">
+                                                    <ComboBox SelectedValue="{Binding Category}" SelectedValuePath="Tag" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0">
                                                         <ComboBoxItem Content="movies" Tag="movies"/>
                                                         <ComboBoxItem Content="shows" Tag="shows"/>
                                                         <ComboBoxItem Content="music" Tag="music"/>
@@ -459,51 +477,28 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <Border Grid.Row="2" x:Name="DetailsPanel" Background="#333333" Padding="15" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0" 
-                                    Visibility="{Binding SelectedItem, ElementName=ReviewListBox, Converter={StaticResource NullToVisibilityConverter}}">
-                                <StackPanel>
-                                    <TextBlock Text="Media Preview" FontWeight="Bold" Foreground="White" Margin="0,0,0,10"/>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Border Width="80" Height="120" Background="#444444" Margin="0,0,15,0" CornerRadius="4">
-                                            <TextBlock Text="Poster" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="#666666"/>
-                                        </Border>
-                                        <StackPanel Grid.Column="1">
-                                            <TextBlock Text="{Binding SelectedItem.Title, ElementName=ReviewListBox}" FontSize="16" FontWeight="Bold" Foreground="White"/>
-                                            <TextBlock Text="{Binding SelectedItem.Year, ElementName=ReviewListBox}" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
-                                            <TextBlock Text="{Binding SelectedItem.Plot, ElementName=ReviewListBox}" Foreground="White" TextWrapping="Wrap" MaxHeight="60" Opacity="0.8"/>
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Row="3" Background="#252525" Padding="10" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
-                                <Grid>
+                            <!-- Space Warning and Batch Controls -->
+                            <StackPanel Grid.Row="2" Background="#111111" Margin="0,5,0,0">
+                                <TextBlock Text="{Binding SpaceWarning}" Foreground="{StaticResource PrimaryColor}" 
+                                           HorizontalAlignment="Center" FontWeight="Bold" Margin="0,5"/>
+                                <Grid Margin="10,5">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="Bulk Action:" VerticalAlignment="Center" Margin="0,0,10,0" FontSize="12" Foreground="{StaticResource MutedTextColor}"/>
-                                        <ComboBox x:Name="BulkCategoryCombo" Width="100" Margin="0,0,5,0">
-                                            <ComboBoxItem Content="movies" Tag="movies"/>
-                                            <ComboBoxItem Content="shows" Tag="shows"/>
-                                            <ComboBoxItem Content="music" Tag="music"/>
-                                            <ComboBoxItem Content="books" Tag="books"/>
-                                            <ComboBoxItem Content="gallery" Tag="gallery"/>
-                                            <ComboBoxItem Content="files" Tag="files"/>
-                                        </ComboBox>
-                                        <Button Content="Apply" Click="ApplyBulkCategory_Click" Padding="10,2" Margin="0,0,10,0"/>
-                                        <Button Content="Clean Titles" Click="BulkCleanTitles_Click" Padding="10,2" Background="#3D3D3D"
-                                                ToolTip="Remove dots, underscores, and common release tags from selected titles."/>
+                                    <StackPanel Orientation="Horizontal" Grid.Column="1">
+                                        <Button Content="STOP" Click="StopProcessing_Click" Background="{StaticResource DangerColor}" Width="80" Height="40" Margin="0,0,10,0"
+                                                Visibility="{Binding IsTransferring, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        <Button Content="START PROCESSING" Click="StartProcessing_Click" 
+                                                Background="{StaticResource PrimaryColor}" Width="200" Height="40" FontWeight="Bold"
+                                                IsEnabled="{Binding IsTransferring, Converter={StaticResource InverseBooleanConverter}}"/>
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Start Processing" Click="StartProcessing_Click" 
-                                            Style="{StaticResource PrimaryButton}" Width="200" Height="40" FontSize="14"/>
                                 </Grid>
-                            </Border>
+                            </StackPanel>
+
+                            <ProgressBar Grid.Row="3" Height="4" Value="{Binding TotalProgress}" 
+                                         Foreground="{StaticResource PrimaryColor}" Background="Transparent" BorderThickness="0"
+                                         Visibility="{Binding IsTransferring, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                         </Grid>
                     </Grid>
                 </Border>

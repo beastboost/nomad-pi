@@ -394,11 +394,12 @@ async function loadFileBrowser(path, query = '') {
 
             // Back to /data
             const backDiv = document.createElement('div');
-            backDiv.className = 'media-item folder';
+            backDiv.className = 'list-item folder-item';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('/data')">
-                    <div class="media-info">
-                        <h3>📁 .. (Back to /data)</h3>
+                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('/data')">
+                    <span style="font-size:1.5em;">📁</span>
+                    <div style="flex-grow:1;">
+                        <h3 style="margin:0; font-size:1rem;">.. (Back to /data)</h3>
                     </div>
                 </div>
             `;
@@ -406,12 +407,14 @@ async function loadFileBrowser(path, query = '') {
 
             drives.forEach(d => {
                 const div = document.createElement('div');
-                div.className = 'media-item folder';
+                div.className = 'list-item drive-item';
+                const mountPath = (d.mountpoint || '').replaceAll('\\', '\\\\');
                 div.innerHTML = `
-                    <div class="media-card glass" onclick="loadFileBrowser('${d.mountpoint.replaceAll('\\', '\\\\')}')">
-                        <div class="media-info">
-                            <h3>💽 Drive ${d.name} (${formatBytes(d.free)} free)</h3>
-                            <p>${d.fstype} - ${d.mountpoint}</p>
+                    <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${mountPath}')">
+                        <span style="font-size:1.5em;">💽</span>
+                        <div style="flex-grow:1;">
+                            <h3 style="margin:0; font-size:1rem;">Drive ${d.name} (${formatBytes(d.free)} free)</h3>
+                            <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">${d.fstype || 'Unknown'} - ${d.mountpoint || 'Not mounted'}</p>
                         </div>
                     </div>
                 `;
@@ -449,11 +452,12 @@ async function loadFileBrowser(path, query = '') {
             }
 
             const backDiv = document.createElement('div');
-            backDiv.className = 'media-item folder';
+            backDiv.className = 'list-item folder-item';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
-                    <div class="media-info">
-                        <h3>📁 .. (Back)</h3>
+                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
+                    <span style="font-size:1.5em;">📁</span>
+                    <div style="flex-grow:1;">
+                        <h3 style="margin:0; font-size:1rem;">.. (Back)</h3>
                     </div>
                 </div>
             `;
@@ -461,11 +465,12 @@ async function loadFileBrowser(path, query = '') {
         } else if (path === '/data') {
             // Show "Browse Drives" button at /data root
             const driveDiv = document.createElement('div');
-            driveDiv.className = 'media-item folder';
+            driveDiv.className = 'list-item drive-item';
             driveDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
-                    <div class="media-info">
-                        <h3>💽 Browse External Drives / Partitions</h3>
+                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('DRIVES')">
+                    <span style="font-size:1.5em;">💽</span>
+                    <div style="flex-grow:1;">
+                        <h3 style="margin:0; font-size:1rem;">Browse External Drives / Partitions</h3>
                     </div>
                 </div>
             `;
@@ -473,11 +478,12 @@ async function loadFileBrowser(path, query = '') {
         } else if (isWindows && isRoot) {
             // At drive root, allow going back to drives list
             const backDiv = document.createElement('div');
-            backDiv.className = 'media-item folder';
+            backDiv.className = 'list-item folder-item';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
-                    <div class="media-info">
-                        <h3>📁 .. (Back to Drives)</h3>
+                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('DRIVES')">
+                    <span style="font-size:1.5em;">📁</span>
+                    <div style="flex-grow:1;">
+                        <h3 style="margin:0; font-size:1rem;">.. (Back to Drives)</h3>
                     </div>
                 </div>
             `;
@@ -494,14 +500,15 @@ async function loadFileBrowser(path, query = '') {
         } else {
             items.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'media-item' + (item.is_dir ? ' folder' : '');
+                div.className = 'list-item' + (item.is_dir ? ' folder-item' : ' file-item');
                 const itemPath = item.path.replaceAll('\\', '\\\\');
 
                 if (item.is_dir) {
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="loadFileBrowser('${itemPath}')">
-                            <div class="media-info">
-                                <h3>📁 ${escapeHtml(item.name)}</h3>
+                        <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${itemPath}')">
+                            <span style="font-size:1.5em;">📁</span>
+                            <div style="flex-grow:1;">
+                                <h3 style="margin:0; font-size:1rem;">${escapeHtml(item.name)}</h3>
                             </div>
                         </div>
                     `;
@@ -514,10 +521,11 @@ async function loadFileBrowser(path, query = '') {
                     if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
 
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="openFile('${itemPath}')">
-                            <div class="media-info">
-                                <h3>${icon} ${escapeHtml(item.name)}</h3>
-                                <p>${formatBytes(item.size)}</p>
+                        <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="openFile('${itemPath}')">
+                            <span style="font-size:1.5em;">${icon}</span>
+                            <div style="flex-grow:1;">
+                                <h3 style="margin:0; font-size:1rem;">${escapeHtml(item.name)}</h3>
+                                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">${formatBytes(item.size)}</p>
                             </div>
                         </div>
                     `;

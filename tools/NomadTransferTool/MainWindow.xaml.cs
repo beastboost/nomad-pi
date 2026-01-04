@@ -103,6 +103,13 @@ namespace NomadTransferTool
 
         public ObservableCollection<DriveInfoModel> Drives { get; set; } = new ObservableCollection<DriveInfoModel>();
 
+        private long _totalRequiredSpace;
+        private string _spaceWarning = "";
+
+        public long TotalRequiredSpace { get => _totalRequiredSpace; set { _totalRequiredSpace = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalRequiredSpaceFormatted)); } }
+        public string TotalRequiredSpaceFormatted => FormatSize(TotalRequiredSpace);
+        public string SpaceWarning { get => _spaceWarning; set { _spaceWarning = value; OnPropertyChanged(); } }
+
         public MainWindow()
         {
             InitializeComponent();
@@ -134,6 +141,51 @@ namespace NomadTransferTool
             RefreshDrives();
             // StartDriveWatcher();
             CheckHandbrakeStatus();
+
+            ReviewQueue.CollectionChanged += (s, e) => UpdateSpaceRequirement();
+        }
+
+        private void UpdateSpaceRequirement()
+        {
+            long required = 0;
+            foreach (var item in ReviewQueue)
+            {
+                if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
+                {
+                    double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
+                    required += (long)(bytes * 1.1); // 10% overhead
+                }
+                else
+                {
+                    try { required += new FileInfo(item.SourcePath).Length; } catch { }
+                }
+            }
+            TotalRequiredSpace = required;
+
+            if (DriveList.SelectedItem is DriveInfoModel drive)
+            {
+                if (drive.AvailableFreeSpace < required)
+                    SpaceWarning = $"⚠️ NOT ENOUGH SPACE! Need {FormatSize(required)}, have {FormatSize(drive.AvailableFreeSpace)}";
+                else
+                    SpaceWarning = $"Estimated Space: {FormatSize(required)} / {FormatSize(drive.AvailableFreeSpace)} available";
+            }
+            else
+            {
+                SpaceWarning = $"Estimated Space: {FormatSize(required)}";
+            }
+        }
+
+        private string FormatSize(long bytes)
+        {
+            string[] units = { "B", "KB", "MB", "GB", "TB" };
+            double size = bytes;
+            int unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.Length - 1)
+            {
+                size /= 1024;
+                unitIndex++;
+            }
+            return $"{size:N2} {units[unitIndex]}";
         }
 
         private void InitializePresets()
@@ -702,6 +754,7 @@ namespace NomadTransferTool
         private void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateDuplicateStatus();
+            UpdateSpaceRequirement();
         }
 
         private void UpdateDuplicateStatus()
@@ -710,6 +763,14 @@ namespace NomadTransferTool
             if (targetDrive == null) return;
 
             foreach (var item in ReviewQueue)
+            {
+                UpdateItemDuplicateStatus(item, targetDrive);
+            }
+        }
+
+        private void UpdateItemDuplicateStatus(MediaItem item, string targetDrive)
+        {
+            try
             {
                 string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                 string extension = Path.GetExtension(item.SourcePath);
@@ -728,79 +789,130 @@ namespace NomadTransferTool
                 }
                 item.IsDuplicate = File.Exists(dest);
             }
+            catch { /* Ignore errors during status check */ }
         }
 
         private async void OnFilesDropped(string[] paths)
         {
             if (IsTransferring) return;
 
-            var allFiles = new List<string>();
-            foreach (var path in paths)
-            {
-                if (Directory.Exists(path))
-                    allFiles.AddRange(Directory.GetFiles(path, "*.*", SearchOption.AllDirectories));
-                else if (File.Exists(path))
-                    allFiles.Add(path);
-            }
+            AppStatus = "Scanning files...";
+            AddLog("Scanning dropped paths...");
 
-            if (allFiles.Count == 0) return;
+            // Discover files in background
+            var allFiles = await Task.Run(() =>
+            {
+                var files = new List<string>();
+                foreach (var path in paths)
+                {
+                    try
+                    {
+                        if (Directory.Exists(path))
+                            files.AddRange(Directory.EnumerateFiles(path, "*.*", SearchOption.AllDirectories));
+                        else if (File.Exists(path))
+                            files.Add(path);
+                    }
+                    catch (Exception ex) { Debug.WriteLine($"Access error: {ex.Message}"); }
+                }
+                return files;
+            });
+
+            if (allFiles.Count == 0)
+            {
+                AppStatus = "No files found.";
+                return;
+            }
 
             ReviewQueue.Clear();
-            AddLog($"Added {allFiles.Count} files to review queue.");
-            
-            foreach (var file in allFiles)
+            AddLog($"Processing {allFiles.Count} files...");
+
+            // Process metadata and add to UI in chunks
+            int batchSize = 50;
+            for (int i = 0; i < allFiles.Count; i += batchSize)
             {
-                var item = new MediaItem { SourcePath = file };
-                item.OriginalSize = new FileInfo(file).Length;
-                
-                // Try to guess title/year/category/season/episode
-                string fileName = Path.GetFileNameWithoutExtension(file);
-                item.Title = fileName;
-                item.Category = GuessCategory(file);
+                var batchFiles = allFiles.Skip(i).Take(batchSize).ToList();
+                var batchItems = new List<MediaItem>();
 
-                if (IsVideoFile(file))
+                await Task.Run(async () =>
                 {
-                    item.SelectedPreset = SelectedGlobalPreset;
-                    item.DurationSeconds = EstimateDuration(file);
-                }
-
-                // TV Show specific parsing
-                if (item.Category == "shows" || Regex.IsMatch(fileName, @"[sS]\d+[eE]\d+"))
-                {
-                    item.Category = "shows";
-                    var tvMatch = Regex.Match(fileName, @"[sS](?<sCount>\d+)[eE](?<eCount>\d+)", RegexOptions.IgnoreCase);
-                    if (tvMatch.Success)
+                    foreach (var file in batchFiles)
                     {
-                        item.Season = tvMatch.Groups["sCount"].Value.TrimStart('0');
-                        item.Episode = tvMatch.Groups["eCount"].Value.TrimStart('0');
-                        // Clean title by removing everything after SxxExx
-                        item.Title = fileName.Substring(0, tvMatch.Index).Trim(' ', '.', '-', '_');
+                        try
+                        {
+                            var item = new MediaItem { SourcePath = file };
+                            item.OriginalSize = new FileInfo(file).Length;
+                            
+                            string fileName = Path.GetFileNameWithoutExtension(file);
+                            item.Title = fileName;
+                            item.Category = GuessCategory(file);
+
+                            if (IsVideoFile(file))
+                            {
+                                item.SelectedPreset = SelectedGlobalPreset;
+                                item.DurationSeconds = EstimateDuration(file);
+                            }
+
+                            if (item.Category == "shows" || Regex.IsMatch(fileName, @"[sS]\d+[eE]\d+"))
+                            {
+                                item.Category = "shows";
+                                var tvMatch = Regex.Match(fileName, @"[sS](?<sCount>\d+)[eE](?<eCount>\d+)", RegexOptions.IgnoreCase);
+                                if (tvMatch.Success)
+                                {
+                                    item.Season = tvMatch.Groups["sCount"].Value.TrimStart('0');
+                                    item.Episode = tvMatch.Groups["eCount"].Value.TrimStart('0');
+                                    item.Title = fileName.Substring(0, tvMatch.Index).Trim(' ', '.', '-', '_');
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
+                            {
+                                var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                if (meta != null)
+                                {
+                                    item.Title = meta.Title;
+                                    item.Year = meta.Year;
+                                }
+                            }
+
+                            batchItems.Add(item);
+                        }
+                        catch { }
                     }
+                });
+
+                string? targetDrive = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+                foreach (var item in batchItems)
+                {
+                    ReviewQueue.Add(item);
+                    if (targetDrive != null) UpdateItemDuplicateStatus(item, targetDrive);
+                    
+                    if (IsHandbrakeAvailable && item.IsVideo)
+                        _ = ScanTracks(item);
+
+                    item.PropertyChanged += (s, e) => {
+                        if (e.PropertyName == nameof(MediaItem.Title) || 
+                            e.PropertyName == nameof(MediaItem.Category) || 
+                            e.PropertyName == nameof(MediaItem.Season) || 
+                            e.PropertyName == nameof(MediaItem.Episode) || 
+                            e.PropertyName == nameof(MediaItem.Year))
+                        {
+                            var drive = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+                            if (drive != null) UpdateItemDuplicateStatus(item, drive);
+                        }
+                        
+                        if (e.PropertyName == nameof(MediaItem.SelectedPreset))
+                        {
+                            UpdateSpaceRequirement();
+                        }
+                    };
                 }
 
-                // Quick OMDb lookup if possible
-                if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
-                {
-                    var meta = await FetchOMDBMetadata(item.Title, item.Category);
-                    if (meta != null)
-                    {
-                        item.Title = meta.Title;
-                        item.Year = meta.Year;
-                        item.Plot = meta.Plot;
-                    }
-                }
-
-                ReviewQueue.Add(item);
-                if (IsHandbrakeAvailable && item.IsVideo)
-                {
-                    _ = ScanTracks(item); // Run in background
-                }
-                item.PropertyChanged += (s, e) => {
-                    if (e.PropertyName != nameof(MediaItem.IsDuplicate) && e.PropertyName != nameof(MediaItem.IsProcessing))
-                        UpdateDuplicateStatus();
-                };
+                AppStatus = $"Loaded {ReviewQueue.Count}/{allFiles.Count} files...";
+                await Task.Yield();
             }
-            UpdateDuplicateStatus();
+
+            AppStatus = "Ready";
+            AddLog($"Finished adding {ReviewQueue.Count} items.");
         }
 
         private string GuessCategory(string filePath)
@@ -1101,13 +1213,16 @@ namespace NomadTransferTool
                                     File.Move(tempFile, localDest);
                                 }
                             }
-                            catch (Exception)
+                            catch (OperationCanceledException) { throw; }
+                            catch (Exception ex)
                             {
+                                AddLog($"Transcode failed for {item.Title}: {ex.Message}");
+                                item.StatusMessage = "Transcode Failed";
                                 if (File.Exists(tempFile))
                                 {
                                     try { File.Delete(tempFile); } catch { }
                                 }
-                                throw;
+                                continue; // Continue with next item instead of throwing
                             }
                             finally
                             {
@@ -1543,6 +1658,16 @@ namespace NomadTransferTool
             string category = value?.ToString() ?? "";
             string target = parameter?.ToString() ?? "";
             return category == target ? Visibility.Visible : Visibility.Collapsed;
+        }
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
+    }
+
+    public class InverseBooleanConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            if (value is bool b) return !b;
+            return true;
         }
         public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
     }

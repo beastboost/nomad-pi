@@ -65,12 +65,18 @@ echo "Waiting 5 seconds for UI to update..."
 sleep 5
 
 # Try to restart the service, with fallback if service doesn't exist
-if systemctl is-active --quiet nomad-pi.service; then
-    echo "Restarting nomad-pi service..." >> update.log
-    sudo systemctl restart nomad-pi.service
-elif systemctl is-active --quiet nomad-pi; then
-    echo "Restarting nomad-pi service..." >> update.log
-    sudo systemctl restart nomad-pi
+# We use restart which works whether it was running or not
+if command -v systemctl >/dev/null 2>&1; then
+    echo "Attempting to restart nomad-pi service via systemctl..." >> update.log
+    # Check if the service file exists at all
+    if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable nomad-pi.service
+        sudo systemctl restart nomad-pi.service
+        echo "Service restart command issued." >> update.log
+    else
+        echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
+    fi
 else
-    echo "Service not found. If running manually, please restart the application." >> update.log
+    echo "systemctl not found. If running manually, please restart the application." >> update.log
 fi

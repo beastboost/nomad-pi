@@ -409,6 +409,35 @@ body {
         display: none;
     }
 
+    /* Improve font sizes for readability on small screens */
+    body {
+        font-size: 14px;
+    }
+
+    h2 {
+        font-size: 1.25rem;
+    }
+
+    .nav-item {
+        padding: 0.875rem 1rem;
+    }
+
+    /* Better spacing for mobile */
+    .view-section {
+        padding-bottom: 2rem;
+    }
+
+    /* Responsive tables */
+    .table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .btn-icon span {
+        display: none;
+    }
+}
+
     .content {
         padding: 1rem;
     }
@@ -421,6 +450,27 @@ body {
 
     .toast {
         min-width: 0;
+    }
+
+    .drives-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .control-panel {
+        grid-template-columns: 1fr !important;
+    }
+
+    .media-stats {
+        grid-template-columns: 1fr !important;
+    }
+
+    .header-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .log-viewer {
+        height: 300px;
     }
 }
 
