@@ -55,6 +55,8 @@ if [ -d ".git" ]; then
     echo "[0/9] Optimizing Git configuration..."
     
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
+    # Explicitly unset the openssl backend in case it was set by a previous version of this script
+    git config --global --unset http.sslBackend 2>/dev/null || true
     git config --global http.sslVerify true
     # Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub
     git config --global http.version HTTP/1.1
