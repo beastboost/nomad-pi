@@ -60,8 +60,6 @@ if [ -d ".git" ]; then
     git config --global http.version HTTP/1.1
     # Increase postBuffer to 50MB (from default 1MB) for stable large transfers without excessive memory usage
     git config --global http.postBuffer 52428800
-    # Prefer OpenSSL backend if available in the curl/git build to bypass GnuTLS bugs
-    git config --global http.sslBackend openssl 2>/dev/null || true
     
     # Switch to clean public URL to avoid password prompts for public repo
     git remote set-url origin https://github.com/beastboost/nomad-pi.git
