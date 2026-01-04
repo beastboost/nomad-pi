@@ -154,7 +154,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 if [ -z "$OMDB_KEY_VALUE" ]; then
-    read -r -p "Enter OMDb API key (leave blank to skip): " OMDB_KEY_VALUE
+    read -r -p "Enter OMDb API key (leave blank to skip): " OMDB_KEY_VALUE </dev/tty
 fi
 
 # Set default password if none exists
@@ -199,6 +199,17 @@ sudo fuser -k 8000/tcp >/dev/null 2>&1 || true
 
 sudo systemctl enable nomad-pi
 sudo systemctl restart nomad-pi
+
+# Wait for service to start and show status
+echo "Waiting for service to initialize..."
+sleep 5
+if systemctl is-active --quiet nomad-pi; then
+    echo "Nomad Pi service is running."
+else
+    echo "ERROR: Nomad Pi service failed to start."
+    echo "Last 20 lines of service logs:"
+    sudo journalctl -u nomad-pi -n 20 --no-pager
+fi
 
 # 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
 echo "[6/9] Configuring permissions..."
