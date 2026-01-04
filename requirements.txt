@@ -9,3 +9,5 @@ psutil
 uvloop; platform_system != 'Windows'
 httptools; platform_system != 'Windows'
 watchdog
+apscheduler
+python-jose[cryptography]
