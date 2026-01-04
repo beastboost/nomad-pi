@@ -1204,9 +1204,22 @@ def set_progress(data: Dict = Body(...)):
     path = data.get("path") or data.get("file_path")
     time = data.get("current_time")
     duration = data.get("duration")
-    if path and time is not None:
+    
+    if not path or time is None:
+        return {"status": "error", "message": "Missing path or current_time"}
+        
+    try:
         database.update_progress(path, time, duration)
-    return {"status": "ok"}
+        
+        # If progress is near the end (e.g., > 95%), mark as played
+        if duration and duration > 0:
+            if (time / duration) > 0.95:
+                database.increment_play_count(path)
+                
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error updating progress for {path}: {e}")
+        return {"status": "error", "message": str(e)}
 
 @router.post("/rename")
 def rename_media(data: Dict = Body(...)):
@@ -1815,21 +1828,39 @@ def delete_media(path: str):
         raise HTTPException(status_code=404, detail="File not found")
     
     try:
+        # Get metadata before deleting from DB to find poster
+        meta = database.get_file_metadata(path)
+        
         if os.path.isdir(fs_path):
             shutil.rmtree(fs_path)
         else:
             os.remove(fs_path)
             
-        # Clean up database
+        # Clean up database (now also cleans metadata and progress)
         database.delete_library_index_item(path)
         
-        # If it's a media file, check if we should remove the parent folder if empty
+        # Clean up cached poster if it exists
+        if meta and meta.get("poster"):
+            poster_url = meta.get("poster")
+            if poster_url.startswith("/data/cache/posters/"):
+                try:
+                    poster_fs = safe_fs_path_from_web_path(poster_url)
+                    if os.path.exists(poster_fs):
+                        os.remove(poster_fs)
+                except:
+                    pass
+
+        # If it's a media file, check if we should remove the parent folder if empty or only contains posters
         parent = os.path.dirname(fs_path)
-        if os.path.exists(parent) and not os.listdir(parent) and parent != BASE_DIR:
-            try:
-                os.rmdir(parent)
-            except:
-                pass
+        if os.path.exists(parent) and parent != BASE_DIR:
+            remaining = os.listdir(parent)
+            # If only common metadata files remain, clean them up too
+            junk = {"poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png", "fanart.jpg", "movie.nfo"}
+            if all(f.lower() in junk for f in remaining):
+                try:
+                    shutil.rmtree(parent)
+                except:
+                    pass
                 
         return {"status": "ok", "deleted": path}
     except Exception as e:

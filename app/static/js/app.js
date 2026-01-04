@@ -1805,14 +1805,18 @@ async function updateProgress(mediaElement, filePath) {
 }
 
 function checkResume(mediaElement, filePath, savedTime) {
-    if (savedTime > 60 && (mediaElement.duration - savedTime) > 60) {
-        // If saved time is significant, prompt or auto-resume? 
-        // For now, let's just set the time.
-        // mediaElement.currentTime = savedTime; 
-        // Usually better to let user choose, or just set it.
-        // Let's set it but notify
+    if (savedTime > 15 && (mediaElement.duration - savedTime) > 15) {
+        // If saved time is significant, set the time.
         console.log(`Resuming ${filePath} at ${savedTime}`);
         mediaElement.currentTime = savedTime;
+        
+        // Brief notification
+        const toast = document.createElement('div');
+        toast.className = 'resume-toast';
+        toast.textContent = `Resuming from ${Math.floor(savedTime / 60)}:${String(Math.floor(savedTime % 60)).padStart(2, '0')}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.classList.add('fade-out'), 3000);
+        setTimeout(() => toast.remove(), 4000);
     }
 }
 

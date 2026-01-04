@@ -267,6 +267,8 @@ def delete_library_index_item(path: str):
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM library_index WHERE path = ?", (path,))
+    c.execute("DELETE FROM file_metadata WHERE path = ?", (path,))
+    c.execute("DELETE FROM progress WHERE path = ?", (path,))
     conn.commit()
 
 def upsert_library_index_items(items: list):
