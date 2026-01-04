@@ -249,6 +249,19 @@
 
                         <div class="control-panel">
                             <div class="control-card">
+                                <div class="control-icon restart-icon" style="background: rgba(59, 130, 246, 0.1); color: var(--primary-color);">
+                                    <i class="fas fa-sync-alt"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>Restart Service</h4>
+                                    <p>Restart the Nomad Pi application service</p>
+                                </div>
+                                <button @click="confirmRestart" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Restart
+                                </button>
+                            </div>
+
+                            <div class="control-card">
                                 <div class="control-icon update-icon">
                                     <i class="fas fa-cloud-download-alt"></i>
                                 </div>

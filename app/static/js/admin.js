@@ -301,7 +301,7 @@ createApp({
                         this.updateStatus.progress = 5;
                         this.updateStatus.message = 'Starting update...';
                         
-                        await this.apiCall('/api/system/control/update', 'POST');
+                        await this.apiCall('/api/system/control', 'POST', { action: 'update' });
                         this.pollUpdateStatus();
                     } catch (error) {
                         this.updateStatus.updating = false;
@@ -407,6 +407,26 @@ createApp({
             }
         },
 
+        async confirmRestart() {
+            this.showConfirmModal = true;
+            this.confirmModal = {
+                title: 'Restart Service',
+                message: 'Are you sure you want to restart the Nomad Pi service? This will disconnect current sessions.',
+                action: async () => {
+                    this.showConfirmModal = false;
+                    try {
+                        await this.apiCall('/api/system/control', 'POST', { action: 'restart' });
+                        this.showNotification('Service restart initiated...', 'info');
+                        this.handleSystemRestart();
+                    } catch (error) {
+                        this.showNotification('Failed to restart service', 'error');
+                    }
+                },
+                actionText: 'Restart',
+                actionClass: 'btn-primary'
+            };
+        },
+
         async confirmReboot() {
             this.showConfirmModal = true;
             this.confirmModal = {
@@ -415,7 +435,7 @@ createApp({
                 action: async () => {
                     this.showConfirmModal = false;
                     try {
-                        await this.apiCall('/api/system/control/reboot', 'POST');
+                        await this.apiCall('/api/system/control', 'POST', { action: 'reboot' });
                         this.handleSystemRestart();
                     } catch (error) {
                         this.showNotification('Failed to initiate reboot', 'error');
@@ -434,7 +454,7 @@ createApp({
                 action: async () => {
                     this.showConfirmModal = false;
                     try {
-                        await this.apiCall('/api/system/control/shutdown', 'POST');
+                        await this.apiCall('/api/system/control', 'POST', { action: 'shutdown' });
                         this.showNotification('System is shutting down...', 'warning');
                     } catch (error) {
                         this.showNotification('Failed to initiate shutdown', 'error');
@@ -490,13 +510,27 @@ createApp({
         },
 
         toggleSidebar() {
-            this.sidebarCollapsed = !this.sidebarCollapsed;
+            if (window.innerWidth <= 768) {
+                const sidebar = document.querySelector('.sidebar');
+                sidebar.classList.toggle('mobile-open');
+            } else {
+                this.sidebarCollapsed = !this.sidebarCollapsed;
+            }
         },
 
         setView(view) {
             this.currentView = view;
-            if (window.innerWidth <= 992) {
-                this.sidebarCollapsed = true;
+            if (window.innerWidth <= 768) {
+                document.querySelector('.sidebar').classList.remove('mobile-open');
+            }
+            if (view === 'dashboard') {
+                this.loadSystemStats();
+            } else if (view === 'storage') {
+                this.loadStorageInfo();
+            } else if (view === 'logs') {
+                this.fetchLogs();
+            } else if (view === 'media') {
+                this.loadMediaStats();
             }
         },
 

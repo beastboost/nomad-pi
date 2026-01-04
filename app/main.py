@@ -55,10 +55,9 @@ def check_environment():
 
     # 2. Check Database
     try:
-        from app.database import get_db_connection
-        conn = get_db_connection()
+        from app.database import get_db
+        conn = get_db()
         conn.execute("SELECT 1").fetchone()
-        conn.close()
         logger.info("Environment check: Database is accessible")
         results["checks"].append({"name": "database", "status": "pass"})
     except Exception as e:
@@ -134,6 +133,8 @@ for d in DATA_DIRS:
 
 # Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+# Public system endpoints
+app.include_router(system.public_router, prefix="/api/system", tags=["system"])
 # Protect these routes
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user)])
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user)])

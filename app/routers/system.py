@@ -12,9 +12,13 @@ from app import database
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+public_router = APIRouter()
 
 class OmdbKeyRequest(BaseModel):
     key: str
+
+class ControlRequest(BaseModel):
+    action: str
 
 @router.get("/settings/omdb")
 def get_omdb_key():
@@ -28,12 +32,12 @@ def save_omdb_key(request: OmdbKeyRequest):
     os.environ["OMDB_API_KEY"] = request.key
     return {"status": "ok"}
 
-@router.get("/status")
+@public_router.get("/status")
 def get_system_status():
     """Lightweight endpoint for connectivity checks"""
     return {"status": "online", "version": "1.5.0"}
 
-@router.get("/health")
+@public_router.get("/health")
 def get_health():
     """Detailed health check results from startup"""
     from app.main import ENV_CHECK_RESULTS
@@ -384,6 +388,10 @@ def get_logs(lines: int = 100):
             pass
             
     return {"logs": ["No logs available. Check if data/app.log exists or if journalctl is accessible."]}
+
+@router.post("/control")
+def system_control_body(request: ControlRequest):
+    return system_control(request.action)
 
 @router.post("/control/{action}")
 def system_control(action: str):

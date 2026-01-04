@@ -379,44 +379,46 @@ body {
 }
 
 /* Responsive */
-@media (max-width: 992px) {
+@media (max-width: 768px) {
     .sidebar {
         position: fixed;
-        left: 0;
+        left: -260px;
         z-index: 1000;
-        transform: translateX(0);
-        box-shadow: 10px 0 30px rgba(0,0,0,0.1);
+        height: 100vh;
+        width: 260px !important;
     }
-    .sidebar.collapsed {
-        transform: translateX(-100%);
-        width: 260px; /* Keep full width when mobile-open */
+
+    .sidebar.mobile-open {
+        left: 0;
     }
+
     .main-content {
+        margin-left: 0 !important;
         width: 100%;
     }
-    .header {
-        padding: 0 1rem;
-    }
+
     .mobile-toggle-btn {
         display: block !important;
     }
-}
 
-@media (max-width: 600px) {
     .stats-grid {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr !important;
     }
+    
     .header-right .status-indicator span {
         display: none;
     }
+
     .content {
         padding: 1rem;
     }
+
     .toast-container {
         left: 1rem;
         right: 1rem;
         bottom: 1rem;
     }
+
     .toast {
         min-width: 0;
     }

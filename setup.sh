@@ -112,13 +112,7 @@ sudo chown -R $USER:$USER data
 sudo chmod -R 775 data
 
 # 5. Systemd Service Setup
-echo "[5/9] Configuring systemd service..."
-
-# Add sudoers rule for service management
-echo "Adding sudoers rule for service management..."
-SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
-sudo bash -c "echo '$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/sbin/reboot, /usr/sbin/shutdown' > $SUDOERS_FILE"
-sudo chmod 440 $SUDOERS_FILE
+echo "[5/9] Setting up Systemd service..."
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 CURRENT_DIR=$(pwd)
@@ -190,7 +184,7 @@ sudo systemctl restart nomad-pi
 echo "[6/9] Configuring permissions..."
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl restart nomad-pi
+$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/bin/systemctl status nomad-pi.service, /usr/bin/systemctl restart nomad-pi, /usr/bin/nmcli
 EOL
 sudo chmod 0440 $SUDOERS_FILE
 

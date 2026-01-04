@@ -13,6 +13,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.IO.Compression;
 using Microsoft.Win32;
 using System.Windows.Forms;
@@ -456,8 +457,9 @@ namespace NomadTransferTool
                 // However, our system.py has 'reboot' which reboots the whole Pi.
                 // Let's check if we want just service restart.
                 
-                // For now, let's trigger a 'restart' of the service
-                var res = await client.PostAsync($"{API_BASE}/system/control/restart", null);
+                // Use the standardized body-based control endpoint
+                var content = new StringContent(JsonConvert.SerializeObject(new { action = "restart" }), Encoding.UTF8, "application/json");
+                var res = await client.PostAsync($"{API_BASE}/system/control", content);
                 if (res.IsSuccessStatusCode)
                 {
                     AddLog("Restart command accepted. Application is restarting...");
@@ -485,7 +487,7 @@ namespace NomadTransferTool
                 {
                     var content = await res.Content.ReadAsStringAsync();
                     var data = JsonConvert.DeserializeObject<dynamic>(content);
-                    if (data != null && data.logs != null)
+                    if (data?.logs != null)
                     {
                         AddLog("--- Remote Logs Start ---");
                         foreach (var log in data.logs)
@@ -512,22 +514,36 @@ namespace NomadTransferTool
             {
                 try
                 {
+                    // Use the new public status endpoint
                     var res = await client.GetAsync($"{API_BASE}/system/status");
                     if (res.IsSuccessStatusCode)
                     {
-                        ServerStatus = "Online";
-                        ServerStatusColor = System.Windows.Media.Brushes.LightGreen;
+                        var content = await res.Content.ReadAsStringAsync();
+                        var data = JsonConvert.DeserializeObject<dynamic>(content);
+                        
+                        Dispatcher.Invoke(() => {
+                            ServerStatus = "Online";
+                            ServerStatusColor = System.Windows.Media.Brushes.LightGreen;
+                            AppStatus = $"Nomad v{data?.version ?? APP_VERSION} - Connected";
+                        });
                     }
                     else
                     {
-                        ServerStatus = "Error";
-                        ServerStatusColor = System.Windows.Media.Brushes.Orange;
+                        Dispatcher.Invoke(() => {
+                            ServerStatus = "Error";
+                            ServerStatusColor = System.Windows.Media.Brushes.Orange;
+                            AppStatus = $"Server Error: {res.StatusCode}";
+                        });
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    ServerStatus = "Offline";
-                    ServerStatusColor = System.Windows.Media.Brushes.Red;
+                    Dispatcher.Invoke(() => {
+                        ServerStatus = "Offline";
+                        ServerStatusColor = System.Windows.Media.Brushes.Red;
+                        AppStatus = "Server Offline / Unreachable";
+                    });
+                    Debug.WriteLine($"Status check failed: {ex.Message}");
                 }
                 await Task.Delay(10000); // Check every 10s
             }
@@ -651,6 +667,19 @@ namespace NomadTransferTool
                 string? folder = Path.GetDirectoryName(dialog.FileName);
                 if (folder != null) OnFilesDropped(new[] { folder });
             }
+        }
+
+        private void DropZone_DragOver(object sender, System.Windows.DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
+            {
+                e.Effects = System.Windows.DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effects = System.Windows.DragDropEffects.None;
+            }
+            e.Handled = true;
         }
 
         private void Transfer_Drop(object sender, System.Windows.DragEventArgs e)
