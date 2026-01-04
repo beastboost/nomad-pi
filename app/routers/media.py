@@ -15,6 +15,8 @@ import urllib.request
 import logging
 from datetime import datetime, timedelta
 from collections import OrderedDict
+from functools import lru_cache
+from hashlib import md5
 import threading
 from app import database
 
@@ -25,6 +27,61 @@ router = APIRouter()
 BASE_DIR = "data"
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
 os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
+
+@lru_cache(maxsize=100)
+def _get_paged_data_cached(category: str, cache_key: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str):
+    """Internal cached version of paged data retrieval"""
+    return _get_paged_data(category, q, offset, limit, sort, genre, year, False)
+
+def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, rebuild: bool):
+    idx_info = maybe_start_index_build(category, force=bool(rebuild))
+    items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year)
+
+    all_progress = database.get_all_progress()
+    out = []
+    for r in items:
+        web_path = r.get("path")
+        try:
+            fs_path = safe_fs_path_from_web_path(web_path)
+            if not os.path.isfile(fs_path):
+                continue
+        except Exception:
+            continue
+        item = {
+            "name": r.get("name"),
+            "path": web_path,
+            "folder": r.get("folder") or ".",
+            "type": category,
+            "source": r.get("source") or "local",
+        }
+        if (category == "movies" or category == "shows") and r.get("poster"):
+            item["poster"] = r.get("poster")
+        if web_path in all_progress:
+            item["progress"] = all_progress[web_path]
+        out.append(item)
+
+    if not out and int(offset or 0) == 0:
+        out = scan_media_page(category, q, offset, limit)
+        total = max(int(total or 0), int(offset or 0) + len(out))
+
+    next_offset = int(offset or 0) + len(out)
+    has_more = next_offset < int(total or 0)
+    return {
+        "items": out,
+        "offset": int(offset or 0),
+        "limit": int(limit or 0),
+        "next_offset": next_offset,
+        "total": int(total or 0),
+        "has_more": has_more,
+        "index": idx_info,
+    }
+
+def build_cache_key(category: str, q: str, offset: int, limit: int, 
+                     sort: str, genre: str, year: str) -> str:
+    """Build cache key for pagination"""
+    params = f"{category}:{q}:{offset}:{limit}:{sort}:{genre}:{year}"
+    return md5(params.encode()).hexdigest()
+
 INDEX_TTL = timedelta(hours=12)
 _index_lock = threading.Lock()
 _index_building = {}
@@ -1098,47 +1155,12 @@ def list_media_paged(
     if category not in ["movies", "shows", "music", "books", "gallery", "files"]:
         raise HTTPException(status_code=400, detail="Invalid category")
 
-    idx_info = maybe_start_index_build(category, force=bool(rebuild))
-    items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year)
+    # Use cache if not rebuilding
+    if not rebuild:
+        cache_key = build_cache_key(category, q, offset, limit, sort, genre, year)
+        return _get_paged_data_cached(category, cache_key, q, offset, limit, sort, genre, year)
 
-    all_progress = database.get_all_progress()
-    out = []
-    for r in items:
-        web_path = r.get("path")
-        try:
-            fs_path = safe_fs_path_from_web_path(web_path)
-            if not os.path.isfile(fs_path):
-                continue
-        except Exception:
-            continue
-        item = {
-            "name": r.get("name"),
-            "path": web_path,
-            "folder": r.get("folder") or ".",
-            "type": category,
-            "source": r.get("source") or "local",
-        }
-        if category == "movies" and r.get("poster"):
-            item["poster"] = r.get("poster")
-        if web_path in all_progress:
-            item["progress"] = all_progress[web_path]
-        out.append(item)
-
-    if not out and int(offset or 0) == 0:
-        out = scan_media_page(category, q, offset, limit)
-        total = max(int(total or 0), int(offset or 0) + len(out))
-
-    next_offset = int(offset or 0) + len(out)
-    has_more = next_offset < int(total or 0)
-    return {
-        "items": out,
-        "offset": int(offset or 0),
-        "limit": int(limit or 0),
-        "next_offset": next_offset,
-        "total": int(total or 0),
-        "has_more": has_more,
-        "index": idx_info,
-    }
+    return _get_paged_data(category, q, offset, limit, sort, genre, year, rebuild)
 
 def extract_archive_to_dir(archive_path: str, out_dir: str):
     attempts = []
@@ -1500,18 +1522,23 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                     first = parts[0]
                     first_l = first.lower()
                     
-                    # Check for combined show-season folder name (e.g. "Family Guy - Season 14" or "Family Guy Season 14")
-                    season_match = re.search(r'(?i)(.*?)\s*(?:[-_]\s*)?(season\s*(\d+)|series\s*(\d+)|\bs(\d+)\b)', first)
-                    if season_match:
-                        show_name = season_match.group(1).strip()
-                        # Try to get season number from match groups
-                        s_num_str = season_match.group(3) or season_match.group(4) or season_match.group(5)
-                        if s_num_str:
-                            season_num_from_folder = int(s_num_str)
-                    else:
-                        season_like = first_l.startswith("season") or first_l.startswith("series") or re.match(r"^s\d{1,3}$", first_l or "")
-                        if not season_like:
-                            show_name = first
+                    # Better show name extraction
+                    if ' - season ' in first_l or ' season ' in first_l:
+                        match = re.search(r'^(.+?)\s*[-–]\s*season\s*\d+', first, re.IGNORECASE)
+                        if match:
+                            show_name = match.group(1).strip()
+                        else:
+                            match = re.search(r'^(.+?)\s*season\s*\d+', first, re.IGNORECASE)
+                            if match:
+                                show_name = match.group(1).strip()
+                        
+                        # Also extract season number for later use if we found a match
+                        s_match = re.search(r'season\s*(\d+)', first, re.IGNORECASE)
+                        if s_match:
+                            season_num_from_folder = int(s_match.group(1))
+                    elif not (first_l.startswith("season") or first_l.startswith("series") 
+                              or re.match(r"^s\d{1,3}$", first_l or "")):
+                        show_name = first
 
                 if not show_name:
                     show_name = _infer_show_name_from_filename(f) or "Unsorted"

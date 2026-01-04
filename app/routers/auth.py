@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
 import os
+from datetime import datetime, timedelta
+from collections import defaultdict
 from passlib.context import CryptContext
 from app import database
 
@@ -10,6 +12,11 @@ router = APIRouter()
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Simple in-memory rate limiter
+login_attempts = defaultdict(list)
+MAX_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
 
 # Authentication configuration
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -84,16 +91,43 @@ class PasswordChangeRequest(BaseModel):
     new_password: str
 
 @router.post("/login")
-def login(request: LoginRequest):
+def login(request: LoginRequest, request_obj: Request):
+    client_ip = request_obj.client.host if request_obj.client else "unknown"
+    
+    # Rate limiting
+    now = datetime.now()
+    attempts = login_attempts[client_ip]
+    attempts = [t for t in attempts if now - t < timedelta(minutes=LOCKOUT_MINUTES)]
+    
+    if len(attempts) >= MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Too many login attempts. Try again in {LOCKOUT_MINUTES} minutes."
+        )
+
     current_hash = get_admin_password_hash()
         
     if pwd_context.verify(request.password, current_hash):
+        # Clear attempts on success
+        login_attempts[client_ip] = []
         token = str(uuid.uuid4())
         database.create_session(token)
         # We set httponly=False so the frontend can read the token for media requests (audio/video elements)
         response = JSONResponse(content={"status": "ok", "token": token})
-        response.set_cookie(key="auth_token", value=token, httponly=False, max_age=86400 * 30) # 30 days
+        response.set_cookie(
+            key="auth_token", 
+            value=token, 
+            httponly=False, 
+            max_age=86400 * 30,
+            secure=False,  # Set to True in production with HTTPS
+            samesite="lax"
+        )
         return response
+    
+    # Record failed attempt
+    attempts.append(now)
+    login_attempts[client_ip] = attempts
+    
     raise HTTPException(status_code=401, detail="Invalid password")
 
 # Dependency for protecting routes

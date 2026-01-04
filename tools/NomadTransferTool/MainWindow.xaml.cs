@@ -77,12 +77,14 @@ namespace NomadTransferTool
         private string _detectedEncoder = "x264";
         private System.Threading.CancellationTokenSource? _processingCts;
         private HashSet<string> _connectedSambaPaths = new HashSet<string>();
+        private readonly object _sambaConnectionLock = new object();
 
         // Samba Properties
         private bool _useSamba;
         private string _sambaPath = "";
         private string _sambaUser = "";
         private string _sambaPassword = "";
+        private System.Threading.Timer? _driveRefreshTimer;
 
         public bool UseSamba 
         { 
@@ -90,7 +92,13 @@ namespace NomadTransferTool
             set { 
                 _useSamba = value; 
                 OnPropertyChanged(); 
-                Dispatcher.BeginInvoke(new Action(() => RefreshDrives())); // Refresh drives when toggled
+                
+                // Debounce drive refresh
+                _driveRefreshTimer?.Dispose();
+                _driveRefreshTimer = new System.Threading.Timer(_ => 
+                {
+                    Dispatcher.BeginInvoke(new Action(() => RefreshDrives()));
+                }, null, 300, System.Threading.Timeout.Infinite);
             } 
         }
         public string SambaPath 
@@ -265,24 +273,33 @@ namespace NomadTransferTool
 
         private (bool success, int errorCode) ConnectToSamba(string path, string user, string pass)
         {
-            var nr = new NetResource
+            lock (_sambaConnectionLock)
             {
-                Type = 1, // RESOURCETYPE_DISK
-                RemoteName = path
-            };
+                // Check if already connected first
+                if (_connectedSambaPaths.Contains(path))
+                    return (true, 0);
 
-            // If user is empty, try connecting with null (guest/existing)
-            int result = WNetAddConnection2(nr, string.IsNullOrEmpty(pass) ? null : pass, string.IsNullOrEmpty(user) ? null : user, 0);
-            
-            if (result == 0 || result == 1219) // 0 is success, 1219 is already connected
-            {
-                lock (_connectedSambaPaths)
+                var nr = new NetResource
+                {
+                    Type = 1, // RESOURCETYPE_DISK
+                    RemoteName = path
+                };
+
+                // If user is empty, try connecting with null (guest/existing)
+                int result = WNetAddConnection2(nr, string.IsNullOrEmpty(pass) ? null : pass, string.IsNullOrEmpty(user) ? null : user, 0);
+                
+                if (result == 0)
                 {
                     _connectedSambaPaths.Add(path);
+                    return (true, result);
                 }
-                return (true, result);
+                else if (result == 1219) // Already connected
+                {
+                    _connectedSambaPaths.Add(path);
+                    return (true, result);
+                }
+                return (false, result);
             }
-            return (false, result);
         }
 
         private void SambaPassBox_PasswordChanged(object sender, RoutedEventArgs e)
@@ -328,6 +345,8 @@ namespace NomadTransferTool
             InitializeComponent();
             DataContext = this;
             
+            client.Timeout = TimeSpan.FromMinutes(10);
+            
             _ = MonitorServerStatus();
             
             InitializePresets();
@@ -370,7 +389,7 @@ namespace NomadTransferTool
                 }
                 else
                 {
-                    try { required += new FileInfo(item.SourcePath).Length; } catch { }
+                    required += item.FileSize;
                 }
             }
             TotalRequiredSpace = required;
@@ -1134,7 +1153,7 @@ namespace NomadTransferTool
                         try
                         {
                             var item = new MediaItem { SourcePath = file };
-                            item.OriginalSize = new FileInfo(file).Length;
+                            item.FileSize = new FileInfo(file).Length;
                             
                             string fileName = Path.GetFileNameWithoutExtension(file);
                             item.Title = fileName;
@@ -1437,7 +1456,7 @@ namespace NomadTransferTool
                         }
                         else
                         {
-                            requiredSpace += new FileInfo(item.SourcePath).Length;
+                            requiredSpace += item.FileSize;
                         }
                     }
                     
@@ -1473,19 +1492,22 @@ namespace NomadTransferTool
             string tempDir = Path.Combine(Path.GetTempPath(), "NomadTranscode");
             if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
 
+            var tempFilesToClean = new List<string>();
+
             try
             {
                 foreach (var item in items)
                 {
                     token.ThrowIfCancellationRequested();
+                    string? tempFile = null;
 
                     try
-                        {
-                            string renamingInfo = item.Category;
-                            if (!string.IsNullOrEmpty(item.Year)) renamingInfo += $" ({item.Year})";
-                            AddLog($"Renaming/Sorting {item.Title} -> {renamingInfo} via OMDb data");
-                            
-                            item.IsProcessing = true;
+                    {
+                        string renamingInfo = item.Category;
+                        if (!string.IsNullOrEmpty(item.Year)) renamingInfo += $" ({item.Year})";
+                        AddLog($"Renaming/Sorting {item.Title} -> {renamingInfo} via OMDb data");
+                        
+                        item.IsProcessing = true;
                         item.StatusMessage = "Starting...";
                         item.Progress = 0;
                         
@@ -1550,7 +1572,9 @@ namespace NomadTransferTool
 
                         if (willTranscode)
                         {
-                            string tempFile = Path.Combine(tempDir, Guid.NewGuid().ToString() + ".mp4");
+                            tempFile = Path.Combine(tempDir, Guid.NewGuid().ToString() + ".mp4");
+                            tempFilesToClean.Add(tempFile);
+                            
                             try
                             {
                                 AddLog($"Transcoding {item.Title}...");
@@ -1613,7 +1637,7 @@ namespace NomadTransferTool
                                     // Delete temp file after successful transfer
                                     if (File.Exists(tempFile))
                                     {
-                                        try { File.Delete(tempFile); } catch { }
+                                        try { File.Delete(tempFile); tempFilesToClean.Remove(tempFile); } catch { }
                                     }
                                 }
                                 else
@@ -1622,6 +1646,7 @@ namespace NomadTransferTool
                                     string localDest = Path.Combine(Path.GetDirectoryName(item.SourcePath)!, safeTitle + ".mp4");
                                     if (File.Exists(localDest)) File.Delete(localDest);
                                     File.Move(tempFile, localDest);
+                                    tempFilesToClean.Remove(tempFile);
                                     
                                     // Update source path to the transcoded file for consistency
                                     item.SourcePath = localDest;
@@ -1632,9 +1657,9 @@ namespace NomadTransferTool
                             {
                                 AddLog($"Processing failed for {item.Title}: {ex.Message}");
                                 item.StatusMessage = "Error: " + ex.Message;
-                                if (File.Exists(tempFile))
+                                if (tempFile != null && File.Exists(tempFile))
                                 {
-                                    try { File.Delete(tempFile); } catch { }
+                                    try { File.Delete(tempFile); tempFilesToClean.Remove(tempFile); } catch { }
                                 }
                                 continue; 
                             }
@@ -1735,6 +1760,13 @@ namespace NomadTransferTool
                 FileProgress = "";
                 AddLog("Batch processing finished.");
                 
+                // Final cleanup of any missed temp files
+                foreach (var tempFile in tempFilesToClean.ToList())
+                {
+                    try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+                }
+                tempFilesToClean.Clear();
+
                 // Disconnect Samba if we used it
                 lock (_connectedSambaPaths)
                 {
@@ -1772,12 +1804,15 @@ namespace NomadTransferTool
                         double elapsed = sw.Elapsed.TotalSeconds;
                         double speed = elapsed > 0 ? totalRead / 1024.0 / 1024.0 / elapsed : 0;
                         
-                        item.Progress = progress;
-                        item.StatusMessage = $"Transferring: {progress:F1}% ({speed:F1} MB/s)";
-                        
-                        CurrentFileProgress = progress;
-                        FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
-                        TransferSpeed = $"{speed:F1} MB/s";
+                        // Thread-safe UI updates
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            item.Progress = progress;
+                            item.StatusMessage = $"Transferring: {progress:F1}% ({speed:F1} MB/s)";
+                            CurrentFileProgress = progress;
+                            FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
+                            TransferSpeed = $"{speed:F1} MB/s";
+                        }, System.Windows.Threading.DispatcherPriority.Background);
                     }
                 }
             }
@@ -2059,17 +2094,41 @@ namespace NomadTransferTool
         private double _progress;
         private string _statusMessage = "";
         private EncodingPreset? _selectedPreset;
-        private long _originalSize;
         private double _durationSeconds; // estimated or fetched
         private ObservableCollection<MediaTrack> _audioTracks = new();
         private ObservableCollection<MediaTrack> _subtitleTracks = new();
         private MediaTrack? _selectedAudioTrack;
         private MediaTrack? _selectedSubtitleTrack;
 
-        public string SourcePath { get => _sourcePath; set { _sourcePath = value; OnPropertyChanged(); OnPropertyChanged(nameof(FileName)); } }
-        public string FileName => Path.GetFileName(SourcePath);
-        
         private string _sourcePath = "";
+        private long _fileSize;
+
+        public string SourcePath 
+        { 
+            get => _sourcePath; 
+            set 
+            { 
+                _sourcePath = value; 
+                try 
+                { 
+                    FileSize = new FileInfo(value).Length; 
+                } 
+                catch 
+                { 
+                    FileSize = 0; 
+                }
+                OnPropertyChanged(); 
+                OnPropertyChanged(nameof(FileName)); 
+            } 
+        }
+
+        public long FileSize 
+        { 
+            get => _fileSize; 
+            set { _fileSize = value; OnPropertyChanged(); OnPropertyChanged(nameof(FileSizeDisplay)); } 
+        }
+
+        public string FileName => Path.GetFileName(SourcePath);
         public string Title { get => _title; set { _title = value; OnPropertyChanged(); } }
         public string Year { get => _year; set { _year = value; OnPropertyChanged(); } }
         public string Category { get => _category; set { _category = value; OnPropertyChanged(); } }
@@ -2089,7 +2148,6 @@ namespace NomadTransferTool
             set { _selectedPreset = value; OnPropertyChanged(); OnPropertyChanged(nameof(EstimatedSizeDisplay)); } 
         }
 
-        public long OriginalSize { get => _originalSize; set { _originalSize = value; OnPropertyChanged(); OnPropertyChanged(nameof(OriginalSizeDisplay)); } }
         public double DurationSeconds { get => _durationSeconds; set { _durationSeconds = value; OnPropertyChanged(); OnPropertyChanged(nameof(EstimatedSizeDisplay)); } }
 
         public ObservableCollection<MediaTrack> AudioTracks { get => _audioTracks; set { _audioTracks = value; OnPropertyChanged(); } }
@@ -2098,13 +2156,13 @@ namespace NomadTransferTool
         public MediaTrack? SelectedAudioTrack { get => _selectedAudioTrack; set { _selectedAudioTrack = value; OnPropertyChanged(); } }
         public MediaTrack? SelectedSubtitleTrack { get => _selectedSubtitleTrack; set { _selectedSubtitleTrack = value; OnPropertyChanged(); } }
 
-        public string OriginalSizeDisplay => $"{OriginalSize / 1024 / 1024} MB";
+        public string FileSizeDisplay => $"{FileSize / 1024 / 1024} MB";
         
         public string EstimatedSizeDisplay 
         {
             get
             {
-                if (SelectedPreset == null || SelectedPreset.Bitrate == 0 || DurationSeconds == 0) return OriginalSizeDisplay;
+                if (SelectedPreset == null || SelectedPreset.Bitrate == 0 || DurationSeconds == 0) return FileSizeDisplay;
                 // Size in bits = bitrate * seconds. 
                 // Size in bytes = (bitrate * 1024 * seconds) / 8
                 double bytes = (SelectedPreset.Bitrate * 1024.0 * DurationSeconds) / 8.0;

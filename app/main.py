@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from app.routers import media, system, auth, uploads
 from app.services import ingest
 from app import database
@@ -9,7 +9,10 @@ import os
 import threading
 import mimetypes
 import logging
-from datetime import datetime
+import shutil
+from datetime import datetime, timedelta
+from pathlib import Path
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Configure logging
 LOG_FILE = "data/app.log"
@@ -58,11 +61,14 @@ def check_environment():
 
     # 2. Check Database
     try:
-        from app.database import get_db
+        from app.database import get_db, return_db
         conn = get_db()
-        conn.execute("SELECT 1").fetchone()
-        logger.info("Environment check: Database is accessible")
-        results["checks"].append({"name": "database", "status": "pass"})
+        try:
+            conn.execute("SELECT 1").fetchone()
+            logger.info("Environment check: Database is accessible")
+            results["checks"].append({"name": "database", "status": "pass"})
+        finally:
+            return_db(conn)
     except Exception as e:
         logger.error(f"Environment check FAILED: Database error: {e}")
         results["checks"].append({"name": "database", "status": "fail", "error": str(e)})
@@ -117,6 +123,52 @@ mimetypes.add_type('application/pdf', '.pdf')
 
 app = FastAPI(title="Nomad Pi")
 
+# Global Scheduler
+scheduler = BackgroundScheduler()
+
+def cleanup_old_uploads():
+    """Clean up uploads older than 24 hours"""
+    UPLOAD_DIR = Path("data/uploads")
+    if not UPLOAD_DIR.exists():
+        return
+        
+    cutoff = datetime.now() - timedelta(hours=24)
+    logger.info(f"Running cleanup task for old uploads in {UPLOAD_DIR}...")
+    
+    count = 0
+    for item in UPLOAD_DIR.glob("*"):
+        try:
+            # Check both files and directories
+            mtime = datetime.fromtimestamp(item.stat().st_mtime)
+            if mtime < cutoff:
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+                count += 1
+                logger.info(f"Cleaned up old upload: {item}")
+        except Exception as e:
+            logger.error(f"Failed to cleanup {item}: {e}")
+            
+    if count > 0:
+        logger.info(f"Cleanup finished. Removed {count} items.")
+
+# Global Exception Handlers
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Check logs for details."}
+    )
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Resource not found"}
+    )
+
 # Initialize Database immediately
 database.init_db()
 
@@ -145,6 +197,14 @@ app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user)]
 
 @app.on_event("startup")
 def _startup_tasks():
+    # Start scheduler
+    scheduler.add_job(cleanup_old_uploads, 'interval', hours=6)
+    scheduler.start()
+    logger.info("Background scheduler started (cleanup task scheduled every 6 hours)")
+    
+    # Run one cleanup immediately on startup
+    threading.Thread(target=cleanup_old_uploads, daemon=True).start()
+
     # Indexer logic
     def needs_build(category: str):
         try:
