@@ -213,9 +213,19 @@ fi
 
 # 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
 echo "[6/9] Configuring permissions..."
+
+# Detect paths for sudoers to be universal
+MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
+UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
+SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
+REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
+SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
+NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
+MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
+
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/bin/systemctl status nomad-pi.service, /usr/bin/systemctl restart nomad-pi, /usr/bin/nmcli, /usr/bin/systemctl restart minidlna, /usr/bin/systemctl restart minidlna.service, /usr/sbin/minidlnad
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
 EOL
 sudo chmod 0440 $SUDOERS_FILE
 
@@ -321,7 +331,7 @@ SAMBA_CONF="/etc/samba/smb.conf"
 sudo bash -c "cat > $SAMBA_CONF" <<EOL
 [global]
    workgroup = WORKGROUP
-   server string = Nomad Pi
+   server string = $NEW_HOSTNAME
    security = user
    map to guest = Bad User
    dns proxy = no
@@ -329,7 +339,7 @@ sudo bash -c "cat > $SAMBA_CONF" <<EOL
    client min protocol = SMB2
    ntlm auth = yes
    smb ports = 445
-   netbios name = NOMADPI
+   netbios name = $(echo $NEW_HOSTNAME | tr '[:lower:]' '[:upper:]')
    wins support = yes
 
 [data]
@@ -372,9 +382,9 @@ media_dir=P,$CURRENT_DIR/data/gallery
 media_dir=P,$CURRENT_DIR/data/books
 db_dir=/var/cache/minidlna
 log_dir=/var/log
-friendly_name=Nomad Pi
+friendly_name=$NEW_HOSTNAME
 inotify=yes
-presentation_url=http://nomadpi.local:8000/
+presentation_url=http://$NEW_HOSTNAME.local:8000/
 EOL
 
 # Fix permissions for MiniDLNA - Use group-based permissions instead of changing ownership
@@ -508,8 +518,8 @@ fi
 echo "=========================================="
 echo "      Installation Complete!              "
 echo "=========================================="
-echo "Access via Web: http://nomadpi.local:8000 or http://$(hostname -I | awk '{print $1}'):8000"
-echo "Access via SMB: \\\\nomadpi.local\\data (User: $USER_NAME, Pass: $SAMBA_PASS)"
+echo "Access via Web: http://$NEW_HOSTNAME.local:8000 or http://$(hostname -I | awk '{print $1}'):8000"
+echo "Access via SMB: \\\\$NEW_HOSTNAME.local\\data (User: $USER_NAME, Pass: $SAMBA_PASS)"
 echo "Wifi: Tries '$HOME_SSID' first, then falls back to Hotspot 'NomadPi'."
 echo "Please reboot to ensure all services start correctly: sudo reboot"
 
