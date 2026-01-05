@@ -335,31 +335,30 @@
                             <label style="display: block; margin-bottom: 5px;">Confirm New Password</label>
                             <input type="password" id="change-pw-confirm" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
                         </div>
+                        <p id="change-pw-status" style="margin-bottom: 10px; font-size: 0.9em;"></p>
                         <button onclick="changePassword()" class="primary">Update Password</button>
-                        <p id="change-pw-status" style="margin-top:10px; font-size:0.9em;"></p>
                     </div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>General Settings</h3>
+                    <h3>Metadata Configuration</h3>
                     <div class="settings-form">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Server Name</label>
-                            <input type="text" id="setting-server-name" placeholder="Nomad Pi" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                            <label style="display: block; margin-bottom: 5px;">OMDb API Key</label>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="omdb-api-key" placeholder="Enter OMDb API Key" style="flex: 1; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                                <button onclick="saveOmdbKey()" class="primary">Save Key</button>
+                            </div>
+                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:5px;">Used for fetching movie/show posters and metadata. Get one at omdbapi.com</p>
                         </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Session Expiry (Days)</label>
-                            <input type="number" id="setting-session-days" value="30" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
-                        </div>
-                        <button onclick="saveSettings()" class="primary">Save Settings</button>
                     </div>
                 </div>
-                
+
                 <div class="admin-panel">
-                    <h3>Appearance</h3>
+                    <h3>Interface Settings</h3>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button onclick="setTheme('dark')" class="secondary">Dark Theme</button>
-                        <button onclick="setTheme('glass')" class="secondary">Glassmorphism</button>
+                        <button onclick="toggleTheme()" class="secondary">Toggle Dark/Light Mode</button>
+                        <button onclick="toggleGlassEffect()" class="secondary">Toggle Glass Effect</button>
                     </div>
                 </div>
             </section>

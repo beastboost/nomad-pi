@@ -20,12 +20,12 @@ class OmdbKeyRequest(BaseModel):
 class ControlRequest(BaseModel):
     action: str
 
-@router.get("/settings/omdb")
+@public_router.get("/settings/omdb")
 def get_omdb_key():
     key = database.get_setting("omdb_api_key")
     return {"key": key or ""}
 
-@router.post("/settings/omdb")
+@public_router.post("/settings/omdb")
 def save_omdb_key(request: OmdbKeyRequest):
     database.set_setting("omdb_api_key", request.key)
     # Also update environment for current process if possible

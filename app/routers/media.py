@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-BASE_DIR = "data"
+BASE_DIR = os.path.abspath("data")
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
 os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
 
@@ -248,6 +248,41 @@ def normalize_title(s: str):
     s = re.sub(r'\s+', ' ', s).strip().lower()
     return s
 
+_poster_cache = OrderedDict()
+_poster_cache_max = 2048
+
+def find_local_poster(dir_path: str, filename: str = None):
+    global _poster_cache
+    if dir_path in _poster_cache and not filename:
+        v = _poster_cache.pop(dir_path)
+        _poster_cache[dir_path] = v
+        return v
+    
+    candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
+    if filename:
+        # Add {filename}.jpg and {filename}.png as candidates (used by NomadTransferTool for movies)
+        base_name = os.path.splitext(filename)[0]
+        candidates.insert(0, f"{base_name}.jpg")
+        candidates.insert(1, f"{base_name}.png")
+
+    v = None
+    for name in candidates:
+        p = os.path.join(dir_path, name)
+        if os.path.isfile(p):
+            try:
+                rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
+                v = f"/data/{rel_from_data}"
+                break
+            except Exception:
+                continue
+    
+    # Only cache if we didn't use a specific filename (since filename-specific posters are not per-directory)
+    if not filename:
+        _poster_cache[dir_path] = v
+        if len(_poster_cache) > _poster_cache_max:
+            _poster_cache.popitem(last=False)
+    return v
+
 def infer_show_name(filename: str):
     # Try to extract show name from S01E01 style
     m = re.search(r'^(.*?)(?:\bS\d{1,3}\s*[\.\-_\s]*\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b)', filename, re.I)
@@ -389,13 +424,17 @@ def get_shows_library():
         if show_name not in shows_dict:
             shows_dict[show_name] = {
                 "name": show_name,
-                "seasons": {}
+                "seasons": {},
+                "poster": None,
+                "path": os.path.join("/data/shows", show_name).replace(os.sep, '/')
             }
         
         if season_name not in shows_dict[show_name]["seasons"]:
             shows_dict[show_name]["seasons"][season_name] = {
                 "name": season_name,
-                "episodes": []
+                "episodes": [],
+                "poster": None,
+                "path": os.path.join("/data/shows", show_name, season_name).replace(os.sep, '/')
             }
             
         ep = {
@@ -405,6 +444,26 @@ def get_shows_library():
             "progress": all_progress.get(web_path),
             "ep_num": parse_ep_num(r.get("name") or "")
         }
+
+        # Aggregation: Use the first available poster for show/season if not set
+        # Priority: Show-level poster.jpg, then Season-level poster.jpg, then first episode poster
+        if r.get("poster"):
+            # If it's a show-level poster (e.g. /data/shows/Show/poster.jpg)
+            if r.get("poster").endswith("/poster.jpg") or r.get("poster").endswith("/poster.png"):
+                poster_path = r.get("poster")
+                if "/Season" not in poster_path:
+                    shows_dict[show_name]["poster"] = poster_path
+                else:
+                    shows_dict[show_name]["seasons"][season_name]["poster"] = poster_path
+            
+            # Fallback for show poster
+            if not shows_dict[show_name]["poster"]:
+                shows_dict[show_name]["poster"] = r.get("poster")
+            
+            # Fallback for season poster
+            if not shows_dict[show_name]["seasons"][season_name]["poster"]:
+                shows_dict[show_name]["seasons"][season_name]["poster"] = r.get("poster")
+
         shows_dict[show_name]["seasons"][season_name]["episodes"].append(ep)
         
     # Convert to list structure
@@ -461,26 +520,6 @@ def build_library_index(category: str):
 
     database.clear_library_index_category(category)
 
-    poster_cache = OrderedDict()
-    poster_cache_max = 2048
-    def find_local_poster(dir_path: str):
-        if dir_path in poster_cache:
-            v = poster_cache.pop(dir_path)
-            poster_cache[dir_path] = v
-            return v
-        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
-        v = None
-        for name in candidates:
-            p = os.path.join(dir_path, name)
-            if os.path.isfile(p):
-                rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                v = f"/data/{rel_from_data}"
-                break
-        poster_cache[dir_path] = v
-        if len(poster_cache) > poster_cache_max:
-            poster_cache.popitem(last=False)
-        return v
-
     allowed = None
     if category in ['movies', 'shows']:
         allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg'}
@@ -522,11 +561,15 @@ def build_library_index(category: str):
                 # Poster lookup
                 p_url = None
                 if category == "movies":
-                    p_url = find_local_poster(root)
+                    p_url = find_local_poster(root, f)
                 elif category == "shows":
-                    p_url = find_local_poster(root)
+                    # Priority 1: Episode-specific poster (if any)
+                    p_url = find_local_poster(root, f)
                     if not p_url:
-                        # Try show-level folder
+                        # Priority 2: Season-specific poster (poster.jpg in Season folder)
+                        p_url = find_local_poster(root)
+                    if not p_url:
+                        # Priority 3: Show-level folder (poster.jpg in Show folder)
                         parent = os.path.dirname(root)
                         if parent != base and parent != BASE_DIR:
                             p_url = find_local_poster(parent)
@@ -551,7 +594,7 @@ def build_library_index(category: str):
                     item["year"] = meta.get("year")
                 
                 batch.append(item)
-                if len(batch) >= 100:
+                if len(batch) >= 500:
                     database.upsert_library_index_items(batch)
                     batch = []
                 count += 1
@@ -607,20 +650,6 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
     limit = max(1, min(int(limit or 50), 200))
     want = offset + limit
 
-    poster_cache = {}
-    def find_local_poster(dir_path: str):
-        if dir_path in poster_cache:
-            return poster_cache[dir_path]
-        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
-        for name in candidates:
-            p = os.path.join(dir_path, name)
-            if os.path.isfile(p):
-                rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                poster_cache[dir_path] = f"/data/{rel_from_data}"
-                return poster_cache[dir_path]
-        poster_cache[dir_path] = None
-        return None
-
     allowed = None
     if category in ['movies', 'shows']:
         allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg'}
@@ -659,20 +688,35 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
                 except Exception:
                     folder = "."
 
+                # Poster lookup
+                p_url = None
+                if category == "movies":
+                    p_url = find_local_poster(root, f)
+                elif category == "shows":
+                    # Priority 1: Episode-specific poster (if any)
+                    p_url = find_local_poster(root, f)
+                    if not p_url:
+                        # Priority 2: Season-specific poster (poster.jpg in Season folder)
+                        p_url = find_local_poster(root)
+                    if not p_url:
+                        # Priority 3: Show-level folder (poster.jpg in Show folder)
+                        parent = os.path.dirname(root)
+                        if parent != base and parent != BASE_DIR:
+                            p_url = find_local_poster(parent)
+
                 item = {
                     "name": f,
                     "path": web_path,
                     "folder": folder,
                     "type": category,
                     "source": "external" if "external" in rel_path else "local",
+                    "poster": p_url
                 }
-                if category == "movies":
-                    item["poster"] = find_local_poster(root)
 
                 matched.append(item)
                 try:
                     st = os.stat(full_path)
-                    database.upsert_library_index_item({
+                    item_to_index = {
                         "path": web_path,
                         "category": category,
                         "name": f,
@@ -681,7 +725,11 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
                         "poster": item.get("poster"),
                         "mtime": float(getattr(st, "st_mtime", 0.0) or 0.0),
                         "size": int(getattr(st, "st_size", 0) or 0),
-                    })
+                    }
+                    # We could batch these, but since scan_media_page is for small-ish result sets (limit 200),
+                    # individual upserts are okay, but let's at least make sure it's not slowing down the search UI too much.
+                    # Actually, for consistency with build_library_index, let's use the batching pattern if we want to be thorough.
+                    database.upsert_library_index_item(item_to_index)
                 except Exception:
                     pass
                 if len(matched) >= want:
@@ -1104,17 +1152,18 @@ def browse_files(path: str = Query(default="/data")):
         raise HTTPException(status_code=404, detail="Directory not found")
 
     items = []
+    base_abs = BASE_DIR # Already absolute
     try:
         for item in os.listdir(fs_path):
             if item.startswith('.'):
                 continue
             
             try:
-                full_path = os.path.join(fs_path, item)
+                full_path = os.path.abspath(os.path.join(fs_path, item))
                 is_dir = os.path.isdir(full_path)
                 
-                if full_path.startswith(os.path.abspath(BASE_DIR)):
-                    rel_path = os.path.relpath(full_path, BASE_DIR).replace(os.sep, "/")
+                if full_path.startswith(base_abs):
+                    rel_path = os.path.relpath(full_path, base_abs).replace(os.sep, "/")
                     web_path = f"/data/{rel_path}"
                 else:
                     # External path, use absolute path for browsing
@@ -1216,20 +1265,6 @@ def list_media(category: str):
     
     # Get all progress to merge
     all_progress = database.get_all_progress()
-    poster_cache = {}
-
-    def find_poster(dir_path: str):
-        if dir_path in poster_cache:
-            return poster_cache[dir_path]
-        candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
-        for name in candidates:
-            p = os.path.join(dir_path, name)
-            if os.path.isfile(p):
-                rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                poster_cache[dir_path] = f"/data/{rel_from_data}"
-                return poster_cache[dir_path]
-        poster_cache[dir_path] = None
-        return None
 
     for path in paths_to_scan:
         if not os.path.exists(path):
@@ -1266,7 +1301,14 @@ def list_media(category: str):
                     }
 
                     if category == "movies":
-                        item["poster"] = find_poster(root)
+                        item["poster"] = find_local_poster(root, f)
+                    elif category == "shows":
+                        item["poster"] = find_local_poster(root, f)
+                        if not item["poster"]:
+                            # Try show-level folder
+                            parent = os.path.dirname(root)
+                            if parent != path and parent != BASE_DIR:
+                                item["poster"] = find_local_poster(parent)
                     
                     # Add progress if exists
                     if web_path in all_progress:
@@ -1562,12 +1604,6 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                     dest_name = f"S{int(season_num):02d}E{int(episode_num):02d}{ext}"
 
                 dest_fs = os.path.join(dest_dir, dest_name)
-                if not dry_run:
-                    dest_fs = _pick_unique_dest(dest_fs)
-
-                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
-                    skipped += 1
-                    continue
 
                 # Correct web paths relative to BASE_DIR
                 try:
@@ -1585,66 +1621,64 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                         break
                     continue
 
-                if os.path.exists(dest_fs):
-                    errors += 1
-                    continue
-
-                os.makedirs(dest_dir, exist_ok=True)
-                try:
-                    shutil.move(src_fs, dest_fs)
-                    logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
-                except Exception as e:
-                    logger.error(f"Failed to move show file {src_fs}: {e}")
-                    errors += 1
-                    continue
-
-                try:
-                    database.rename_media_path(plan["from"], to_web)
-                except Exception:
-                    pass
+                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
+                    # Already in correct location, but we still want to ensure metadata and posters
+                    dest_fs = src_fs
+                else:
+                    os.makedirs(dest_dir, exist_ok=True)
+                    dest_fs = _pick_unique_dest(dest_fs)
+                    try:
+                        shutil.move(src_fs, dest_fs)
+                        logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
+                        try:
+                            # Update path in database if it was moved
+                            to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                            database.rename_media_path(from_web, to_web)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        logger.error(f"Failed to move show file {src_fs}: {e}")
+                        errors += 1
+                        continue
 
                 # Fetch OMDB metadata and poster for the show (once per show)
                 meta = shows_processed.get(show_name)
+                show_dir = os.path.join(base, show_name)
+                poster_dest = os.path.join(show_dir, "poster.jpg")
+                
+                # Try to fetch from OMDB if needed
                 if use_omdb and show_name != "Unsorted" and not meta:
                     if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
                         try:
                             # Fetch show metadata
                             meta = omdb_fetch(title=show_name, media_type="series")
                             shows_processed[show_name] = meta
-                            
-                            # Cache poster if available
-                            poster_url = meta.get("Poster")
-                            if poster_url and poster_url != "N/A" and write_poster:
-                                # Check if poster already exists in show directory
-                                show_dir = os.path.join(base, show_name)
-                                poster_dest = os.path.join(show_dir, "poster.jpg")
-                                
-                                if os.path.exists(poster_dest):
-                                    try:
-                                        meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
-                                    except Exception:
-                                        pass
-                                else:
-                                    cached_poster = cache_remote_poster(poster_url)
-                                    if cached_poster:
-                                        # Also save as poster.jpg in show directory
-                                        try:
-                                            # Copy from cache to show directory
-                                            cached_fs = safe_fs_path_from_web_path(cached_poster)
-                                            if os.path.exists(cached_fs):
-                                                shutil.copy2(cached_fs, poster_dest)
-                                                logger.info(f"Saved poster for {show_name}")
-                                        except Exception as e:
-                                            logger.warning(f"Failed to save poster for {show_name}: {e}")
-                            
                             logger.info(f"Fetched OMDB metadata for show: {show_name}")
-                        except HTTPException as e:
-                            if e.status_code == 404:
-                                logger.warning(f"Show not found in OMDB: {show_name}")
-                            else:
-                                logger.warning(f"Failed to fetch OMDB data for {show_name}: {e.detail}")
                         except Exception as e:
                             logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
+
+                # Handle posters (either from OMDB or local folder)
+                if write_poster:
+                    # 1. Check if local poster.jpg already exists
+                    if os.path.exists(poster_dest):
+                        try:
+                            if not meta: meta = {"Title": show_name}
+                            meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
+                        except Exception: pass
+                    # 2. Otherwise try to download from OMDB if we have meta
+                    elif meta and meta.get("Poster") and meta["Poster"] != "N/A":
+                        try:
+                            poster_url = meta["Poster"]
+                            cached_poster = cache_remote_poster(poster_url)
+                            if cached_poster:
+                                # Also save as poster.jpg in show directory
+                                cached_fs = safe_fs_path_from_web_path(cached_poster)
+                                if os.path.exists(cached_fs):
+                                    shutil.copy2(cached_fs, poster_dest)
+                                    meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
+                                    logger.info(f"Saved OMDB poster for {show_name} to local folder")
+                        except Exception as e:
+                            logger.warning(f"Failed to save OMDB poster for {show_name}: {e}")
 
                 if meta:
                     try:
@@ -1772,15 +1806,9 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
                 dest_name = f"{folder}{ext}"
                 dest_fs = os.path.join(dest_dir, dest_name)
 
-                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
-                    skipped += 1
-                    continue
-
                 # Correct web paths relative to BASE_DIR
                 try:
                     from_web = f"/data/{os.path.relpath(src_fs, BASE_DIR).replace(os.sep, '/')}"
-                    to_web_raw = f"/data/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}" # This is wrong, should be relative to BASE_DIR
-                    # Fix: use the same logic for to_web as from_web
                     to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
                 except Exception:
                     # Fallback if relpath fails (e.g. different drives on Windows)
@@ -1795,45 +1823,53 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
                         break
                     continue
 
-                os.makedirs(dest_dir, exist_ok=True)
-                dest_fs = _pick_unique_dest(dest_fs)
-                # Re-calculate to_web after picking unique dest
+                if os.path.abspath(src_fs) == os.path.abspath(dest_fs):
+                    # Already in correct location, but we still want to ensure metadata and posters
+                    dest_fs = src_fs
+                else:
+                    os.makedirs(dest_dir, exist_ok=True)
+                    dest_fs = _pick_unique_dest(dest_fs)
+                    try:
+                        shutil.move(src_fs, dest_fs)
+                        logger.info(f"Organized movie file: {src_fs} -> {dest_fs}")
+                        try:
+                            # Update path in database if it was moved
+                            to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                            database.rename_media_path(from_web, to_web)
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        logger.error(f"Failed to move movie file {src_fs}: {e}")
+                        errors += 1
+                        continue
+
+                # Correct to_web after potential move/unique dest
                 try:
                     to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
                 except Exception:
-                    to_web = f"/data/movies/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"
+                    to_web = from_web
 
-                try:
-                    shutil.move(src_fs, dest_fs)
-                    logger.info(f"Organized movie file: {src_fs} -> {dest_fs}")
-                except Exception as e:
-                    logger.error(f"Failed to move movie file {src_fs}: {e}")
-                    errors += 1
-                    continue
-
-                try:
-                    database.rename_media_path(plan["from"], to_web)
-                except Exception:
-                    pass
-
-                if meta and write_poster:
-                    try:
-                        poster_out = os.path.join(dest_dir, "poster.jpg")
-                        # IMPROVEMENT: Check if poster already exists in destination folder
-                        if os.path.exists(poster_out):
-                            try:
-                                meta["Poster"] = f"/data/{os.path.relpath(poster_out, BASE_DIR).replace(os.sep, '/')}"
-                            except Exception:
-                                pass
-                        else:
-                            cached = cache_remote_poster(meta.get("Poster"))
+                # Handle posters (either from OMDB or local folder)
+                if write_poster:
+                    poster_out = os.path.join(dest_dir, "poster.jpg")
+                    # 1. Check if local poster.jpg already exists in destination
+                    if os.path.exists(poster_out):
+                        try:
+                            if not meta: meta = {"Title": title, "Year": year}
+                            meta["Poster"] = f"/data/{os.path.relpath(poster_out, BASE_DIR).replace(os.sep, '/')}"
+                        except Exception: pass
+                    # 2. Otherwise try to download from OMDB if we have meta
+                    elif meta and meta.get("Poster") and meta["Poster"] != "N/A":
+                        try:
+                            poster_url = meta["Poster"]
+                            cached = cache_remote_poster(poster_url)
                             if cached and cached.startswith("/data/"):
-                                meta["Poster"] = cached
                                 cached_fs = safe_fs_path_from_web_path(cached)
                                 if os.path.isfile(cached_fs):
                                     shutil.copy2(cached_fs, poster_out)
-                    except Exception:
-                        pass
+                                    meta["Poster"] = f"/data/{os.path.relpath(poster_out, BASE_DIR).replace(os.sep, '/')}"
+                                    logger.info(f"Saved OMDB poster for {title} to local folder")
+                        except Exception: pass
 
                 if meta:
                     try:

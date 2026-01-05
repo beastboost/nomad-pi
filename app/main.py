@@ -101,6 +101,15 @@ def check_environment():
         except Exception:
             results["checks"].append({"name": "nmcli", "status": "fail"})
             
+    # 4. Load settings from database into environment
+    try:
+        omdb_key = database.get_setting("omdb_api_key")
+        if omdb_key:
+            os.environ["OMDB_API_KEY"] = omdb_key
+            logger.info("Loaded OMDb API Key from settings")
+    except Exception as e:
+        logger.error(f"Failed to load settings on startup: {e}")
+
     return results
 
 # Run check and store results for status endpoint

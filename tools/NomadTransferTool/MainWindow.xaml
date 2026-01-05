@@ -213,6 +213,7 @@
                                  Background="#252525" Foreground="White" BorderBrush="{StaticResource BorderColor}"
                                  VerticalContentAlignment="Center" Padding="5,0"
                                  PasswordChanged="OmdbKeyBox_PasswordChanged"/>
+                    <Button Content="💾" Click="SaveOmdb_Click" Width="32" Height="32" Margin="5,0,0,0" ToolTip="Save and Sync OMDb Key to Pi"/>
                 </StackPanel>
             </Border>
         </Grid>
@@ -353,8 +354,9 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
-                        <TextBlock Text="Activity Logs" Style="{StaticResource HeaderBlock}"/>
+                        <TextBlock Grid.Row="0" Text="Activity Logs" Style="{StaticResource HeaderBlock}"/>
                         <ListBox Grid.Row="1" ItemsSource="{Binding ProcessingLogs}" Background="Transparent" BorderThickness="0" FontSize="11">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
@@ -362,6 +364,8 @@
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
+                        <Button Grid.Row="2" Content="📁 Open Temp Folder" Click="OpenTempFolder_Click" 
+                                HorizontalAlignment="Right" Padding="8,2" FontSize="10" Margin="0,5,0,0" Background="#3D3D3D"/>
                     </Grid>
                 </Border>
             </Grid>

@@ -357,6 +357,10 @@ function showSection(id) {
             }
         }, 5000);
     }
+
+    if (id === 'settings') {
+        loadOmdbKey();
+    }
 }
 
 async function loadMedia(category) {
@@ -3321,65 +3325,69 @@ async function unmountDrive(mountpoint) {
     }
 }
 
-async function changePassword() {
-    const current = document.getElementById('change-pwd-current').value;
-    const newPass = document.getElementById('change-pwd-new').value;
-    const confirm = document.getElementById('change-pwd-confirm').value;
-
-    if (!current || !newPass || !confirm) {
-        showToast('Please fill in all password fields.', 'warning');
-        return;
-    }
-
-    if (newPass !== confirm) {
-        showToast('New passwords do not match.', 'error');
-        return;
-    }
-
-    if (newPass.length < 4) {
-        showToast('New password must be at least 4 characters long.', 'warning');
-        return;
-    }
-
+async function saveOmdbKey() {
+    const keyInput = document.getElementById('omdb-api-key');
+    const key = keyInput.value.trim();
+    
     try {
-        const res = await fetch(`${API_BASE}/auth/change-password`, {
+        const res = await fetch(`${API_BASE}/system/settings/omdb`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                current_password: current,
-                new_password: newPass
-            })
+            body: JSON.stringify({ key: key })
         });
-
-        const data = await res.json();
+        
         if (res.ok) {
-            showToast('Password updated successfully!', 'success');
-            // Clear fields
-            document.getElementById('change-pwd-current').value = '';
-            document.getElementById('change-pwd-new').value = '';
-            document.getElementById('change-pwd-confirm').value = '';
+            showToast('OMDb API Key saved!', 'success');
         } else {
-            showToast(data.detail || 'Failed to update password.', 'error');
+            showToast('Failed to save OMDb key.', 'error');
         }
     } catch (e) {
-        console.error('Error updating password:', e);
-        showToast('Error updating password. See console for details.', 'error');
+        showToast('Error saving OMDb key: ' + e, 'error');
     }
 }
 
-function saveSettings() {
-    const serverName = document.getElementById('setting-server-name').value;
-    const sessionDays = document.getElementById('setting-session-days').value;
-    localStorage.setItem('nomadpi.serverName', serverName);
-    localStorage.setItem('nomadpi.sessionDays', sessionDays);
-    if (serverName) {
-        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
-        document.title = serverName;
+async function loadOmdbKey() {
+    const keyInput = document.getElementById('omdb-api-key');
+    if (!keyInput) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/system/settings/omdb`);
+        const data = await res.json();
+        if (data.key) {
+            keyInput.value = data.key;
+        }
+    } catch (e) {
+        console.error('Error loading OMDb key:', e);
     }
-    showToast('Settings saved locally!', 'success');
 }
 
-function setTheme(theme) {
+function toggleTheme() {
+    const isDark = document.body.classList.contains('dark-theme');
+    if (isDark) {
+        document.body.classList.remove('dark-theme');
+        document.body.classList.add('glass-theme');
+        localStorage.setItem('nomadpi.theme', 'glass');
+        showToast('Glass Theme enabled');
+    } else {
+        document.body.classList.remove('glass-theme');
+        document.body.classList.add('dark-theme');
+        localStorage.setItem('nomadpi.theme', 'dark');
+        showToast('Dark Theme enabled');
+    }
+}
+
+function toggleGlassEffect() {
+    document.body.classList.toggle('no-glass');
+    const isNoGlass = document.body.classList.contains('no-glass');
+    localStorage.setItem('nomadpi.noGlass', isNoGlass);
+    showToast(isNoGlass ? 'Glass effects disabled' : 'Glass effects enabled');
+}
+
+// Initialize settings on load
+window.addEventListener('DOMContentLoaded', () => {
+    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
+    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
+    
     if (theme === 'dark') {
         document.body.classList.remove('glass-theme');
         document.body.classList.add('dark-theme');
@@ -3387,24 +3395,10 @@ function setTheme(theme) {
         document.body.classList.remove('dark-theme');
         document.body.classList.add('glass-theme');
     }
-    localStorage.setItem('nomadpi.theme', theme);
-}
-
-// Initialize settings on load
-window.addEventListener('DOMContentLoaded', () => {
-    const serverName = localStorage.getItem('nomadpi.serverName');
-    const sessionDays = localStorage.getItem('nomadpi.sessionDays');
-    const theme = localStorage.getItem('nomadpi.theme');
-
-    if (serverName) {
-        const nameInput = document.getElementById('setting-server-name');
-        if (nameInput) nameInput.value = serverName;
-        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
-        document.title = serverName;
+    
+    if (noGlass) {
+        document.body.classList.add('no-glass');
     }
-    if (sessionDays) {
-        const daysInput = document.getElementById('setting-session-days');
-        if (daysInput) daysInput.value = sessionDays;
-    }
-    if (theme) setTheme(theme);
+    
+    checkAuth();
 });

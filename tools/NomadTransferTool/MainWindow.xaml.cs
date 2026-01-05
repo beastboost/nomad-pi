@@ -93,12 +93,8 @@ namespace NomadTransferTool
                 _useSamba = value; 
                 OnPropertyChanged(); 
                 
-                // Debounce drive refresh
-                _driveRefreshTimer?.Dispose();
-                _driveRefreshTimer = new System.Threading.Timer(_ => 
-                {
-                    Dispatcher.BeginInvoke(new Action(() => RefreshDrives()));
-                }, null, 300, System.Threading.Timeout.Infinite);
+                // Trigger drive refresh soon
+                _driveRefreshTimer?.Change(300, 30000);
             } 
         }
         public string SambaPath 
@@ -107,7 +103,7 @@ namespace NomadTransferTool
             set { 
                 _sambaPath = value; 
                 OnPropertyChanged(); 
-                Dispatcher.BeginInvoke(new Action(() => RefreshDrives())); // Refresh drives when path changes
+                _driveRefreshTimer?.Change(300, 30000);
             } 
         }
         public string SambaUser { get => _sambaUser; set { _sambaUser = value; OnPropertyChanged(); } }
@@ -202,7 +198,9 @@ namespace NomadTransferTool
         {
             try
             {
-                AddLog("Syncing Samba settings from Nomad Pi...");
+                AddLog("Syncing settings from Nomad Pi...");
+                
+                // 1. Sync Samba
                 var res = await client.GetAsync($"{API_BASE}/system/samba/config");
                 if (res.IsSuccessStatusCode)
                 {
@@ -255,19 +253,60 @@ namespace NomadTransferTool
                             UseSamba = true;
                         });
                         
-                        AddLog("Samba settings synchronized successfully.");
-                        if (showMessages) System.Windows.MessageBox.Show("Samba settings synchronized!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                        AddLog("Samba settings synchronized.");
                     }
                 }
-                else if (showMessages)
+
+                // 2. Sync OMDb Key
+                var omdbRes = await client.GetAsync($"{API_BASE}/system/settings/omdb");
+                if (omdbRes.IsSuccessStatusCode)
                 {
-                    System.Windows.MessageBox.Show($"Failed to sync: {res.StatusCode}", "Sync Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    var content = await omdbRes.Content.ReadAsStringAsync();
+                    var omdbData = JsonConvert.DeserializeObject<dynamic>(content);
+                    if (omdbData != null && !string.IsNullOrEmpty((string)omdbData.key))
+                    {
+                        string key = (string)omdbData.key;
+                        Dispatcher.Invoke(() => {
+                            OMDB_API_KEY = key;
+                            OmdbKeyBox.Password = key;
+                            File.WriteAllText("omdb.txt", key);
+                        });
+                        AddLog("OMDb API Key synchronized from Pi.");
+                    }
                 }
+
+                if (showMessages) System.Windows.MessageBox.Show("Settings synchronized from Nomad Pi!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
                 AddLog($"Sync failed: {ex.Message}");
                 if (showMessages) System.Windows.MessageBox.Show($"Error syncing: {ex.Message}", "Sync Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void SaveOmdb_Click(object sender, RoutedEventArgs e)
+        {
+            string key = OmdbKeyBox.Password.Trim();
+            if (string.IsNullOrEmpty(key)) return;
+
+            try {
+                AddLog("Saving OMDb key and syncing to Pi...");
+                OMDB_API_KEY = key;
+                File.WriteAllText("omdb.txt", key);
+
+                // Push to Pi
+                var content = new StringContent(JsonConvert.SerializeObject(new { key = key }), Encoding.UTF8, "application/json");
+                var res = await client.PostAsync($"{API_BASE}/system/settings/omdb", content);
+                
+                if (res.IsSuccessStatusCode) {
+                    AddLog("OMDb key saved and synced to Pi successfully.");
+                    System.Windows.MessageBox.Show("OMDb key saved and synced to Nomad Pi!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                } else {
+                    AddLog($"OMDb key saved locally, but Pi sync failed: {res.StatusCode}");
+                    System.Windows.MessageBox.Show("OMDb key saved locally, but failed to sync to Pi. Check if Pi is online.", "Sync Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            } catch (Exception ex) {
+                AddLog($"Error saving OMDb key: {ex.Message}");
             }
         }
 
@@ -371,6 +410,13 @@ namespace NomadTransferTool
             }
 
             RefreshDrives();
+            
+            // Start periodic drive refresh (every 30 seconds)
+            _driveRefreshTimer = new System.Threading.Timer(_ => 
+            {
+                RefreshDrives();
+            }, null, 30000, 30000);
+
             // StartDriveWatcher();
             CheckHandbrakeStatus();
 
@@ -1179,7 +1225,7 @@ namespace NomadTransferTool
 
                             if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
                             {
-                                var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
                                 if (meta != null)
                                 {
                                     item.Title = meta.Title;
@@ -1419,6 +1465,23 @@ namespace NomadTransferTool
             if (items == null || items.Count == 0) return;
 
             string? targetPath = null;
+            bool effectiveUseSamba = UseSamba;
+            long requiredSpace = 0;
+
+            // Calculate total required space first
+            foreach (var item in items)
+            {
+                if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
+                {
+                    double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
+                    requiredSpace += (long)(bytes * 1.1);
+                }
+                else
+                {
+                    requiredSpace += item.FileSize;
+                }
+            }
+
             if (UseSamba)
             {
                 if (string.IsNullOrEmpty(SambaPath))
@@ -1433,8 +1496,32 @@ namespace NomadTransferTool
                     SambaPath = "\\\\" + SambaPath.TrimStart('\\');
                 }
                 
-                // No pre-connection check here anymore. We'll connect right before moving.
                 targetPath = SambaPath;
+
+                // Check for Samba Failover (10% threshold)
+                try {
+                    long freeBytes, totalBytes, totalFreeBytes;
+                    if (GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes) && totalBytes > 0)
+                    {
+                        double percentFree = (double)freeBytes / totalBytes;
+                        if (percentFree < 0.10)
+                        {
+                            AddLog($"Samba share is low on space ({percentFree:P1} free). Checking for USB failover...");
+                            // Look for a USB drive with enough space
+                            var usbDrive = Drives.FirstOrDefault(d => d.Name != SambaPath && d.IsMounted && d.AvailableFreeSpace > requiredSpace);
+                            if (usbDrive != null)
+                            {
+                                AddLog($"FAILOVER: Switching to USB drive {usbDrive.Name} ({usbDrive.Label}) as fail-safe.");
+                                targetPath = usbDrive.Name;
+                                effectiveUseSamba = false;
+                            }
+                            else
+                            {
+                                AddLog("Failover failed: No USB drive with sufficient space found.");
+                            }
+                        }
+                    }
+                } catch (Exception ex) { AddLog($"Failover check error: {ex.Message}"); }
             }
             else
             {
@@ -1442,24 +1529,9 @@ namespace NomadTransferTool
             }
             
             // Disk space check (only for local drives - starts with drive letter like C:\)
-            if (targetPath != null && !UseSamba && Regex.IsMatch(targetPath, @"^[a-zA-Z]:\\"))
+            if (targetPath != null && !effectiveUseSamba && Regex.IsMatch(targetPath, @"^[a-zA-Z]:\\"))
             {
                 try {
-                    long requiredSpace = 0;
-                    foreach (var item in items)
-                    {
-                        if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
-                        {
-                            // Use estimated size if transcoding
-                            double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
-                            requiredSpace += (long)(bytes * 1.1); // 10% overhead
-                        }
-                        else
-                        {
-                            requiredSpace += item.FileSize;
-                        }
-                    }
-                    
                     var driveInfo = new DriveInfo(targetPath.Substring(0, 3));
                     if (driveInfo.AvailableFreeSpace < requiredSpace)
                     {
@@ -1523,7 +1595,7 @@ namespace NomadTransferTool
                         {
                             // Construct the destination path
                             // User says: "connect to the main directory... use data/movie"
-                            if (UseSamba)
+                            if (effectiveUseSamba)
                             {
                                 // Ensure path starts with \\
                                 if (!effectiveTargetPath.StartsWith("\\\\")) 
@@ -1566,7 +1638,7 @@ namespace NomadTransferTool
                             {
                                 AddLog($"Target path check failed: {err}");
                                 // For local drives, if it's not ready now, it's likely disconnected
-                                if (!UseSamba) throw new Exception($"Target drive '{effectiveTargetPath}' is not accessible.");
+                                if (!effectiveUseSamba) throw new Exception($"Target drive '{effectiveTargetPath}' is not accessible.");
                             }
                         }
 
@@ -1593,37 +1665,76 @@ namespace NomadTransferTool
 
                                     // CREATE DIRECTORY HERE
                                     string? finalDir = Path.GetDirectoryName(finalDest);
-                                    if (finalDir != null && !Directory.Exists(finalDir)) 
+                                    if (finalDir != null) 
                                     {
-                                        AddLog($"Creating directory: {finalDir}");
-                                        Directory.CreateDirectory(finalDir);
+                                        bool exists = await Task.Run(() => Directory.Exists(finalDir));
+                                        if (!exists)
+                                        {
+                                            AddLog($"Creating directory: {finalDir}");
+                                            await Task.Run(() => Directory.CreateDirectory(finalDir));
+                                        }
                                     }
 
                                     // Handle Poster if available
                                     if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
                                     {
                                         try {
-                                            var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                            var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
                                             if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                                             {
                                                 string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                                string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
-                                                string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                                string posterBase;
+                                                string posterName;
+
+                                                if (item.Category == "shows")
+                                                {
+                                                    if (!string.IsNullOrEmpty(item.Season))
+                                                    {
+                                                        // Season-specific poster goes in Season folder
+                                                        posterBase = Path.GetDirectoryName(finalDest)!;
+                                                        posterName = "poster";
+                                                    }
+                                                    else
+                                                    {
+                                                        // Show-level poster goes in Show folder
+                                                        posterBase = Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
+                                                        posterName = "poster";
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    // Movie poster matches file name in same folder
+                                                    posterBase = Path.GetDirectoryName(finalDest)!;
+                                                    posterName = Path.GetFileNameWithoutExtension(finalDest);
+                                                }
+
                                                 string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-                                                if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
-                                                await DownloadPoster(meta.Poster, posterDest);
+                                                 
+                                                 bool posterExists = await Task.Run(() => File.Exists(posterDest));
+                                                 if (posterExists) await Task.Run(() => File.Delete(posterDest));
+                                                 
+                                                 bool baseExists = await Task.Run(() => Directory.Exists(posterBase));
+                                                 if (!baseExists) await Task.Run(() => Directory.CreateDirectory(posterBase));
+                                                 
+                                                 await DownloadPoster(meta.Poster, posterDest);
                                             }
                                         } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
                                     }
 
-                                    if (File.Exists(finalDest)) File.Delete(finalDest);
+                                    if (finalDest != null)
+                                    {
+                                        bool destExists = await Task.Run(() => File.Exists(finalDest));
+                                        if (destExists) await Task.Run(() => File.Delete(finalDest));
+                                    }
                                     
                                     // Retry logic for copy
                                     int retries = 3;
+                                    bool copySuccess = false;
                                     while (retries > 0)
                                     {
                                         try {
-                                            await CopyFileWithProgress(item, tempFile, finalDest, token);
+                                            await CopyFileWithProgress(item, tempFile, finalDest!, token);
+                                            copySuccess = true;
                                             break;
                                         } catch (Exception ex) when (retries > 1) {
                                             retries--;
@@ -1634,10 +1745,14 @@ namespace NomadTransferTool
                                         }
                                     }
                                     
-                                    // Delete temp file after successful transfer
-                                    if (File.Exists(tempFile))
+                                    // Delete temp file ONLY after successful transfer
+                                    if (copySuccess && File.Exists(tempFile))
                                     {
                                         try { File.Delete(tempFile); tempFilesToClean.Remove(tempFile); } catch { }
+                                    }
+                                    else if (!copySuccess)
+                                    {
+                                        throw new Exception("Failed to copy transcoded file to destination after multiple retries.");
                                     }
                                 }
                                 else
@@ -1682,37 +1797,74 @@ namespace NomadTransferTool
 
                             // CREATE DIRECTORY HERE
                             string? finalDir = Path.GetDirectoryName(finalDest);
-                            if (finalDir != null && !Directory.Exists(finalDir)) 
+                            if (finalDir != null) 
                             {
-                                AddLog($"Creating directory: {finalDir}");
-                                Directory.CreateDirectory(finalDir);
+                                bool exists = await Task.Run(() => Directory.Exists(finalDir));
+                                if (!exists)
+                                {
+                                    AddLog($"Creating directory: {finalDir}");
+                                    await Task.Run(() => Directory.CreateDirectory(finalDir));
+                                }
                             }
 
                             // Handle Poster if available
                              if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
                              {
                                  try {
-                                     var meta = await FetchOMDBMetadata(item.Title, item.Category);
+                                     var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
                                      if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                                      {
                                          string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                         string posterBase = item.Category == "shows" ? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir) : Path.GetDirectoryName(finalDest)!;
-                                         string posterName = item.Category == "shows" ? "poster" : Path.GetFileNameWithoutExtension(finalDest);
+                                         string posterBase;
+                                         string posterName;
+
+                                         if (item.Category == "shows")
+                                         {
+                                             if (!string.IsNullOrEmpty(item.Season))
+                                             {
+                                                 // Season-specific poster goes in Season folder
+                                                 posterBase = Path.GetDirectoryName(finalDest)!;
+                                                 posterName = "poster";
+                                             }
+                                             else
+                                             {
+                                                 // Show-level poster goes in Show folder
+                                                 posterBase = Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
+                                                 posterName = "poster";
+                                             }
+                                         }
+                                         else
+                                         {
+                                             // Movie poster matches file name in same folder
+                                             posterBase = Path.GetDirectoryName(finalDest)!;
+                                             posterName = Path.GetFileNameWithoutExtension(finalDest);
+                                         }
+
                                          string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-                                         if (!Directory.Exists(posterBase)) Directory.CreateDirectory(posterBase);
+
+                                         bool posterExists = await Task.Run(() => File.Exists(posterDest));
+                                         if (posterExists) await Task.Run(() => File.Delete(posterDest));
+
+                                         bool baseExists = await Task.Run(() => Directory.Exists(posterBase));
+                                         if (!baseExists) await Task.Run(() => Directory.CreateDirectory(posterBase));
+
                                          await DownloadPoster(meta.Poster, posterDest);
                                      }
                                  } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
                              }
 
-                            if (File.Exists(finalDest)) File.Delete(finalDest);
+                            if (finalDest != null)
+                            {
+                                bool destExists = await Task.Run(() => File.Exists(finalDest));
+                                if (destExists) await Task.Run(() => File.Delete(finalDest));
+                            }
                             
                             // Retry logic for copy
                             int retries = 3;
                             while (retries > 0)
                             {
                                 try {
-                                    await CopyFileWithProgress(item, finalDest, token);
+                                    await CopyFileWithProgress(item, item.SourcePath, finalDest!, token);
                                     break;
                                 } catch (Exception ex) when (retries > 1) {
                                     retries--;
@@ -1731,14 +1883,20 @@ namespace NomadTransferTool
                         AddLog($"Completed: {item.Title}");
                         
                         // Safety check: Delete source if requested and file was actually moved/copied
-                        if (DeleteSourceAfterTransfer && File.Exists(finalDest) && File.Exists(item.SourcePath))
+                        if (DeleteSourceAfterTransfer && finalDest != null)
                         {
-                            try 
-                            { 
-                                File.Delete(item.SourcePath); 
-                                AddLog($"Deleted source: {item.FileName}");
-                            } 
-                            catch (Exception ex) { AddLog($"Failed to delete source: {ex.Message}"); }
+                            bool finalExists = await Task.Run(() => File.Exists(finalDest));
+                            bool sourceExists = await Task.Run(() => File.Exists(item.SourcePath));
+                            
+                            if (finalExists && sourceExists)
+                            {
+                                try 
+                                { 
+                                    await Task.Run(() => File.Delete(item.SourcePath)); 
+                                    AddLog($"Deleted source: {item.FileName}");
+                                } 
+                                catch (Exception ex) { AddLog($"Failed to delete source: {ex.Message}"); }
+                            }
                         }
 
                         TotalProgress = (double)processedItems / items.Count * 100;
@@ -1760,6 +1918,18 @@ namespace NomadTransferTool
                 FileProgress = "";
                 AddLog("Batch processing finished.");
                 
+                // Trigger background library scan on the server
+                _ = Task.Run(async () => {
+                    try {
+                        AddLog("Triggering server library scan...");
+                        var response = await client.PostAsync($"{API_BASE}/media/scan", null);
+                        if (response.IsSuccessStatusCode) AddLog("Server library scan started.");
+                        else AddLog($"Server library scan trigger failed: {response.StatusCode}");
+                    } catch (Exception ex) {
+                        AddLog($"Failed to trigger server scan: {ex.Message}");
+                    }
+                });
+
                 // Final cleanup of any missed temp files
                 foreach (var tempFile in tempFilesToClean.ToList())
                 {
@@ -1783,7 +1953,7 @@ namespace NomadTransferTool
 
         private async Task CopyFileWithProgress(MediaItem item, string source, string dest, System.Threading.CancellationToken token)
         {
-            byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
+            byte[] buffer = new byte[4 * 1024 * 1024]; // 4MB buffer for better throughput
             long totalBytes = new FileInfo(source).Length;
             long totalRead = 0;
             
@@ -1793,7 +1963,10 @@ namespace NomadTransferTool
                 using (var destStream = File.Create(dest))
                 {
                     Stopwatch sw = Stopwatch.StartNew();
+                    Stopwatch uiSw = Stopwatch.StartNew();
                     int read;
+                    double lastReportedProgress = -1;
+
                     while ((read = await sourceStream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                     {
                         token.ThrowIfCancellationRequested();
@@ -1801,18 +1974,25 @@ namespace NomadTransferTool
                         totalRead += read;
                         
                         double progress = (double)totalRead / totalBytes * 100;
-                        double elapsed = sw.Elapsed.TotalSeconds;
-                        double speed = elapsed > 0 ? totalRead / 1024.0 / 1024.0 / elapsed : 0;
                         
-                        // Thread-safe UI updates
-                        await Dispatcher.InvokeAsync(() =>
+                        // Throttle UI updates to every 250ms or every 1% to prevent flooding the UI thread
+                        if (uiSw.ElapsedMilliseconds > 250 || progress - lastReportedProgress > 1.0 || totalRead == totalBytes)
                         {
-                            item.Progress = progress;
-                            item.StatusMessage = $"Transferring: {progress:F1}% ({speed:F1} MB/s)";
-                            CurrentFileProgress = progress;
-                            FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
-                            TransferSpeed = $"{speed:F1} MB/s";
-                        }, System.Windows.Threading.DispatcherPriority.Background);
+                            double elapsed = sw.Elapsed.TotalSeconds;
+                            double speed = elapsed > 0.1 ? totalRead / 1024.0 / 1024.0 / elapsed : 0;
+                            lastReportedProgress = progress;
+                            uiSw.Restart();
+
+                            // Thread-safe UI updates with higher priority than Background to ensure responsiveness
+                            await Dispatcher.InvokeAsync(() =>
+                            {
+                                item.Progress = progress;
+                                item.StatusMessage = $"Transferring: {progress:F1}% ({speed:F1} MB/s)";
+                                CurrentFileProgress = progress;
+                                FileProgress = $"{totalRead / 1024 / 1024}MB / {totalBytes / 1024 / 1024}MB ({progress:F1}%)";
+                                TransferSpeed = $"{speed:F1} MB/s";
+                            }, System.Windows.Threading.DispatcherPriority.Normal);
+                        }
                     }
                 }
             }
@@ -1831,7 +2011,7 @@ namespace NomadTransferTool
             await CopyFileWithProgress(item, item.SourcePath, dest, token);
         }
 
-        private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category)
+        private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category, string season = null)
         {
             try
             {
@@ -1854,13 +2034,24 @@ namespace NomadTransferTool
                 if (string.IsNullOrEmpty(title)) return null;
 
                 string type = category == "movies" ? "movie" : "series";
+                
+                // Construct URL
                 string url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
-                if (!string.IsNullOrEmpty(year)) url += $"&y={year}";
+                if (!string.IsNullOrEmpty(season)) url += $"&Season={season}";
+                else if (!string.IsNullOrEmpty(year)) url += $"&y={year}";
                 
                 var response = await client.GetStringAsync(url);
                 var result = JsonConvert.DeserializeObject<OmdbResult>(response);
                 
-                if ((result == null || result.Response != "True") && !string.IsNullOrEmpty(year))
+                // Fallback for shows if season poster fails
+                if (result?.Response != "True" && !string.IsNullOrEmpty(season))
+                {
+                    url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
+                    response = await client.GetStringAsync(url);
+                    result = JsonConvert.DeserializeObject<OmdbResult>(response);
+                }
+
+                if ((result == null || result.Response != "True") && !string.IsNullOrEmpty(year) && string.IsNullOrEmpty(season))
                 {
                     url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
                     response = await client.GetStringAsync(url);
@@ -1881,6 +2072,20 @@ namespace NomadTransferTool
                 await File.WriteAllBytesAsync(destPath, data);
             }
             catch { }
+        }
+
+        private void OpenTempFolder_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "NomadTranscode");
+                if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+                Process.Start("explorer.exe", tempDir);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Error opening temp folder: {ex.Message}");
+            }
         }
 
         public static bool IsVideoFile(string file)
@@ -2021,7 +2226,23 @@ namespace NomadTransferTool
             await TranscodeWithHandbrake(item, dest, token);
         }
 
-        public class OmdbResult
+        public class OmdbSearchResponse
+    {
+        public List<OmdbSearchResult> Search { get; set; } = new List<OmdbSearchResult>();
+        public string totalResults { get; set; } = "0";
+        public string Response { get; set; } = "False";
+    }
+
+    public class OmdbSearchResult
+    {
+        public string Title { get; set; } = "";
+        public string Year { get; set; } = "";
+        public string imdbID { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string Poster { get; set; } = "";
+    }
+
+    public class OmdbResult
         {
             public string Title { get; set; } = "";
             public string Year { get; set; } = "";
