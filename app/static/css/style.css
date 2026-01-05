@@ -438,17 +438,21 @@ button.primary:hover {
 header {
     background-color: var(--header-bg);
     padding: 0 4%;
-    min-height: 80px;
+    min-height: 70px; /* Slightly more compact */
     display: flex;
     justify-content: space-between;
     align-items: center;
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 1000; /* Higher z-index */
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-bottom: var(--glass-border);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.mobile-bottom-nav {
+    display: none; /* Hidden on desktop */
 }
 
 .logo {
@@ -661,30 +665,79 @@ h1, h2, h3 {
         flex-direction: row;
         justify-content: space-between;
         align-items: center;
-        padding: 10px 16px;
+        padding: 0 16px;
+        min-height: 60px;
     }
 
     .mobile-menu-btn {
         display: block;
+        padding: 15px; /* Larger hit area */
+        margin-right: -10px;
+    }
+
+    /* Bottom Navigation for Mobile */
+    .mobile-bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 70px;
+        background: rgba(18, 18, 18, 0.95);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-top: var(--glass-border);
+        z-index: 1000;
+        justify-content: space-around;
+        align-items: center;
+        padding: 0 10px;
+        padding-bottom: env(safe-area-inset-bottom); /* Support for iPhone notch */
+    }
+
+    .mobile-bottom-nav .nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        gap: 4px;
+        padding: 8px 0;
+        flex: 1;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .mobile-bottom-nav .nav-item.active {
+        color: var(--accent-color);
+    }
+
+    .mobile-bottom-nav .nav-icon {
+        font-size: 1.5rem;
+    }
+
+    .mobile-bottom-nav .nav-label {
+        font-size: 0.75rem;
+        font-weight: 500;
     }
 
     nav {
         position: fixed;
-        top: 70px;
+        top: 60px; /* Match mobile header height */
         left: 0;
         right: 0;
-        bottom: 0;
+        bottom: 70px; /* Above bottom nav */
         background-color: var(--bg-color);
         flex-direction: column;
         align-items: center;
         padding: 40px 20px;
-        gap: 20px;
-        z-index: 1000;
+        gap: 15px;
+        z-index: 999;
         transform: translateX(100%);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         overflow-y: auto;
         backdrop-filter: blur(20px);
-        background: rgba(18, 18, 18, 0.95);
+        background: rgba(18, 18, 18, 0.98);
     }
 
     nav.mobile-active {
@@ -695,85 +748,22 @@ h1, h2, h3 {
         width: 100%;
         margin: 0;
         padding: 16px;
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    nav .logout-btn {
-        margin-top: 20px;
-    }
-
-    .header-stats {
-        display: none;
-    }
-
-    .login-box {
-        padding: 26px;
-        max-width: 92vw;
-    }
-
-    .media-grid {
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: 12px;
-    }
-
-    .menu-grid {
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-        gap: 12px;
-        margin-top: 18px;
-    }
-
-    .list-item {
-        padding: 18px 12px;
-        gap: 12px;
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .list-item > div:last-child {
-        width: 100%;
-        justify-content: space-between;
-        margin-top: 8px;
-    }
-
-    .list-item span {
-        font-size: 1.05rem;
-        word-break: break-all;
-    }
-
-    .music-play {
-        padding: 10px 25px !important;
-        font-size: 1rem !important;
+        border-radius: 12px;
     }
 
     main {
-        padding: 16px 12px 180px 12px; /* Even more bottom padding for the larger mobile player */
+        padding: 16px 12px 160px 12px; /* Bottom padding for bottom-nav + player-bar */
     }
 
-    .modal-content {
-        margin-top: 12px;
-        height: calc(100vh - 24px);
-    }
-
-    /* Mobile Player Bar Fixes */
     .player-bar {
-        grid-template-areas: 
-            "progress"
-            "title"
-            "controls";
-        grid-template-columns: 1fr;
-        height: auto;
-        padding: 12px 8px;
-        bottom: 0;
+        bottom: 70px; /* Above bottom nav */
         left: 0;
         right: 0;
         border-radius: 16px 16px 0 0;
-        border-bottom: none;
-        gap: 8px;
-        box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
+        margin: 0;
     }
 
     .player-title {

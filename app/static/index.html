@@ -23,7 +23,7 @@
             <div class="logo">Nomad Pi ✨</div>
             <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
             <nav id="main-nav">
-                <button onclick="showSection('home')">Home</button>
+                <button onclick="showSection('home')" class="active">Home</button>
                 <button onclick="showSection('movies')">Movies</button>
                 <button onclick="showSection('shows')">Shows</button>
                 <button onclick="showSection('music')">Music</button>
@@ -36,6 +36,29 @@
                 <button onclick="logout()" class="logout-btn">Logout</button>
             </nav>
         </header>
+
+        <nav class="mobile-bottom-nav glass">
+            <button onclick="showSection('home')" id="btn-home-mob" class="nav-item active">
+                <span class="nav-icon">🏠</span>
+                <span class="nav-label">Home</span>
+            </button>
+            <button onclick="showSection('movies')" id="btn-movies-mob" class="nav-item">
+                <span class="nav-icon">🎬</span>
+                <span class="nav-label">Movies</span>
+            </button>
+            <button onclick="showSection('shows')" id="btn-shows-mob" class="nav-item">
+                <span class="nav-icon">📺</span>
+                <span class="nav-label">Shows</span>
+            </button>
+            <button onclick="showSection('files')" id="btn-files-mob" class="nav-item">
+                <span class="nav-icon">🗂️</span>
+                <span class="nav-label">Files</span>
+            </button>
+            <button onclick="toggleMobileMenu()" id="btn-more-mob" class="nav-item">
+                <span class="nav-icon">☰</span>
+                <span class="nav-label">More</span>
+            </button>
+        </nav>
 
         <main>
             <section id="home" class="active">

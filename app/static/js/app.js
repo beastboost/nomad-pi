@@ -324,6 +324,15 @@ function showSection(id) {
         }
     });
 
+    // Update active state for mobile bottom nav
+    document.querySelectorAll('.mobile-bottom-nav .nav-item').forEach(btn => {
+        btn.classList.remove('active');
+        const btnId = btn.id;
+        if (btnId === `btn-${id}-mob`) {
+            btn.classList.add('active');
+        }
+    });
+
     const target = document.getElementById(id);
     if (target) {
         target.classList.remove('hidden');
