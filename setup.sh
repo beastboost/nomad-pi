@@ -215,7 +215,7 @@ fi
 echo "[6/9] Configuring permissions..."
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/bin/systemctl status nomad-pi.service, /usr/bin/systemctl restart nomad-pi, /usr/bin/nmcli
+$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/mount, /usr/bin/umount, /usr/sbin/shutdown, /usr/sbin/reboot, /usr/bin/systemctl restart nomad-pi.service, /usr/bin/systemctl stop nomad-pi.service, /usr/bin/systemctl start nomad-pi.service, /usr/bin/systemctl status nomad-pi.service, /usr/bin/systemctl restart nomad-pi, /usr/bin/nmcli, /usr/bin/systemctl restart minidlna, /usr/bin/systemctl restart minidlna.service, /usr/sbin/minidlnad
 EOL
 sudo chmod 0440 $SUDOERS_FILE
 
@@ -365,7 +365,11 @@ sudo systemctl restart nmbd
 echo "[9/9] Configuring MiniDLNA..."
 MINIDLNA_CONF="/etc/minidlna.conf"
 sudo bash -c "cat > $MINIDLNA_CONF" <<EOL
-media_dir=V,$CURRENT_DIR/data
+media_dir=V,$CURRENT_DIR/data/movies
+media_dir=V,$CURRENT_DIR/data/shows
+media_dir=A,$CURRENT_DIR/data/music
+media_dir=P,$CURRENT_DIR/data/gallery
+media_dir=P,$CURRENT_DIR/data/books
 db_dir=/var/cache/minidlna
 log_dir=/var/log
 friendly_name=Nomad Pi

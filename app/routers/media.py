@@ -511,7 +511,10 @@ def get_media_stats():
 def rebuild_library(background_tasks: BackgroundTasks):
     for category in ["movies", "shows", "music", "books"]:
         background_tasks.add_task(build_library_index, category)
-    return {"status": "Library rebuild started in background"}
+    # Also trigger MiniDLNA rescan and auto-organization
+    background_tasks.add_task(trigger_dlna_rescan)
+    background_tasks.add_task(trigger_auto_organize)
+    return {"status": "Library rebuild and organization started in background"}
 
 def build_library_index(category: str):
     paths_to_scan = get_scan_paths(category)
@@ -1344,7 +1347,7 @@ def set_progress(data: Dict = Body(...)):
         return {"status": "error", "message": str(e)}
 
 @router.post("/rename")
-def rename_media(data: Dict = Body(...)):
+def rename_media(data: Dict = Body(...), background_tasks: BackgroundTasks = None):
     old_path = data.get("old_path") or data.get("path")
     new_path = data.get("new_path") or data.get("dest_path")
     if not isinstance(old_path, str) or not old_path.startswith("/data/"):
@@ -1371,6 +1374,13 @@ def rename_media(data: Dict = Body(...)):
         database.rename_media_path(old_path, new_path, is_dir=is_dir)
     except Exception:
         pass
+
+    # Trigger MiniDLNA rescan after rename
+    if background_tasks:
+        background_tasks.add_task(trigger_dlna_rescan)
+    else:
+        # Fallback if BackgroundTasks is not provided for some reason
+        trigger_dlna_rescan()
 
     return {"status": "ok", "old_path": old_path, "new_path": new_path}
 
@@ -1888,8 +1898,37 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
 
     return {"status": "ok", "dry_run": bool(dry_run), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "planned": planned[: min(len(planned), 1000)]}
 
+import psutil
+import subprocess
+import platform
+
+def trigger_dlna_rescan():
+    """Trigger a MiniDLNA rescan if on Linux"""
+    if platform.system() == "Linux":
+        try:
+            # We try to use the same logic as system.py
+            subprocess.run(["sudo", "/usr/sbin/minidlnad", "-R"], check=False)
+            subprocess.run(["sudo", "/usr/bin/systemctl", "restart", "minidlna"], check=False)
+            logger.info("Triggered MiniDLNA rescan")
+        except Exception as e:
+            logger.error(f"Failed to trigger MiniDLNA rescan: {e}")
+
+def trigger_auto_organize():
+    """Trigger automated organization of shows and movies"""
+    try:
+        # We can call the organization functions with dry_run=False
+        # Note: We don't want to use OMDB every time as it might be slow/hit limits
+        # But for new uploads it's probably fine.
+        organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True)
+        organize_movies(dry_run=False, use_omdb=True, write_poster=True)
+        logger.info("Automated media organization completed")
+        # Trigger DLNA rescan after organization is done
+        trigger_dlna_rescan()
+    except Exception as e:
+        logger.error(f"Automated organization failed: {e}")
+
 @router.post("/upload/{category}")
-async def upload_file(category: str, files: UploadFile = File(...)):
+async def upload_file(category: str, background_tasks: BackgroundTasks, files: UploadFile = File(...)):
     # Note: 'files' param name matches frontend FormData.append('files', ...)
     # But since we send one by one, it receives a single UploadFile if not defined as List
     # To support both, we can use List and handle it, or just stick to List.
@@ -1938,12 +1977,17 @@ async def upload_file(category: str, files: UploadFile = File(...)):
         except Exception:
             pass
     
+    # Trigger background tasks for rescan and auto-organization
+    background_tasks.add_task(trigger_dlna_rescan)
+    if category in ["shows", "movies"]:
+        background_tasks.add_task(trigger_auto_organize)
+    
     return {"info": f"Uploaded {len(saved_files)} files to {category}", "files": saved_files}
 
 import aiofiles
 
 @router.post("/upload_stream/{category}")
-async def upload_stream(category: str, request: Request, path: str = Query(default="")):
+async def upload_stream(category: str, request: Request, background_tasks: BackgroundTasks, path: str = Query(default="")):
     incoming_name = path or request.headers.get("x-file-path", "")
     incoming_name = (incoming_name or "").replace("\\", "/")
     normalized = posixpath.normpath(incoming_name).lstrip("/")
@@ -1985,10 +2029,15 @@ async def upload_stream(category: str, request: Request, path: str = Query(defau
     except Exception:
         pass
 
+    # Trigger background tasks for rescan and auto-organization
+    background_tasks.add_task(trigger_dlna_rescan)
+    if category in ["shows", "movies"]:
+        background_tasks.add_task(trigger_auto_organize)
+
     return {"info": "Uploaded 1 file", "files": [dest_rel]}
 
 @router.delete("/delete")
-def delete_media(path: str):
+def delete_media(path: str, background_tasks: BackgroundTasks):
     fs_path = safe_fs_path_from_web_path(path)
     if not os.path.exists(fs_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -2032,6 +2081,9 @@ def delete_media(path: str):
                 except:
                     pass
                 
+        # Trigger MiniDLNA rescan after deletion
+        background_tasks.add_task(trigger_dlna_rescan)
+                
         return {"status": "ok", "deleted": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
@@ -2054,6 +2106,12 @@ def prepare_drive(path: str):
     
     return {"status": "ok", "created": created, "message": f"Created {len(created)} folders on drive."}
 
+@router.post("/organize")
+def manual_organize(background_tasks: BackgroundTasks):
+    """Manually trigger automated media organization"""
+    background_tasks.add_task(trigger_auto_organize)
+    return {"status": "ok", "message": "Automated organization started in background"}
+
 @router.post("/scan")
 def scan_library(background_tasks: BackgroundTasks):
     def run_scan():
@@ -2063,8 +2121,12 @@ def scan_library(background_tasks: BackgroundTasks):
                  build_library_index(cat)
              except Exception as e:
                  print(f"Scan error {cat}: {e}")
+        # Also trigger MiniDLNA rescan and auto-organization
+        trigger_dlna_rescan()
+        trigger_auto_organize()
+        
     background_tasks.add_task(run_scan)
-    return {"status": "ok", "message": "Library scan started in background."}
+    return {"status": "ok", "message": "Library scan and organization started in background."}
 
 def find_file_poster(web_path: str):
     try:

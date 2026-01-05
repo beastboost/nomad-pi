@@ -17,7 +17,7 @@
     --skeleton: #e2e8f0;
 }
 
-.dark-mode {
+body.dark-theme {
     --bg-color: #0f172a;
     --card-bg: #1e293b;
     --text-color: #f1f5f9;
@@ -25,6 +25,30 @@
     --border-color: #334155;
     --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2);
     --skeleton: #334155;
+}
+
+body.glass-theme {
+    --bg-color: #0f172a;
+    --card-bg: rgba(30, 41, 59, 0.7);
+    --text-color: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border-color: rgba(51, 65, 85, 0.5);
+    --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    --skeleton: #334155;
+}
+
+body.glass-theme .stat-card,
+body.glass-theme .card,
+body.glass-theme .header {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+}
+
+body.no-glass * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }
 
 /* Skeleton Loading */
@@ -472,6 +496,27 @@ body {
     .log-viewer {
         height: 300px;
     }
+}
+
+.btn-group {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.input-with-button {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input-with-button input {
+    flex: 1;
+}
+
+.help-text {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
 }
 
 /* Log Viewer */

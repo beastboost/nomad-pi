@@ -17,6 +17,36 @@
     --shadow-lg: 0 8px 16px rgba(0,0,0,0.4);
 }
 
+/* Theme Variations */
+body.dark-theme {
+    --bg-color: #080808;
+    --card-bg: #121212;
+    --card-hover: #1a1a1a;
+    --header-bg: #0a0a0a;
+    --glass-border: 1px solid #222;
+}
+
+body.glass-theme {
+    --bg-color: #0f0f0f;
+    --card-bg: rgba(255, 255, 255, 0.03);
+    --card-hover: rgba(255, 255, 255, 0.06);
+    --header-bg: rgba(15, 15, 15, 0.7);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Glass Effect Toggle */
+body.no-glass * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+body.no-glass .glass,
+body.no-glass .player-bar,
+body.no-glass .modal-backdrop,
+body.no-glass .login-box {
+    background: var(--card-bg) !important;
+}
+
 * {
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;

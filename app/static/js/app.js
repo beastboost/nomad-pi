@@ -3371,43 +3371,32 @@ async function loadOmdbKey() {
 }
 
 function toggleTheme() {
-    const isDark = document.body.classList.contains('dark-theme');
-    if (isDark) {
-        document.body.classList.remove('dark-theme');
-        document.body.classList.add('glass-theme');
-        localStorage.setItem('nomadpi.theme', 'glass');
-        showToast('Glass Theme enabled');
-    } else {
-        document.body.classList.remove('glass-theme');
-        document.body.classList.add('dark-theme');
-        localStorage.setItem('nomadpi.theme', 'dark');
-        showToast('Dark Theme enabled');
-    }
+    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
+    const newTheme = theme === 'dark' ? 'glass' : 'dark';
+    localStorage.setItem('nomadpi.theme', newTheme);
+    applyTheme();
+    showToast(`${newTheme.charAt(0).toUpperCase() + newTheme.slice(1)} Theme enabled`);
 }
 
 function toggleGlassEffect() {
-    document.body.classList.toggle('no-glass');
-    const isNoGlass = document.body.classList.contains('no-glass');
-    localStorage.setItem('nomadpi.noGlass', isNoGlass);
-    showToast(isNoGlass ? 'Glass effects disabled' : 'Glass effects enabled');
+    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
+    const newNoGlass = !noGlass;
+    localStorage.setItem('nomadpi.noGlass', newNoGlass);
+    applyTheme();
+    showToast(newNoGlass ? 'Glass effects disabled' : 'Glass effects enabled');
+}
+
+function applyTheme() {
+    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
+    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
+    
+    document.body.classList.remove('dark-theme', 'glass-theme');
+    document.body.classList.add(`${theme}-theme`);
+    document.body.classList.toggle('no-glass', noGlass);
 }
 
 // Initialize settings on load
 window.addEventListener('DOMContentLoaded', () => {
-    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
-    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
-    
-    if (theme === 'dark') {
-        document.body.classList.remove('glass-theme');
-        document.body.classList.add('dark-theme');
-    } else {
-        document.body.classList.remove('dark-theme');
-        document.body.classList.add('glass-theme');
-    }
-    
-    if (noGlass) {
-        document.body.classList.add('no-glass');
-    }
-    
+    applyTheme();
     checkAuth();
 });

@@ -11,7 +11,8 @@ createApp({
             // UI State
             sidebarCollapsed: window.innerWidth <= 992,
             currentView: 'dashboard',
-            isDarkMode: localStorage.getItem('darkMode') === 'true',
+            theme: localStorage.getItem('nomadpi.theme') || 'glass',
+            noGlass: localStorage.getItem('nomadpi.noGlass') === 'true',
             isLoading: false,
             statsLoading: true,
             connectionStatus: 'connected',
@@ -120,6 +121,9 @@ createApp({
     },
 
     computed: {
+        isDarkMode() {
+            return this.theme === 'dark';
+        },
         activeUploadsCount() {
             return this.uploads.filter(u => u.status === 'uploading').length;
         }
@@ -145,9 +149,7 @@ createApp({
             }
 
             // Apply theme
-            if (this.isDarkMode) {
-                document.body.classList.add('dark-mode');
-            }
+            this.applyTheme();
         },
 
         async checkAuthentication() {
@@ -377,10 +379,34 @@ createApp({
             try {
                 this.isLoading = true;
                 await this.apiCall('/api/media/rebuild', 'POST');
-                this.showNotification('Library rebuild initiated', 'success');
+                this.showNotification('Library rebuild and organization started', 'success');
                 await this.loadMediaStats();
             } catch (error) {
                 this.showNotification('Failed to rebuild library', 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async triggerAutoOrganize() {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/media/organize', 'POST');
+                this.showNotification('Automated organization started', 'success');
+            } catch (error) {
+                this.showNotification('Failed to start organization', 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async restartDLNA() {
+            try {
+                this.isLoading = true;
+                await this.apiCall('/api/system/dlna/restart', 'POST');
+                this.showNotification('DLNA server restarted and rescanning', 'success');
+            } catch (error) {
+                this.showNotification('Failed to restart DLNA', 'error');
             } finally {
                 this.isLoading = false;
             }
@@ -546,9 +572,23 @@ createApp({
         },
 
         toggleTheme() {
-            this.isDarkMode = !this.isDarkMode;
-            localStorage.setItem('darkMode', this.isDarkMode);
-            document.body.classList.toggle('dark-mode', this.isDarkMode);
+            this.theme = this.theme === 'dark' ? 'glass' : 'dark';
+            localStorage.setItem('nomadpi.theme', this.theme);
+            this.applyTheme();
+            this.showNotification(`${this.theme.charAt(0).toUpperCase() + this.theme.slice(1)} theme enabled`, 'info');
+        },
+
+        toggleGlassEffect() {
+            this.noGlass = !this.noGlass;
+            localStorage.setItem('nomadpi.noGlass', this.noGlass);
+            this.applyTheme();
+            this.showNotification(this.noGlass ? 'Glass effects disabled' : 'Glass effects enabled', 'info');
+        },
+
+        applyTheme() {
+            document.body.classList.remove('dark-theme', 'glass-theme', 'dark-mode');
+            document.body.classList.add(`${this.theme}-theme`);
+            document.body.classList.toggle('no-glass', this.noGlass);
         },
 
         formatBytes(bytes) {
