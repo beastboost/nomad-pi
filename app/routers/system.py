@@ -6,6 +6,7 @@ import subprocess
 import platform
 import json
 import logging
+import shutil
 from datetime import datetime
 from app import database
 
@@ -550,10 +551,14 @@ def system_control(action: str):
     if action not in ["shutdown", "reboot", "update", "restart"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     
+    def _get_bin_path(name: str, default: str) -> str:
+        return shutil.which(name) or default
+
     if action == "restart":
         if platform.system() == "Linux":
             try:
-                subprocess.Popen(["sudo", "-n", "/usr/bin/systemctl", "restart", "nomad-pi.service"])
+                systemctl = _get_bin_path("systemctl", "/usr/bin/systemctl")
+                subprocess.Popen(["sudo", "-n", systemctl, "restart", "nomad-pi.service"])
                 return {"status": "ok", "message": "Service restart initiated..."}
             except Exception as e:
                 return {"status": "error", "message": f"Failed to restart service: {e}"}
@@ -593,7 +598,10 @@ def system_control(action: str):
             return {"status": "update_simulated", "message": "Update script would run on Linux or Windows"}
 
     if platform.system() == "Linux":
-        cmd = ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"] if action == "shutdown" else ["sudo", "-n", "/usr/sbin/reboot"]
+        shutdown_bin = _get_bin_path("shutdown", "/usr/sbin/shutdown")
+        reboot_bin = _get_bin_path("reboot", "/usr/sbin/reboot")
+        
+        cmd = ["sudo", "-n", shutdown_bin, "-h", "now"] if action == "shutdown" else ["sudo", "-n", reboot_bin]
         try:
             subprocess.Popen(cmd)
             return {"status": "ok", "message": f"{action.capitalize()} initiated..."}

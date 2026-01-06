@@ -18,6 +18,7 @@ from collections import OrderedDict
 from functools import lru_cache
 from hashlib import md5
 import threading
+import shutil
 from app import database
 
 logger = logging.getLogger(__name__)
@@ -1902,13 +1903,21 @@ import psutil
 import subprocess
 import platform
 
+def _get_bin_path(name: str, default: str) -> str:
+    """Find binary path dynamically or use default"""
+    import shutil
+    return shutil.which(name) or default
+
 def trigger_dlna_rescan():
     """Trigger a MiniDLNA rescan if on Linux"""
     if platform.system() == "Linux":
         try:
-            # We try to use the same logic as system.py
-            subprocess.run(["sudo", "/usr/sbin/minidlnad", "-R"], check=False)
-            subprocess.run(["sudo", "/usr/bin/systemctl", "restart", "minidlna"], check=False)
+            # We try to use dynamic paths for better SBC compatibility
+            minidlnad = _get_bin_path("minidlnad", "/usr/sbin/minidlnad")
+            systemctl = _get_bin_path("systemctl", "/usr/bin/systemctl")
+            
+            subprocess.run(["sudo", minidlnad, "-R"], check=False)
+            subprocess.run(["sudo", systemctl, "restart", "minidlna"], check=False)
             logger.info("Triggered MiniDLNA rescan")
         except Exception as e:
             logger.error(f"Failed to trigger MiniDLNA rescan: {e}")

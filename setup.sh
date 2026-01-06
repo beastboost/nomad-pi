@@ -466,6 +466,9 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
             fi
 
             TEMP_LIMIT="${NOMADPI_TEMP_LIMIT:-80}"
+        elif echo "$MODEL" | grep -qi "Raspberry Pi 5"; then
+            echo "Raspberry Pi 5 detected. Using default frequencies (high performance)."
+            ARM_FREQ="" # Pi 5 is fast enough, don't force OC by default
         elif echo "$MODEL" | grep -qi "Raspberry Pi 4"; then
             ARM_FREQ="1750"
             GPU_FREQ="600"
@@ -479,6 +482,9 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
             GPU_FREQ="450"
             OVER_VOLTAGE="2"
         else
+            echo "Non-Raspberry Pi or unknown model detected ($MODEL)."
+            echo "Skipping hardware-specific optimizations (Overclocking/config.txt)."
+            ARM_FREQ=""
             OVER_VOLTAGE=""
         fi
 
