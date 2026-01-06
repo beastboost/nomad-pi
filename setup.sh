@@ -261,8 +261,22 @@ if command -v nmcli &> /dev/null; then
             sudo nmcli con modify "NomadPi" wifi-sec.psk "nomadpassword"
             # Set lower priority for Hotspot so it only activates if Home Wi-Fi fails
             sudo nmcli con modify "NomadPi" connection.autoconnect-priority 0
+            # Ensure the hotspot doesn't aggressively take over
+            sudo nmcli con modify "NomadPi" connection.autoconnect-retries 1
         }
         create_hotspot || echo "Warning: Could not create hotspot (hardware might be missing or busy)."
+    fi
+
+    # Disable WiFi Power Management (Prevents disconnects mid-transfer)
+    echo "Disabling WiFi Power Management..."
+    sudo iw dev "$WIFI_DEV" set power_save off 2>/dev/null || true
+    
+    # Make power management change persistent
+    if [ -d "/etc/NetworkManager/conf.d" ]; then
+        sudo bash -c "cat > /etc/NetworkManager/conf.d/default-wifi-powersave-on.conf" <<EOL
+[connection]
+wifi.powersave = 2
+EOL
     fi
 
     sudo nmcli networking on >/dev/null 2>&1 || true

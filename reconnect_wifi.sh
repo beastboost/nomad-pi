@@ -10,6 +10,14 @@ echo "Current active connections:"
 nmcli connection show --active
 echo ""
 
+# Check WiFi Power Management
+WIFI_DEV="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}')"
+if [ -n "$WIFI_DEV" ]; then
+    echo "WiFi Power Management Status:"
+    iw dev "$WIFI_DEV" get power_save 2>/dev/null || echo "  (Not supported/No iw tool)"
+    echo ""
+fi
+
 # Check if hotspot is active
 if nmcli connection show --active | grep -q "NomadPi"; then
     echo "✓ Hotspot 'NomadPi' is currently active"
