@@ -210,38 +210,48 @@ def guess_title_year(name: str):
         s_clean = re.sub(rf'\b{tag}\b', ' ', s_clean, flags=re.I)
     
     # 3. Extract year (4 digits starting with 19 or 20)
-    # We look for a year that is preceded by a space or a bracket
     year = None
-    # Enhanced year regex to handle double brackets like ((2010)) or ( (2010)
-    m = re.search(r'(?:[\s\(\[])+(19\d{2}|20\d{2})(?:[\s\s\)\]])+', s_clean)
+    # Look for year preceded by space, dot, underscore or bracket
+    m = re.search(r'[\s\.\(\[_\-](19\d{2}|20\d{2})[\s\.\)\]_\-]', s)
     if not m:
-        # Fallback to any 4 digit year that looks like a year
-        m = re.search(r'\b(19\d{2}|20\d{2})\b', s_clean)
-        
+        # Fallback to year at end of string
+        m = re.search(r'[\s\.\(\[_\-](19\d{2}|20\d{2})$', s)
+    
     if m:
         year = m.group(1)
-        # The title is everything before the year
-        idx = s_clean.find(year)
-        title = s_clean[:idx].strip()
-        if not title:
-            title = s_clean.replace(year, '').strip()
+        # Title is everything before the year
+        title_part = s[:m.start()]
     else:
-        title = s_clean
-        
-    # 4. Final cleanup of title (remove trailing brackets/dashes)
-    # Clean up empty brackets first (often left by year extraction)
-    title = re.sub(r'\(\s*\)|\s*\[\s*\]', ' ', title)
-    title = re.sub(r'[\[\(].*?[\]\)]', ' ', title)
-    # Special handling for hyphenated titles: don't replace hyphens if they are surrounded by letters
-    # This preserves "Half-Blood" but cleans "Title - 1080p"
-    title = re.sub(r'(?<!\w)-(?!\w)', ' ', title)
+        title_part = s
+
+    # 4. Final cleanup of title
+    # Remove file extension if present
+    title = os.path.splitext(title_part)[0]
+    
+    # Remove quality/source tags from the title part
+    for tag in tags:
+        title = re.sub(rf'\b{tag}\b', ' ', title, flags=re.I)
+    
+    # Preserve hyphens if they are part of words (e.g. Kick-Ass)
+    # But remove them if they are separators (e.g. Title - Quality)
+    title = re.sub(r'(?<![a-zA-Z0-9])[\-_]+|[\-_]+(?![a-zA-Z0-9])', ' ', title)
+    
+    # Replace dots/underscores with spaces
     title = re.sub(r'[\._]+', ' ', title)
     
-    # Final trim of any remaining leading/trailing junk
-    title = title.strip(' -_()[]')
-    title = re.sub(r'\s+', ' ', title).strip()
+    # Remove empty brackets/parentheses
+    title = re.sub(r'[\(\[\{]\s*[\)\]\}]', ' ', title)
+    # Remove content within brackets/parentheses if it looks like junk (tags)
+    title = re.sub(r'[\(\[\{][^a-zA-Z0-9]*[a-zA-Z0-9]+[^a-zA-Z0-9]*[\)\]\}]', lambda m: ' ' if any(t in m.group(0).lower() for t in tags) else m.group(0), title)
+
+    # Final trim and space normalization
+    title = re.sub(r'\s+', ' ', title).strip(' -_()[]')
     
-    return title or s, year
+    # Special case: If title became empty or too short, revert to original filename (sans extension)
+    if len(title) < 2:
+        title = os.path.splitext(title_part)[0].strip()
+
+    return title, year
 
 def normalize_title(s: str):
     s = re.sub(r'[\._]+', ' ', str(s or ''))
@@ -1816,6 +1826,26 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
                 dest_dir = os.path.join(base, folder)
                 dest_name = f"{folder}{ext}"
                 dest_fs = os.path.join(dest_dir, dest_name)
+
+                # CHECK FOR DUPLICATES: Check if this movie already exists in the library
+                # We check the final destination folder name in the base movies directory
+                exists_in_library = False
+                for existing_folder in os.listdir(base):
+                    existing_path = os.path.join(base, existing_folder)
+                    if os.path.isdir(existing_path):
+                        # If a folder with this title and year already exists, skip it
+                        if existing_folder.lower() == folder.lower():
+                            # Check if it contains a video file
+                            has_video = any(os.path.splitext(f)[1].lower() in [".mp4", ".mkv", ".avi", ".mov", ".webm"] 
+                                          for f in os.listdir(existing_path))
+                            if has_video:
+                                exists_in_library = True
+                                break
+                
+                if exists_in_library and os.path.abspath(src_fs) != os.path.abspath(dest_fs):
+                    logger.info(f"Skipping duplicate movie: {title} already exists in library")
+                    skipped += 1
+                    continue
 
                 # Correct web paths relative to BASE_DIR
                 try:
