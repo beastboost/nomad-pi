@@ -219,6 +219,12 @@ class IngestHandler(FileSystemEventHandler):
                 }
                 media.database.upsert_library_index_item(item)
                 logger.info(f"Indexed {category} file: {web_path}")
+                
+                # Trigger MiniDLNA rescan after ingestion
+                try:
+                    media.trigger_dlna_rescan()
+                except Exception as e:
+                    logger.error(f"Failed to trigger MiniDLNA rescan in ingest: {e}")
             except Exception as e:
                 logger.warning(f"Failed to update index for {filename}: {e}")
         finally:

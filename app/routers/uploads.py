@@ -237,6 +237,7 @@ def cleanup_old_uploads(background_tasks: BackgroundTasks, file_path: Path, dela
 
 @router.post("/single", response_model=UploadResponse)
 async def upload_single_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     file_id: Optional[str] = Query(None),
     category: str = Query("files"),
@@ -306,7 +307,15 @@ async def upload_single_file(
             })
         except Exception as e:
             logger.error(f"Failed to index uploaded file: {e}")
-
+            
+        # Trigger MiniDLNA rescan and auto-organization
+        try:
+            from app.routers.media import trigger_dlna_rescan, trigger_auto_organize
+            background_tasks.add_task(trigger_dlna_rescan)
+            background_tasks.add_task(trigger_auto_organize)
+        except ImportError:
+            logger.warning("Could not import triggers from media router")
+            
         return UploadResponse(
             file_id=file_id,
             filename=file.filename,
@@ -324,6 +333,7 @@ async def upload_single_file(
 
 @router.post("/multiple", response_model=MultipleUploadResponse)
 async def upload_multiple_files(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     category: str = Query("files")
 ):
@@ -412,6 +422,15 @@ async def upload_multiple_files(
     
     total_time = time.time() - start_time
     
+    # Trigger MiniDLNA rescan and auto-organization if any files were uploaded
+    if uploaded_files:
+        try:
+            from app.routers.media import trigger_dlna_rescan, trigger_auto_organize
+            background_tasks.add_task(trigger_dlna_rescan)
+            background_tasks.add_task(trigger_auto_organize)
+        except ImportError:
+            logger.warning("Could not import triggers from media router")
+
     return MultipleUploadResponse(
         files=uploaded_files,
         total_size=total_size,
