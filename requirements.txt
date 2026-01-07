@@ -12,3 +12,5 @@ watchdog
 apscheduler
 python-jose[cryptography]
 httpx
+numpy
+scikit-learn

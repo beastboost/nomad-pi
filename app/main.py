@@ -2,9 +2,13 @@ from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
-from app.routers import media, system, auth, uploads
 from app.services import ingest
 from app import database
+
+# Initialize database before importing routers that might depend on it
+database.init_db()
+
+from app.routers import media, system, auth, uploads
 import os
 import threading
 import mimetypes

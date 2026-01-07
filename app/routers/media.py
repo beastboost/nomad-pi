@@ -84,9 +84,6 @@ INDEX_TTL = timedelta(hours=12)
 _index_lock = threading.Lock()
 _index_building = {}
 
-# Initialize DB on module load (or main startup)
-database.init_db()
-
 def get_scan_paths(category: str):
     paths = [os.path.join(BASE_DIR, category)]
     # Also check data/media/category
