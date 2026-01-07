@@ -35,7 +35,7 @@ mkdir -p ~/nomad-pi && cd ~/nomad-pi
 ```bash
 git clone https://github.com/beastboost/nomad-pi.git .
 chmod +x setup.sh
-./setup.sh
+sudo ./setup.sh
 ```
 
 The installer will automatically:
@@ -57,9 +57,17 @@ Simply go to the **Admin** panel in the web UI and click **Update from GitHub**.
 - **Samba (SMB)**: Access your media via network shares at `\\nomadpi.local\nomadpi`.
 - **USB Import**: Plug in a drive and use the **Storage Management** tool to mount and index files.
 
-## 🔐 Security
-- **Default Password**: `nomad`
-- **Recommended**: Change your password immediately in **Settings -> Account Security**.
+## 🔐 Security & First Login
+
+Nomad Pi is designed with security-first principles. On the first run:
+
+1.  **Run the Setup**: `sudo ./setup.sh`
+2.  **Check the Console**: The installer will create a default `admin` user and print a **randomly generated password** to your terminal. 
+    *   *If you set `ADMIN_PASSWORD` in your environment, that will be used instead.*
+3.  **Login**: Access the web UI and log in with username `admin` and the password from Step 2.
+4.  **Forced Change**: For your protection, you will be **forced to change your password** immediately after the first successful login.
+
+You can manage additional users and roles in the **Admin -> User Management** section.
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to submit a Pull Request.

@@ -52,13 +52,12 @@ find . -name "*.sh" -exec chmod +x {} +
 
 update_status 50 "Installing system dependencies..."
 echo "Installing/Updating system dependencies..."
-# Ensure all required system packages are present (especially if new ones were added in a recent release)
-if ! sudo apt-get update; then
-    echo "Warning: apt-get update failed, continuing with existing package lists..." >> update.log
-fi
-
+# Ensure all required system packages are present
+# We only run update if install fails to save time on Pi
 if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools; then
-    echo "Warning: Some system packages may have failed to install" >> update.log
+    echo "Some packages missing, updating list and trying again..." >> update.log
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
 fi
 update_status 60 "Installing Python dependencies..."
 echo "Installing Python dependencies..."
@@ -88,15 +87,15 @@ echo "Waiting 5 seconds for UI to update..."
 sleep 5
 
 # Try to restart the service, with fallback if service doesn't exist
-# We use restart which works whether it was running or not
 if command -v systemctl >/dev/null 2>&1; then
     echo "Attempting to restart nomad-pi service via systemctl..." >> update.log
-    # Check if the service file exists at all
     if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
         sudo systemctl daemon-reload
         sudo systemctl enable nomad-pi.service
-        sudo systemctl restart nomad-pi.service
-        echo "Service restart command issued." >> update.log
+        # Background the restart so the script can finish and the UI gets the final status
+        echo "Restarting service in background..." >> update.log
+        nohup bash -c "sleep 2 && sudo systemctl restart nomad-pi" > /dev/null 2>&1 &
+        echo "Service restart command issued in background." >> update.log
     else
         echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
     fi

@@ -32,23 +32,28 @@ def ensure_admin_user():
     users = database.get_all_users()
     if not users:
         # Create default admin user
-        must_change = False
+        must_change = True  # Always force change for first-time setup
         if ADMIN_PASSWORD:
             password = ADMIN_PASSWORD
         elif ADMIN_PASSWORD_HASH:
             password = None
+            must_change = False # If pre-hashed, assume it's secure
         else:
             password = secrets.token_urlsafe(16)
-            must_change = True
             
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
         database.create_user("admin", h, is_admin=True, must_change_password=must_change)
         
-        if password and must_change:
-            logger.warning(f"Created default admin user with RANDOM password: {password}")
-            print(f"!!! WARNING: Created default admin user with RANDOM password: {password} !!!")
+        if password:
+            print(f"\n" + "="*50)
+            print(f"!!! FIRST TIME SETUP: ADMIN USER CREATED !!!")
+            print(f"Username: admin")
+            print(f"Password: {password}")
+            print(f"PLEASE LOGIN AND CHANGE YOUR PASSWORD IMMEDIATELY.")
+            print("="*50 + "\n")
+            logger.warning(f"Created default admin user. Password displayed in console.")
         else:
-            print(f"Created default admin user with {'pre-hashed' if ADMIN_PASSWORD_HASH else 'configured'} password")
+            print(f"Created default admin user with pre-hashed password")
 
 ensure_admin_user()
 
@@ -216,6 +221,18 @@ def logout(request: Request):
 @router.get("/check")
 def check_auth(request: Request):
     token = request.cookies.get("auth_token")
-    if token and database.get_session(token):
-        return {"authenticated": True}
+    if token:
+        session = database.get_session(token)
+        if session:
+            user = database.get_user_by_id(session['user_id'])
+            if user:
+                return {
+                    "authenticated": True,
+                    "user": {
+                        "id": user['id'],
+                        "username": user['username'],
+                        "is_admin": bool(user['is_admin']),
+                        "must_change_password": bool(user.get('must_change_password', 0))
+                    }
+                }
     return {"authenticated": False}

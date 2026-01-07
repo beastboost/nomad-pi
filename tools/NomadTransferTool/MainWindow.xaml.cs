@@ -318,7 +318,7 @@ namespace NomadTransferTool
                 {
                     var content = await omdbRes.Content.ReadAsStringAsync();
                     var omdbData = JsonConvert.DeserializeObject<dynamic>(content);
-                    if (omdbData != null && !string.IsNullOrEmpty((string)omdbData.key))
+                    if (omdbData?.key != null && !string.IsNullOrEmpty((string)omdbData.key))
                     {
                         string key = (string)omdbData.key;
                         Dispatcher.Invoke(() => {
@@ -1599,31 +1599,28 @@ namespace NomadTransferTool
             }
         }
 
-        private async Task DownloadPoster(string url, string dest)
-        {
-            var bytes = await client.GetByteArrayAsync(url);
-            await File.WriteAllBytesAsync(dest, bytes);
-        }
-
         private async Task ProcessMediaItems(IEnumerable<MediaItem> items, System.Threading.CancellationToken token)
         {
-            if (items == null || items.Count == 0) return;
+            if (items == null || items.Count() == 0) return;
 
             string? targetPath = null;
             bool effectiveUseSamba = UseSamba;
             long requiredSpace = 0;
 
             // Calculate total required space first
-            foreach (var item in items)
+            if (items != null)
             {
-                if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
+                foreach (var item in items!)
                 {
-                    double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
-                    requiredSpace += (long)(bytes * 1.1);
-                }
-                else
-                {
-                    requiredSpace += item.FileSize;
+                    if (IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
+                    {
+                        double bytes = (item.SelectedPreset.Bitrate * 1024.0 * item.DurationSeconds) / 8.0;
+                        requiredSpace += (long)(bytes * 1.1);
+                    }
+                    else
+                    {
+                        requiredSpace += item.FileSize;
+                    }
                 }
             }
 
@@ -1695,9 +1692,9 @@ namespace NomadTransferTool
             TotalProgress = 0;
             TranscodeQueue.Clear();
             ProcessingLogs.Clear();
-            AddLog($"Starting processing for {items.Count} items.");
+            AddLog($"Starting processing for {items!.Count()} items.");
 
-            foreach (var item in items)
+            foreach (var item in items!)
             {
                 if (useHandbrake && IsVideoFile(item.SourcePath) && item.SelectedPreset != null && item.SelectedPreset.Bitrate > 0)
                 {
@@ -1713,9 +1710,10 @@ namespace NomadTransferTool
 
             try
             {
-                foreach (var item in items)
+                foreach (var item in items!)
                 {
                     token.ThrowIfCancellationRequested();
+                    string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                     string? tempFile = null;
 
                     try
@@ -2016,7 +2014,7 @@ namespace NomadTransferTool
                             }
                         }
 
-                        TotalProgress = (double)processedItems / items.Count * 100;
+                        TotalProgress = (double)processedItems / items!.Count() * 100;
                     }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception ex)
@@ -2128,7 +2126,7 @@ namespace NomadTransferTool
             await CopyFileWithProgress(item, item.SourcePath, dest, token);
         }
 
-        private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category, string season = null)
+        private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category, string? season = null)
         {
             try
             {
@@ -2423,7 +2421,7 @@ namespace NomadTransferTool
     {
         private string _title = "";
         private string _year = "";
-        private string _category = Categories.Movies;
+        private string _category = MainWindow.Categories.Movies;
         private string _plot = "";
         private string _season = "";
         private string _episode = "";

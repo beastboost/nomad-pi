@@ -207,6 +207,95 @@ function restoreShowsState() {
 }
 
 // Auth Functions
+function showChangePasswordModal(isForced = false) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('force-change-password-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'force-change-password-modal';
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.style.zIndex = '10000';
+        
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 400px;">
+                <h2>${isForced ? 'Password Change Required' : 'Change Password'}</h2>
+                <p style="color: var(--text-muted); margin-bottom: 20px;">
+                    ${isForced ? 'For security reasons, you must change your password before continuing.' : 'Enter your current and new password below.'}
+                </p>
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" id="force-current-pwd" class="full-width">
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="force-new-pwd" class="full-width">
+                </div>
+                <div class="form-group">
+                    <label>Confirm New Password</label>
+                    <input type="password" id="force-confirm-pwd" class="full-width">
+                </div>
+                <div id="force-pwd-error" class="error-msg" style="display:none; margin-bottom: 15px;"></div>
+                <div class="modal-actions">
+                    ${isForced ? '' : '<button onclick="document.getElementById(\'force-change-password-modal\').remove()" class="secondary">Cancel</button>'}
+                    <button onclick="handleForcePasswordChange(${isForced})" class="primary">Change Password</button>
+                    ${isForced ? '<button onclick="logout()" class="secondary" style="margin-left: 10px;">Logout</button>' : ''}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+}
+
+async function handleForcePasswordChange(isForced) {
+    const currentPwd = document.getElementById('force-current-pwd').value;
+    const newPwd = document.getElementById('force-new-pwd').value;
+    const confirmPwd = document.getElementById('force-confirm-pwd').value;
+    const errorEl = document.getElementById('force-pwd-error');
+    
+    if (!currentPwd || !newPwd || !confirmPwd) {
+        errorEl.textContent = 'All fields are required';
+        errorEl.style.display = 'block';
+        return;
+    }
+    
+    if (newPwd !== confirmPwd) {
+        errorEl.textContent = 'New passwords do not match';
+        errorEl.style.display = 'block';
+        return;
+    }
+    
+    if (newPwd.length < 8) {
+        errorEl.textContent = 'New password must be at least 8 characters long';
+        errorEl.style.display = 'block';
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_password: currentPwd,
+                new_password: newPwd
+            })
+        });
+        
+        if (res.ok) {
+            alert('Password changed successfully! Please login again.');
+            document.getElementById('force-change-password-modal').remove();
+            logout(); // Force re-login with new password
+        } else {
+            const data = await res.json();
+            errorEl.textContent = data.detail || 'Failed to change password';
+            errorEl.style.display = 'block';
+        }
+    } catch (e) {
+        errorEl.textContent = 'Connection error';
+        errorEl.style.display = 'block';
+    }
+}
+
 async function login() {
     const usernameInput = document.getElementById('username-input');
     const passwordInput = document.getElementById('password-input');
@@ -224,6 +313,13 @@ async function login() {
         });
 
         if (res.ok) {
+            const data = await res.json();
+            
+            if (data.user && data.user.must_change_password) {
+                showChangePasswordModal(true); // Force change
+                return;
+            }
+
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             // Load initial data
@@ -251,6 +347,10 @@ async function checkAuth() {
         const res = await fetch(`${API_BASE}/auth/check`);
         const data = await res.json();
         if (data.authenticated) {
+            if (data.user && data.user.must_change_password) {
+                showChangePasswordModal(true);
+                return;
+            }
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             loadStorageStats();
