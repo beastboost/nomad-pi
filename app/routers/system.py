@@ -14,7 +14,7 @@ from app.routers.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 
 router = APIRouter()
 public_router = APIRouter()
@@ -679,6 +679,10 @@ def get_changelog():
     # Fallback for Windows/Testing
     return {
         "changelog": [
+            "Improved TV Show detection for root folders (1.6.0)",
+            "Automated MiniDLNA permissions and system tuning in setup.sh (1.6.0)",
+            "Secured backend endpoints with user-level authentication (1.6.0)",
+            "Fixed cross-user data leaks in database queries (1.6.0)",
             "Fixed mobile UI header alignment (1.5.1)",
             "Improved PWA notch support (1.5.1)",
             "Redesigned mobile menu transition (1.5.1)",
