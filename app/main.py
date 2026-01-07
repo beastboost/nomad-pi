@@ -2,13 +2,18 @@ from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
-from app.services import ingest
 from app import database
 
-# Initialize database before importing routers that might depend on it
+# Initialize database immediately
 database.init_db()
 
-from app.routers import media, system, auth, uploads
+# Now import routers and services
+from app.routers import auth
+# Ensure admin user exists after DB is ready
+auth.ensure_admin_user()
+
+from app.services import ingest
+from app.routers import media, system, uploads
 import os
 import threading
 import mimetypes

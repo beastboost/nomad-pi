@@ -78,7 +78,7 @@ def ensure_admin_user():
         else:
             print(f"Created default admin user with pre-hashed password")
 
-ensure_admin_user()
+# ensure_admin_user() called in main.py after init_db
 
 class LoginRequest(BaseModel):
     username: str = "admin"
