@@ -793,6 +793,17 @@ def increment_play_count(path: str = Body(..., embed=True), user_id: int = Depen
     database.increment_play_count(user_id, path)
     return {"status": "success"}
 
+@router.get("/similar")
+def get_similar_media(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    """Get similar media items for a given path."""
+    items = database.get_similar_media(path)
+    # Add progress information for the user
+    all_progress = database.get_all_progress(user_id)
+    for item in items:
+        if item['path'] in all_progress:
+            item['progress'] = all_progress[item['path']]
+    return items
+
 @router.get("/library/{category}")
 def get_library(
     category: str, 

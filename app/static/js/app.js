@@ -1522,11 +1522,66 @@ function openPdfViewer(path, title) {
 function closeViewer() {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
+    
+    // Stop any video/audio
+    const video = body ? body.querySelector('video') : null;
+    if (video) {
+        video.pause();
+        video.src = "";
+        video.load();
+    }
+    
     if (body) body.innerHTML = '';
     if (modal) modal.classList.add('hidden');
     comicPages = [];
     comicIndex = 0;
 }
+
+// Global Keyboard Shortcuts
+window.addEventListener('keydown', (e) => {
+    // Ignore if user is typing in an input or textarea
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    const video = document.getElementById('main-video-player');
+    const modal = document.getElementById('viewer-modal');
+    const isModalOpen = modal && !modal.classList.contains('hidden');
+
+    if (isModalOpen && video) {
+        switch (e.key.toLowerCase()) {
+            case ' ': // Space: Play/Pause
+                e.preventDefault();
+                if (video.paused) video.play();
+                else video.pause();
+                break;
+            case 'f': // F: Fullscreen
+                e.preventDefault();
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else {
+                    video.requestFullscreen().catch(() => {});
+                }
+                break;
+            case 'm': // M: Mute
+                e.preventDefault();
+                video.muted = !video.muted;
+                break;
+            case 'arrowright': // Right Arrow: Seek forward 10s
+                e.preventDefault();
+                video.currentTime = Math.min(video.duration, video.currentTime + 10);
+                break;
+            case 'arrowleft': // Left Arrow: Seek backward 10s
+                e.preventDefault();
+                video.currentTime = Math.max(0, video.currentTime - 10);
+                break;
+            case 'escape': // Escape: Close modal
+                closeViewer();
+                break;
+        }
+    } else if (isModalOpen) {
+        // Handle Esc for other viewer types (images, comics, pdfs)
+        if (e.key === 'Escape') closeViewer();
+    }
+});
 
 function openImageViewer(path, title) {
     const modal = document.getElementById('viewer-modal');
@@ -1657,7 +1712,53 @@ function openVideoViewer(path, title, startSeconds = 0, extras = null) {
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
     body.appendChild(video);
+    
+    // Add "More Like This" section
+    const similarContainer = document.createElement('div');
+    similarContainer.className = 'similar-media-section';
+    similarContainer.style.cssText = 'padding:20px; border-top:1px solid rgba(255,255,255,0.1); margin-top:20px;';
+    similarContainer.innerHTML = '<h3 style="margin-bottom:15px; color:#ddd;">More Like This</h3><div class="similar-grid" style="display:flex; gap:15px; overflow-x:auto; padding-bottom:10px;"></div>';
+    body.appendChild(similarContainer);
+    
+    fetchSimilarMedia(path, similarContainer.querySelector('.similar-grid'));
+
     modal.classList.remove('hidden');
+}
+
+async function fetchSimilarMedia(path, container) {
+    try {
+        const res = await fetch(`${API_BASE}/media/similar?path=${encodeURIComponent(path)}`);
+        if (res.status === 401) return;
+        const items = await res.json();
+        
+        if (!items || items.length === 0) {
+            container.parentElement.style.display = 'none';
+            return;
+        }
+        
+        items.forEach(item => {
+            const card = document.createElement('div');
+            card.style.cssText = 'flex:0 0 140px; cursor:pointer; position:relative;';
+            const poster = item.poster || '/static/img/placeholder.png';
+            
+            card.innerHTML = `
+                <div style="aspect-ratio:2/3; background:#222; border-radius:6px; overflow:hidden; margin-bottom:8px;">
+                    <img src="${poster}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
+                </div>
+                <div style="font-size:0.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">${escapeHtml(item.name)}</div>
+                <div style="font-size:0.75em; color:#aaa;">${item.year || ''}</div>
+            `;
+            
+            card.onclick = () => {
+                // Close current viewer and open new one
+                playVideo(item, item.progress?.current_time || 0);
+            };
+            container.appendChild(card);
+        });
+    } catch (e) {
+        console.error('Failed to fetch similar media:', e);
+        container.parentElement.style.display = 'none';
+    }
 }
 
 function playTrailer(path, title) {
