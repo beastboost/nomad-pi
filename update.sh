@@ -21,7 +21,29 @@ update_status() {
     mv "$tmp_file" "$STATUS_FILE"
 }
 
-update_status 5 "Configuring Git..."
+update_status 5 "Checking System Health..."
+echo "Checking system memory and power resources..."
+
+# Check for under-voltage/throttling (Pi specific)
+if command -v vcgencmd >/dev/null 2>&1; then
+    THROTTLED=$(vcgencmd get_throttled | cut -d= -f2)
+    if [ "$THROTTLED" != "0x0" ]; then
+        echo "WARNING: Your Pi is reporting throttling/under-voltage ($THROTTLED)!"
+    fi
+fi
+
+# Ensure enough swap for pip installs
+TOTAL_SWAP=$(free -m | awk '/Swap/ {print $2}')
+if [ "$TOTAL_SWAP" -lt 1000 ]; then
+    echo "Increasing swap to 1GB for stability..."
+    if [ -f /etc/dphys-swapfile ]; then
+        sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+        sudo dphys-swapfile setup
+        sudo dphys-swapfile swapon
+    fi
+fi
+
+update_status 10 "Configuring Git..."
 echo "Optimizing Git configuration..."
 
 # System update to pick up GnuTLS/security fixes (optional but recommended for handshake issues)
@@ -61,12 +83,29 @@ if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager do
 fi
 update_status 60 "Installing Python dependencies..."
 echo "Installing Python dependencies..."
+
+# Fix permissions on venv if it exists to avoid Errno 13
+if [ -d "venv" ]; then
+    echo "Fixing venv permissions..."
+    sudo chown -R $USER:$USER venv || true
+fi
+
 if [ ! -d "venv" ]; then
     echo "Virtual environment not found. Creating one..."
     python3 -m venv venv
 fi
+
 ./venv/bin/pip install --upgrade pip
-./venv/bin/pip install -r requirements.txt
+
+# Split installation into chunks to avoid massive memory spikes (Pi Zero stability)
+echo "Installing base dependencies..."
+./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+
+echo "Installing security and utility dependencies..."
+./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
+
+echo "Installing remaining requirements..."
+./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt
 
 update_status 80 "Update complete. Preparing to restart..."
 echo "Update complete. Preparing to restart..."
