@@ -459,9 +459,31 @@ def get_shows_library(user_id: int = Depends(get_current_user_id)):
                 "name": show_name,
                 "seasons": {},
                 "poster": None,
+                "genres": set(),
+                "years": set(),
+                "mtime": 0,
                 "path": os.path.join("/data/shows", show_name).replace(os.sep, '/')
             }
         
+        # Aggregate genres and years
+        if r.get("genre"):
+            for g in r.get("genre").split(','):
+                shows_dict[show_name]["genres"].add(g.strip())
+        if r.get("year"):
+            shows_dict[show_name]["years"].add(str(r.get("year")))
+        
+        # Track most recent modification time
+        mtime = r.get("mtime") or 0
+        if mtime > shows_dict[show_name]["mtime"]:
+            shows_dict[show_name]["mtime"] = mtime
+        
+        # Track last played
+        prog = all_progress.get(web_path)
+        if prog and prog.get("last_played"):
+            lp = prog.get("last_played")
+            if not shows_dict[show_name].get("last_played") or lp > shows_dict[show_name]["last_played"]:
+                shows_dict[show_name]["last_played"] = lp
+
         if season_name not in shows_dict[show_name]["seasons"]:
             shows_dict[show_name]["seasons"][season_name] = {
                 "name": season_name,
@@ -510,6 +532,9 @@ def get_shows_library(user_id: int = Depends(get_current_user_id)):
             season["episodes"].sort(key=lambda x: (x["ep_num"], database.natural_sort_key_list(x["name"])))
             seasons.append(season)
         show["seasons"] = seasons
+        # Convert sets to sorted lists
+        show["genres"] = sorted(list(show.get("genres", [])))
+        show["years"] = sorted(list(show.get("years", [])))
         out.append(show)
         
     return {"shows": out}

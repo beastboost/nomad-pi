@@ -752,7 +752,7 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
 
     q = (str(q) if q is not None and not hasattr(q, 'default') else "").strip().lower()
     offset = max(0, int(offset or 0))
-    limit = max(1, min(int(limit or 50), 200))
+    limit = max(1, min(int(limit or 50), 50000))
 
     conn = get_db()
     try:

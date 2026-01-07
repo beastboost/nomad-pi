@@ -292,6 +292,39 @@ async function checkAuth() {
     }
 }
 
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.style.position = 'fixed';
+    toast.style.bottom = '20px';
+    toast.style.right = '20px';
+    toast.style.padding = '12px 20px';
+    toast.style.borderRadius = '8px';
+    toast.style.color = '#fff';
+    toast.style.zIndex = '9999';
+    toast.style.animation = 'fade-in 0.3s ease-out';
+    toast.style.backdropFilter = 'blur(10px)';
+    toast.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+    
+    if (type === 'success') {
+        toast.style.background = 'rgba(40, 167, 69, 0.8)';
+        toast.innerHTML = `<i class="fas fa-check-circle" style="margin-right:8px;"></i> ${message}`;
+    } else if (type === 'error') {
+        toast.style.background = 'rgba(220, 53, 69, 0.8)';
+        toast.innerHTML = `<i class="fas fa-exclamation-circle" style="margin-right:8px;"></i> ${message}`;
+    } else {
+        toast.style.background = 'rgba(0, 123, 255, 0.8)';
+        toast.innerHTML = `<i class="fas fa-info-circle" style="margin-right:8px;"></i> ${message}`;
+    }
+
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'fade-out 0.3s ease-in forwards';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
 function handleLoginKey(e) {
     if (e.key === 'Enter') login();
 }
@@ -355,6 +388,7 @@ function showSection(id) {
     if (id === 'admin') {
         loadDrives();
         loadWifiStatus();
+        loadUsers();
         // Auto-refresh drives every 5 seconds while in admin panel
         driveScanInterval = setInterval(() => {
             // Only refresh if we are not currently interacting (simple check)
@@ -665,8 +699,11 @@ async function updateFilters(category) {
 
 function loadMovies(reset) { loadMediaPage('movies', reset); }
 function loadShows(reset) { 
+    if (reset) {
+        showsLibraryCache = null;
+    }
     if (showsState.level === 'shows') {
-        loadMediaPage('shows', reset); 
+        loadShowsLibrary(); 
     } else {
         renderShowsLevel();
     }
@@ -1494,6 +1531,8 @@ async function loadShowsLibrary() {
             if (res.status === 401) { logout(); return; }
             const data = await res.json();
             showsLibraryCache = data.shows || [];
+            // Populate filters if they are empty
+            updateFilters('shows');
         }
         if (!restoreShowsState()) {
             showsState = showsState || { level: 'shows', showName: null, seasonName: null };
@@ -1532,7 +1571,8 @@ function setShowsLevel(level, showName = null, seasonName = null) {
         const continueSection = document.getElementById('shows-continue');
         if (continueSection) continueSection.style.display = 'none';
         
-        loadMediaPage('shows', true);
+        showsLibraryCache = null; // Clear cache for a fresh fetch
+        loadShowsLibrary();
     } else {
         renderShowsLevel();
     }
@@ -1624,9 +1664,40 @@ function renderShows() {
     }
 
     if (showsState.level === 'shows') {
-        const list = q ? showsLibraryCache.filter(s => s.name.toLowerCase().includes(q)) : showsLibraryCache;
+        const genre = document.getElementById('shows-genre')?.value || '';
+        const year = document.getElementById('shows-year')?.value || '';
+        const sort = document.getElementById('shows-sort')?.value || 'name';
 
-        if (continueEl && !q) {
+        let list = [...showsLibraryCache];
+
+        // Filter by search
+        if (q) {
+            list = list.filter(s => s.name.toLowerCase().includes(q));
+        }
+
+        // Filter by genre
+        if (genre) {
+            list = list.filter(s => (s.genres || []).includes(genre));
+        }
+
+        // Filter by year
+        if (year) {
+            list = list.filter(s => (s.years || []).includes(year));
+        }
+
+        // Sort
+        list.sort((a, b) => {
+            if (sort === 'newest') return (b.mtime || 0) - (a.mtime || 0);
+            if (sort === 'recently_played') {
+                const at = Date.parse(a.last_played || '') || 0;
+                const bt = Date.parse(b.last_played || '') || 0;
+                return bt - at;
+            }
+            if (sort === 'top_watched') return (b.play_count || 0) - (a.play_count || 0);
+            return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        });
+
+        if (continueEl && !q && !genre && !year) {
             const cont = collectContinueEpisodes().slice(0, 6);
             if (cont.length > 0) {
                 const title = document.createElement('h3');
@@ -3415,3 +3486,179 @@ window.addEventListener('DOMContentLoaded', () => {
     // Check if we just updated
     checkPostUpdate();
 });
+
+async function loadUsers() {
+    const container = document.getElementById('user-management-list');
+    if (!container) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users`);
+        if (res.status === 401) { logout(); return; }
+        if (res.status === 403) {
+            container.innerHTML = '<p class="error">Admin privileges required.</p>';
+            return;
+        }
+        if (!res.ok) {
+            throw new Error(`Failed to load users: ${res.statusText}`);
+        }
+        
+        const users = await res.json();
+        if (!Array.isArray(users)) {
+            container.innerHTML = '<p>No users found.</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'list-item glass';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.padding = '10px 15px';
+            div.style.marginBottom = '8px';
+            div.style.borderRadius = '8px';
+
+            const info = document.createElement('div');
+            info.innerHTML = `
+                <div style="font-weight:bold;">${escapeHtml(user.username)}</div>
+                <div style="font-size:0.85em; color:var(--text-muted);">${user.is_admin ? '🛡️ Admin' : '👤 User'} • Joined ${new Date(user.created_at).toLocaleDateString()}</div>
+            `;
+
+            const actions = document.createElement('div');
+            actions.style.display = 'flex';
+            actions.style.gap = '8px';
+
+            // Don't allow deleting yourself or the main admin if possible
+            // But for now just basic delete
+            const delBtn = document.createElement('button');
+            delBtn.className = 'danger btn-sm';
+            delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            delBtn.onclick = () => deleteUser(user.id, user.username);
+            
+            const roleBtn = document.createElement('button');
+            roleBtn.className = 'secondary btn-sm';
+            roleBtn.innerHTML = user.is_admin ? 'Revoke Admin' : 'Make Admin';
+            roleBtn.onclick = () => toggleUserAdmin(user.id, !user.is_admin);
+
+            const passBtn = document.createElement('button');
+            passBtn.className = 'secondary btn-sm';
+            passBtn.innerHTML = '<i class="fas fa-key"></i>';
+            passBtn.title = 'Reset Password';
+            passBtn.onclick = () => resetUserPassword(user.id, user.username);
+
+            actions.appendChild(roleBtn);
+            actions.appendChild(passBtn);
+            actions.appendChild(delBtn);
+
+            div.appendChild(info);
+            div.appendChild(actions);
+            container.appendChild(div);
+        });
+    } catch (e) {
+        console.error('Error loading users:', e);
+        container.innerHTML = '<p>Error loading users.</p>';
+    }
+}
+
+async function addUser() {
+    const usernameInput = document.getElementById('new-user-username');
+    const passwordInput = document.getElementById('new-user-password');
+    const isAdminInput = document.getElementById('new-user-is-admin');
+
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    const is_admin = isAdminInput.checked;
+
+    if (!username || !password) {
+        showToast('Username and password are required', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, is_admin })
+        });
+
+        if (res.ok) {
+            showToast(`User ${username} created`, 'success');
+            usernameInput.value = '';
+            passwordInput.value = '';
+            isAdminInput.checked = false;
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to create user', 'error');
+        }
+    } catch (e) {
+        console.error('Error adding user:', e);
+        showToast('Network error', 'error');
+    }
+}
+
+async function deleteUser(userId, username) {
+    if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users/${userId}`, {
+            method: 'DELETE'
+        });
+
+        if (res.ok) {
+            showToast('User deleted', 'success');
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to delete user', 'error');
+        }
+    } catch (e) {
+        console.error('Error deleting user:', e);
+        showToast('Network error', 'error');
+    }
+}
+
+async function toggleUserAdmin(userId, makeAdmin) {
+    try {
+        const res = await fetch(`${API_BASE}/auth/users/${userId}/role`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_admin: makeAdmin })
+        });
+
+        if (res.ok) {
+            showToast('User role updated', 'success');
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to update role', 'error');
+        }
+    } catch (e) {
+        console.error('Error updating role:', e);
+        showToast('Network error', 'error');
+    }
+}
+
+async function resetUserPassword(userId, username) {
+    const newPassword = prompt(`Enter new password for user "${username}":`);
+    if (!newPassword) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users/${userId}/password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPassword })
+        });
+
+        if (res.ok) {
+            showToast('Password reset successfully', 'success');
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to reset password', 'error');
+        }
+    } catch (e) {
+        console.error('Error resetting password:', e);
+        showToast('Network error', 'error');
+    }
+}

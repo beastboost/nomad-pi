@@ -110,6 +110,16 @@ class UserCreateRequest(BaseModel):
 class UserRoleRequest(BaseModel):
     is_admin: bool
 
+class UserPasswordResetRequest(BaseModel):
+    new_password: str
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        is_valid, error_msg = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_msg)
+        return v
+
 class ProfileUpdateRequest(BaseModel):
     name: str
     avatar: str = None
@@ -215,6 +225,12 @@ def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_c
     if user_id == admin['id']:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
     database.update_user_role(user_id, request.is_admin)
+    return {"status": "ok"}
+
+@router.post("/users/{user_id}/password")
+def reset_user_password(user_id: int, request: UserPasswordResetRequest, admin=Depends(get_current_admin)):
+    h = pwd_context.hash(request.new_password)
+    database.update_user_password(user_id, h)
     return {"status": "ok"}
 
 @router.get("/profile")

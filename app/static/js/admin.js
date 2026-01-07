@@ -24,6 +24,7 @@ createApp({
                 storage: 'Storage & Mounts',
                 system: 'System Control',
                 media: 'Media Library',
+                users: 'User Management',
                 settings: 'Settings',
                 logs: 'System Logs'
             },
@@ -31,7 +32,19 @@ createApp({
             // Authentication
             isAuthenticated: false,
             currentUser: null,
+            currentUserId: null,
             apiToken: localStorage.getItem('adminToken') || null,
+
+            // Users State
+            users: [],
+            usersLoading: false,
+            showUserModal: false,
+            newUser: {
+                username: '',
+                password: '',
+                is_admin: false,
+                loading: false
+            },
 
             // Logs State
             logLines: 100,
@@ -210,6 +223,77 @@ createApp({
                 this.mediaStats = response;
             } catch (error) {
                 console.error('Error loading media stats:', error);
+            }
+        },
+
+        async loadUsers() {
+            this.usersLoading = true;
+            try {
+                const response = await this.apiCall('/api/auth/users', 'GET');
+                this.users = response || [];
+            } catch (error) {
+                this.showToast('Error loading users', 'error');
+            } finally {
+                this.usersLoading = false;
+            }
+        },
+
+        openCreateUserModal() {
+            this.newUser = {
+                username: '',
+                password: '',
+                is_admin: false,
+                loading: false
+            };
+            this.showUserModal = true;
+        },
+
+        async createUser() {
+            if (!this.newUser.username || !this.newUser.password) {
+                this.showToast('Username and password are required', 'error');
+                return;
+            }
+
+            this.newUser.loading = true;
+            try {
+                await this.apiCall('/api/auth/users', 'POST', {
+                    username: this.newUser.username,
+                    password: this.newUser.password,
+                    is_admin: this.newUser.is_admin
+                });
+                this.showToast(`User ${this.newUser.username} created`, 'success');
+                this.showUserModal = false;
+                this.loadUsers();
+            } catch (error) {
+                this.showToast(error.message || 'Failed to create user', 'error');
+            } finally {
+                this.newUser.loading = false;
+            }
+        },
+
+        async deleteUser(user) {
+            if (!confirm(`Are you sure you want to delete user "${user.username}"?`)) return;
+
+            try {
+                await this.apiCall(`/api/auth/users/${user.id}`, 'DELETE');
+                this.showToast('User deleted successfully', 'success');
+                this.loadUsers();
+            } catch (error) {
+                this.showToast('Failed to delete user', 'error');
+            }
+        },
+
+        async resetUserPassword(user) {
+            const newPassword = prompt(`Enter new password for "${user.username}":`);
+            if (!newPassword) return;
+
+            try {
+                await this.apiCall(`/api/auth/users/${user.id}/password`, 'POST', {
+                    new_password: newPassword
+                });
+                this.showToast('Password updated successfully', 'success');
+            } catch (error) {
+                this.showToast('Failed to update password', 'error');
             }
         },
 

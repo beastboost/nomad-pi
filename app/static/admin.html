@@ -45,10 +45,15 @@
                         <i class="fas fa-cogs"></i>
                         <span v-if="!sidebarCollapsed">System Control</span>
                     </a>
-                    <a href="#" @click.prevent="setView('media')" 
+                    <a href="#" @click.prevent="setView('media')"
                        :class="{ active: currentView === 'media' }" class="nav-item">
                         <i class="fas fa-film"></i>
                         <span v-if="!sidebarCollapsed">Media Library</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('users')"
+                       :class="{ active: currentView === 'users' }" class="nav-item">
+                        <i class="fas fa-users"></i>
+                        <span v-if="!sidebarCollapsed">Users</span>
                     </a>
                     <a href="#" @click.prevent="setView('settings')"
                        :class="{ active: currentView === 'settings' }" class="nav-item">
@@ -366,6 +371,92 @@
                                     <h4>Books</h4>
                                     <p>{{ mediaStats.books }} files</p>
                                 </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Users View -->
+                    <section v-if="currentView === 'users'" class="view-section">
+                        <div class="section-header">
+                            <h3>User Management</h3>
+                            <button @click="openCreateUserModal" class="btn btn-primary">
+                                <i class="fas fa-user-plus"></i> Create User
+                            </button>
+                        </div>
+
+                        <div class="glass-card" style="margin-top: 20px;">
+                            <div v-if="usersLoading" class="loading-state">
+                                <div class="spinner"></div>
+                                <p>Loading users...</p>
+                            </div>
+                            <div v-else-if="users.length === 0" class="empty-state">
+                                <i class="fas fa-users-slash"></i>
+                                <p>No users found</p>
+                            </div>
+                            <table v-else class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Role</th>
+                                        <th>Created At</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="user in users" :key="user.id">
+                                        <td>
+                                            <div class="user-info">
+                                                <span class="username">{{ user.username }}</span>
+                                                <span v-if="user.id === currentUserId" class="badge">You</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span :class="['role-badge', user.is_admin ? 'admin' : 'user']">
+                                                {{ user.is_admin ? 'Admin' : 'User' }}
+                                            </span>
+                                        </td>
+                                        <td>{{ formatDate(user.created_at) }}</td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <button @click="resetUserPassword(user)" class="btn btn-secondary btn-sm" title="Reset Password">
+                                                    <i class="fas fa-key"></i>
+                                                </button>
+                                                <button v-if="user.id !== currentUserId" @click="deleteUser(user)" class="btn btn-danger btn-sm" title="Delete User">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Create User Modal -->
+                        <div v-if="showUserModal" class="modal-overlay">
+                            <div class="glass-modal animate-fade">
+                                <h3>Create New User</h3>
+                                <form @submit.prevent="createUser" class="settings-form">
+                                    <div class="form-group">
+                                        <label>Username</label>
+                                        <input type="text" v-model="newUser.username" placeholder="Username" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Password</label>
+                                        <input type="password" v-model="newUser.password" placeholder="Password" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" v-model="newUser.is_admin">
+                                            <span>Grant Admin Privileges</span>
+                                        </label>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" @click="showUserModal = false" class="btn btn-secondary">Cancel</button>
+                                        <button type="submit" class="btn btn-primary" :disabled="newUser.loading">
+                                            {{ newUser.loading ? 'Creating...' : 'Create User' }}
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
                         </div>
                     </section>
