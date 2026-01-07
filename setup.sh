@@ -46,6 +46,17 @@ find app -name "*.py" -exec sed -i 's/\r$//' {} +
 find . -maxdepth 1 -name "*.txt" -exec sed -i 's/\r$//' {} +
 sed -i 's/\r$//' requirements.txt || true
 
+# 0. System Tuning (Inotify limits for MiniDLNA and Ingest Service)
+echo "Tuning system for media streaming..."
+if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf; then
+    echo "Increasing inotify watch limit..."
+    echo "fs.inotify.max_user_watches=100000" | sudo tee -a /etc/sysctl.conf
+    sudo sysctl -p
+fi
+
+# Ensure home directory is traversable by services (minidlna, etc)
+chmod +x "$HOME"
+
 echo "=========================================="
 echo "      Nomad Pi Installation Script        "
 echo "=========================================="
@@ -514,8 +525,14 @@ db_dir=/var/cache/minidlna
 log_dir=/var/log
 friendly_name=$NEW_HOSTNAME
 inotify=yes
+root_container=V
 presentation_url=http://$NEW_HOSTNAME.local:8000/
 EOL
+
+# Ensure the data directory is fully accessible to minidlna
+echo "Finalizing permissions for MiniDLNA..."
+sudo chown -R $REAL_USER:$REAL_USER "$CURRENT_DIR/data"
+sudo chmod -R 755 "$CURRENT_DIR/data"
 
 # Only update if config changed
 if ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then

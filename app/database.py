@@ -875,7 +875,12 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
                     SELECT 
                         CASE 
                             WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
-                            WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
+                            WHEN folder != '.' AND folder NOT LIKE '%/%' THEN folder
+                            WHEN folder = '.' THEN 
+                                CASE 
+                                    WHEN name LIKE '%.%' THEN SUBSTR(name, 1, INSTR(name, '.') - 1)
+                                    ELSE name
+                                END
                             ELSE folder 
                         END as show_name,
                         folder, path, poster, mtime, genre, year
@@ -891,7 +896,12 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
                     SELECT 
                         CASE 
                             WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
-                            WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
+                            WHEN folder != '.' AND folder NOT LIKE '%/%' THEN folder
+                            WHEN folder = '.' THEN 
+                                CASE 
+                                    WHEN name LIKE '%.%' THEN SUBSTR(name, 1, INSTR(name, '.') - 1)
+                                    ELSE name
+                                END
                             ELSE folder 
                         END as show_name,
                         folder, path, poster, mtime, genre, year
