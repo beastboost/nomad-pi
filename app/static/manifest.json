@@ -1,0 +1,43 @@
+{
+  "name": "Nomad Pi Media Server",
+  "short_name": "Nomad Pi",
+  "description": "Your portable media server for movies, shows, music and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#3b82f6",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["entertainment", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Movies",
+      "url": "/#movies",
+      "icons": [{ "src": "/icons/icon-512.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Shows",
+      "url": "/#shows",
+      "icons": [{ "src": "/icons/icon-512.svg", "sizes": "192x192" }]
+    }
+  ]
+}

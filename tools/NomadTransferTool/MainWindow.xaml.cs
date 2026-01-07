@@ -11,6 +11,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.IO.Compression;
@@ -34,12 +35,66 @@ namespace NomadTransferTool
         }
     }
 
-    public partial class MainWindow : Window, INotifyPropertyChanged
+    public partial class MainWindow : Window, INotifyPropertyChanged, IDisposable
     {
         private const string APP_VERSION = "1.5.0";
-        private static readonly HttpClient client = new HttpClient();
+        private const string DEFAULT_SERVER_IP = "nomadpi.local";
+        private const string STATUS_READY = "Ready";
+        private const string DATA_SHARE = "data";
+        private const string OMDB_FILE = "omdb.txt";
+        
+        public static class Categories
+        {
+            public const string Movies = "movies";
+            public const string Shows = "shows";
+            public const string Music = "music";
+            public const string Books = "books";
+            public const string Gallery = "gallery";
+            public const string Files = "files";
+            
+            public static readonly string[] All = { Movies, Shows, Music, Books, Gallery, Files };
+        }
+
+        public void Dispose()
+        {
+            _driveRefreshTimer?.Dispose();
+            _processingCts?.Dispose();
+            GC.SuppressFinalize(this);
+        }
+
+        protected override void OnClosed(EventArgs e)
+         {
+             Dispose();
+             base.OnClosed(e);
+         }
+
+         private static readonly HttpClient client = new HttpClient();
+
+        private string EncryptString(string plainText)
+        {
+            if (string.IsNullOrEmpty(plainText)) return "";
+            try
+            {
+                byte[] data = Encoding.UTF8.GetBytes(plainText);
+                byte[] encrypted = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser);
+                return Convert.ToBase64String(encrypted);
+            }
+            catch { return ""; }
+        }
+
+        private string DecryptString(string encryptedText)
+        {
+            if (string.IsNullOrEmpty(encryptedText)) return "";
+            try
+            {
+                byte[] data = Convert.FromBase64String(encryptedText);
+                byte[] decrypted = ProtectedData.Unprotect(data, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(decrypted);
+            }
+            catch { return encryptedText; } // Return original if not encrypted/fails
+        }
         private string API_BASE => $"http://{ServerIp}:8000/api";
-        private string _serverIp = "nomadpi.local";
+        private string _serverIp = DEFAULT_SERVER_IP;
         public string ServerIp 
         { 
             get => _serverIp; 
@@ -60,7 +115,7 @@ namespace NomadTransferTool
 
         // UI State
         private bool _isTransferring;
-        private string _currentStatus = "Ready";
+        private string _currentStatus = STATUS_READY;
         private string _transferSpeed = "";
         private string _fileProgress = "";
         private double _totalProgress;
@@ -227,7 +282,7 @@ namespace NomadTransferTool
                                 }
                                 
                                 // Default to 'data' share if none found, as that's what setup.sh creates
-                                if (string.IsNullOrEmpty(share)) share = "data";
+                                if (string.IsNullOrEmpty(share)) share = DATA_SHARE;
                                 
                                 path = $"\\\\{ServerIp}\\{share}";
                             }
@@ -239,7 +294,7 @@ namespace NomadTransferTool
                             var pathParts = path.Split('\\', StringSplitOptions.RemoveEmptyEntries);
                             if (pathParts.Length == 1) // Just hostname/IP
                             {
-                                path = path.TrimEnd('\\') + "\\data";
+                                path = path.TrimEnd('\\') + "\\" + DATA_SHARE;
                             }
                             
                             SambaPath = path;
@@ -269,7 +324,7 @@ namespace NomadTransferTool
                         Dispatcher.Invoke(() => {
                             OMDB_API_KEY = key;
                             OmdbKeyBox.Password = key;
-                            File.WriteAllText("omdb.txt", key);
+                            File.WriteAllText(OMDB_FILE, EncryptString(key));
                         });
                         AddLog("OMDb API Key synchronized from Pi.");
                     }
@@ -292,7 +347,7 @@ namespace NomadTransferTool
             try {
                 AddLog("Saving OMDb key and syncing to Pi...");
                 OMDB_API_KEY = key;
-                File.WriteAllText("omdb.txt", key);
+                File.WriteAllText(OMDB_FILE, EncryptString(key));
 
                 // Push to Pi
                 var content = new StringContent(JsonConvert.SerializeObject(new { key = key }), Encoding.UTF8, "application/json");
@@ -327,12 +382,7 @@ namespace NomadTransferTool
                 // If user is empty, try connecting with null (guest/existing)
                 int result = WNetAddConnection2(nr, string.IsNullOrEmpty(pass) ? null : pass, string.IsNullOrEmpty(user) ? null : user, 0);
                 
-                if (result == 0)
-                {
-                    _connectedSambaPaths.Add(path);
-                    return (true, result);
-                }
-                else if (result == 1219) // Already connected
+                if (result == 0 || result == 1219) // 0 = success, 1219 = already connected
                 {
                     _connectedSambaPaths.Add(path);
                     return (true, result);
@@ -391,22 +441,22 @@ namespace NomadTransferTool
             InitializePresets();
             
             // Load OMDB key if exists
-            if (File.Exists("omdb.txt")) 
+            if (File.Exists(OMDB_FILE)) 
             {
-                OMDB_API_KEY = File.ReadAllText("omdb.txt").Trim();
+                OMDB_API_KEY = DecryptString(File.ReadAllText(OMDB_FILE).Trim());
                 OmdbKeyBox.Password = OMDB_API_KEY;
             }
 
             // Try to find the media server data path
             string currentDir = AppDomain.CurrentDomain.BaseDirectory;
             DirectoryInfo? dir = new DirectoryInfo(currentDir);
-            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "data")))
+            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, DATA_SHARE)))
             {
                 dir = dir.Parent;
             }
             if (dir != null)
             {
-                mediaServerDataPath = Path.Combine(dir.FullName, "data");
+                mediaServerDataPath = Path.Combine(dir.FullName, DATA_SHARE);
             }
 
             RefreshDrives();
@@ -1011,7 +1061,7 @@ namespace NomadTransferTool
             {
                 try
                 {
-                    string[] folders = { "movies", "shows", "music", "books", "gallery", "files" };
+                    string[] folders = Categories.All;
                     foreach (var f in folders)
                     {
                         string path = Path.Combine(drive.Name, f);
@@ -1136,7 +1186,7 @@ namespace NomadTransferTool
                 if (HandbrakeCheck.IsChecked == true && IsVideoFile(item.SourcePath)) extension = ".mp4";
 
                 string dest;
-                if (item.Category == "shows")
+                if (item.Category == Categories.Shows)
                 {
                     dest = Path.Combine(targetDrive, item.Category, safeTitle, $"Season {item.Season.PadLeft(2, '0')}", $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}" + extension);
                 }
@@ -1211,9 +1261,9 @@ namespace NomadTransferTool
                                 item.DurationSeconds = EstimateDuration(file);
                             }
 
-                            if (item.Category == "shows" || Regex.IsMatch(fileName, @"[sS]\d+[eE]\d+"))
+                            if (item.Category == Categories.Shows || Regex.IsMatch(fileName, @"[sS]\d+[eE]\d+"))
                             {
-                                item.Category = "shows";
+                                item.Category = Categories.Shows;
                                 var tvMatch = Regex.Match(fileName, @"[sS](?<sCount>\d+)[eE](?<eCount>\d+)", RegexOptions.IgnoreCase);
                                 if (tvMatch.Success)
                                 {
@@ -1223,7 +1273,7 @@ namespace NomadTransferTool
                                 }
                             }
 
-                            if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
+                            if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == Categories.Movies || item.Category == Categories.Shows))
                             {
                                 var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
                                 if (meta != null)
@@ -1270,18 +1320,18 @@ namespace NomadTransferTool
                 await Task.Yield();
             }
 
-            AppStatus = "Ready";
+            AppStatus = STATUS_READY;
             AddLog($"Finished adding {ReviewQueue.Count} items.");
         }
 
         private string GuessCategory(string filePath)
         {
             string ext = Path.GetExtension(filePath).ToLower();
-            if (IsVideoFile(filePath)) return "movies";
-            if (ext == ".mp3" || ext == ".flac" || ext == ".m4a") return "music";
-            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") return "gallery";
-            if (ext == ".pdf" || ext == ".epub" || ext == ".mobi") return "books";
-            return "files";
+            if (IsVideoFile(filePath)) return Categories.Movies;
+            if (ext == ".mp3" || ext == ".flac" || ext == ".m4a") return Categories.Music;
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") return Categories.Gallery;
+            if (ext == ".pdf" || ext == ".epub" || ext == ".mobi") return Categories.Books;
+            return Categories.Files;
         }
 
         private async void StartProcessing_Click(object sender, RoutedEventArgs e)
@@ -1341,7 +1391,7 @@ namespace NomadTransferTool
                 return;
             }
 
-            string category = (BulkCategoryCombo.SelectedItem as FrameworkElement)?.Tag?.ToString() ?? "movies";
+            string category = (BulkCategoryCombo.SelectedItem as FrameworkElement)?.Tag?.ToString() ?? Categories.Movies;
             foreach (var item in selectedItems)
             {
                 item.Category = category;
@@ -1460,7 +1510,102 @@ namespace NomadTransferTool
              return (true, "");
          }
 
-        private async Task ProcessMediaItems(List<MediaItem> items, System.Threading.CancellationToken token)
+        private string GetDestinationPath(MediaItem item, string targetRoot, bool willTranscode)
+        {
+            string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+            string categoryDir = Path.Combine(targetRoot, item.Category);
+            string finalName = safeTitle;
+
+            if (item.Category == Categories.Shows)
+            {
+                string showDir = Path.Combine(categoryDir, safeTitle);
+                string seasonDir = Path.Combine(showDir, $"Season {item.Season.PadLeft(2, '0')}");
+                if (string.IsNullOrEmpty(item.Season)) seasonDir = showDir;
+
+                categoryDir = seasonDir;
+                finalName = $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}";
+                if (string.IsNullOrEmpty(item.Season)) finalName = item.Title;
+            }
+            else if (!string.IsNullOrEmpty(item.Year))
+            {
+                finalName += $" ({item.Year})";
+            }
+
+            string extension = Path.GetExtension(item.SourcePath);
+            if (willTranscode) extension = ".mp4";
+
+            return Path.Combine(categoryDir, finalName + extension);
+        }
+
+        private async Task CreateDirectoryIfNotExists(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return;
+            bool exists = await Task.Run(() => Directory.Exists(path));
+            if (!exists)
+            {
+                AddLog($"Creating directory: {path}");
+                await Task.Run(() => Directory.CreateDirectory(path));
+            }
+        }
+
+        private async Task HandlePosterDownload(MediaItem item, string finalDest, string effectiveTargetPath)
+        {
+            if (string.IsNullOrEmpty(OMDB_API_KEY) || (item.Category != Categories.Movies && item.Category != Categories.Shows))
+                return;
+
+            try
+            {
+                var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
+                if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                {
+                    string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                    string posterBase;
+                    string posterName;
+
+                    if (item.Category == Categories.Shows)
+                    {
+                        if (!string.IsNullOrEmpty(item.Season))
+                        {
+                            // Season-specific poster goes in Season folder
+                            posterBase = Path.GetDirectoryName(finalDest)!;
+                            posterName = "poster";
+                        }
+                        else
+                        {
+                            // Show-level poster goes in Show folder
+                            posterBase = Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
+                            posterName = "poster";
+                        }
+                    }
+                    else
+                    {
+                        // Movie poster matches file name in same folder
+                        posterBase = Path.GetDirectoryName(finalDest)!;
+                        posterName = Path.GetFileNameWithoutExtension(finalDest);
+                    }
+
+                    string posterDest = Path.Combine(posterBase, posterName + ".jpg");
+
+                    bool posterExists = await Task.Run(() => File.Exists(posterDest));
+                    if (posterExists) await Task.Run(() => File.Delete(posterDest));
+
+                    await CreateDirectoryIfNotExists(posterBase);
+                    await DownloadPoster(meta.Poster, posterDest);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Poster download failed: {ex.Message}");
+            }
+        }
+
+        private async Task DownloadPoster(string url, string dest)
+        {
+            var bytes = await client.GetByteArrayAsync(url);
+            await File.WriteAllBytesAsync(dest, bytes);
+        }
+
+        private async Task ProcessMediaItems(IEnumerable<MediaItem> items, System.Threading.CancellationToken token)
         {
             if (items == null || items.Count == 0) return;
 
@@ -1588,56 +1733,28 @@ namespace NomadTransferTool
                         CurrentFileProgress = 0;
 
                         string finalDest = "";
-                        string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                         string effectiveTargetPath = targetPath ?? "";
                         
                         if (autoMove && targetPath != null)
                         {
-                            // Construct the destination path
-                            // User says: "connect to the main directory... use data/movie"
                             if (effectiveUseSamba)
                             {
-                                // Ensure path starts with \\
                                 if (!effectiveTargetPath.StartsWith("\\\\")) 
                                     effectiveTargetPath = "\\\\" + effectiveTargetPath.TrimStart('\\');
 
-                                // Append 'data' if not already in the path
-                                if (!effectiveTargetPath.ToLower().EndsWith("\\data") && !effectiveTargetPath.ToLower().Contains("\\data\\"))
+                                if (!effectiveTargetPath.ToLower().EndsWith("\\" + DATA_SHARE) && !effectiveTargetPath.ToLower().Contains("\\" + DATA_SHARE + "\\"))
                                 {
-                                    effectiveTargetPath = Path.Combine(effectiveTargetPath, "data");
+                                    effectiveTargetPath = Path.Combine(effectiveTargetPath, DATA_SHARE);
                                 }
                             }
 
-                            string categoryDir = Path.Combine(effectiveTargetPath, item.Category);
-                            string finalName = safeTitle;
-                            
-                            // Special handling for TV Shows (folders by Show Name -> Season)
-                            if (item.Category == "shows")
-                            {
-                                string showDir = Path.Combine(categoryDir, safeTitle);
-                                string seasonDir = Path.Combine(showDir, $"Season {item.Season.PadLeft(2, '0')}");
-                                if (string.IsNullOrEmpty(item.Season)) seasonDir = showDir;
-                                
-                                categoryDir = seasonDir;
-                                finalName = $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}";
-                                if (string.IsNullOrEmpty(item.Season)) finalName = item.Title;
-                            }
-                            else if (!string.IsNullOrEmpty(item.Year))
-                            {
-                                finalName += $" ({item.Year})";
-                            }
-                            
-                            string extension = Path.GetExtension(item.SourcePath);
-                            if (willTranscode) extension = ".mp4";
-                            
-                            finalDest = Path.Combine(categoryDir, finalName + extension);
+                            finalDest = GetDestinationPath(item, effectiveTargetPath, willTranscode);
 
                             // Pre-check target path availability before starting long operations
                             var (ready, err) = await EnsurePathReady(effectiveTargetPath);
                             if (!ready)
                             {
                                 AddLog($"Target path check failed: {err}");
-                                // For local drives, if it's not ready now, it's likely disconnected
                                 if (!effectiveUseSamba) throw new Exception($"Target drive '{effectiveTargetPath}' is not accessible.");
                             }
                         }
@@ -1676,7 +1793,7 @@ namespace NomadTransferTool
                                     }
 
                                     // Handle Poster if available
-                                    if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
+                                    if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == Categories.Movies || item.Category == Categories.Shows))
                                     {
                                         try {
                                             var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
@@ -1938,7 +2055,7 @@ namespace NomadTransferTool
                 tempFilesToClean.Clear();
 
                 // Disconnect Samba if we used it
-                lock (_connectedSambaPaths)
+                lock (_sambaConnectionLock)
                 {
                     foreach (var path in _connectedSambaPaths)
                     {
@@ -2033,7 +2150,7 @@ namespace NomadTransferTool
                 
                 if (string.IsNullOrEmpty(title)) return null;
 
-                string type = category == "movies" ? "movie" : "series";
+                string type = category == Categories.Movies ? "movie" : "series";
                 
                 // Construct URL
                 string url = $"http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={Uri.EscapeDataString(title)}&type={type}";
@@ -2306,7 +2423,7 @@ namespace NomadTransferTool
     {
         private string _title = "";
         private string _year = "";
-        private string _category = "movies";
+        private string _category = Categories.Movies;
         private string _plot = "";
         private string _season = "";
         private string _episode = "";

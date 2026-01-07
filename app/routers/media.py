@@ -1,8 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Query, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Query, BackgroundTasks, Depends
+from app.routers.auth import get_current_user_id
 from fastapi.responses import FileResponse
-from typing import List, Dict
+from pydantic import BaseModel, validator
+from typing import List, Dict, Optional
 import os
 import posixpath
+import pathlib
 import platform
 import re
 import shutil
@@ -10,8 +13,7 @@ import zipfile
 import hashlib
 import subprocess
 import json
-import urllib.parse
-import urllib.request
+import httpx
 import logging
 from datetime import datetime, timedelta
 from collections import OrderedDict
@@ -24,21 +26,22 @@ from app import database
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+public_router = APIRouter()
 
 BASE_DIR = os.path.abspath("data")
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
 os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
 
 @lru_cache(maxsize=100)
-def _get_paged_data_cached(category: str, cache_key: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str):
+def _get_paged_data_cached(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, user_id: int):
     """Internal cached version of paged data retrieval"""
-    return _get_paged_data(category, q, offset, limit, sort, genre, year, False)
+    return _get_paged_data(category, q, offset, limit, sort, genre, year, False, user_id)
 
-def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, rebuild: bool):
+def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, rebuild: bool, user_id: int):
     idx_info = maybe_start_index_build(category, force=bool(rebuild))
     items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year)
 
-    all_progress = database.get_all_progress()
+    all_progress = database.get_all_progress(user_id)
     out = []
     for r in items:
         web_path = r.get("path")
@@ -76,12 +79,6 @@ def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, g
         "has_more": has_more,
         "index": idx_info,
     }
-
-def build_cache_key(category: str, q: str, offset: int, limit: int, 
-                     sort: str, genre: str, year: str) -> str:
-    """Build cache key for pagination"""
-    params = f"{category}:{q}:{offset}:{limit}:{sort}:{genre}:{year}"
-    return md5(params.encode()).hexdigest()
 
 INDEX_TTL = timedelta(hours=12)
 _index_lock = threading.Lock()
@@ -149,30 +146,59 @@ def get_scan_paths(category: str):
     return paths
 
 def safe_fs_path_from_web_path(web_path: str):
-    # Allow Windows absolute paths
-    if platform.system() == "Windows" and len(web_path) >= 2 and web_path[1] == ":":
-        return os.path.abspath(web_path)
-
-    # Allow Linux absolute paths to /media and /mnt if they exist
-    if platform.system() == "Linux" and (web_path.startswith("/media") or web_path.startswith("/mnt")):
-        abs_path = os.path.abspath(web_path)
-        # Basic safety: ensure it's not trying to access system files
-        if any(abs_path.startswith(p) for p in ["/media", "/mnt"]):
-            return abs_path
-
-    if not isinstance(web_path, str) or not web_path.startswith("/data/"):
+    if not isinstance(web_path, str) or not web_path:
         raise HTTPException(status_code=400, detail="Invalid path")
+
+    # 1. Handle absolute paths for Windows (e.g., C:/...)
+    if platform.system() == "Windows" and len(web_path) >= 2 and web_path[1] == ":":
+        p = pathlib.Path(web_path).resolve()
+        # For Windows, we still want to ensure it's within a known media drive or the app's data dir
+        # For simplicity, we check if it's within BASE_DIR or if it's an absolute path that exists.
+        # But to be secure, we should only allow specific roots.
+        # Let's check if it's within BASE_DIR or an allowed external root.
+        base_abs = pathlib.Path(BASE_DIR).resolve()
+        try:
+            p.relative_to(base_abs)
+            return str(p)
+        except ValueError:
+            # Check external drives symlinked in data/external
+            ext_root = base_abs / "external"
+            if ext_root.exists():
+                for item in ext_root.iterdir():
+                    if item.is_symlink():
+                        target = item.resolve()
+                        try:
+                            p.relative_to(target)
+                            return str(p)
+                        except ValueError:
+                            continue
+            raise HTTPException(status_code=400, detail="Access denied to external path")
+
+    # 2. Handle Linux absolute paths to /media and /mnt
+    if platform.system() == "Linux" and (web_path.startswith("/media") or web_path.startswith("/mnt")):
+        p = pathlib.Path(web_path).resolve()
+        if any(str(p).startswith(prefix) for prefix in ["/media", "/mnt"]):
+            return str(p)
+        raise HTTPException(status_code=400, detail="Access denied to system path")
+
+    # 3. Standard /data/ paths
+    if not web_path.startswith("/data/"):
+        raise HTTPException(status_code=400, detail="Invalid path format")
 
     rel = posixpath.normpath(web_path[len("/data/"):]).lstrip("/")
     if rel.startswith("..") or rel == ".":
-        raise HTTPException(status_code=400, detail="Invalid path")
+        raise HTTPException(status_code=400, detail="Invalid path traversal")
 
-    base_abs = os.path.abspath(BASE_DIR)
-    # Use os.path.join for constructing the file system path
-    fs_path = os.path.abspath(os.path.join(base_abs, *rel.split('/')))
-    if os.path.commonpath([base_abs, fs_path]) != base_abs:
-        raise HTTPException(status_code=400, detail="Invalid path")
-    return fs_path
+    base_abs = pathlib.Path(BASE_DIR).resolve()
+    fs_path = (base_abs / rel).resolve()
+    
+    # Check if the resolved path is within the base directory
+    try:
+        fs_path.relative_to(base_abs)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path - traversal detected")
+        
+    return str(fs_path)
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'([0-9]+)', s)]
@@ -302,7 +328,7 @@ def infer_show_name(filename: str):
         if name: return name
     return None
 
-def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, media_type: str = None):
+async def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, media_type: str = None):
     api_key = os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="OMDb not configured")
@@ -320,23 +346,21 @@ def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, media_t
     if media_type:
         params["type"] = media_type
 
-    url = "https://www.omdbapi.com/?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            raw = resp.read()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"OMDb request failed: {e}")
-
-    try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid OMDb response")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get("https://www.omdbapi.com/", params=params, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"OMDb request failed: {e}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=502, detail="Invalid OMDb response")
 
     if str(data.get("Response") or "").lower() == "false":
         raise HTTPException(status_code=404, detail=str(data.get("Error") or "Not found"))
     return data
 
-def omdb_search(query: str, year: str = None, media_type: str = None):
+async def omdb_search(query: str, year: str = None, media_type: str = None):
     api_key = os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="OMDb not configured")
@@ -346,49 +370,49 @@ def omdb_search(query: str, year: str = None, media_type: str = None):
         params["y"] = str(year)
     if media_type:
         params["type"] = media_type
-    url = "https://www.omdbapi.com/?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            raw = resp.read()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"OMDb request failed: {e}")
 
-    try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except Exception:
-        raise HTTPException(status_code=502, detail="Invalid OMDb response")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get("https://www.omdbapi.com/", params=params, timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"OMDb request failed: {e}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=502, detail="Invalid OMDb response")
 
     if str(data.get("Response") or "").lower() == "false":
         raise HTTPException(status_code=404, detail=str(data.get("Error") or "Not found"))
     return data
 
-def cache_remote_poster(poster_url: str):
+async def cache_remote_poster(poster_url: str):
     if not poster_url or poster_url == "N/A":
         return None
-    try:
-        parsed = urllib.parse.urlparse(poster_url)
-        if parsed.scheme not in ("http", "https"):
-            return None
-    except Exception:
+    
+    # Basic URL validation
+    if not (poster_url.startswith("http://") or poster_url.startswith("https://")):
         return None
 
     os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
     key = hashlib.sha256(poster_url.encode("utf-8", errors="ignore")).hexdigest()
     out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+    
     if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
         rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
         return f"/data/{rel}"
 
-    req = urllib.request.Request(poster_url, headers={"User-Agent": "NomadPi/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = resp.read(5_000_000)
-    except Exception:
-        return None
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(poster_url, timeout=10.0, headers={"User-Agent": "NomadPi/1.0"})
+            response.raise_for_status()
+            data = response.content
+            if len(data) > 5_000_000: # Limit to 5MB
+                return None
+        except Exception:
+            return None
 
-    if not data:
-        return None
     try:
+        # Use aiofiles if we want to be fully async, but for small files this is okay
         with open(out_fs, "wb") as f:
             f.write(data)
     except Exception:
@@ -779,6 +803,31 @@ def get_library(
     genre: str = Query(default=None),
     year: str = Query(default=None)
 ):
+    # Handle FastAPI Query objects if passed directly in tests
+    if hasattr(q, 'default'): q = q.default
+    if hasattr(offset, 'default'): offset = offset.default
+    if hasattr(limit, 'default'): limit = limit.default
+    if hasattr(sort, 'default'): sort = sort.default
+    if hasattr(genre, 'default'): genre = genre.default
+    if hasattr(year, 'default'): year = year.default
+
+    # Ensure integer types for numeric params
+    try:
+        offset = int(offset or 0)
+        limit = int(limit or 50)
+    except (ValueError, TypeError):
+        offset = 0
+        limit = 50
+
+    # Validation
+    allowed_categories = ['movies', 'shows', 'music', 'books', 'gallery', 'files']
+    if category not in allowed_categories:
+        raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+        
+    allowed_sorts = ['name', 'newest', 'oldest', 'year_desc', 'year_asc', 'recently_played', 'top_watched']
+    if sort not in allowed_sorts:
+        sort = 'name'
+
     # Try to use database index if available
     try:
         if category == 'shows':
@@ -807,8 +856,133 @@ def get_library(
         "source": "filesystem"
     }
 
+def fs_path_to_web_path(fs_path: str) -> str:
+    """Convert a filesystem path back to a web path."""
+    base_abs = os.path.abspath(BASE_DIR)
+    fs_abs = os.path.abspath(fs_path)
+    
+    if fs_abs.startswith(base_abs):
+        rel_path = os.path.relpath(fs_abs, base_abs).replace(os.sep, "/")
+        return f"/data/{rel_path}"
+    return fs_abs
+
+def find_subtitles(media_fs_path: str) -> List[Dict[str, str]]:
+    """Find subtitle files for a given media file."""
+    if not os.path.isfile(media_fs_path):
+        return []
+    
+    subs = []
+    dir_path = os.path.dirname(media_fs_path)
+    base_name = os.path.splitext(os.path.basename(media_fs_path))[0]
+    
+    # Common subtitle extensions
+    sub_exts = {".srt", ".vtt", ".ass", ".ssa"}
+    
+    # 1. Look in the same directory
+    try:
+        for item in os.listdir(dir_path):
+            item_path = os.path.join(dir_path, item)
+            if not os.path.isfile(item_path):
+                continue
+            
+            ext = os.path.splitext(item)[1].lower()
+            if ext in sub_exts:
+                # Check if it starts with the same name or is just a sub file in the same dir
+                if item.lower().startswith(base_name.lower()) or len(os.listdir(dir_path)) < 10:
+                    label = item
+                    # Try to extract language from name (e.g. movie.en.srt)
+                    lang_match = re.search(r"\.([a-z]{2,3})\.(srt|vtt|ass|ssa)$", item, re.I)
+                    if lang_match:
+                        label = lang_match.group(1).upper()
+                    
+                    subs.append({
+                        "label": label,
+                        "path": fs_path_to_web_path(item_path),
+                        "ext": ext[1:]
+                    })
+    except Exception as e:
+        logger.warning(f"Error scanning for subtitles in {dir_path}: {e}")
+
+    # 2. Look in 'subs' or 'subtitles' subfolder
+    for sub_dir_name in ["subs", "subtitles", "Subs", "Subtitles"]:
+        sub_dir = os.path.join(dir_path, sub_dir_name)
+        if os.path.isdir(sub_dir):
+            try:
+                for item in os.listdir(sub_dir):
+                    item_path = os.path.join(sub_dir, item)
+                    if not os.path.isfile(item_path):
+                        continue
+                    
+                    ext = os.path.splitext(item)[1].lower()
+                    if ext in sub_exts:
+                        label = f"{sub_dir_name}/{item}"
+                        lang_match = re.search(r"\.([a-z]{2,3})\.(srt|vtt|ass|ssa)$", item, re.I)
+                        if lang_match:
+                            label = f"{lang_match.group(1).upper()} ({item})"
+                            
+                        subs.append({
+                            "label": label,
+                            "path": fs_path_to_web_path(item_path),
+                            "ext": ext[1:]
+                        })
+            except Exception as e:
+                logger.warning(f"Error scanning for subtitles in {sub_dir}: {e}")
+                
+    return subs
+
+def find_trailers(media_fs_path: str) -> List[Dict[str, str]]:
+    """Find trailer files for a given media file."""
+    if not os.path.isfile(media_fs_path):
+        return []
+    
+    trailers = []
+    dir_path = os.path.dirname(media_fs_path)
+    
+    # Common video extensions
+    video_exts = {".mp4", ".mkv", ".avi", ".mov", ".webm"}
+    
+    # 1. Look in the same directory for files with 'trailer' in name
+    try:
+        for item in os.listdir(dir_path):
+            if item == os.path.basename(media_fs_path):
+                continue
+                
+            item_path = os.path.join(dir_path, item)
+            if not os.path.isfile(item_path):
+                continue
+            
+            ext = os.path.splitext(item)[1].lower()
+            if ext in video_exts and "trailer" in item.lower():
+                trailers.append({
+                    "name": item,
+                    "path": fs_path_to_web_path(item_path)
+                })
+    except Exception as e:
+        logger.warning(f"Error scanning for trailers in {dir_path}: {e}")
+
+    # 2. Look in 'trailers' subfolder
+    for trailer_dir_name in ["trailers", "Trailers"]:
+        trailer_dir = os.path.join(dir_path, trailer_dir_name)
+        if os.path.isdir(trailer_dir):
+            try:
+                for item in os.listdir(trailer_dir):
+                    item_path = os.path.join(trailer_dir, item)
+                    if not os.path.isfile(item_path):
+                        continue
+                    
+                    ext = os.path.splitext(item)[1].lower()
+                    if ext in video_exts:
+                        trailers.append({
+                            "name": f"Trailer: {item}",
+                            "path": fs_path_to_web_path(item_path)
+                        })
+            except Exception as e:
+                logger.warning(f"Error scanning for trailers in {trailer_dir}: {e}")
+                
+    return trailers
+
 @router.get("/meta")
-def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None)):
+async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None)):
     if not isinstance(path, str) or not path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid path")
 
@@ -822,11 +996,32 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
             media_type = "movie"
 
     cached = database.get_file_metadata(path)
+    
+    # Always check for local subtitles and trailers even if metadata is cached
+    local_extras = {"subtitles": [], "trailers": []}
+    try:
+        fs_path = safe_fs_path_from_web_path(path)
+        if fs_path:
+            local_extras["subtitles"] = find_subtitles(fs_path)
+            local_extras["trailers"] = find_trailers(fs_path)
+    except Exception:
+        pass
+
     if cached and not fetch:
-        return {"configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), "cached": True, **cached}
+        return {
+            "configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), 
+            "cached": True, 
+            **cached,
+            **local_extras
+        }
 
     if not fetch:
-        return {"configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), "cached": False, "path": path}
+        return {
+            "configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), 
+            "cached": False, 
+            "path": path,
+            **local_extras
+        }
 
     if cached and not force:
         fetched_at = cached.get("fetched_at")
@@ -834,7 +1029,12 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
             try:
                 ts = datetime.fromisoformat(fetched_at)
                 if datetime.now() - ts < timedelta(days=30):
-                    return {"configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), "cached": True, **cached}
+                    return {
+                        "configured": bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")), 
+                        "cached": True, 
+                        **cached,
+                        **local_extras
+                    }
             except Exception:
                 pass
 
@@ -920,7 +1120,7 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
     for q_title, q_year in search_queries:
         try:
             # Try direct fetch first
-            meta = omdb_fetch(title=q_title, year=q_year, media_type=media_type)
+            meta = await omdb_fetch(title=q_title, year=q_year, media_type=media_type)
             if meta: break
         except HTTPException as e:
             if e.status_code != 404:
@@ -930,13 +1130,13 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
             # If we tried series and failed, try movie just in case
             if media_type == "series":
                 try:
-                    meta = omdb_fetch(title=q_title, year=q_year, media_type="movie")
+                    meta = await omdb_fetch(title=q_title, year=q_year, media_type="movie")
                     if meta: break
                 except: pass
 
             # Try search if direct fetch fails
             try:
-                search = omdb_search(query=q_title, year=q_year, media_type=media_type)
+                search = await omdb_search(query=q_title, year=q_year, media_type=media_type)
                 results = search.get("Search") or []
                 if results:
                     # Score and pick best
@@ -981,7 +1181,7 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
                             best_score = score
                     
                     if best and best_score >= 20: # Higher threshold for better accuracy
-                        meta = omdb_fetch(imdb_id=best.get("imdbID"), media_type=media_type)
+                        meta = await omdb_fetch(imdb_id=best.get("imdbID"), media_type=media_type)
                         break
             except Exception:
                 continue
@@ -992,7 +1192,7 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
 
     # Cache poster if available
     if meta.get("Poster") and meta["Poster"] != "N/A":
-        cached_poster = cache_remote_poster(meta["Poster"])
+        cached_poster = await cache_remote_poster(meta["Poster"])
         if cached_poster:
             meta["Poster"] = cached_poster
 
@@ -1010,7 +1210,12 @@ def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), for
         pass
 
     stored = database.get_file_metadata(path)
-    return {"configured": True, "cached": True, **(stored or {})}
+    return {
+        "configured": True, 
+        "cached": True, 
+        **(stored or {}),
+        **local_extras
+    }
 
 
 from fastapi.responses import FileResponse, StreamingResponse
@@ -2166,6 +2371,45 @@ def scan_library(background_tasks: BackgroundTasks):
         
     background_tasks.add_task(run_scan)
     return {"status": "ok", "message": "Library scan and organization started in background."}
+
+@router.get("/duplicates")
+def get_duplicates():
+    """Find and return duplicate files and media content."""
+    try:
+        file_dupes = database.find_duplicate_files()
+        meta_dupes = database.find_duplicate_metadata()
+        
+        # Format file duplicates
+        formatted_files = []
+        for d in file_dupes:
+            paths = d["paths"].split("|")
+            formatted_files.append({
+                "name": d["name"],
+                "size": d["size"],
+                "category": d["category"],
+                "count": d["count"],
+                "paths": paths
+            })
+            
+        # Format metadata duplicates
+        formatted_meta = []
+        for d in meta_dupes:
+            paths = d["paths"].split("|")
+            formatted_meta.append({
+                "imdb_id": d["imdb_id"],
+                "title": d["title"],
+                "media_type": d["media_type"],
+                "count": d["count"],
+                "paths": paths
+            })
+            
+        return {
+            "file_duplicates": formatted_files,
+            "content_duplicates": formatted_meta
+        }
+    except Exception as e:
+        logger.error(f"Error finding duplicates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def find_file_poster(web_path: str):
     try:

@@ -67,11 +67,33 @@ def init_db():
         c = conn.cursor()
         c.execute('''
             CREATE TABLE IF NOT EXISTS progress (
-                path TEXT PRIMARY KEY,
+                user_id INTEGER,
+                path TEXT,
                 current_time REAL,
                 duration REAL,
                 play_count INTEGER DEFAULT 0,
-                last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, path)
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password_hash TEXT,
+                is_admin INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNIQUE,
+                name TEXT,
+                avatar TEXT,
+                preferences TEXT, -- JSON
+                parental_controls INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
         c.execute('''
@@ -115,7 +137,9 @@ def init_db():
         c.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                user_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
         c.execute('''
@@ -138,6 +162,22 @@ def init_db():
         try:
             c.execute("ALTER TABLE library_index ADD COLUMN year TEXT")
         except sqlite3.OperationalError: pass
+
+        try:
+            c.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+        except sqlite3.OperationalError: pass
+
+        try:
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)")
+        except sqlite3.OperationalError: pass
+
+        # Add indexes for performance
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_category ON library_index(category)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_path ON library_index(path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_folder ON library_index(folder)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_mtime ON library_index(mtime)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_progress_path ON progress(path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_metadata_path ON file_metadata(path)")
 
         conn.commit()
     finally:
@@ -170,54 +210,156 @@ def get_setting(key: str) -> Optional[str]:
     finally:
         return_db(conn)
 
-def update_progress(path: str, current_time: float, duration: float):
+def get_user_by_username(username: str) -> Optional[dict]:
     conn = get_db()
     try:
         c = conn.cursor()
-        
-        # Check if we should increment play count (e.g., if we reached > 90% and it wasn't already marked)
-        # This is a bit complex for a single query, so we'll just update it.
-        # Frontend will typically send progress updates.
-        
+        c.execute('SELECT * FROM users WHERE username = ?', (username.lower(),))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        return_db(conn)
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        return_db(conn)
+
+def create_user(username: str, password_hash: str, is_admin: bool = False) -> int:
+    conn = get_db()
+    try:
+        c = conn.cursor()
         c.execute('''
-            INSERT INTO progress (path, current_time, duration, last_played, play_count)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 0)
-            ON CONFLICT(path) DO UPDATE SET
+            INSERT INTO users (username, password_hash, is_admin)
+            VALUES (?, ?, ?)
+        ''', (username.lower(), password_hash, 1 if is_admin else 0))
+        conn.commit()
+        return c.lastrowid
+    finally:
+        return_db(conn)
+
+def update_user_password(user_id: int, new_hash: str):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_hash, user_id))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def get_all_users() -> List[dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT id, username, is_admin, created_at FROM users')
+        return [dict(row) for row in c.fetchall()]
+    finally:
+        return_db(conn)
+
+def delete_user(user_id: int):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+        c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+        c.execute('DELETE FROM profiles WHERE user_id = ?', (user_id,))
+        c.execute('DELETE FROM progress WHERE user_id = ?', (user_id,))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def update_user_role(user_id: int, is_admin: bool):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('UPDATE users SET is_admin = ? WHERE id = ?', (1 if is_admin else 0, user_id))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def get_profile(user_id: int) -> Optional[dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT * FROM profiles WHERE user_id = ?', (user_id,))
+        row = c.fetchone()
+        if row:
+            data = dict(row)
+            if data.get('preferences'):
+                try:
+                    data['preferences'] = json.loads(data['preferences'])
+                except:
+                    data['preferences'] = {}
+            return data
+        return None
+    finally:
+        return_db(conn)
+
+def upsert_profile(user_id: int, name: str, avatar: str = None, preferences: dict = None, parental_controls: int = 0):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        prefs_json = json.dumps(preferences or {})
+        c.execute('''
+            INSERT INTO profiles (user_id, name, avatar, preferences, parental_controls)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                name = excluded.name,
+                avatar = excluded.avatar,
+                preferences = excluded.preferences,
+                parental_controls = excluded.parental_controls
+        ''', (user_id, name, avatar, prefs_json, parental_controls))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def update_progress(user_id: int, path: str, current_time: float, duration: float):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO progress (user_id, path, current_time, duration, last_played, play_count)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
+            ON CONFLICT(user_id, path) DO UPDATE SET
                 current_time = excluded.current_time,
                 duration = excluded.duration,
                 last_played = CURRENT_TIMESTAMP
-        ''', (path, current_time, duration))
-        
-        # If progress > 90%, we can consider it "played" once. 
-        # But we don't want to increment every time a ping comes.
-        # Maybe the frontend should explicitly call an "increment_play_count" endpoint.
-        # For now, let's just stick to updating progress.
-        
+        ''', (user_id, path, current_time, duration))
         conn.commit()
     finally:
         return_db(conn)
 
-def increment_play_count(path: str):
+def increment_play_count(user_id: int, path: str):
     conn = get_db()
     try:
         c = conn.cursor()
         c.execute('''
-            UPDATE progress SET play_count = play_count + 1 WHERE path = ?
-        ''', (path,))
+            UPDATE progress SET play_count = play_count + 1 
+            WHERE user_id = ? AND path = ?
+        ''', (user_id, path))
         if c.rowcount == 0:
             c.execute('''
-                INSERT INTO progress (path, current_time, duration, play_count, last_played)
-                VALUES (?, 0, 0, 1, CURRENT_TIMESTAMP)
-            ''', (path,))
+                INSERT INTO progress (user_id, path, current_time, duration, play_count, last_played)
+                VALUES (?, ?, 0, 0, 1, CURRENT_TIMESTAMP)
+            ''', (user_id, path))
         conn.commit()
     finally:
         return_db(conn)
 
-def get_progress(path: str) -> Optional[dict]:
+def get_progress(user_id: int, path: str) -> Optional[dict]:
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('SELECT current_time, duration, last_played FROM progress WHERE path = ?', (path,))
+        c.execute('''
+            SELECT current_time, duration, last_played 
+            FROM progress 
+            WHERE user_id = ? AND path = ?
+        ''', (user_id, path))
         row = c.fetchone()
         if row:
             return dict(row)
@@ -225,11 +367,15 @@ def get_progress(path: str) -> Optional[dict]:
     finally:
         return_db(conn)
 
-def get_all_progress():
+def get_all_progress(user_id: int):
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('SELECT path, current_time, duration, last_played FROM progress')
+        c.execute('''
+            SELECT path, current_time, duration, last_played 
+            FROM progress 
+            WHERE user_id = ?
+        ''', (user_id,))
         rows = c.fetchall()
         return {row['path']: dict(row) for row in rows}
     finally:
@@ -359,6 +505,40 @@ def delete_library_index_items_by_prefix(path_prefix: str):
     finally:
         return_db(conn)
 
+def find_duplicate_files() -> List[dict]:
+    """Find files with the same name and size across the entire library."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT name, size, category, GROUP_CONCAT(path, '|') as paths, COUNT(*) as count
+            FROM library_index
+            WHERE category NOT IN ('music', 'books') -- Skip small files that might have common names
+            GROUP BY name, size
+            HAVING count > 1
+            ORDER BY count DESC
+        ''')
+        return [dict(row) for row in c.fetchall()]
+    finally:
+        return_db(conn)
+
+def find_duplicate_metadata() -> List[dict]:
+    """Find media items that represent the same content based on IMDb ID."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT imdb_id, title, media_type, GROUP_CONCAT(path, '|') as paths, COUNT(*) as count
+            FROM file_metadata
+            WHERE imdb_id IS NOT NULL AND imdb_id != 'N/A' AND imdb_id != ''
+            GROUP BY imdb_id
+            HAVING count > 1
+            ORDER BY count DESC
+        ''')
+        return [dict(row) for row in c.fetchall()]
+    finally:
+        return_db(conn)
+
 def upsert_library_index_items(items: list):
     if not items:
         return
@@ -456,11 +636,24 @@ def get_unique_years(category: str) -> List[str]:
         return_db(conn)
 
 def query_library_index(category: str, q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+    # Validation
+    allowed_sorts = ['name', 'newest', 'oldest', 'year_desc', 'year_asc', 'recently_played', 'top_watched']
+    if sort not in allowed_sorts:
+        sort = 'name'
+
     if category == 'shows' and offset == 0 and not q and not genre and not year and sort == 'name':
         # Optional: We could call query_shows here, but let's keep it separate for now
         pass
 
-    q = (q or "").strip().lower()
+    # Handle FastAPI Query objects if passed directly in tests
+    if hasattr(q, 'default'): q = q.default
+    if hasattr(genre, 'default'): genre = genre.default
+    if hasattr(year, 'default'): year = year.default
+    if hasattr(sort, 'default'): sort = sort.default
+    if hasattr(offset, 'default'): offset = offset.default
+    if hasattr(limit, 'default'): limit = limit.default
+
+    q = (str(q) if q is not None and not hasattr(q, 'default') else "").strip().lower()
     offset = max(0, int(offset or 0))
     limit = max(1, min(int(limit or 50), 200))
 
@@ -538,6 +731,19 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         return_db(conn)
 
 def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+    # Handle FastAPI Query objects if passed directly in tests
+    if hasattr(q, 'default'): q = q.default
+    if hasattr(genre, 'default'): genre = genre.default
+    if hasattr(year, 'default'): year = year.default
+    if hasattr(sort, 'default'): sort = sort.default
+    if hasattr(offset, 'default'): offset = offset.default
+    if hasattr(limit, 'default'): limit = limit.default
+
+    # Validation
+    allowed_sorts = ['name', 'newest', 'top_watched', 'recently_played']
+    if sort not in allowed_sorts:
+        sort = 'name'
+
     conn = get_db()
     try:
         c = conn.cursor()
@@ -691,11 +897,11 @@ def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
 
 SESSION_MAX_AGE_DAYS = int(os.environ.get("SESSION_MAX_AGE_DAYS", 30))
 
-def create_session(token: str):
+def create_session(token: str, user_id: int):
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('INSERT INTO sessions (token) VALUES (?)', (token,))
+        c.execute('INSERT INTO sessions (token, user_id) VALUES (?, ?)', (token, user_id))
         conn.commit()
     finally:
         return_db(conn)
@@ -706,7 +912,7 @@ def get_session(token: str) -> Optional[dict]:
         c = conn.cursor()
         # Only return session if it hasn't expired
         c.execute('''
-            SELECT token, created_at 
+            SELECT token, user_id, created_at 
             FROM sessions 
             WHERE token = ? AND created_at >= datetime('now', '-' || ? || ' days')
         ''', (token, SESSION_MAX_AGE_DAYS))

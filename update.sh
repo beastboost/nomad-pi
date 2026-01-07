@@ -50,8 +50,14 @@ git reset --hard origin/main
 chmod +x *.sh
 find . -name "*.sh" -exec chmod +x {} +
 
-update_status 40 "Installing dependencies..."
-echo "Installing dependencies..."
+update_status 50 "Installing system dependencies..."
+echo "Installing/Updating system dependencies..."
+# Ensure all required system packages are present (especially if new ones were added in a recent release)
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
+
+update_status 60 "Installing Python dependencies..."
+echo "Installing Python dependencies..."
 if [ ! -d "venv" ]; then
     echo "Virtual environment not found. Creating one..."
     python3 -m venv venv
@@ -59,7 +65,7 @@ fi
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -r requirements.txt
 
-update_status 90 "Update complete. Preparing to restart..."
+update_status 80 "Update complete. Preparing to restart..."
 echo "Update complete. Preparing to restart..."
 
 # Write completion marker to log BEFORE restarting

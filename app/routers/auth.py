@@ -23,72 +23,39 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
 
-# Cache for the hashed admin password to avoid re-hashing on every call
-_CACHED_ADMIN_HASH = None
+def ensure_admin_user():
+    """Ensures at least one admin user exists."""
+    users = database.get_all_users()
+    if not users:
+        # Create default admin user
+        password = ADMIN_PASSWORD or "nomad"
+        h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
+        database.create_user("admin", h, is_admin=True)
+        print(f"Created default admin user with password: {'***' if ADMIN_PASSWORD else 'nomad'}")
 
-def get_admin_password_hash():
-    """Returns the current admin password hash based on priority:
-    1. Environment Variable ADMIN_PASSWORD_HASH
-    2. Environment Variable ADMIN_PASSWORD (hashed)
-    3. Database setting 'admin_password_hash'
-    4. Default password 'nomad' (if allowed)
-    """
-    global _CACHED_ADMIN_HASH
-    
-    # Return cached hash if available
-    if _CACHED_ADMIN_HASH:
-        return _CACHED_ADMIN_HASH
-
-    # 1. Check environment variables (highest priority)
-    if ADMIN_PASSWORD_HASH:
-        _CACHED_ADMIN_HASH = ADMIN_PASSWORD_HASH
-        return _CACHED_ADMIN_HASH
-    if ADMIN_PASSWORD:
-        _CACHED_ADMIN_HASH = pwd_context.hash(ADMIN_PASSWORD)
-        return _CACHED_ADMIN_HASH
-    
-    # 2. Check database
-    stored_hash = database.get_setting("admin_password_hash")
-    if stored_hash:
-        _CACHED_ADMIN_HASH = stored_hash
-        return _CACHED_ADMIN_HASH
-    
-    # 3. Handle default if allowed
-    if ALLOW_INSECURE_DEFAULT:
-        default_pass = "nomad"
-        h = pwd_context.hash(default_pass)
-        # Store it so it's persistent and can be changed
-        database.set_setting("admin_password_hash", h)
-        _CACHED_ADMIN_HASH = h
-        return h
-    
-    # 4. Fail fast
-    import sys
-    print("FATAL: No ADMIN_PASSWORD, ADMIN_PASSWORD_HASH, or stored password found.")
-    print("Security policy requires credentials to be set.")
-    print("To bypass this (NOT RECOMMENDED), set ALLOW_INSECURE_DEFAULT=true")
-    sys.exit(1)
-
-# Log security status at startup
-def log_security_status():
-    if not ADMIN_PASSWORD_HASH and not ADMIN_PASSWORD:
-        stored_hash = database.get_setting("admin_password_hash")
-        if not stored_hash and ALLOW_INSECURE_DEFAULT:
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("WARNING: Using insecure default password: 'nomad'")
-            print("Please change this immediately via the UI or set ADMIN_PASSWORD")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        elif not stored_hash:
-             print("Security: No credentials found. Server will fail fast on next access.")
-
-log_security_status()
+ensure_admin_user()
 
 class LoginRequest(BaseModel):
+    username: str = "admin"
     password: str
 
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
+
+class UserRoleRequest(BaseModel):
+    is_admin: bool
+
+class ProfileUpdateRequest(BaseModel):
+    name: str
+    avatar: str = None
+    preferences: dict = {}
+    parental_controls: int = 0
 
 @router.post("/login")
 def login(request: LoginRequest, request_obj: Request):
@@ -105,21 +72,29 @@ def login(request: LoginRequest, request_obj: Request):
             detail=f"Too many login attempts. Try again in {LOCKOUT_MINUTES} minutes."
         )
 
-    current_hash = get_admin_password_hash()
-        
-    if pwd_context.verify(request.password, current_hash):
+    user = database.get_user_by_username(request.username)
+    if user and pwd_context.verify(request.password, user['password_hash']):
         # Clear attempts on success
         login_attempts[client_ip] = []
         token = str(uuid.uuid4())
-        database.create_session(token)
-        # We set httponly=False so the frontend can read the token for media requests (audio/video elements)
-        response = JSONResponse(content={"status": "ok", "token": token})
+        database.create_session(token, user['id'])
+        
+        response = JSONResponse(content={
+            "status": "ok", 
+            "token": token,
+            "user": {
+                "id": user['id'],
+                "username": user['username'],
+                "is_admin": bool(user['is_admin'])
+            }
+        })
         response.set_cookie(
             key="auth_token", 
             value=token, 
             httponly=False, 
             max_age=86400 * 30,
-            secure=False,  # Set to True in production with HTTPS
+            path="/",
+            secure=False,
             samesite="lax"
         )
         return response
@@ -128,11 +103,10 @@ def login(request: LoginRequest, request_obj: Request):
     attempts.append(now)
     login_attempts[client_ip] = attempts
     
-    raise HTTPException(status_code=401, detail="Invalid password")
+    raise HTTPException(status_code=401, detail="Invalid username or password")
 
 # Dependency for protecting routes
-def get_current_user(request: Request):
-    # Check cookie, then query param, then Authorization header
+def get_current_user_id(request: Request):
     token = request.cookies.get("auth_token")
     if not token:
         token = request.query_params.get("token")
@@ -141,18 +115,75 @@ def get_current_user(request: Request):
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
             
-    if not token or not database.get_session(token):
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return token
+        
+    session = database.get_session(token)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        
+    return session['user_id']
+
+def get_current_admin(user_id=Depends(get_current_user_id)):
+    user = database.get_user_by_id(user_id)
+    if not user or not user['is_admin']:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
+    return user
+
+@router.get("/users")
+def list_users(admin=Depends(get_current_admin)):
+    return database.get_all_users()
+
+@router.post("/users")
+def create_user(request: UserCreateRequest, admin=Depends(get_current_admin)):
+    if database.get_user_by_username(request.username):
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    h = pwd_context.hash(request.password)
+    user_id = database.create_user(request.username, h, is_admin=request.is_admin)
+    return {"status": "ok", "user_id": user_id}
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, admin=Depends(get_current_admin)):
+    if user_id == admin['id']:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    database.delete_user(user_id)
+    return {"status": "ok"}
+
+@router.post("/users/{user_id}/role")
+def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_current_admin)):
+    if user_id == admin['id']:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+    database.update_user_role(user_id, request.is_admin)
+    return {"status": "ok"}
+
+@router.get("/profile")
+def get_profile(user_id=Depends(get_current_user_id)):
+    profile = database.get_profile(user_id)
+    if not profile:
+        user = database.get_user_by_id(user_id)
+        return {"user_id": user_id, "name": user['username'], "avatar": None, "preferences": {}, "parental_controls": 0}
+    return profile
+
+@router.post("/profile")
+def update_profile(request: ProfileUpdateRequest, user_id=Depends(get_current_user_id)):
+    database.upsert_profile(
+        user_id, 
+        request.name, 
+        avatar=request.avatar, 
+        preferences=request.preferences, 
+        parental_controls=request.parental_controls
+    )
+    return {"status": "ok"}
 
 @router.post("/change-password")
-def change_password(request: PasswordChangeRequest, current_user=Depends(get_current_user)):
-    current_hash = get_admin_password_hash()
-    if not pwd_context.verify(request.current_password, current_hash):
+def change_password(request: PasswordChangeRequest, user_id=Depends(get_current_user_id)):
+    user = database.get_user_by_id(user_id)
+    if not user or not pwd_context.verify(request.current_password, user['password_hash']):
         raise HTTPException(status_code=400, detail="Current password incorrect")
     
     new_hash = pwd_context.hash(request.new_password)
-    database.set_setting("admin_password_hash", new_hash)
+    database.update_user_password(user_id, new_hash)
     return {"status": "ok", "message": "Password changed successfully"}
 
 @router.post("/logout")

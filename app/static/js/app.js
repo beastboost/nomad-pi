@@ -78,6 +78,9 @@ async function fetchMovieMeta(file) {
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || data.configured === false) return null;
         file.omdb = data;
+        // Store extras for easy access
+        file.subtitles = data.subtitles || [];
+        file.trailers = data.trailers || [];
         return data;
     } catch {
         return null;
@@ -99,19 +102,33 @@ function applyMovieMetaToCard(cardEl, file, data) {
     const parts = [year, rated, runtime].filter(v => v && v !== 'N/A');
     if (subEl && parts.length > 0) subEl.textContent = parts.join(' • ');
 
-    if (shell && !file.poster) {
-        const posterUrl = data.poster || data.meta?.Poster;
-        if (posterUrl && posterUrl !== 'N/A') {
-            const existingImg = shell.querySelector('img.poster-img');
-            if (!existingImg) {
-                const placeholder = shell.querySelector('.poster-placeholder');
-                const img = document.createElement('img');
-                img.className = 'poster-img';
-                img.loading = 'lazy';
-                img.alt = file?.name || 'Poster';
-                img.src = posterUrl;
-                if (placeholder) placeholder.replaceWith(img);
-                else shell.prepend(img);
+    if (shell) {
+        if (!file.poster) {
+            const posterUrl = data.poster || data.meta?.Poster;
+            if (posterUrl && posterUrl !== 'N/A') {
+                const existingImg = shell.querySelector('img.poster-img');
+                if (!existingImg) {
+                    const placeholder = shell.querySelector('.poster-placeholder');
+                    const img = document.createElement('img');
+                    img.className = 'poster-img';
+                    img.loading = 'lazy';
+                    img.alt = file?.name || 'Poster';
+                    img.src = posterUrl;
+                    if (placeholder) placeholder.replaceWith(img);
+                    else shell.prepend(img);
+                }
+            }
+        }
+
+        // Add Trailer button if trailers exist
+        if (data.trailers && data.trailers.length > 0) {
+            const infoDiv = shell.querySelector('.media-info');
+            if (infoDiv && !infoDiv.querySelector('.trailer-badge')) {
+                const badge = document.createElement('div');
+                badge.className = 'trailer-badge';
+                badge.textContent = 'Trailer';
+                badge.style.cssText = 'background:var(--accent-color); color:white; padding:2px 6px; border-radius:4px; font-size:0.7em; margin-top:5px; display:inline-block; font-weight:bold;';
+                infoDiv.appendChild(badge);
             }
         }
     }
@@ -191,7 +208,9 @@ function restoreShowsState() {
 
 // Auth Functions
 async function login() {
+    const usernameInput = document.getElementById('username-input');
     const passwordInput = document.getElementById('password-input');
+    const username = usernameInput.value;
     const password = passwordInput.value;
     const errorMsg = document.getElementById('login-error');
 
@@ -201,7 +220,7 @@ async function login() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ password: password })
+            body: JSON.stringify({ username: username, password: password })
         });
 
         if (res.ok) {
@@ -210,6 +229,7 @@ async function login() {
             // Load initial data
             loadStorageStats();
             loadResume();
+            loadProfile();
             startStatsAutoRefresh();
         } else {
             errorMsg.style.display = 'block';
@@ -235,6 +255,7 @@ async function checkAuth() {
             document.getElementById('app').classList.remove('hidden');
             loadStorageStats();
             loadResume();
+            loadProfile();
             startStatsAutoRefresh();
         } else {
             // Ensure login screen is visible
@@ -244,6 +265,191 @@ async function checkAuth() {
         }
     } catch (e) {
         console.error("Auth check failed", e);
+    }
+}
+
+// User Management Functions
+async function loadUsers() {
+    const container = document.getElementById('user-management-list');
+    if (!container) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users`);
+        if (res.status === 403) {
+            container.innerHTML = '<div class="warning">Admin privileges required to manage users.</div>';
+            return;
+        }
+        const users = await res.json();
+        
+        container.innerHTML = '';
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'list-item user-item';
+            div.style.display = 'flex';
+            div.style.alignItems = 'center';
+            div.style.justifyContent = 'space-between';
+            div.style.padding = '12px 15px';
+            
+            div.innerHTML = `
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div style="font-size:1.5em;">👤</div>
+                    <div>
+                        <div style="font-weight:bold;">${escapeHtml(user.username)} ${user.is_admin ? '<span class="badge">Admin</span>' : ''}</div>
+                        <div style="font-size:0.8em; color:var(--text-muted);">Joined: ${new Date(user.created_at).toLocaleDateString()}</div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="toggleUserRole(${user.id}, ${!user.is_admin})" class="secondary btn-sm">
+                        ${user.is_admin ? 'Demote' : 'Make Admin'}
+                    </button>
+                    <button onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" class="danger btn-sm">Delete</button>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    } catch (e) {
+        console.error('Error loading users:', e);
+        container.innerHTML = '<div class="error">Failed to load users.</div>';
+    }
+}
+
+async function addUser() {
+    const usernameInput = document.getElementById('new-user-username');
+    const passwordInput = document.getElementById('new-user-password');
+    const isAdminInput = document.getElementById('new-user-is-admin');
+    
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    const is_admin = isAdminInput.checked;
+
+    if (!username || !password) {
+        showToast('Username and password are required', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, is_admin })
+        });
+
+        if (res.ok) {
+            showToast('User created successfully', 'success');
+            usernameInput.value = '';
+            passwordInput.value = '';
+            isAdminInput.checked = false;
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to create user', 'error');
+        }
+    } catch (e) {
+        showToast('Error creating user', 'error');
+    }
+}
+
+async function deleteUser(userId, username) {
+    if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/users/${userId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('User deleted', 'success');
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to delete user', 'error');
+        }
+    } catch (e) {
+        showToast('Error deleting user', 'error');
+    }
+}
+
+async function toggleUserRole(userId, isAdmin) {
+    try {
+        const res = await fetch(`${API_BASE}/auth/users/${userId}/role`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_admin: isAdmin })
+        });
+
+        if (res.ok) {
+            showToast('User role updated', 'success');
+            loadUsers();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to update role', 'error');
+        }
+    } catch (e) {
+        showToast('Error updating role', 'error');
+    }
+}
+
+// Profile Functions
+let currentUserProfile = null;
+
+async function loadProfile() {
+    try {
+        const res = await fetch(`${API_BASE}/auth/profile`);
+        if (res.ok) {
+            currentUserProfile = await res.json();
+            updateUIWithProfile();
+        }
+    } catch (e) {
+        console.error('Error loading profile:', e);
+    }
+}
+
+function updateUIWithProfile() {
+    if (!currentUserProfile) return;
+    
+    // Update display name in header if we had one (could add later)
+    console.log('Profile loaded:', currentUserProfile);
+    
+    // Update settings form if it exists
+    const nameInput = document.getElementById('profile-name');
+    const avatarInput = document.getElementById('profile-avatar');
+    const parentalInput = document.getElementById('profile-parental');
+    
+    if (nameInput) nameInput.value = currentUserProfile.name || '';
+    if (avatarInput) avatarInput.value = currentUserProfile.avatar || '';
+    if (parentalInput) parentalInput.value = currentUserProfile.parental_controls || 0;
+}
+
+async function saveProfileUI() {
+    const nameInput = document.getElementById('profile-name');
+    const avatarInput = document.getElementById('profile-avatar');
+    const parentalInput = document.getElementById('profile-parental');
+    
+    if (!nameInput) return;
+    
+    const name = nameInput.value.trim();
+    const avatar = avatarInput.value.trim();
+    const parental_controls = parseInt(parentalInput.value);
+    
+    if (!name) {
+        showToast('Display name is required', 'error');
+        return;
+    }
+    
+    await saveProfile(name, avatar, {}, parental_controls);
+}
+
+async function saveProfile(name, avatar = null, preferences = {}, parental_controls = 0) {
+    try {
+        const res = await fetch(`${API_BASE}/auth/profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, avatar, preferences, parental_controls })
+        });
+
+        if (res.ok) {
+            showToast('Profile updated', 'success');
+            loadProfile();
+        }
+    } catch (e) {
+        showToast('Error saving profile', 'error');
     }
 }
 
@@ -356,6 +562,7 @@ function showSection(id) {
     }
 
     if (id === 'admin') {
+        loadUsers();
         loadDrives();
         loadWifiStatus();
         // Auto-refresh drives every 5 seconds while in admin panel
@@ -557,7 +764,11 @@ async function loadFileBrowser(path, query = '') {
 function openFile(path) {
     const ext = path.split('.').pop().toLowerCase();
     if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg'].includes(ext)) {
-        openVideoViewer(path);
+        const file = {
+            path: path,
+            name: path.split('/').pop() || path
+        };
+        playVideo(file);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
         openImageViewer(path);
     } else if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) {
@@ -926,7 +1137,7 @@ function renderMediaList(category, files, append = false) {
             div.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
                 if (isVideo) {
-                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    playVideo(file, file.progress?.current_time || 0);
                 } else {
                     openImageViewer(file.path, cleanTitle(file.name));
                 }
@@ -975,7 +1186,7 @@ function renderMediaList(category, files, append = false) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        playVideo(file, file.progress?.current_time || 0);
                     });
                 }
 
@@ -1013,7 +1224,7 @@ function renderMediaList(category, files, append = false) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        playVideo(file, file.progress?.current_time || 0);
                     });
                 }
             } else {
@@ -1331,7 +1542,29 @@ function openImageViewer(path, title) {
     modal.classList.remove('hidden');
 }
 
-function openVideoViewer(path, title, startSeconds = 0) {
+async function playVideo(file, startSeconds = 0) {
+    if (!file || !file.path) return;
+    
+    // If metadata isn't loaded yet, fetch it now to get subtitles/trailers
+    if (!file.omdb) {
+        // Show a brief loading state if needed, but usually it's fast
+        const meta = await fetchMovieMeta(file);
+        if (meta) {
+            file.omdb = meta;
+            file.subtitles = meta.subtitles || [];
+            file.trailers = meta.trailers || [];
+        }
+    }
+    
+    const extras = {
+        subtitles: file.subtitles || [],
+        trailers: file.trailers || []
+    };
+    
+    openVideoViewer(file.path, cleanTitle(file.name), startSeconds, extras);
+}
+
+function openVideoViewer(path, title, startSeconds = 0, extras = null) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -1354,9 +1587,33 @@ function openVideoViewer(path, title, startSeconds = 0) {
     const safeExt = extMatch ? extMatch[0] : '.mp4';
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
+    // Subtitles and Trailers UI
+    let extrasHtml = '';
+    if (extras) {
+        if (extras.trailers && extras.trailers.length > 0) {
+            extrasHtml += `
+                <select onchange="playTrailer(this.value, '${escapeHtml(safeTitle)} Trailer')" class="player-action-btn" style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px; border-radius:4px; font-size:0.9em; cursor:pointer;">
+                    <option value="">🎞️ Trailers</option>
+                    ${extras.trailers.map(t => `<option value="${escapeHtml(t.path)}">${escapeHtml(t.name)}</option>`).join('')}
+                </select>
+            `;
+        }
+        if (extras.subtitles && extras.subtitles.length > 0) {
+            extrasHtml += `
+                <select onchange="setSubtitle(this.value)" class="player-action-btn" style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px; border-radius:4px; font-size:0.9em; cursor:pointer;">
+                    <option value="none">💬 Subtitles: Off</option>
+                    ${extras.subtitles.map((s, idx) => `<option value="${idx}">${escapeHtml(s.label)}</option>`).join('')}
+                </select>
+            `;
+        }
+    }
+
     heading.innerHTML = `
-        <div style="display:flex; align-items:center; gap:12px; width:100%;">
+        <div style="display:flex; align-items:center; gap:12px; width:100%; flex-wrap:wrap;">
             <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</span>
+            <div class="player-extras" style="display:flex; gap:8px;">
+                ${extrasHtml}
+            </div>
             <div class="external-player-btns" style="display:flex; gap:8px;">
                 <a href="${streamUrl}" download="${escapeHtml(downloadName)}" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
@@ -1372,16 +1629,66 @@ function openVideoViewer(path, title, startSeconds = 0) {
     console.log('Opening video:', path, 'at', streamUrl);
 
     const video = document.createElement('video');
+    video.id = 'main-video-player';
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
-    video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
+    video.preload = 'auto';
+    video.crossOrigin = 'anonymous';
     video.src = streamUrl;
+    
+    // Add subtitle tracks
+    if (extras && extras.subtitles) {
+        extras.subtitles.forEach((sub, idx) => {
+            const track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = sub.label;
+            track.srclang = sub.label.toLowerCase().substring(0, 2);
+            
+            let subUrl = sub.path;
+            if (token) subUrl += (subUrl.includes('?') ? '&' : '?') + 'token=' + token;
+            track.src = subUrl;
+            
+            video.appendChild(track);
+        });
+    }
+
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
     body.appendChild(video);
     modal.classList.remove('hidden');
+}
+
+function playTrailer(path, title) {
+    if (!path) return;
+    const video = document.getElementById('main-video-player');
+    if (!video) return;
+    
+    const token = getCookie('auth_token');
+    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
+    if (token) streamUrl += '&token=' + token;
+    
+    video.pause();
+    video.src = streamUrl;
+    video.currentTime = 0;
+    // Remove subtitles for trailer
+    while (video.firstChild) video.removeChild(video.firstChild);
+    
+    video.play().catch(e => console.error('Trailer play failed:', e));
+    
+    // Update heading title if possible
+    const titleSpan = document.querySelector('#viewer-title span');
+    if (titleSpan) titleSpan.textContent = title;
+}
+
+function setSubtitle(idx) {
+    const video = document.getElementById('main-video-player');
+    if (!video) return;
+    
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+        tracks[i].mode = (idx !== 'none' && i === parseInt(idx)) ? 'showing' : 'hidden';
+    }
 }
 
 async function openComicViewer(path, title) {
@@ -1707,14 +2014,14 @@ function renderShows() {
 
                     div.addEventListener('click', (e) => {
                         if (e.target.closest('button')) return;
-                        openVideoViewer(item.path, item.name, start);
+                        playVideo(item, start);
                     });
 
                     const playBtn = div.querySelector('.poster-play');
                     if (playBtn) {
                         playBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            openVideoViewer(item.path, item.name, start);
+                            playVideo(item, start);
                         });
                     }
 
@@ -1845,14 +2152,14 @@ function renderShows() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+            playVideo(ep, ep.progress?.current_time || 0);
         });
 
         const btn = div.querySelector('.poster-play');
         if (btn) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+                playVideo(ep, ep.progress?.current_time || 0);
             });
         }
 
@@ -1952,14 +2259,14 @@ async function loadResume() {
                  
                  div.addEventListener('click', (e) => {
                     if (e.target.closest('button')) return;
-                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    playVideo(file, file.progress?.current_time || 0);
                  });
 
                  const btn = div.querySelector('.poster-play');
                  if (btn) {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        playVideo(file, file.progress?.current_time || 0);
                     });
                  }
 
@@ -2035,7 +2342,7 @@ async function loadRecent() {
 
                 div.addEventListener('click', () => {
                     if (item.category === 'movies') {
-                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0);
+                        playVideo(item, item.progress?.current_time || 0);
                     } else {
                         showSection('shows');
                         setShowsLevel('seasons', item.name);
@@ -2329,6 +2636,167 @@ function cancelUpload() {
             startBtn.textContent = 'Start Upload';
         }
     }
+}
+
+async function findDuplicates() {
+    const statusDiv = document.getElementById('duplicates-status');
+    if (statusDiv) statusDiv.innerHTML = '<span class="loading-spinner"></span> Finding duplicates...';
+
+    try {
+        const res = await fetch(`${API_BASE}/media/duplicates`);
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        if (statusDiv) statusDiv.innerHTML = '';
+        showDuplicatesModal(data);
+    } catch (e) {
+        console.error('Error finding duplicates:', e);
+        if (statusDiv) statusDiv.innerHTML = '<span style="color:var(--danger-color)">Error finding duplicates.</span>';
+    }
+}
+
+function showDuplicatesModal(data) {
+    const { file_duplicates, content_duplicates } = data;
+    
+    let html = `
+        <div class="duplicates-container">
+            <div class="tabs" style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+                <button onclick="switchDuplicateTab('files')" class="tab-btn active" id="tab-files-btn">File Duplicates (${file_duplicates.length})</button>
+                <button onclick="switchDuplicateTab('content')" class="tab-btn" id="tab-content-btn">Content Duplicates (${content_duplicates.length})</button>
+            </div>
+            
+            <div id="duplicate-files-section" class="duplicate-section">
+                ${file_duplicates.length === 0 ? '<p>No duplicate files found.</p>' : ''}
+                <div class="duplicate-list">
+                    ${file_duplicates.map(d => `
+                        <div class="duplicate-item card" style="margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.05);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <strong style="font-size:1.1em;">${escapeHtml(d.name)}</strong>
+                                <span class="badge" style="background:var(--accent-color);">${formatSize(d.size)}</span>
+                            </div>
+                            <div class="paths-list" style="font-size:0.9em; color:var(--text-muted);">
+                                ${d.paths.map((p, i) => `
+                                    <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
+                                        <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
+                                        <button onclick="deleteDuplicate('${escapeHtml(p)}', this)" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div id="duplicate-content-section" class="duplicate-section hidden">
+                ${content_duplicates.length === 0 ? '<p>No duplicate content found.</p>' : ''}
+                <div class="duplicate-list">
+                    ${content_duplicates.map(d => `
+                        <div class="duplicate-item card" style="margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.05);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <strong style="font-size:1.1em;">${escapeHtml(d.title)}</strong>
+                                <span class="badge" style="background:var(--primary-color);">${escapeHtml(d.media_type)}</span>
+                            </div>
+                            <div style="font-size:0.85em; color:var(--text-muted); margin-bottom:8px;">IMDb ID: ${escapeHtml(d.imdb_id)}</div>
+                            <div class="paths-list" style="font-size:0.9em; color:var(--text-muted);">
+                                ${d.paths.map((p, i) => `
+                                    <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
+                                        <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
+                                        <button onclick="deleteDuplicate('${escapeHtml(p)}', this)" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    openModal('Duplicate Detection Results', html);
+}
+
+function switchDuplicateTab(tab) {
+    const fileSec = document.getElementById('duplicate-files-section');
+    const contentSec = document.getElementById('duplicate-content-section');
+    const fileBtn = document.getElementById('tab-files-btn');
+    const contentBtn = document.getElementById('tab-content-btn');
+    
+    if (tab === 'files') {
+        fileSec.classList.remove('hidden');
+        contentSec.classList.add('hidden');
+        fileBtn.classList.add('active');
+        contentBtn.classList.remove('active');
+    } else {
+        fileSec.classList.add('hidden');
+        contentSec.classList.remove('hidden');
+        fileBtn.classList.remove('active');
+        contentBtn.classList.add('active');
+    }
+}
+
+async function deleteDuplicate(path, btn) {
+    if (!confirm(`Are you sure you want to permanently delete this file?\n\n${path}`)) return;
+    
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+    
+    try {
+        const res = await fetch(`${API_BASE}/media/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        if (res.status === 401) { logout(); return; }
+        
+        if (res.ok) {
+            const row = btn.closest('div');
+            row.style.opacity = '0.5';
+            btn.remove();
+            const span = document.createElement('span');
+            span.textContent = 'Deleted';
+            span.style.color = 'var(--danger-color)';
+            row.appendChild(span);
+        } else {
+            const data = await res.json();
+            alert(`Error deleting file: ${data.detail || 'Unknown error'}`);
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    } catch (e) {
+        alert(`Error deleting file: ${e.message}`);
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+function openModal(title, contentHtml) {
+    const modal = document.getElementById('viewer-modal');
+    const titleEl = document.getElementById('viewer-title');
+    const bodyEl = document.getElementById('viewer-body');
+    
+    if (!modal || !titleEl || !bodyEl) return;
+    
+    titleEl.textContent = title;
+    bodyEl.innerHTML = contentHtml;
+    modal.classList.remove('hidden');
+}
+
+function formatClock(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatSize(bytes) {
+    if (!bytes || isNaN(bytes)) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    return `${size.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function debounce(func, wait) {
@@ -3395,8 +3863,66 @@ function applyTheme() {
     document.body.classList.toggle('no-glass', noGlass);
 }
 
+// PWA Installation & Connectivity
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later.
+    deferredPrompt = e;
+    // Update UI notify the user they can install the PWA
+    showInstallPromotion();
+});
+
+window.addEventListener('appinstalled', () => {
+    // Clear the deferredPrompt so it can be garbage collected
+    deferredPrompt = null;
+    console.log('PWA was installed');
+    showToast('App installed successfully!', 'success');
+});
+
+window.addEventListener('online', () => {
+    showToast('Back online', 'success');
+    document.body.classList.remove('offline');
+});
+
+window.addEventListener('offline', () => {
+    showToast('You are offline. Some features may be limited.', 'warning');
+    document.body.classList.add('offline');
+});
+
+function showInstallPromotion() {
+    const installBtn = document.getElementById('install-pwa-btn');
+    if (installBtn) {
+        installBtn.classList.remove('hidden');
+    }
+}
+
+async function installPWA() {
+    if (!deferredPrompt) return;
+    // Show the install prompt
+    deferredPrompt.prompt();
+    // Wait for the user to respond to the prompt
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to the install prompt: ${outcome}`);
+    // We've used the prompt, and can't use it again, throw it away
+    deferredPrompt = null;
+    
+    const installBtn = document.getElementById('install-pwa-btn');
+    if (installBtn) {
+        installBtn.classList.add('hidden');
+    }
+}
+
 // Initialize settings on load
 window.addEventListener('DOMContentLoaded', () => {
     applyTheme();
     checkAuth();
+    
+    // Check if already in standalone mode
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+        console.log('Running in standalone mode');
+        document.body.classList.add('standalone');
+    }
 });

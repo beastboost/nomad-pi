@@ -1,47 +1,47 @@
 :root {
     --primary-color: #3b82f6;
-    --primary-hover: #2563eb;
+    --primary-hover: #60a5fa;
     --secondary-color: #64748b;
-    --bg-color: #f8fafc;
-    --card-bg: #ffffff;
-    --text-color: #1e293b;
-    --text-muted: #64748b;
-    --border-color: #e2e8f0;
-    --sidebar-bg: #1e293b;
+    --bg-color: #0f1115;
+    --card-bg: #1a1d23;
+    --text-color: #f1f3f5;
+    --text-muted: #94a3b8;
+    --border-color: rgba(255, 255, 255, 0.1);
+    --sidebar-bg: #0f1115;
     --sidebar-text: #f1f5f9;
     --sidebar-active: #334155;
     --danger: #ef4444;
     --warning: #f59e0b;
     --success: #10b981;
-    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-    --skeleton: #e2e8f0;
+    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --glass-blur: 16px;
 }
 
 body.dark-theme {
-    --bg-color: #0f172a;
-    --card-bg: #1e293b;
-    --text-color: #f1f5f9;
-    --text-muted: #94a3b8;
-    --border-color: #334155;
-    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2);
-    --skeleton: #334155;
+    --bg-color: #050505;
+    --card-bg: #0d0d0d;
+    --sidebar-bg: #050505;
+    --sidebar-active: #151515;
+    --border-color: rgba(255, 255, 255, 0.05);
 }
 
 body.glass-theme {
-    --bg-color: #0f172a;
-    --card-bg: rgba(30, 41, 59, 0.7);
-    --text-color: #f1f5f9;
-    --text-muted: #94a3b8;
-    --border-color: rgba(51, 65, 85, 0.5);
-    --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    --skeleton: #334155;
+    --bg-color: #0b0e14;
+    --card-bg: rgba(25, 30, 45, 0.5);
+    --sidebar-bg: rgba(15, 17, 21, 0.65);
+    --border-color: rgba(255, 255, 255, 0.12);
+    --shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
 }
 
 body.glass-theme .stat-card,
 body.glass-theme .card,
-body.glass-theme .header {
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+body.glass-theme .header,
+body.glass-theme .sidebar {
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
     background: var(--card-bg);
     border: 1px solid var(--border-color);
 }

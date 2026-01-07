@@ -5,16 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nomad Pi</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="css/style.css?v=3">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css?v=4">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Nomad Pi">
+    <link rel="apple-touch-icon" href="icons/icon-512.svg">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Nomad Pi">
+    <meta name="msapplication-TileColor" content="#0f172a">
+    <meta name="msapplication-tap-highlight" content="no">
 </head>
 <body>
     <div id="login-screen" class="login-container">
         <div class="login-box">
             <div class="logo">Nomad Pi ✨</div>
-            <p>Enter password to access your media</p>
+            <p>Sign in to access your media</p>
+            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;">
             <input type="password" id="password-input" placeholder="Password (default: nomad)" onkeypress="handleLoginKey(event)">
             <button onclick="login()" class="primary">Enter</button>
-            <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect password</p>
+            <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect username or password</p>
         </div>
     </div>
 
@@ -23,39 +38,39 @@
             <div class="logo">Nomad Pi ✨</div>
             <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
             <nav id="main-nav">
-                <button onclick="showSection('home')" class="active">Home</button>
-                <button onclick="showSection('movies')">Movies</button>
-                <button onclick="showSection('shows')">Shows</button>
-                <button onclick="showSection('music')">Music</button>
-                <button onclick="showSection('books')">Books</button>
-                <button onclick="showSection('gallery')">Gallery</button>
-                <button onclick="showSection('files')">Files</button>
-                <button onclick="showSection('admin')">Admin</button>
-                <button onclick="showSection('settings')">Settings</button>
+                <button onclick="showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
+                <button onclick="showSection('movies')"><i class="fas fa-film"></i> Movies</button>
+                <button onclick="showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
+                <button onclick="showSection('music')"><i class="fas fa-music"></i> Music</button>
+                <button onclick="showSection('books')"><i class="fas fa-book"></i> Books</button>
+                <button onclick="showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
+                <button onclick="showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
+                <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
+                <button onclick="showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
                 <span id="header-stats" class="header-stats"></span>
-                <button onclick="logout()" class="logout-btn">Logout</button>
+                <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
             </nav>
         </header>
 
         <nav class="mobile-bottom-nav glass">
             <button onclick="showSection('home')" id="btn-home-mob" class="nav-item active">
-                <span class="nav-icon">🏠</span>
+                <span class="nav-icon"><i class="fas fa-home"></i></span>
                 <span class="nav-label">Home</span>
             </button>
             <button onclick="showSection('movies')" id="btn-movies-mob" class="nav-item">
-                <span class="nav-icon">🎬</span>
+                <span class="nav-icon"><i class="fas fa-film"></i></span>
                 <span class="nav-label">Movies</span>
             </button>
             <button onclick="showSection('shows')" id="btn-shows-mob" class="nav-item">
-                <span class="nav-icon">📺</span>
+                <span class="nav-icon"><i class="fas fa-tv"></i></span>
                 <span class="nav-label">Shows</span>
             </button>
             <button onclick="showSection('files')" id="btn-files-mob" class="nav-item">
-                <span class="nav-icon">🗂️</span>
+                <span class="nav-icon"><i class="fas fa-folder-open"></i></span>
                 <span class="nav-label">Files</span>
             </button>
             <button onclick="toggleMobileMenu()" id="btn-more-mob" class="nav-item">
-                <span class="nav-icon">☰</span>
+                <span class="nav-icon"><i class="fas fa-bars"></i></span>
                 <span class="nav-label">More</span>
             </button>
         </nav>
@@ -66,7 +81,7 @@
                 <div class="stats-grid">
                     <div class="stat-card glass-hover">
                         <div class="stat-header">
-                            <span class="stat-icon">💾</span>
+                            <span class="stat-icon"><i class="fas fa-hdd"></i></span>
                             <span class="stat-label">Storage</span>
                         </div>
                         <div id="storage-stats" class="stat-value">Loading...</div>
@@ -75,7 +90,7 @@
                     </div>
                     <div class="stat-card glass-hover">
                         <div class="stat-header">
-                            <span class="stat-icon">🧠</span>
+                            <span class="stat-icon"><i class="fas fa-microchip"></i></span>
                             <span class="stat-label">CPU</span>
                         </div>
                         <div id="cpu-stats" class="stat-value">Loading...</div>
@@ -84,7 +99,7 @@
                     </div>
                     <div class="stat-card glass-hover">
                         <div class="stat-header">
-                            <span class="stat-icon">⚡</span>
+                            <span class="stat-icon"><i class="fas fa-memory"></i></span>
                             <span class="stat-label">RAM</span>
                         </div>
                         <div id="ram-stats" class="stat-value">Loading...</div>
@@ -93,7 +108,7 @@
                     </div>
                     <div class="stat-card glass-hover">
                         <div class="stat-header">
-                            <span class="stat-icon">🌡️</span>
+                            <span class="stat-icon"><i class="fas fa-thermometer-half"></i></span>
                             <span class="stat-label">Temp</span>
                         </div>
                         <div id="cpu-temp" class="stat-value">--°C</div>
@@ -102,36 +117,36 @@
                 </div>
                 
                 <div class="menu-grid">
-                    <div class="card" onclick="showSection('movies')">
-                        <div class="icon">🎬</div>
+                    <div class="card glass-hover" onclick="showSection('movies')">
+                        <div class="icon"><i class="fas fa-film"></i></div>
                         <h3>Movies</h3>
                     </div>
-                    <div class="card" onclick="showSection('shows')">
-                        <div class="icon">📺</div>
+                    <div class="card glass-hover" onclick="showSection('shows')">
+                        <div class="icon"><i class="fas fa-tv"></i></div>
                         <h3>Shows</h3>
                     </div>
-                    <div class="card" onclick="showSection('music')">
-                        <div class="icon">🎵</div>
+                    <div class="card glass-hover" onclick="showSection('music')">
+                        <div class="icon"><i class="fas fa-music"></i></div>
                         <h3>Music</h3>
                     </div>
-                    <div class="card" onclick="showSection('books')">
-                         <div class="icon">📚</div>
+                    <div class="card glass-hover" onclick="showSection('books')">
+                         <div class="icon"><i class="fas fa-book"></i></div>
                         <h3>Books</h3>
                     </div>
-                    <div class="card" onclick="showSection('gallery')">
-                        <div class="icon">🖼️</div>
+                    <div class="card glass-hover" onclick="showSection('gallery')">
+                        <div class="icon"><i class="fas fa-image"></i></div>
                         <h3>Gallery</h3>
                     </div>
-                    <div class="card" onclick="showSection('files')">
-                        <div class="icon">🗂️</div>
+                    <div class="card glass-hover" onclick="showSection('files')">
+                        <div class="icon"><i class="fas fa-folder-open"></i></div>
                         <h3>Files</h3>
                     </div>
-                    <div class="card" onclick="showSection('admin')">
-                        <div class="icon">⚙️</div>
+                    <div class="card glass-hover" onclick="showSection('admin')">
+                        <div class="icon"><i class="fas fa-user-shield"></i></div>
                         <h3>Admin</h3>
                     </div>
-                    <div class="card" onclick="showSection('settings')">
-                        <div class="icon">🔧</div>
+                    <div class="card glass-hover" onclick="showSection('settings')">
+                        <div class="icon"><i class="fas fa-cog"></i></div>
                         <h3>Settings</h3>
                     </div>
                 </div>
@@ -243,45 +258,44 @@
                         </div>
                     </div>
 
-                    <div id="wifi-scan-container" class="hidden animate-fade" style="margin-top:15px; padding:20px; background:rgba(0,0,0,0.4); border-radius:16px; border:1px solid var(--border-color); box-shadow: var(--shadow-md);">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                            <h3 style="margin:0; font-size:1.1em; display:flex; align-items:center; gap:8px;">
-                                <span style="font-size:1.2em;">📶</span> Available Networks
+                    <div id="wifi-scan-container" class="hidden animate-fade wifi-container glass-card">
+                        <div class="wifi-header">
+                            <h3 class="wifi-title">
+                                <i class="fas fa-wifi"></i> Available Networks
                             </h3>
-                            <button onclick="scanWifi()" class="secondary" style="padding: 6px 12px; font-size: 0.85em; border-radius:8px;">
-                                <span>🔄</span> Refresh
+                            <button onclick="scanWifi()" class="secondary btn-sm">
+                                <i class="fas fa-sync-alt"></i> Refresh
                             </button>
                         </div>
-                        <div id="wifi-networks-list" style="display:flex; flex-direction:column; gap:10px; max-height:350px; overflow-y:auto; padding-right:5px;">
+                        <div id="wifi-networks-list" class="wifi-list">
                             <!-- Networks will be listed here -->
                         </div>
                     </div>
 
                     <!-- Modern Modal for Password -->
-                    <div id="wifi-modal" class="hidden" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px;">
-                        <div class="glass animate-fade" style="width:100%; max-width:400px; padding:30px; border-radius:24px; box-shadow:var(--shadow-lg);">
-                            <h3 id="modal-title" style="margin-top:0; margin-bottom:10px;">Connect to Network</h3>
-                            <p id="modal-ssid" style="color:var(--text-muted); margin-bottom:20px;"></p>
+                    <div id="wifi-modal" class="hidden wifi-modal-overlay">
+                        <div class="glass-modal animate-fade">
+                            <h3 id="modal-title">Connect to Network</h3>
+                            <p id="modal-ssid" class="modal-subtitle"></p>
                             
-                            <div style="margin-bottom:20px;">
-                                <label style="display:block; margin-bottom:8px; font-size:0.9em; color:var(--text-muted);">Password</label>
-                                <input type="password" id="wifi-password-input" placeholder="Enter network password" 
-                                    style="width:100%; padding:12px 16px; background:rgba(255,255,255,0.05); border:1px solid var(--border-color); border-radius:12px; color:white; font-size:1em;">
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="wifi-password-input" placeholder="Enter network password">
                             </div>
                             
-                            <div style="display:flex; gap:12px;">
-                                <button onclick="closeWifiModal()" class="secondary" style="flex:1; padding:12px; border-radius:12px;">Cancel</button>
-                                <button id="modal-connect-btn" class="primary" style="flex:2; padding:12px; border-radius:12px;">Connect</button>
+                            <div class="modal-footer">
+                                <button onclick="closeWifiModal()" class="secondary">Cancel</button>
+                                <button id="modal-connect-btn" class="primary">Connect</button>
                             </div>
                         </div>
                     </div>
 
-                    <div id="update-log-container" class="hidden" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; border:1px solid var(--border-color);">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                            <h4 style="margin:0;">Update Progress</h4>
+                    <div id="update-log-container" class="hidden update-container glass-card">
+                        <div class="update-header">
+                            <h4 class="update-title"><i class="fas fa-download"></i> Update Progress</h4>
                             <span id="update-status-badge" class="badge">Running...</span>
                         </div>
-                        <pre id="update-log-view" style="max-height:200px; overflow-y:auto; font-size:0.85em; margin:0; white-space:pre-wrap; font-family:monospace;"></pre>
+                        <pre id="update-log-view" class="update-log"></pre>
                     </div>
                 </div>
 
@@ -325,6 +339,31 @@
                 </div>
 
                 <div class="admin-panel">
+                    <h3>User Management</h3>
+                    <div id="user-management-list" class="list-view" style="margin-bottom: 20px;">
+                        <!-- Users will be listed here -->
+                        <div class="loading">Loading users...</div>
+                    </div>
+                    
+                    <h4>Add New User</h4>
+                    <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" id="new-user-username" placeholder="Username">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="new-user-password" placeholder="Password">
+                        </div>
+                        <div class="form-group">
+                            <label style="display: block; margin-bottom: 5px;">Admin</label>
+                            <input type="checkbox" id="new-user-is-admin" style="width: auto; height: auto;">
+                        </div>
+                        <button onclick="addUser()" class="primary" style="grid-column: span 3;">Create User</button>
+                    </div>
+                </div>
+
+                <div class="admin-panel">
                     <h3>Storage Management</h3>
                     <button onclick="loadDrives()">Scan Drives</button>
                     <div id="drive-list"></div>
@@ -339,10 +378,42 @@
                     <button onclick="organizeMovies(false)" class="warning">Apply Movie Organize</button>
                     <div id="organize-status" style="margin-top:10px;"></div>
                 </div>
+
+                <div class="admin-panel">
+                    <h3>Smart Media Management</h3>
+                    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:10px;">Identify duplicate files and content across your library.</p>
+                    <button onclick="findDuplicates()" class="primary">Find Duplicates</button>
+                    <div id="duplicates-status" style="margin-top:10px;"></div>
+                </div>
             </section>
 
             <section id="settings" class="hidden">
                 <h2>Settings</h2>
+                
+                <div class="admin-panel">
+                    <h3>Your Profile</h3>
+                    <div class="settings-form">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Display Name</label>
+                            <input type="text" id="profile-name" placeholder="How you want to be called" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Avatar URL (optional)</label>
+                            <input type="text" id="profile-avatar" placeholder="https://..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        </div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 5px;">Parental Controls Level</label>
+                            <select id="profile-parental" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                                <option value="0">All Access</option>
+                                <option value="1">Level 1 (Kids)</option>
+                                <option value="2">Level 2 (Teens)</option>
+                                <option value="3">Level 3 (Restricted)</option>
+                            </select>
+                        </div>
+                        <button onclick="saveProfileUI()" class="primary">Update Profile</button>
+                    </div>
+                </div>
+
                 <div class="admin-panel">
                     <h3>Account Security</h3>
                     <div class="settings-form">
@@ -382,6 +453,7 @@
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <button onclick="toggleTheme()" class="secondary">Toggle Dark/Light Mode</button>
                         <button onclick="toggleGlassEffect()" class="secondary">Toggle Glass Effect</button>
+                        <button id="install-pwa-btn" onclick="installPWA()" class="primary hidden">✨ Install Nomad Pi App</button>
                     </div>
                 </div>
             </section>
@@ -419,5 +491,14 @@
     </div>
     <div id="toast-container"></div>
     <script src="js/app.js?v=6"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(reg => console.log('Service Worker registered!', reg))
+                    .catch(err => console.error('Service Worker registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>
