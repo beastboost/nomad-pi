@@ -15,7 +15,7 @@ def sanitize_like_pattern(pattern: str) -> str:
     if not pattern:
         return ""
     # Escape special characters used in LIKE patterns
-    pattern = str(pattern).replace("\&quot;, "\\\&quot;)
+    pattern = str(pattern).replace("\\", "\\\\")
     pattern = pattern.replace("%", "\\%")
     pattern = pattern.replace("_", "\\_")
     return pattern
@@ -741,13 +741,13 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         if q:
             # Sanitize query to prevent SQL injection
             safe_q = sanitize_like_pattern(q)
-            sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\&quot; OR LOWER(l.folder) LIKE ? ESCAPE "\&quot;)'
+            sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\\" OR LOWER(l.folder) LIKE ? ESCAPE "\\")'
             params.extend([f"%{safe_q}%", f"%{safe_q}%"])
         
         if genre:
             # Sanitize genre to prevent SQL injection
             safe_genre = sanitize_like_pattern(genre)
-            sql += ' AND l.genre LIKE ? ESCAPE "\&quot;'
+            sql += ' AND l.genre LIKE ? ESCAPE "\\"'
             params.append(f"%{safe_genre}%")
             
         if year:
@@ -792,11 +792,11 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         count_params = [category]
         if q:
             safe_q = sanitize_like_pattern(q)
-            count_sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\&quot; OR LOWER(l.folder) LIKE ? ESCAPE "\&quot;)'
+            count_sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\\" OR LOWER(l.folder) LIKE ? ESCAPE "\\")'
             count_params.extend([f"%{safe_q}%", f"%{safe_q}%"])
         if genre:
             safe_genre = sanitize_like_pattern(genre)
-            count_sql += ' AND l.genre LIKE ? ESCAPE "\&quot;'
+            count_sql += ' AND l.genre LIKE ? ESCAPE "\\"'
             count_params.append(f"%{safe_genre}%")
         if year:
             if year.isdigit():
@@ -849,12 +849,12 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
         
         if q:
             safe_q = sanitize_like_pattern(q)
-            where_clauses.append('l.show_name LIKE ? ESCAPE "\&quot;')
+            where_clauses.append('l.show_name LIKE ? ESCAPE "\\"')
             params.append(f"%{safe_q}%")
         
         if genre:
             safe_genre = sanitize_like_pattern(genre)
-            where_clauses.append('l.genre LIKE ? ESCAPE "\&quot;')
+            where_clauses.append('l.genre LIKE ? ESCAPE "\\"')
             params.append(f"%{safe_genre}%")
             
         if year:
