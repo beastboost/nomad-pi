@@ -157,7 +157,7 @@ if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
     
     # Split installation into chunks to avoid massive memory spikes
     echo "Installing base dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn[standard] psutil
+    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
     
     echo "Installing security and utility dependencies..."
     ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
@@ -177,19 +177,21 @@ fi
 echo "[4/9] Ensuring data directories exist..."
 mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
 
-# Optimize chown/chmod - only run if needed
+# Optimize chown/chmod - only run if needed, and skip data/ for the main pass
 echo "Verifying file permissions..."
 CURRENT_OWNER=$(stat -c '%U:%G' "$CURRENT_DIR" 2>/dev/null || echo "unknown")
 if [ "$CURRENT_OWNER" != "$REAL_USER:$REAL_USER" ]; then
-    echo "Updating ownership to $REAL_USER..."
-    sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
+    echo "Updating ownership to $REAL_USER (skipping data/ for speed)..."
+    # Find everything except the data directory to avoid I/O hang
+    find "$CURRENT_DIR" -maxdepth 1 ! -name "data" ! -name "." -exec sudo chown -R "$REAL_USER:$REAL_USER" {} +
+    sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
 fi
 
-# Only chmod data directory if it's not already 775
-DATA_PERMS=$(stat -c '%a' "$CURRENT_DIR/data" 2>/dev/null || echo "000")
-if [ "$DATA_PERMS" != "775" ]; then
+# Only chmod/chown data directory if absolutely necessary
+if [ ! -w "$CURRENT_DIR/data" ]; then
     echo "Updating data directory permissions..."
-    sudo chmod -R 775 "$CURRENT_DIR/data"
+    sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
+    sudo chmod 775 "$CURRENT_DIR/data"
 fi
 
 # 5. Systemd Service Setup
