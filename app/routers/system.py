@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import psutil
 import os
 import subprocess
@@ -7,6 +7,7 @@ import platform
 import json
 import logging
 import shutil
+import re
 from datetime import datetime
 from app import database
 
@@ -928,6 +929,15 @@ def scan_wifi():
 class WifiConnectRequest(BaseModel):
     ssid: str
     password: str
+    
+    @validator('ssid')
+    def validate_ssid(cls, v):
+        # Allow only alphanumeric, spaces, hyphens, underscores, and dots
+        if not re.match(r'^[a-zA-Z0-9 _\-\.]+$', v):
+            raise ValueError("SSID contains invalid characters")
+        if len(v) > 32:
+            raise ValueError("SSID too long (max 32 characters)")
+        return v
 
 @router.post("/wifi/connect")
 def connect_wifi(request: WifiConnectRequest):
