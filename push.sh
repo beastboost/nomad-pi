@@ -11,9 +11,17 @@ echo -e "\e[36m🚀 Starting push to GitHub...\e[0m"
 
 echo "📦 Staging changes..."
 git add .
+if [ $? -ne 0 ]; then
+    echo -e "\e[31m❌ 'git add' failed. Aborting push.\e[0m"
+    exit 1
+fi
 
 echo "💾 Committing changes with message: '$COMMIT_MSG'..."
 git commit -m "$COMMIT_MSG"
+if [ $? -ne 0 ]; then
+    echo -e "\e[31m❌ 'git commit' failed. Aborting push.\e[0m"
+    exit 1
+fi
 
 echo "📤 Pushing to GitHub..."
 git push origin main
