@@ -73,12 +73,26 @@ if [ -d ".git" ]; then
 fi
 
 # 1. System Updates
-echo "[1/9] Updating system packages..."
-# Only update if install fails to save time and bandwidth
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools; then
-    echo "Some packages missing, updating list and trying again..."
-    sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
+echo "[1/9] Checking system packages..."
+PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools"
+MISSING_PACKAGES=""
+
+for pkg in $PACKAGES; do
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
+    fi
+done
+
+if [ -n "$MISSING_PACKAGES" ]; then
+    echo "Installing missing packages: $MISSING_PACKAGES"
+    # Only update if we actually need to install something
+    if ! sudo apt-get install -y $MISSING_PACKAGES; then
+        echo "Install failed, updating package list and trying again..."
+        sudo apt-get update
+        sudo apt-get install -y $MISSING_PACKAGES
+    fi
+else
+    echo "All system packages are already installed."
 fi
 
 # 2. Set Hostname (for http://nomadpi.local:8000)
@@ -143,14 +157,20 @@ fi
 echo "[4/9] Ensuring data directories exist..."
 mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
 
-echo "Ensuring all files in $CURRENT_DIR are owned by $REAL_USER..."
+# Optimize chown/chmod - only run if needed
+echo "Verifying file permissions..."
+CURRENT_OWNER=$(stat -c '%U:%G' "$CURRENT_DIR" 2>/dev/null || echo "unknown")
+if [ "$CURRENT_OWNER" != "$REAL_USER:$REAL_USER" ]; then
+    echo "Updating ownership to $REAL_USER..."
+    sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
+fi
 
-# Fix permissions to ensure user can write
-sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
-sudo chmod -R 775 "$CURRENT_DIR/data"
-# Also ensure the venv and app files are owned by the user
-sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/venv" 2>/dev/null || true
-sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/app" 2>/dev/null || true
+# Only chmod data directory if it's not already 775
+DATA_PERMS=$(stat -c '%a' "$CURRENT_DIR/data" 2>/dev/null || echo "000")
+if [ "$DATA_PERMS" != "775" ]; then
+    echo "Updating data directory permissions..."
+    sudo chmod -R 775 "$CURRENT_DIR/data"
+fi
 
 # 5. Systemd Service Setup
 echo "[5/9] Setting up Systemd service..."
@@ -175,7 +195,9 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 if [ -z "$OMDB_KEY_VALUE" ]; then
-    read -r -p "Enter OMDb API key (leave blank to skip): " OMDB_KEY_VALUE </dev/tty
+    # Use a timeout for the prompt to avoid hanging in headless setup
+    echo "Enter OMDb API key (leave blank to skip, auto-skipping in 10s):"
+    read -t 10 -r OMDB_KEY_VALUE </dev/tty || OMDB_KEY_VALUE=""
 fi
 
 # Set default password if none exists
@@ -206,6 +228,8 @@ EnvironmentFile=-$ENV_FILE
 ExecStart=$CURRENT_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 Restart=always
 RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -214,23 +238,30 @@ EOL
 echo "Enabling and starting service..."
 sudo systemctl daemon-reload
 
-# Kill any existing process on port 8000 to avoid conflicts
-echo "Stopping any existing processes on port 8000..."
-sudo fuser -k 8000/tcp >/dev/null 2>&1 || true
-
-sudo systemctl enable nomad-pi
-sudo systemctl restart nomad-pi
-
-# Wait for service to start and show status
-echo "Waiting for service to initialize..."
-sleep 5
-if systemctl is-active --quiet nomad-pi; then
-    echo "Nomad Pi service is running."
+# Only restart if configuration changed or service is not running
+if ! systemctl is-active --quiet nomad-pi; then
+    echo "Starting nomad-pi service..."
+    sudo systemctl enable nomad-pi
+    sudo systemctl restart nomad-pi
 else
-    echo "ERROR: Nomad Pi service failed to start."
-    echo "Last 20 lines of service logs:"
-    sudo journalctl -u nomad-pi -n 20 --no-pager
+    echo "nomad-pi service is already running. Reloading configuration..."
+    sudo systemctl restart nomad-pi
 fi
+
+# Wait for service to start and show status with a better loop
+echo "Waiting for service to initialize..."
+for i in {1..10}; do
+    if systemctl is-active --quiet nomad-pi; then
+        echo "Nomad Pi service is running."
+        break
+    fi
+    if [ $i -eq 10 ]; then
+        echo "ERROR: Nomad Pi service failed to start within 50s."
+        echo "Last 20 lines of service logs:"
+        sudo journalctl -u nomad-pi -n 20 --no-pager
+    fi
+    sleep 5
+done
 
 # 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
 echo "[6/9] Configuring permissions..."
@@ -318,17 +349,24 @@ EOL
             echo "Wi-Fi already connected with IP: $IP_ADDR"
         else
             CONNECTED="false"
+            echo "Attempting to connect to known Wi-Fi networks..."
+            # Limit the number of attempts and add a timeout
+            COUNT=0
             while IFS=: read -r CON_NAME CON_TYPE; do
                 if [ "$CON_TYPE" = "802-11-wireless" ] && [ "$CON_NAME" != "NomadPi" ]; then
-                    if sudo nmcli con up "$CON_NAME" >/dev/null 2>&1; then
+                    echo "Trying connection: $CON_NAME"
+                    if sudo timeout 20s nmcli con up "$CON_NAME" >/dev/null 2>&1; then
                         CONNECTED="true"
                         break
                     fi
                 fi
+                COUNT=$((COUNT+1))
+                [ $COUNT -ge 5 ] && break # Don't try more than 5 networks
             done < <(nmcli -t -f NAME,TYPE connection show)
 
             if [ "$CONNECTED" != "true" ] && [ -n "$HOME_SSID" ] && [ -n "$HOME_PASS" ]; then
-                sudo nmcli dev wifi connect "$HOME_SSID" password "$HOME_PASS" >/dev/null 2>&1 || true
+                echo "Trying home Wi-Fi: $HOME_SSID"
+                sudo timeout 30s nmcli dev wifi connect "$HOME_SSID" password "$HOME_PASS" >/dev/null 2>&1 || true
             fi
 
             sleep 3
@@ -338,7 +376,7 @@ EOL
                 echo "Wi-Fi connected with IP: $IP_ADDR"
             else
                 echo "Wi-Fi not connected, enabling Hotspot 'NomadPi'..."
-                sudo nmcli con up "NomadPi" || echo "Warning: Could not enable hotspot."
+                sudo timeout 20s nmcli con up "NomadPi" || echo "Warning: Could not enable hotspot."
             fi
         fi
     fi
@@ -409,7 +447,8 @@ sudo systemctl restart nmbd
 # 9. MiniDLNA Configuration (Smart TV Streaming)
 echo "[9/9] Configuring MiniDLNA..."
 MINIDLNA_CONF="/etc/minidlna.conf"
-sudo bash -c "cat > $MINIDLNA_CONF" <<EOL
+MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
+cat > "$MINIDLNA_TEMP" <<EOL
 media_dir=V,$CURRENT_DIR/data/movies
 media_dir=V,$CURRENT_DIR/data/shows
 media_dir=A,$CURRENT_DIR/data/music
@@ -422,26 +461,26 @@ inotify=yes
 presentation_url=http://$NEW_HOSTNAME.local:8000/
 EOL
 
-# Fix permissions for MiniDLNA - Use group-based permissions instead of changing ownership
-# This ensures the web server user can still write/delete files
-echo "Setting permissions for MiniDLNA..."
-# Ensure the data directory is owned by the current user and group
-sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
-# Ensure the group has write permissions
-sudo chmod -R 775 "$CURRENT_DIR/data"
-# Add minidlna user to the current user's group so it can read the files
-sudo usermod -a -G "$REAL_USER" minidlna
-
-# Increase inotify watches for large libraries
-sudo sysctl -w fs.inotify.max_user_watches=100000 >/dev/null
-grep -q "^fs\.inotify\.max_user_watches=100000$" /etc/sysctl.conf || echo "fs.inotify.max_user_watches=100000" | sudo tee -a /etc/sysctl.conf >/dev/null
-
-# Clean start MiniDLNA
-sudo systemctl stop minidlna
-sudo rm -f /var/cache/minidlna/files.db
-sudo systemctl enable minidlna
-sudo systemctl start minidlna
-sudo minidlnad -R
+# Only update if config changed
+if ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
+    echo "Updating MiniDLNA configuration..."
+    sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
+    
+    # Only rebuild database if config actually changed
+    echo "Clean start MiniDLNA (rebuilding database)..."
+    sudo systemctl stop minidlna
+    sudo rm -f /var/cache/minidlna/files.db
+    sudo systemctl enable minidlna
+    sudo systemctl start minidlna
+    sudo minidlnad -R
+else
+    echo "MiniDLNA configuration unchanged. Skipping rebuild."
+    # Ensure it's running though
+    if ! systemctl is-active --quiet minidlna; then
+        sudo systemctl start minidlna
+    fi
+fi
+rm -f "$MINIDLNA_TEMP"
 
 if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; then
     CFG=""

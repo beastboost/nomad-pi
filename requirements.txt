@@ -12,5 +12,6 @@ watchdog
 apscheduler
 python-jose[cryptography]
 httpx
-numpy
-scikit-learn
+# numpy and scikit-learn removed for Pi Zero stability (replaced by SQL similarity)
+# numpy
+# scikit-learn
