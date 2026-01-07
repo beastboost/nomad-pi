@@ -14,6 +14,7 @@ import threading
 import mimetypes
 import logging
 import shutil
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -212,51 +213,53 @@ app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user)]
 @app.on_event("startup")
 def _startup_tasks():
     # Start scheduler
-    scheduler.add_job(cleanup_old_uploads, 'interval', hours=6)
+    scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
     scheduler.start()
-    logger.info("Background scheduler started (cleanup task scheduled every 6 hours)")
+    logger.info("Background scheduler started")
     
-    # Run one cleanup immediately on startup
-    threading.Thread(target=cleanup_old_uploads, daemon=True).start()
-
-    # Indexer logic
-    def needs_build(category: str):
-        try:
-            state = media.database.get_library_index_state(category)
-        except Exception:
-            return True
-        if not state:
-            return True
-        scanned_at = state.get("scanned_at")
-        if not isinstance(scanned_at, str) or not scanned_at:
-            return True
-        try:
-            ts = datetime.fromisoformat(scanned_at)
-        except Exception:
-            return True
-        return (datetime.now() - ts) >= media.INDEX_TTL
-
-    def run():
-        # Clean up stale sessions on startup
+    # 1. Staggered background tasks to prevent OOM on SBCs
+    def run_staggered():
+        # Wait a bit for the main web server to settle
+        time.sleep(10)
+        
+        # Clean up stale sessions
         try:
             media.database.cleanup_sessions()
-        except Exception:
-            pass
-            
-        for category in ["movies", "shows"]:
+        except Exception: pass
+        
+        # Run cleanup task once
+        cleanup_old_uploads()
+        
+        # 2. Delayed Indexer logic
+        def needs_build(category: str):
+            try:
+                state = media.database.get_library_index_state(category)
+            except Exception: return True
+            if not state: return True
+            scanned_at = state.get("scanned_at")
+            if not isinstance(scanned_at, str) or not scanned_at: return True
+            try:
+                ts = datetime.fromisoformat(scanned_at)
+            except Exception: return True
+            return (datetime.now() - ts) >= media.INDEX_TTL
+
+        # Only index one category at a time with delays
+        for category in ["movies", "shows", "music", "books"]:
             if needs_build(category):
                 try:
+                    logger.info(f"Startup: Indexing {category}...")
                     media.build_library_index(category)
-                except Exception:
-                    pass
+                    # Small breath between categories
+                    time.sleep(5)
+                except Exception: pass
 
-    threading.Thread(target=run, daemon=True).start()
+        # 3. Start ingest service LAST
+        try:
+            ingest.start_ingest_service()
+        except Exception as e:
+            logger.error(f"Failed to start ingest service: {e}")
 
-    # Start ingest service
-    try:
-        ingest.start_ingest_service()
-    except Exception as e:
-        print(f"Failed to start ingest service: {e}")
+    threading.Thread(target=run_staggered, daemon=True).start()
 
 @app.on_event("shutdown")
 def _shutdown_tasks():

@@ -288,9 +288,22 @@ def start_ingest_service():
             for mount_root in ["/media/pi", "/media", "/mnt"]:
                 if os.path.exists(mount_root):
                     try:
-                        # We watch these recursively too, but only if they are likely to contain media
-                        _observer.schedule(IngestHandler(is_direct=True), mount_root, recursive=True)
-                        logger.info(f"Ingest service watching mount root: {mount_root}")
+                        # CRITICAL: On SBCs like Pi Zero, watching mount roots RECURSIVELY is too heavy.
+                        # We only watch the root of the mount point. If a drive is plugged in, 
+                        # we detect it, but we don't watch every single file deep inside.
+                        # The user should use "Rebuild Library" for deep scans of external drives.
+                        _observer.schedule(IngestHandler(is_direct=True), mount_root, recursive=False)
+                        
+                        # Also watch one level deep for already mounted drives
+                        for item in os.listdir(mount_root):
+                            drive_path = os.path.join(mount_root, item)
+                            if os.path.isdir(drive_path) and not item.startswith('.'):
+                                try:
+                                    # Still recursive=False for external drives to save memory/CPU
+                                    _observer.schedule(IngestHandler(is_direct=True), drive_path, recursive=False)
+                                except: pass
+                                
+                        logger.info(f"Ingest service watching mount roots (non-recursively): {mount_root}")
                     except Exception as e:
                         logger.warning(f"Could not watch {mount_root}: {e}")
             

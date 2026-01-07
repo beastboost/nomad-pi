@@ -5,9 +5,7 @@ import re
 import threading
 from queue import Queue
 from typing import List, Dict, Optional
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+# Removed heavy scikit-learn/numpy imports for SBC stability
 
 DB_PATH = "data/nomad.db"
 
@@ -609,82 +607,51 @@ def set_library_index_state(category: str, item_count: int):
         return_db(conn)
 
 def get_similar_media(path: str, limit: int = 10) -> List[Dict]:
-    """Find similar media items using TF-IDF on genres, titles, and plots."""
+    """Find similar media items using lightweight SQL keyword matching."""
     conn = get_db()
     try:
         c = conn.cursor()
         
-        # 1. Get the target item's category and metadata
-        c.execute("SELECT category FROM library_index WHERE path = ?", (path,))
-        row = c.fetchone()
-        if not row:
-            return []
-        category = row['category']
-        
-        # 2. Get all items in the same category with their metadata
-        # Joining library_index with file_metadata to get genres and plots
+        # 1. Get the target item's info
         c.execute('''
-            SELECT l.path, l.name, l.poster, l.genre, l.year, m.plot, m.genre as meta_genre
+            SELECT l.category, l.name, l.genre, l.year, m.genre as meta_genre 
             FROM library_index l
             LEFT JOIN file_metadata m ON l.path = m.path
-            WHERE l.category = ?
-        ''', (category,))
-        
-        items = [dict(r) for r in c.fetchall()]
-        if len(items) <= 1:
+            WHERE l.path = ?
+        ''', (path,))
+        target = c.fetchone()
+        if not target:
             return []
             
-        # 3. Prepare corpus for TF-IDF
-        # We combine name, genre, and plot for similarity calculation
-        corpus = []
-        target_idx = -1
+        category = target['category']
+        # Clean title for matching (remove year and extension)
+        target_name = re.sub(r'\.\w+$', '', target['name'])
+        target_name = re.sub(r'\(\d{4}\)', '', target_name).strip()
         
-        for i, item in enumerate(items):
-            if item['path'] == path:
-                target_idx = i
-                
-            # Combine text fields, handling None values
-            name = str(item['name'] or "")
-            # Use metadata genre if available, else fallback to library index genre
-            genre = str(item['meta_genre'] or item['genre'] or "")
-            plot = str(item['plot'] or "")
-            
-            # Weighted content: boost genre and title
-            combined_text = f"{name} {name} {genre} {genre} {genre} {plot}"
-            corpus.append(combined_text.lower())
-            
-        if target_idx == -1:
-            return []
-            
-        # 4. Calculate similarity
-        vectorizer = TfidfVectorizer(stop_words='english')
-        tfidf_matrix = vectorizer.fit_transform(corpus)
+        # Get first genre
+        genres = (target['meta_genre'] or target['genre'] or "").split(',')
+        primary_genre = genres[0].strip() if genres else None
         
-        # Compute cosine similarity between the target and all others
-        cosine_sim = cosine_similarity(tfidf_matrix[target_idx:target_idx+1], tfidf_matrix).flatten()
+        # 2. Find similar items via SQL (much lighter than TF-IDF on Pi Zero)
+        # Priority: Same primary genre AND similar title words
+        query = '''
+            SELECT l.path, l.name, l.poster, l.genre, l.year
+            FROM library_index l
+            LEFT JOIN file_metadata m ON l.path = m.path
+            WHERE l.category = ? AND l.path != ?
+            ORDER BY 
+                (CASE WHEN l.genre LIKE ? THEN 5 ELSE 0 END) + 
+                (CASE WHEN l.name LIKE ? THEN 3 ELSE 0 END) DESC
+            LIMIT ?
+        '''
         
-        # 5. Get top N similar items (excluding the item itself)
-        # argsort gives indices from lowest to highest similarity
-        similar_indices = cosine_sim.argsort()[::-1]
+        genre_param = f"%{primary_genre}%" if primary_genre else "%"
+        # Take first word of title for simple matching
+        title_word = target_name.split(' ')[0] if ' ' in target_name else target_name
+        title_param = f"%{title_word}%"
         
-        results = []
-        for idx in similar_indices:
-            if idx == target_idx:
-                continue
-            if cosine_sim[idx] < 0.05: # Threshold to filter out totally unrelated items
-                break
-                
-            items[idx]['similarity_score'] = float(cosine_sim[idx])
-            results.append(items[idx])
-            
-            if len(results) >= limit:
-                break
-                
-        return results
-    except Exception as e:
-        import logging
-        logging.error(f"Similarity calculation failed: {e}")
-        return []
+        c.execute(query, (category, path, genre_param, title_param, limit))
+        return [dict(r) for r in c.fetchall()]
     finally:
         return_db(conn)
 

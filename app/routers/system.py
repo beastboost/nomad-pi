@@ -145,8 +145,17 @@ def get_stats():
     disk_total, disk_used, disk_free, disk_percent = get_aggregate_disk_usage()
     
     mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
     net = psutil.net_io_counters()
     
+    # Check for memory pressure warnings (especially on Pi Zero)
+    mem_warning = None
+    if mem.total < 1024 * 1024 * 600: # Less than 600MB RAM (Pi Zero)
+        if swap.total < 1024 * 1024 * 500: # Less than 500MB swap
+            mem_warning = "Low memory detected. Recommend increasing swap space to 1GB for stability."
+        elif swap.percent > 80:
+            mem_warning = "Swap space almost full. Performance may be degraded."
+
     # Get temperature if on Linux/RPi
     temp = 0
     cpu_freq = 0
@@ -225,6 +234,10 @@ def get_stats():
         "memory_total": mem.total,
         "memory_used": mem.used,
         "memory_percent": mem.percent,
+        "swap_total": swap.total,
+        "swap_used": swap.used,
+        "swap_percent": swap.percent,
+        "mem_warning": mem_warning,
         "network_up": net.bytes_sent,
         "network_down": net.bytes_recv,
         "disk_total": disk_total,
