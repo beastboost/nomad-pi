@@ -171,6 +171,7 @@ createApp({
                 const response = await this.apiCall('/api/auth/me', 'GET');
                 this.isAuthenticated = true;
                 this.currentUser = response.user;
+                this.currentUserId = response.user ? response.user.id : null;
                 this.connectionStatus = 'connected';
             } catch (error) {
                 console.warn('Authentication check failed:', error);

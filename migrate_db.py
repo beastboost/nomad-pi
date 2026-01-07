@@ -59,11 +59,42 @@ def migrate():
 
     # 4. Fix 'profiles' table
     c.execute("PRAGMA table_info(profiles)")
-    columns = [r[1] for r in c.fetchall()]
-    if 'user_id' not in columns:
-         # Recreate if it's completely wrong
-         print("Fixing profiles table...")
-         c.execute("DROP TABLE IF EXISTS profiles")
+    profile_columns = [r[1] for r in c.fetchall()]
+    if profile_columns and 'user_id' not in profile_columns:
+         print("Migrating profiles table to new schema...")
+         c.execute("ALTER TABLE profiles RENAME TO profiles_old")
+         c.execute('''
+            CREATE TABLE profiles (
+                user_id INTEGER PRIMARY KEY,
+                name TEXT,
+                avatar TEXT,
+                preferences TEXT,
+                parental_controls INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+         
+         # Identify which columns we can copy
+         source_cols = []
+         target_cols = []
+         for col in ['name', 'avatar', 'preferences', 'parental_controls']:
+             if col in profile_columns:
+                 source_cols.append(col)
+                 target_cols.append(col)
+         
+         if source_cols:
+             # We assume user_id 1 for the first/old profile if it was global
+             source_str = ", ".join(source_cols)
+             target_str = ", ".join(target_cols)
+             c.execute(f'''
+                INSERT INTO profiles (user_id, {target_str})
+                SELECT 1, {source_str} FROM profiles_old LIMIT 1
+            ''')
+         
+         c.execute("DROP TABLE profiles_old")
+         print("Profiles table migrated.")
+    elif not profile_columns:
+         print("Creating profiles table...")
          c.execute('''
             CREATE TABLE profiles (
                 user_id INTEGER PRIMARY KEY,

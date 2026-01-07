@@ -236,7 +236,11 @@ function restoreShowsState() {
 
 // Auth Functions
 async function login() {
+    const usernameInput = document.getElementById('username-input');
     const passwordInput = document.getElementById('password-input');
+    if (!passwordInput) return;
+    
+    const username = usernameInput ? usernameInput.value : 'admin';
     const password = passwordInput.value;
     const errorMsg = document.getElementById('login-error');
 
@@ -246,7 +250,10 @@ async function login() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ password: password })
+            body: JSON.stringify({ 
+                username: username,
+                password: password 
+            })
         });
 
         if (res.ok) {

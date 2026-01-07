@@ -389,23 +389,6 @@ nav button.active {
     justify-content: center;
 }
 
-.card-meta {
-    padding: 10px;
-}
-
-.card-title {
-    font-weight: 600;
-    font-size: 0.9rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.card-subtitle {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-}
-
 /* Forms & Buttons */
 input, select, textarea {
     background: rgba(255, 255, 255, 0.05);
