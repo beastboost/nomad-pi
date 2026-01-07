@@ -14,7 +14,7 @@ from app.routers.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 
 router = APIRouter()
 public_router = APIRouter()
@@ -679,6 +679,7 @@ def get_changelog():
     # Fallback for Windows/Testing
     return {
         "changelog": [
+            "Fixed 203/EXEC service startup error on Raspberry Pi (1.6.1)",
             "Improved TV Show detection for root folders (1.6.0)",
             "Automated MiniDLNA permissions and system tuning in setup.sh (1.6.0)",
             "Secured backend endpoints with user-level authentication (1.6.0)",
