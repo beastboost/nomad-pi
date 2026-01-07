@@ -139,6 +139,16 @@ if [ ! -f "./venv/bin/uvicorn" ]; then
     ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
 fi
 
+update_status 85 "Running database migrations..."
+echo "Running database migrations..."
+if [ -f "migrate_db.py" ]; then
+    ./venv/bin/python migrate_db.py || {
+        echo "WARNING: Database migration failed. Check logs." >> update.log
+    }
+else
+    echo "No migration script found, skipping..." >> update.log
+fi
+
 update_status 90 "Update complete. Finalizing..."
 echo "Update complete. Preparing to restart..."
 
