@@ -106,15 +106,27 @@ fi
 
 ./venv/bin/pip install --upgrade pip
 
-# Split installation into chunks to avoid massive memory spikes (Pi Zero stability)
-echo "Installing base dependencies..."
-./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+# Check for requirements changes to skip redundant installs
+REQUIREMENTS_HASH=$(md5sum requirements.txt | awk '{ print $1 }')
+PREV_HASH=$(cat .requirements_hash 2>/dev/null || echo "")
 
-echo "Installing security and utility dependencies..."
-./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
-
-echo "Installing remaining requirements..."
-./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt
+if [ "$REQUIREMENTS_HASH" != "$PREV_HASH" ] || [ ! -f "./venv/bin/uvicorn" ]; then
+    echo "Requirements changed or environment incomplete. Installing dependencies..."
+    
+    # Split installation into chunks to avoid massive memory spikes (Pi Zero stability)
+    echo "Installing base dependencies..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+    
+    echo "Installing security and utility dependencies..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
+    
+    echo "Installing remaining requirements..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt
+    
+    echo "$REQUIREMENTS_HASH" > .requirements_hash
+else
+    echo "Dependencies already up to date. Skipping pip install."
+fi
 
 # Final check for uvicorn
 if [ ! -f "./venv/bin/uvicorn" ]; then
