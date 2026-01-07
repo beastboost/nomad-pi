@@ -52,6 +52,7 @@ def get_db():
         pass
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    print(f"DEBUG: Connecting to database at {DB_PATH}")
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.create_collation("NATSORT", natural_compare)
@@ -76,9 +77,11 @@ def return_db(conn):
             pass
 
 def init_db():
+    print("DEBUG: Starting database initialization...")
     conn = get_db()
     try:
         c = conn.cursor()
+        print("DEBUG: Creating tables...")
         c.execute('''
             CREATE TABLE IF NOT EXISTS progress (
                 user_id INTEGER,

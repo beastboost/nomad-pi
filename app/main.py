@@ -3,17 +3,32 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from app import database
+import sys
+import traceback
 
-# Initialize database immediately
-database.init_db()
+# Wrap startup in a global try-except to catch invisible crashes
+try:
+    # Initialize database immediately
+    database.init_db()
 
-# Now import routers and services
-from app.routers import auth
-# Ensure admin user exists after DB is ready
-auth.ensure_admin_user()
+    # Now import routers and services
+    from app.routers import auth
+    # Ensure admin user exists after DB is ready
+    auth.ensure_admin_user()
 
-from app.services import ingest
-from app.routers import media, system, uploads
+    from app.services import ingest
+    from app.routers import media, system, uploads
+except Exception as e:
+    print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    # Log to file as well if possible
+    try:
+        with open("data/startup_error.log", "a") as f:
+            f.write(f"\n--- {e} ---\n")
+            traceback.print_exc(file=f)
+    except:
+        pass
+    sys.exit(1)
 import os
 import threading
 import mimetypes
