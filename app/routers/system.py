@@ -679,6 +679,9 @@ def get_changelog():
     # Fallback for Windows/Testing
     return {
         "changelog": [
+            "Fixed service restart timing for Pi Zero stability (1.7.0)",
+            "Added comprehensive TV shows debugging (1.7.0)",
+            "Automatic database migrations during updates (1.7.0)",
             "Fixed 203/EXEC service startup error on Raspberry Pi (1.6.1)",
             "Improved TV Show detection for root folders (1.6.0)",
             "Automated MiniDLNA permissions and system tuning in setup.sh (1.6.0)",
@@ -688,9 +691,7 @@ def get_changelog():
             "Improved PWA notch support (1.5.1)",
             "Redesigned mobile menu transition (1.5.1)",
             "Added mass duplicate file deletion (1.5.1)",
-            "Enhanced update feedback with changelog (1.5.1)",
-            "Optimized database queries for faster loading (1.5.0)",
-            "Initial release of Nomad Pi (1.0.0)"
+            "Enhanced update feedback with changelog (1.5.1)"
         ]
     }
 
