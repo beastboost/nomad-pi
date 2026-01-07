@@ -55,21 +55,35 @@ if [ -d ".git" ]; then
     echo "[0/9] Optimizing Git configuration..."
     
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
-    # Explicitly unset the openssl backend in case it was set by a previous version of this script
     git config --global --unset http.sslBackend 2>/dev/null || true
     git config --global http.sslVerify true
-    # Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub
     git config --global http.version HTTP/1.1
-    # Increase postBuffer to 50MB (from default 1MB) for stable large transfers without excessive memory usage
     git config --global http.postBuffer 52428800
     
-    # Switch to clean public URL to avoid password prompts for public repo
     git remote set-url origin https://github.com/beastboost/nomad-pi.git
-    # Remember credentials for 1 month if they are ever entered
     git config credential.helper 'cache --timeout=2592000'
     
     echo "Pulling latest changes from GitHub..."
     git pull || echo "Warning: Could not pull latest changes. Continuing with current version."
+fi
+
+# 0.1 Proactive Swap Check (Crucial for Pi Zero 512MB RAM)
+echo "Checking system memory resources..."
+TOTAL_SWAP=$(free -m | awk '/Swap/ {print $2}')
+if [ "$TOTAL_SWAP" -lt 1000 ]; then
+    echo "Total swap ($TOTAL_SWAP MB) is less than 1GB. Increasing swap to prevent OOM crashes..."
+    if [ -f /etc/dphys-swapfile ]; then
+        sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+        sudo dphys-swapfile setup
+        sudo dphys-swapfile swapon
+        echo "Swap increased to 1GB."
+    else
+        echo "Creating temporary 1GB swap file..."
+        sudo dd if=/dev/zero of=/var/swap.tmp bs=1M count=1024
+        sudo mkswap /var/swap.tmp
+        sudo swapon /var/swap.tmp
+        echo "Temporary swap enabled."
+    fi
 fi
 
 # 1. System Updates
@@ -140,12 +154,18 @@ fi
 if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
     echo "Installing/Updating Python dependencies (this may take a while on Pi Zero)..."
     ./venv/bin/pip install --upgrade pip
-    # --no-cache-dir saves RAM and disk space on small SBCs
-    # --prefer-binary avoids compiling from source (OOM risk)
+    
+    # Split installation into chunks to avoid massive memory spikes
+    echo "Installing base dependencies..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn[standard] psutil
+    
+    echo "Installing security and utility dependencies..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
+    
+    echo "Installing remaining requirements..."
     if ! ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt; then
-        echo "Error: Dependency installation failed. This often happens due to Low Memory (OOM) on Pi Zero."
-        echo "Try running: sudo dphys-swapfile swapoff && sudo dd if=/dev/zero of=/var/swap bs=1M count=1024 && sudo mkswap /var/swap && sudo dphys-swapfile swapon"
-        echo "to increase swap space temporarily."
+        echo "Error: Dependency installation failed even with 1GB swap."
+        echo "The Pi Zero 2W may need a reboot or more swap space."
         exit 1
     fi
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
