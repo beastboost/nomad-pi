@@ -175,7 +175,20 @@ if command -v systemctl >/dev/null 2>&1; then
         sudo systemctl enable nomad-pi.service
         # Background the restart so the script can finish and the UI gets the final status
         echo "Restarting service in background..." >> update.log
-        nohup bash -c "sudo systemctl stop nomad-pi && sleep 2 && sudo systemctl start nomad-pi" > /dev/null 2>&1 &
+        # Increased sleep to 5 seconds for Pi Zero stability
+        nohup bash -c "
+            sudo systemctl stop nomad-pi
+            echo 'Service stopped, waiting for clean shutdown...' >> update.log
+            sleep 5
+            echo 'Starting service...' >> update.log
+            sudo systemctl start nomad-pi
+            sleep 2
+            if systemctl is-active --quiet nomad-pi; then
+                echo 'Service restart successful!' >> update.log
+            else
+                echo 'WARNING: Service failed to start after update!' >> update.log
+            fi
+        " >> update.log 2>&1 &
         echo "Service restart command issued in background." >> update.log
     else
         echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
