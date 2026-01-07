@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
@@ -186,12 +186,20 @@ async def not_found_handler(request: Request, exc: Exception):
 # Initialize Database immediately
 database.init_db()
 
-# CORS
+# CORS - Restrict origins for security
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '').split(',') if os.getenv('ALLOWED_ORIGINS') else ['*']
+if ALLOWED_ORIGINS != ['*']:
+    # If specific origins are set, enable credentials
+    ALLOW_CREDENTIALS = True
+else:
+    # If wildcard, disable credentials for security
+    ALLOW_CREDENTIALS = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Changed to False since we use token in URL or it's same-origin
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -225,7 +233,10 @@ def _startup_tasks():
         # Clean up stale sessions
         try:
             media.database.cleanup_sessions()
-        except Exception: pass
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to cleanup sessions: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during session cleanup: {e}")
         
         # Run cleanup task once
         cleanup_old_uploads()
@@ -251,11 +262,24 @@ def _startup_tasks():
                     media.build_library_index(category)
                     # Small breath between categories
                     time.sleep(5)
-                except Exception: pass
+                except MemoryError as e:
+                    logger.error(f"Memory error while indexing {category}: {e}")
+                    logger.warning("Skipping remaining indexing to prevent crash")
+                    break  # Stop indexing if we run out of memory
+                except (OSError, IOError) as e:
+                    logger.warning(f"File system error while indexing {category}: {e}")
+                except Exception as e:
+                    logger.error(f"Error indexing {category}: {e}")
+                    continue  # Continue with next category on other errors
 
         # 3. Start ingest service LAST
         try:
             ingest.start_ingest_service()
+        except MemoryError as e:
+            logger.error(f"Memory error starting ingest service: {e}")
+            logger.warning("Ingest service may not be available")
+        except (OSError, IOError) as e:
+            logger.error(f"File system error starting ingest service: {e}")
         except Exception as e:
             logger.error(f"Failed to start ingest service: {e}")
 

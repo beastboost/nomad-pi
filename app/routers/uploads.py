@@ -12,6 +12,7 @@ Features:
 import os
 import hashlib
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, AsyncGenerator, Dict, List
 from datetime import datetime
@@ -75,8 +76,9 @@ class MultipleUploadResponse(BaseModel):
     failed_count: int
 
 
-# Global progress tracking (in production, use Redis or similar)
+# Global progress tracking with thread safety (in production, use Redis or similar)
 progress_tracker: Dict[str, UploadProgress] = {}
+progress_lock = threading.Lock()
 
 
 async def validate_file(filename: str, file_size: int) -> tuple[bool, Optional[str]]:
@@ -163,14 +165,15 @@ async def save_upload_file(
     total_size = 0
     
     try:
-        # Initialize progress tracker
-        progress_tracker[file_id] = UploadProgress(
-            file_id=file_id,
-            filename=upload_file.filename,
-            total_size=0,
-            uploaded_size=0,
-            status="uploading"
-        )
+        # Initialize progress tracker with thread safety
+        with progress_lock:
+            progress_tracker[file_id] = UploadProgress(
+                file_id=file_id,
+                filename=upload_file.filename,
+                total_size=0,
+                uploaded_size=0,
+                status="uploading"
+            )
         
         # Create parent directories if needed
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -188,26 +191,30 @@ async def save_upload_file(
                 total_size += len(chunk)
                 
                 # Update progress less frequently to reduce overhead
-                if file_id in progress_tracker and total_size % (CHUNK_SIZE * 4) == 0:
-                    progress_tracker[file_id].uploaded_size = total_size
-                    progress_tracker[file_id].percentage = (total_size / max(upload_file.size or total_size, 1)) * 100
+                if total_size % (CHUNK_SIZE * 4) == 0:
+                    with progress_lock:
+                        if file_id in progress_tracker:
+                            progress_tracker[file_id].uploaded_size = total_size
+                            progress_tracker[file_id].percentage = (total_size / max(upload_file.size or total_size, 1)) * 100
         
         # Calculate final checksum
         checksum = hash_sha256.hexdigest()
         
         # Update progress to completed
-        if file_id in progress_tracker:
-            progress_tracker[file_id].status = "completed"
-            progress_tracker[file_id].percentage = 100.0
+        with progress_lock:
+            if file_id in progress_tracker:
+                progress_tracker[file_id].status = "completed"
+                progress_tracker[file_id].percentage = 100.0
         
         logger.info(f"File uploaded successfully: {upload_file.filename} ({total_size} bytes)")
         return total_size, checksum
         
     except Exception as e:
         logger.error(f"Error uploading file {upload_file.filename}: {str(e)}")
-        if file_id in progress_tracker:
-            progress_tracker[file_id].status = "failed"
-            progress_tracker[file_id].error = str(e)
+        with progress_lock:
+            if file_id in progress_tracker:
+                progress_tracker[file_id].status = "failed"
+                progress_tracker[file_id].error = str(e)
         raise
 
 
@@ -530,9 +537,10 @@ async def delete_upload(file_id: str):
             # Remove directory
             await aiofiles.os.rmdir(file_dir)
             
-            # Clean progress tracker
-            if file_id in progress_tracker:
-                del progress_tracker[file_id]
+            # Clean progress tracker with thread safety
+            with progress_lock:
+                if file_id in progress_tracker:
+                    del progress_tracker[file_id]
             
             return JSONResponse(
                 status_code=200,

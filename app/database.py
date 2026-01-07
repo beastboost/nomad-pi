@@ -7,6 +7,19 @@ from queue import Queue
 from typing import List, Dict, Optional
 # Removed heavy scikit-learn/numpy imports for SBC stability
 
+def sanitize_like_pattern(pattern: str) -> str:
+    """
+    Sanitize user input for SQL LIKE queries to prevent SQL injection.
+    Escapes special LIKE characters: %, _, and backslash.
+    """
+    if not pattern:
+        return ""
+    # Escape special characters used in LIKE patterns
+    pattern = str(pattern).replace("\&quot;, "\\\&quot;)
+    pattern = pattern.replace("%", "\\%")
+    pattern = pattern.replace("_", "\\_")
+    return pattern
+
 DB_PATH = "data/nomad.db"
 
 # Connection Pool
@@ -726,16 +739,25 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         params = [category]
         
         if q:
-            sql += ' AND (LOWER(l.name) LIKE ? OR LOWER(l.folder) LIKE ?)'
-            params.extend([f"%{q}%", f"%{q}%"])
+            # Sanitize query to prevent SQL injection
+            safe_q = sanitize_like_pattern(q)
+            sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\&quot; OR LOWER(l.folder) LIKE ? ESCAPE "\&quot;)'
+            params.extend([f"%{safe_q}%", f"%{safe_q}%"])
         
         if genre:
-            sql += ' AND l.genre LIKE ?'
-            params.append(f"%{genre}%")
+            # Sanitize genre to prevent SQL injection
+            safe_genre = sanitize_like_pattern(genre)
+            sql += ' AND l.genre LIKE ? ESCAPE "\&quot;'
+            params.append(f"%{safe_genre}%")
             
         if year:
-            sql += ' AND l.year = ?'
-            params.append(year)
+            # Validate year is numeric to prevent injection
+            if year.isdigit():
+                sql += ' AND l.year = ?'
+                params.append(year)
+            else:
+                # Invalid year parameter - skip it
+                pass
             
         # Sorting
         if sort == 'name':
@@ -769,14 +791,17 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         count_sql = 'SELECT COUNT(1) AS cnt FROM library_index l WHERE l.category = ?'
         count_params = [category]
         if q:
-            count_sql += ' AND (LOWER(l.name) LIKE ? OR LOWER(l.folder) LIKE ?)'
-            count_params.extend([f"%{q}%", f"%{q}%"])
+            safe_q = sanitize_like_pattern(q)
+            count_sql += ' AND (LOWER(l.name) LIKE ? ESCAPE "\&quot; OR LOWER(l.folder) LIKE ? ESCAPE "\&quot;)'
+            count_params.extend([f"%{safe_q}%", f"%{safe_q}%"])
         if genre:
-            count_sql += ' AND l.genre LIKE ?'
-            count_params.append(f"%{genre}%")
+            safe_genre = sanitize_like_pattern(genre)
+            count_sql += ' AND l.genre LIKE ? ESCAPE "\&quot;'
+            count_params.append(f"%{safe_genre}%")
         if year:
-            count_sql += ' AND l.year = ?'
-            count_params.append(year)
+            if year.isdigit():
+                count_sql += ' AND l.year = ?'
+                count_params.append(year)
             
         c.execute(count_sql, count_params)
         total = int(c.fetchone()["cnt"])
@@ -823,16 +848,19 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
         params = []
         
         if q:
-            where_clauses.append('l.show_name LIKE ?')
-            params.append(f"%{q}%")
+            safe_q = sanitize_like_pattern(q)
+            where_clauses.append('l.show_name LIKE ? ESCAPE "\&quot;')
+            params.append(f"%{safe_q}%")
         
         if genre:
-            where_clauses.append('l.genre LIKE ?')
-            params.append(f"%{genre}%")
+            safe_genre = sanitize_like_pattern(genre)
+            where_clauses.append('l.genre LIKE ? ESCAPE "\&quot;')
+            params.append(f"%{safe_genre}%")
             
         if year:
-            where_clauses.append('l.year = ?')
-            params.append(year)
+            if year.isdigit():
+                where_clauses.append('l.year = ?')
+                params.append(year)
             
         where_sql = ""
         if where_clauses:

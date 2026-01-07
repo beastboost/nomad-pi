@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import uuid
 import os
 import secrets
 import logging
+import re
 from datetime import datetime, timedelta
 from collections import defaultdict
 from passlib.context import CryptContext
@@ -24,6 +25,28 @@ LOCKOUT_MINUTES = 15
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
+
+# Password complexity requirements
+MIN_PASSWORD_LENGTH = 8
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """
+    Validate password strength requirements.
+    Returns (is_valid, error_message).
+    """
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
+    
+    if not re.search(r'[A-Z]', password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    if not re.search(r'[a-z]', password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    if not re.search(r'\d', password):
+        return False, "Password must contain at least one digit"
+    
+    return True, ""
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +87,25 @@ class LoginRequest(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        is_valid, error_msg = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_msg)
+        return v
 
 class UserCreateRequest(BaseModel):
     username: str
     password: str
     is_admin: bool = False
+    
+    @validator('password')
+    def validate_password(cls, v):
+        is_valid, error_msg = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError(error_msg)
+        return v
 
 class UserRoleRequest(BaseModel):
     is_admin: bool
@@ -114,10 +151,10 @@ def login(request: LoginRequest, request_obj: Request):
         response.set_cookie(
             key="auth_token", 
             value=token, 
-            httponly=False, 
+            httponly=True, 
             max_age=86400 * 30,
             path="/",
-            secure=False,
+            secure=os.getenv('NOMAD_SECURE_COOKIES', 'false').lower() == 'true',
             samesite="lax"
         )
         return response
