@@ -82,6 +82,7 @@ def init_db():
                 username TEXT UNIQUE,
                 password_hash TEXT,
                 is_admin INTEGER DEFAULT 0,
+                must_change_password INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -168,6 +169,10 @@ def init_db():
         except sqlite3.OperationalError: pass
 
         try:
+            c.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0")
+        except sqlite3.OperationalError: pass
+
+        try:
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id)")
         except sqlite3.OperationalError: pass
 
@@ -230,14 +235,14 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     finally:
         return_db(conn)
 
-def create_user(username: str, password_hash: str, is_admin: bool = False) -> int:
+def create_user(username: str, password_hash: str, is_admin: bool = False, must_change_password: bool = False) -> int:
     conn = get_db()
     try:
         c = conn.cursor()
         c.execute('''
-            INSERT INTO users (username, password_hash, is_admin)
-            VALUES (?, ?, ?)
-        ''', (username.lower(), password_hash, 1 if is_admin else 0))
+            INSERT INTO users (username, password_hash, is_admin, must_change_password)
+            VALUES (?, ?, ?, ?)
+        ''', (username.lower(), password_hash, 1 if is_admin else 0, 1 if must_change_password else 0))
         conn.commit()
         return c.lastrowid
     finally:
@@ -247,7 +252,7 @@ def update_user_password(user_id: int, new_hash: str):
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('UPDATE users SET password_hash = ? WHERE id = ?', (new_hash, user_id))
+        c.execute('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', (new_hash, user_id))
         conn.commit()
     finally:
         return_db(conn)

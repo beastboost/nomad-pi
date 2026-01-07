@@ -789,8 +789,8 @@ def get_years(category: str = Query(...)):
     return database.get_unique_years(category)
 
 @router.post("/play_count")
-def increment_play_count(path: str = Body(..., embed=True)):
-    database.increment_play_count(path)
+def increment_play_count(path: str = Body(..., embed=True), user_id: int = Depends(get_current_user_id)):
+    database.increment_play_count(user_id, path)
     return {"status": "success"}
 
 @router.get("/library/{category}")
@@ -1541,7 +1541,7 @@ def list_media(category: str):
     return files
 
 @router.post("/progress")
-def set_progress(data: Dict = Body(...)):
+def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
     path = data.get("path") or data.get("file_path")
     time = data.get("current_time")
     duration = data.get("duration")
@@ -1550,12 +1550,12 @@ def set_progress(data: Dict = Body(...)):
         return {"status": "error", "message": "Missing path or current_time"}
         
     try:
-        database.update_progress(path, time, duration)
+        database.update_progress(user_id, path, time, duration)
         
         # If progress is near the end (e.g., > 95%), mark as played
         if duration and duration > 0:
             if (time / duration) > 0.95:
-                database.increment_play_count(path)
+                database.increment_play_count(user_id, path)
                 
         return {"status": "ok"}
     except Exception as e:

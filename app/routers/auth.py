@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
 import os
+import secrets
+import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 from passlib.context import CryptContext
@@ -23,15 +25,30 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
 
+logger = logging.getLogger(__name__)
+
 def ensure_admin_user():
     """Ensures at least one admin user exists."""
     users = database.get_all_users()
     if not users:
         # Create default admin user
-        password = ADMIN_PASSWORD or "nomad"
+        must_change = False
+        if ADMIN_PASSWORD:
+            password = ADMIN_PASSWORD
+        elif ADMIN_PASSWORD_HASH:
+            password = None
+        else:
+            password = secrets.token_urlsafe(16)
+            must_change = True
+            
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
-        database.create_user("admin", h, is_admin=True)
-        print(f"Created default admin user with password: {'***' if ADMIN_PASSWORD else 'nomad'}")
+        database.create_user("admin", h, is_admin=True, must_change_password=must_change)
+        
+        if password and must_change:
+            logger.warning(f"Created default admin user with RANDOM password: {password}")
+            print(f"!!! WARNING: Created default admin user with RANDOM password: {password} !!!")
+        else:
+            print(f"Created default admin user with {'pre-hashed' if ADMIN_PASSWORD_HASH else 'configured'} password")
 
 ensure_admin_user()
 
@@ -85,7 +102,8 @@ def login(request: LoginRequest, request_obj: Request):
             "user": {
                 "id": user['id'],
                 "username": user['username'],
-                "is_admin": bool(user['is_admin'])
+                "is_admin": bool(user['is_admin']),
+                "must_change_password": bool(user.get('must_change_password', 0))
             }
         })
         response.set_cookie(

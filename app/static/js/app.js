@@ -275,6 +275,7 @@ async function loadUsers() {
 
     try {
         const res = await fetch(`${API_BASE}/auth/users`);
+        if (res.status === 401) { logout(); return; }
         if (res.status === 403) {
             container.innerHTML = '<div class="warning">Admin privileges required to manage users.</div>';
             return;
@@ -2659,10 +2660,10 @@ function showDuplicatesModal(data) {
     const { file_duplicates, content_duplicates } = data;
     
     let html = `
-        <div class="duplicates-container">
+        <div class="duplicates-container" id="duplicates-modal-container">
             <div class="tabs" style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                <button onclick="switchDuplicateTab('files')" class="tab-btn active" id="tab-files-btn">File Duplicates (${file_duplicates.length})</button>
-                <button onclick="switchDuplicateTab('content')" class="tab-btn" id="tab-content-btn">Content Duplicates (${content_duplicates.length})</button>
+                <button data-action="switch-tab" data-tab="files" class="tab-btn active" id="tab-files-btn">File Duplicates (${file_duplicates.length})</button>
+                <button data-action="switch-tab" data-tab="content" class="tab-btn" id="tab-content-btn">Content Duplicates (${content_duplicates.length})</button>
             </div>
             
             <div id="duplicate-files-section" class="duplicate-section">
@@ -2678,7 +2679,7 @@ function showDuplicatesModal(data) {
                                 ${d.paths.map((p, i) => `
                                     <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
                                         <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
-                                        <button onclick="deleteDuplicate('${escapeHtml(p)}', this)" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
+                                        <button data-action="delete-file" data-path="${escapeHtml(p)}" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
                                     </div>
                                 `).join('')}
                             </div>
@@ -2701,7 +2702,7 @@ function showDuplicatesModal(data) {
                                 ${d.paths.map((p, i) => `
                                     <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
                                         <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
-                                        <button onclick="deleteDuplicate('${escapeHtml(p)}', this)" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
+                                        <button data-action="delete-file" data-path="${escapeHtml(p)}" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
                                     </div>
                                 `).join('')}
                             </div>
@@ -2713,6 +2714,22 @@ function showDuplicatesModal(data) {
     `;
     
     openModal('Duplicate Detection Results', html);
+
+    // Add event listeners after modal is opened
+    const container = document.getElementById('duplicates-modal-container');
+    if (container) {
+        container.addEventListener('click', (e) => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            
+            const action = btn.dataset.action;
+            if (action === 'switch-tab') {
+                switchDuplicateTab(btn.dataset.tab);
+            } else if (action === 'delete-file') {
+                deleteDuplicate(btn.dataset.path, btn);
+            }
+        });
+    }
 }
 
 function switchDuplicateTab(tab) {
@@ -3899,8 +3916,43 @@ function showInstallPromotion() {
     }
 }
 
+function showPWAInstallInstructions() {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    let instructions = '';
+    if (isIOS) {
+        instructions = `
+            <div style="text-align:left; padding:10px;">
+                <p>To install on iOS:</p>
+                <ol>
+                    <li>Tap the <strong>Share</strong> button ( <span style="font-size:1.2em;">⎋</span> ) at the bottom of the screen.</li>
+                    <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+                    <li>Tap <strong>Add</strong> in the top right corner.</li>
+                </ol>
+            </div>
+        `;
+    } else {
+        instructions = `
+            <div style="text-align:left; padding:10px;">
+                <p>To install this app:</p>
+                <ul>
+                    <li><strong>Chrome/Edge:</strong> Look for the install icon ( <span style="font-size:1.2em;">⊕</span> ) in the address bar.</li>
+                    <li><strong>Firefox:</strong> This browser may not support direct installation. Try Chrome or Edge for the best PWA experience.</li>
+                    <li><strong>Mobile:</strong> Open the browser menu and select "Install app" or "Add to Home Screen".</li>
+                </ul>
+            </div>
+        `;
+    }
+    
+    openModal('Install NomadPi', instructions);
+}
+
 async function installPWA() {
-    if (!deferredPrompt) return;
+    if (!deferredPrompt) {
+        showPWAInstallInstructions();
+        return;
+    }
     // Show the install prompt
     deferredPrompt.prompt();
     // Wait for the user to respond to the prompt
