@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 STATUS_FILE="/tmp/nomad-pi-update.json"
 
 update_status() {
@@ -43,9 +44,9 @@ if [ "$TOTAL_SWAP" -lt 1000 ]; then
     fi
 fi
 
-# Stop the service to free up RAM for the update
-echo "Stopping nomad-pi service to free up memory..."
-sudo systemctl stop nomad-pi 2>/dev/null || true
+# Stop the service ONLY when we are about to finish, to keep the UI responsive for as long as possible
+# echo "Stopping nomad-pi service to free up memory..."
+# sudo systemctl stop nomad-pi 2>/dev/null || true
 
 update_status 10 "Configuring Git..."
 echo "Optimizing Git configuration..."
@@ -53,8 +54,8 @@ echo "Optimizing Git configuration..."
 # System update to pick up GnuTLS/security fixes (optional but recommended for handshake issues)
 # sudo apt update && sudo apt full-upgrade -y
 
+update_status 15 "Optimizing Git configuration..."
 # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
-# Explicitly unset the openssl backend in case it was set by a previous version of this script
 git config --global --unset http.sslBackend 2>/dev/null || true
 git config --global http.sslVerify true
 # Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub
@@ -74,7 +75,9 @@ git config credential.helper 'cache --timeout=2592000'
 update_status 10 "Pulling latest changes from Git..."
 echo "Pulling latest changes from Git..."
 # Force reset to origin/main to solve any local change conflicts automatically
+update_status 30 "Fetching latest changes..."
 git fetch origin
+update_status 40 "Resetting to latest version..."
 git reset --hard origin/main
 
 # Fix permissions immediately after pull
@@ -104,9 +107,11 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 
+update_status 70 "Upgrading pip..."
 ./venv/bin/pip install --upgrade pip
 
 # Check for requirements changes to skip redundant installs
+update_status 75 "Checking dependencies..."
 REQUIREMENTS_HASH=$(md5sum requirements.txt | awk '{ print $1 }')
 PREV_HASH=$(cat .requirements_hash 2>/dev/null || echo "")
 
@@ -134,7 +139,7 @@ if [ ! -f "./venv/bin/uvicorn" ]; then
     ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
 fi
 
-update_status 80 "Update complete. Preparing to restart..."
+update_status 90 "Update complete. Finalizing..."
 echo "Update complete. Preparing to restart..."
 
 # Write completion marker to log BEFORE restarting
@@ -149,8 +154,8 @@ echo "==========================================" >> update.log
 update_status 100 "Update complete! Restarting in 5 seconds..."
 
 # Give the UI time to read the completion status
-echo "Waiting 5 seconds for UI to update..."
-sleep 5
+echo "Waiting 2 seconds for UI to update..."
+sleep 2
 
 # Try to restart the service, with fallback if service doesn't exist
 if command -v systemctl >/dev/null 2>&1; then
@@ -160,7 +165,7 @@ if command -v systemctl >/dev/null 2>&1; then
         sudo systemctl enable nomad-pi.service
         # Background the restart so the script can finish and the UI gets the final status
         echo "Restarting service in background..." >> update.log
-        nohup bash -c "sleep 2 && sudo systemctl restart nomad-pi" > /dev/null 2>&1 &
+        nohup bash -c "sudo systemctl stop nomad-pi && sleep 2 && sudo systemctl start nomad-pi" > /dev/null 2>&1 &
         echo "Service restart command issued in background." >> update.log
     else
         echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log

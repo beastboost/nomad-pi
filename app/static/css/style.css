@@ -602,6 +602,33 @@ button.primary:hover {
     border: var(--glass-border);
 }
 
+.progress-wrapper {
+    margin-bottom: 20px;
+}
+
+.progress-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-color), #4facfe);
+    width: 0%;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 10px rgba(79, 172, 254, 0.5);
+}
+
+.progress-text {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
 /* Modals */
 .wifi-modal-overlay {
     position: fixed;
@@ -1105,7 +1132,17 @@ h1, h2, h3 {
         justify-content: space-between;
         align-items: center;
         padding: 0 16px;
-        min-height: 60px;
+        padding-top: env(safe-area-inset-top);
+        min-height: calc(60px + env(safe-area-inset-top));
+        margin: 0;
+        border-radius: 0;
+        position: sticky;
+        top: 0;
+        z-index: 900;
+        background: rgba(18, 18, 18, 0.95);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: var(--glass-border);
     }
 
     .mobile-menu-btn {
@@ -1162,42 +1199,54 @@ h1, h2, h3 {
 
     nav {
         position: fixed;
-        top: 80px;
-        left: 15px;
-        right: 15px;
-        bottom: 90px;
-        background-color: var(--header-bg);
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(10, 10, 10, 0.98);
         flex-direction: column;
-        align-items: center;
-        padding: 30px 20px;
-        gap: 12px;
-        z-index: 999;
-        transform: translateY(120%);
-        transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        align-items: flex-start;
+        padding: 80px 30px;
+        gap: 15px;
+        z-index: 2000;
+        opacity: 0;
+        pointer-events: none;
+        transform: scale(1.05);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         overflow-y: auto;
-        backdrop-filter: blur(var(--glass-blur));
-        -webkit-backdrop-filter: blur(var(--glass-blur));
-        border: var(--glass-border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
     }
 
     nav.mobile-active {
-        transform: translateY(0);
+        opacity: 1;
+        pointer-events: all;
+        transform: scale(1);
     }
 
     nav button {
         width: 100%;
         margin: 0;
-        padding: 14px;
-        font-size: 1.05rem;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: var(--radius-md);
+        padding: 18px 24px;
+        font-size: 1.2rem;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
         text-align: left;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 15px;
+        color: white;
+    }
+
+    nav button i {
+        font-size: 1.4rem;
+        width: 30px;
+        text-align: center;
+        color: var(--accent-color);
     }
 
     main {

@@ -1,6 +1,51 @@
 console.log("App v1.2 loaded - Plex-style UI & External Players");
 const API_BASE = '/api';
 
+async function checkPostUpdate() {
+    const preUpdateVersion = localStorage.getItem('nomadpi_pre_update_version');
+    if (!preUpdateVersion) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/system/status`);
+        const data = await res.json();
+        
+        if (data.version && data.version !== preUpdateVersion) {
+            // Version changed! Clear the flag and show modal
+            localStorage.removeItem('nomadpi_pre_update_version');
+            
+            // Update version tag in modal
+            const versionTag = document.getElementById('new-version-tag');
+            if (versionTag) versionTag.textContent = `v${data.version}`;
+            
+            // Fetch changelog
+            const logRes = await fetch(`${API_BASE}/system/changelog`);
+            const logData = await logRes.json();
+            
+            const list = document.getElementById('changelog-list');
+            if (list && logData.changelog) {
+                list.innerHTML = logData.changelog.map(item => `<li>${item}</li>`).join('');
+            }
+            
+            // Show modal
+            const modal = document.getElementById('what-is-new-modal');
+            if (modal) modal.classList.remove('hidden');
+        } else if (data.version === preUpdateVersion) {
+            // Version didn't change (maybe update failed or no new version)
+            // We'll clear it after a while anyway to avoid stuck state
+            // For now, let's keep it in case they refresh again during restart
+        }
+    } catch (e) {
+        console.error('Error checking post-update status:', e);
+    }
+}
+
+function closeWhatIsNew() {
+    const modal = document.getElementById('what-is-new-modal');
+    if (modal) modal.classList.add('hidden');
+    // Also clear the pre-update version to ensure it doesn't show again
+    localStorage.removeItem('nomadpi_pre_update_version');
+}
+
 function getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
@@ -78,9 +123,6 @@ async function fetchMovieMeta(file) {
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || data.configured === false) return null;
         file.omdb = data;
-        // Store extras for easy access
-        file.subtitles = data.subtitles || [];
-        file.trailers = data.trailers || [];
         return data;
     } catch {
         return null;
@@ -102,33 +144,19 @@ function applyMovieMetaToCard(cardEl, file, data) {
     const parts = [year, rated, runtime].filter(v => v && v !== 'N/A');
     if (subEl && parts.length > 0) subEl.textContent = parts.join(' • ');
 
-    if (shell) {
-        if (!file.poster) {
-            const posterUrl = data.poster || data.meta?.Poster;
-            if (posterUrl && posterUrl !== 'N/A') {
-                const existingImg = shell.querySelector('img.poster-img');
-                if (!existingImg) {
-                    const placeholder = shell.querySelector('.poster-placeholder');
-                    const img = document.createElement('img');
-                    img.className = 'poster-img';
-                    img.loading = 'lazy';
-                    img.alt = file?.name || 'Poster';
-                    img.src = posterUrl;
-                    if (placeholder) placeholder.replaceWith(img);
-                    else shell.prepend(img);
-                }
-            }
-        }
-
-        // Add Trailer button if trailers exist
-        if (data.trailers && data.trailers.length > 0) {
-            const infoDiv = shell.querySelector('.media-info');
-            if (infoDiv && !infoDiv.querySelector('.trailer-badge')) {
-                const badge = document.createElement('div');
-                badge.className = 'trailer-badge';
-                badge.textContent = 'Trailer';
-                badge.style.cssText = 'background:var(--accent-color); color:white; padding:2px 6px; border-radius:4px; font-size:0.7em; margin-top:5px; display:inline-block; font-weight:bold;';
-                infoDiv.appendChild(badge);
+    if (shell && !file.poster) {
+        const posterUrl = data.poster || data.meta?.Poster;
+        if (posterUrl && posterUrl !== 'N/A') {
+            const existingImg = shell.querySelector('img.poster-img');
+            if (!existingImg) {
+                const placeholder = shell.querySelector('.poster-placeholder');
+                const img = document.createElement('img');
+                img.className = 'poster-img';
+                img.loading = 'lazy';
+                img.alt = file?.name || 'Poster';
+                img.src = posterUrl;
+                if (placeholder) placeholder.replaceWith(img);
+                else shell.prepend(img);
             }
         }
     }
@@ -207,99 +235,8 @@ function restoreShowsState() {
 }
 
 // Auth Functions
-function showChangePasswordModal(isForced = false) {
-    // Create modal if it doesn't exist
-    let modal = document.getElementById('force-change-password-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'force-change-password-modal';
-        modal.className = 'modal';
-        modal.style.display = 'flex';
-        modal.style.zIndex = '10000';
-        
-        modal.innerHTML = `
-            <div class="modal-content" style="max-width: 400px;">
-                <h2>${isForced ? 'Password Change Required' : 'Change Password'}</h2>
-                <p style="color: var(--text-muted); margin-bottom: 20px;">
-                    ${isForced ? 'For security reasons, you must change your password before continuing.' : 'Enter your current and new password below.'}
-                </p>
-                <div class="form-group">
-                    <label>Current Password</label>
-                    <input type="password" id="force-current-pwd" class="full-width">
-                </div>
-                <div class="form-group">
-                    <label>New Password</label>
-                    <input type="password" id="force-new-pwd" class="full-width">
-                </div>
-                <div class="form-group">
-                    <label>Confirm New Password</label>
-                    <input type="password" id="force-confirm-pwd" class="full-width">
-                </div>
-                <div id="force-pwd-error" class="error-msg" style="display:none; margin-bottom: 15px;"></div>
-                <div class="modal-actions">
-                    ${isForced ? '' : '<button onclick="document.getElementById(\'force-change-password-modal\').remove()" class="secondary">Cancel</button>'}
-                    <button onclick="handleForcePasswordChange(${isForced})" class="primary">Change Password</button>
-                    ${isForced ? '<button onclick="logout()" class="secondary" style="margin-left: 10px;">Logout</button>' : ''}
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-}
-
-async function handleForcePasswordChange(isForced) {
-    const currentPwd = document.getElementById('force-current-pwd').value;
-    const newPwd = document.getElementById('force-new-pwd').value;
-    const confirmPwd = document.getElementById('force-confirm-pwd').value;
-    const errorEl = document.getElementById('force-pwd-error');
-    
-    if (!currentPwd || !newPwd || !confirmPwd) {
-        errorEl.textContent = 'All fields are required';
-        errorEl.style.display = 'block';
-        return;
-    }
-    
-    if (newPwd !== confirmPwd) {
-        errorEl.textContent = 'New passwords do not match';
-        errorEl.style.display = 'block';
-        return;
-    }
-    
-    if (newPwd.length < 8) {
-        errorEl.textContent = 'New password must be at least 8 characters long';
-        errorEl.style.display = 'block';
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/change-password`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                current_password: currentPwd,
-                new_password: newPwd
-            })
-        });
-        
-        if (res.ok) {
-            alert('Password changed successfully! Please login again.');
-            document.getElementById('force-change-password-modal').remove();
-            logout(); // Force re-login with new password
-        } else {
-            const data = await res.json();
-            errorEl.textContent = data.detail || 'Failed to change password';
-            errorEl.style.display = 'block';
-        }
-    } catch (e) {
-        errorEl.textContent = 'Connection error';
-        errorEl.style.display = 'block';
-    }
-}
-
 async function login() {
-    const usernameInput = document.getElementById('username-input');
     const passwordInput = document.getElementById('password-input');
-    const username = usernameInput.value;
     const password = passwordInput.value;
     const errorMsg = document.getElementById('login-error');
 
@@ -309,23 +246,15 @@ async function login() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ username: username, password: password })
+            body: JSON.stringify({ password: password })
         });
 
         if (res.ok) {
-            const data = await res.json();
-            
-            if (data.user && data.user.must_change_password) {
-                showChangePasswordModal(true); // Force change
-                return;
-            }
-
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             // Load initial data
             loadStorageStats();
             loadResume();
-            loadProfile();
             startStatsAutoRefresh();
         } else {
             errorMsg.style.display = 'block';
@@ -347,15 +276,10 @@ async function checkAuth() {
         const res = await fetch(`${API_BASE}/auth/check`);
         const data = await res.json();
         if (data.authenticated) {
-            if (data.user && data.user.must_change_password) {
-                showChangePasswordModal(true);
-                return;
-            }
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             loadStorageStats();
             loadResume();
-            loadProfile();
             startStatsAutoRefresh();
         } else {
             // Ensure login screen is visible
@@ -368,255 +292,11 @@ async function checkAuth() {
     }
 }
 
-// User Management Functions
-async function loadUsers() {
-    const container = document.getElementById('user-management-list');
-    if (!container) return;
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/users`);
-        if (res.status === 401) { logout(); return; }
-        if (res.status === 403) {
-            container.innerHTML = '<div class="warning">Admin privileges required to manage users.</div>';
-            return;
-        }
-        const users = await res.json();
-        
-        container.innerHTML = '';
-        users.forEach(user => {
-            const div = document.createElement('div');
-            div.className = 'list-item user-item';
-            div.style.display = 'flex';
-            div.style.alignItems = 'center';
-            div.style.justifyContent = 'space-between';
-            div.style.padding = '12px 15px';
-            
-            div.innerHTML = `
-                <div style="display:flex; align-items:center; gap:12px;">
-                    <div style="font-size:1.5em;">👤</div>
-                    <div>
-                        <div style="font-weight:bold;">${escapeHtml(user.username)} ${user.is_admin ? '<span class="badge">Admin</span>' : ''}</div>
-                        <div style="font-size:0.8em; color:var(--text-muted);">Joined: ${new Date(user.created_at).toLocaleDateString()}</div>
-                    </div>
-                </div>
-                <div style="display:flex; gap:8px;">
-                    <button onclick="toggleUserRole(${user.id}, ${!user.is_admin})" class="secondary btn-sm">
-                        ${user.is_admin ? 'Demote' : 'Make Admin'}
-                    </button>
-                    <button onclick="deleteUser(${user.id}, '${escapeHtml(user.username)}')" class="danger btn-sm">Delete</button>
-                </div>
-            `;
-            container.appendChild(div);
-        });
-    } catch (e) {
-        console.error('Error loading users:', e);
-        container.innerHTML = '<div class="error">Failed to load users.</div>';
-    }
-}
-
-async function addUser() {
-    const usernameInput = document.getElementById('new-user-username');
-    const passwordInput = document.getElementById('new-user-password');
-    const isAdminInput = document.getElementById('new-user-is-admin');
-    
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    const is_admin = isAdminInput.checked;
-
-    if (!username || !password) {
-        showToast('Username and password are required', 'error');
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/users`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password, is_admin })
-        });
-
-        if (res.ok) {
-            showToast('User created successfully', 'success');
-            usernameInput.value = '';
-            passwordInput.value = '';
-            isAdminInput.checked = false;
-            loadUsers();
-        } else {
-            const data = await res.json();
-            showToast(data.detail || 'Failed to create user', 'error');
-        }
-    } catch (e) {
-        showToast('Error creating user', 'error');
-    }
-}
-
-async function deleteUser(userId, username) {
-    if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/users/${userId}`, { method: 'DELETE' });
-        if (res.ok) {
-            showToast('User deleted', 'success');
-            loadUsers();
-        } else {
-            const data = await res.json();
-            showToast(data.detail || 'Failed to delete user', 'error');
-        }
-    } catch (e) {
-        showToast('Error deleting user', 'error');
-    }
-}
-
-async function toggleUserRole(userId, isAdmin) {
-    try {
-        const res = await fetch(`${API_BASE}/auth/users/${userId}/role`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ is_admin: isAdmin })
-        });
-
-        if (res.ok) {
-            showToast('User role updated', 'success');
-            loadUsers();
-        } else {
-            const data = await res.json();
-            showToast(data.detail || 'Failed to update role', 'error');
-        }
-    } catch (e) {
-        showToast('Error updating role', 'error');
-    }
-}
-
-// Profile Functions
-let currentUserProfile = null;
-
-async function loadProfile() {
-    try {
-        const res = await fetch(`${API_BASE}/auth/profile`);
-        if (res.ok) {
-            currentUserProfile = await res.json();
-            updateUIWithProfile();
-        }
-    } catch (e) {
-        console.error('Error loading profile:', e);
-    }
-}
-
-function updateUIWithProfile() {
-    if (!currentUserProfile) return;
-    
-    // Update display name in header if we had one (could add later)
-    console.log('Profile loaded:', currentUserProfile);
-    
-    // Update settings form if it exists
-    const nameInput = document.getElementById('profile-name');
-    const avatarInput = document.getElementById('profile-avatar');
-    const parentalInput = document.getElementById('profile-parental');
-    
-    if (nameInput) nameInput.value = currentUserProfile.name || '';
-    if (avatarInput) avatarInput.value = currentUserProfile.avatar || '';
-    if (parentalInput) parentalInput.value = currentUserProfile.parental_controls || 0;
-}
-
-async function saveProfileUI() {
-    const nameInput = document.getElementById('profile-name');
-    const avatarInput = document.getElementById('profile-avatar');
-    const parentalInput = document.getElementById('profile-parental');
-    
-    if (!nameInput) return;
-    
-    const name = nameInput.value.trim();
-    const avatar = avatarInput.value.trim();
-    const parental_controls = parseInt(parentalInput.value);
-    
-    if (!name) {
-        showToast('Display name is required', 'error');
-        return;
-    }
-    
-    await saveProfile(name, avatar, {}, parental_controls);
-}
-
-async function saveProfile(name, avatar = null, preferences = {}, parental_controls = 0) {
-    try {
-        const res = await fetch(`${API_BASE}/auth/profile`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, avatar, preferences, parental_controls })
-        });
-
-        if (res.ok) {
-            showToast('Profile updated', 'success');
-            loadProfile();
-        }
-    } catch (e) {
-        showToast('Error saving profile', 'error');
-    }
-}
-
-function showToast(message, type = 'info', duration = 3000) {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    
-    let icon = '✨';
-    if (type === 'success') icon = '✅';
-    if (type === 'error') icon = '❌';
-    if (type === 'warning') icon = '⚠️';
-
-    const iconSpan = document.createElement('span');
-    iconSpan.textContent = icon;
-    
-    const msgSpan = document.createElement('span');
-    msgSpan.textContent = message;
-
-    toast.appendChild(iconSpan);
-    toast.appendChild(document.createTextNode(' '));
-    toast.appendChild(msgSpan);
-    
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add('fade-out');
-        setTimeout(() => toast.remove(), 500);
-    }, duration);
-}
-
-function renderSkeletons(container, count = 8) {
-    if (!container) return;
-    container.innerHTML = '';
-    for (let i = 0; i < count; i++) {
-        const skel = document.createElement('div');
-        skel.className = 'media-item skeleton';
-        skel.style.height = '300px';
-        skel.style.borderRadius = '12px';
-        container.appendChild(skel);
-    }
-}
-
 function handleLoginKey(e) {
     if (e.key === 'Enter') login();
 }
 
-function toggleMobileMenu() {
-    const nav = document.getElementById('main-nav');
-    const btn = document.querySelector('.mobile-menu-btn');
-    if (nav) {
-        nav.classList.toggle('mobile-active');
-        if (btn) btn.innerText = nav.classList.contains('mobile-active') ? '✕' : '☰';
-    }
-}
-
 function showSection(id) {
-    const nav = document.getElementById('main-nav');
-    const btn = document.querySelector('.mobile-menu-btn');
-    if (nav) {
-        nav.classList.remove('mobile-active');
-        if (btn) btn.innerText = '☰';
-    }
-
     document.querySelectorAll('main > section').forEach(sec => {
         sec.classList.add('hidden');
         sec.style.display = 'none'; // Force hide
@@ -627,15 +307,6 @@ function showSection(id) {
     document.querySelectorAll('nav button').forEach(btn => {
         btn.classList.remove('active');
         if (btn.innerText.trim().toLowerCase() === id.toLowerCase()) {
-            btn.classList.add('active');
-        }
-    });
-
-    // Update active state for mobile bottom nav
-    document.querySelectorAll('.mobile-bottom-nav .nav-item').forEach(btn => {
-        btn.classList.remove('active');
-        const btnId = btn.id;
-        if (btnId === `btn-${id}-mob`) {
             btn.classList.add('active');
         }
     });
@@ -662,8 +333,26 @@ function showSection(id) {
         loadStorageStats();
     }
 
+    // Setup search listeners
+    ['movies', 'shows', 'music', 'files'].forEach(cat => {
+        const input = document.getElementById(`${cat}-search`);
+        if (input && !input._listenerAttached) {
+            let timeout = null;
+            input.addEventListener('input', () => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    if (cat === 'movies') loadMovies(true);
+                    else if (cat === 'shows') {
+                        if (showsState.level === 'shows') loadShows(true);
+                        else renderShows(); 
+                    }
+                    else if (cat === 'music' || cat === 'files') loadMedia(cat);
+                }, 500);
+            });
+            input._listenerAttached = true;
+        }
+    });
     if (id === 'admin') {
-        loadUsers();
         loadDrives();
         loadWifiStatus();
         // Auto-refresh drives every 5 seconds while in admin panel
@@ -674,28 +363,21 @@ function showSection(id) {
             }
         }, 5000);
     }
-
-    if (id === 'settings') {
-        loadOmdbKey();
-    }
 }
 
 async function loadMedia(category) {
     if (category === 'files') {
-        const searchInput = document.getElementById('files-search');
-        const q = (searchInput?.value || '').trim();
-        loadFileBrowser(mediaState.path || '/data', q);
+        loadFileBrowser(mediaState.path || '/data');
         return;
     }
     await loadMediaPage(category, true);
 }
 
-async function loadFileBrowser(path, query = '') {
-    console.log('loadFileBrowser called with path:', path, 'query:', query);
+async function loadFileBrowser(path) {
+    console.log('loadFileBrowser called with path:', path);
     const container = document.getElementById('files-list');
     if (!container) return;
 
-    const q = (query || '').trim().toLowerCase();
     container.innerHTML = '<div class="loading">Loading files...</div>';
     
     // Check if we should show drive list (Windows)
@@ -704,23 +386,15 @@ async function loadFileBrowser(path, query = '') {
             const res = await fetch(`${API_BASE}/system/drives`);
             const data = await res.json();
             container.innerHTML = '<h2>Available Drives</h2>';
-            let drives = data.blockdevices || [];
+            const drives = data.blockdevices || [];
             
-            if (q) {
-                drives = drives.filter(d => 
-                    d.name.toLowerCase().includes(q) || 
-                    (d.mountpoint && d.mountpoint.toLowerCase().includes(q))
-                );
-            }
-
             // Back to /data
             const backDiv = document.createElement('div');
-            backDiv.className = 'list-item folder-item';
+            backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('/data')">
-                    <span style="font-size:1.5em;">📁</span>
-                    <div style="flex-grow:1;">
-                        <h3 style="margin:0; font-size:1rem;">.. (Back to /data)</h3>
+                <div class="media-card glass" onclick="loadFileBrowser('/data')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back to /data)</h3>
                     </div>
                 </div>
             `;
@@ -728,14 +402,12 @@ async function loadFileBrowser(path, query = '') {
 
             drives.forEach(d => {
                 const div = document.createElement('div');
-                div.className = 'list-item drive-item';
-                const mountPath = (d.mountpoint || '').replaceAll('\\', '\\\\');
+                div.className = 'media-item folder';
                 div.innerHTML = `
-                    <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${mountPath}')">
-                        <span style="font-size:1.5em;">💽</span>
-                        <div style="flex-grow:1;">
-                            <h3 style="margin:0; font-size:1rem;">Drive ${d.name} (${formatBytes(d.free)} free)</h3>
-                            <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">${d.fstype || 'Unknown'} - ${d.mountpoint || 'Not mounted'}</p>
+                    <div class="media-card glass" onclick="loadFileBrowser('${d.mountpoint.replaceAll('\\', '\\\\')}')">
+                        <div class="media-info">
+                            <h3>💽 Drive ${d.name} (${formatBytes(d.free)} free)</h3>
+                            <p>${d.fstype} - ${d.mountpoint}</p>
                         </div>
                     </div>
                 `;
@@ -773,12 +445,11 @@ async function loadFileBrowser(path, query = '') {
             }
 
             const backDiv = document.createElement('div');
-            backDiv.className = 'list-item folder-item';
+            backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
-                    <span style="font-size:1.5em;">📁</span>
-                    <div style="flex-grow:1;">
-                        <h3 style="margin:0; font-size:1rem;">.. (Back)</h3>
+                <div class="media-card glass" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back)</h3>
                     </div>
                 </div>
             `;
@@ -786,12 +457,11 @@ async function loadFileBrowser(path, query = '') {
         } else if (path === '/data') {
             // Show "Browse Drives" button at /data root
             const driveDiv = document.createElement('div');
-            driveDiv.className = 'list-item drive-item';
+            driveDiv.className = 'media-item folder';
             driveDiv.innerHTML = `
-                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('DRIVES')">
-                    <span style="font-size:1.5em;">💽</span>
-                    <div style="flex-grow:1;">
-                        <h3 style="margin:0; font-size:1rem;">Browse External Drives / Partitions</h3>
+                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                    <div class="media-info">
+                        <h3>💽 Browse External Drives / Partitions</h3>
                     </div>
                 </div>
             `;
@@ -799,37 +469,30 @@ async function loadFileBrowser(path, query = '') {
         } else if (isWindows && isRoot) {
             // At drive root, allow going back to drives list
             const backDiv = document.createElement('div');
-            backDiv.className = 'list-item folder-item';
+            backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('DRIVES')">
-                    <span style="font-size:1.5em;">📁</span>
-                    <div style="flex-grow:1;">
-                        <h3 style="margin:0; font-size:1rem;">.. (Back to Drives)</h3>
+                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                    <div class="media-info">
+                        <h3>📁 .. (Back to Drives)</h3>
                     </div>
                 </div>
             `;
             container.appendChild(backDiv);
         }
 
-        let items = data.items || [];
-        if (q) {
-            items = items.filter(item => item.name.toLowerCase().includes(q));
-        }
-
-        if (items.length === 0) {
-            container.innerHTML += `<p style="padding:20px; text-align:center; color:var(--text-muted);">${q ? 'No matching files found.' : 'This folder is empty.'}</p>`;
+        if (!data.items || data.items.length === 0) {
+            container.innerHTML += '<p style="padding:20px; text-align:center; color:var(--text-muted);">This folder is empty.</p>';
         } else {
-            items.forEach(item => {
+            data.items.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'list-item' + (item.is_dir ? ' folder-item' : ' file-item');
+                div.className = 'media-item' + (item.is_dir ? ' folder' : '');
                 const itemPath = item.path.replaceAll('\\', '\\\\');
 
                 if (item.is_dir) {
                     div.innerHTML = `
-                        <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="loadFileBrowser('${itemPath}')">
-                            <span style="font-size:1.5em;">📁</span>
-                            <div style="flex-grow:1;">
-                                <h3 style="margin:0; font-size:1rem;">${escapeHtml(item.name)}</h3>
+                        <div class="media-card glass" onclick="loadFileBrowser('${itemPath}')">
+                            <div class="media-info">
+                                <h3>📁 ${escapeHtml(item.name)}</h3>
                             </div>
                         </div>
                     `;
@@ -842,11 +505,10 @@ async function loadFileBrowser(path, query = '') {
                     if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
 
                     div.innerHTML = `
-                        <div style="display:flex; align-items:center; gap:15px; width:100%;" onclick="openFile('${itemPath}')">
-                            <span style="font-size:1.5em;">${icon}</span>
-                            <div style="flex-grow:1;">
-                                <h3 style="margin:0; font-size:1rem;">${escapeHtml(item.name)}</h3>
-                                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">${formatBytes(item.size)}</p>
+                        <div class="media-card glass" onclick="openFile('${itemPath}')">
+                            <div class="media-info">
+                                <h3>${icon} ${escapeHtml(item.name)}</h3>
+                                <p>${formatBytes(item.size)}</p>
                             </div>
                         </div>
                     `;
@@ -865,11 +527,7 @@ async function loadFileBrowser(path, query = '') {
 function openFile(path) {
     const ext = path.split('.').pop().toLowerCase();
     if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg'].includes(ext)) {
-        const file = {
-            path: path,
-            name: path.split('/').pop() || path
-        };
-        playVideo(file);
+        openVideoViewer(path);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
         openImageViewer(path);
     } else if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) {
@@ -925,7 +583,7 @@ async function loadMediaPage(category, reset) {
         state.year = year;
         state.hasMore = true;
         mediaCache[category] = null;
-        renderSkeletons(container);
+        container.innerHTML = '<div class="loading">Loading...</div>';
     }
 
     if (state.loading || !state.hasMore) return;
@@ -947,7 +605,7 @@ async function loadMediaPage(category, reset) {
         state.offset = Number(data.next_offset || (state.offset + items.length));
         state.hasMore = Boolean(data.has_more);
         mediaCache[category] = state.items;
-        renderMediaListPaged(category, items, state.hasMore, !reset);
+        renderMediaListPaged(category, state.items, state.hasMore);
         
         // Populate filters if they are empty
         if (reset && (category === 'movies' || category === 'shows')) {
@@ -1014,8 +672,8 @@ function loadShows(reset) {
     }
 }
 
-function renderMediaListPaged(category, files, hasMore, append = false) {
-    renderMediaList(category, files, append);
+function renderMediaListPaged(category, files, hasMore) {
+    renderMediaList(category, files);
     const container = document.getElementById(`${category}-list`);
     if (!container) return;
 
@@ -1030,20 +688,15 @@ function renderMediaListPaged(category, files, hasMore, append = false) {
     btn.style.margin = '14px auto';
     btn.style.display = 'block';
     btn.textContent = 'Load more';
-    btn.addEventListener('click', () => {
-        btn.disabled = true;
-        btn.textContent = 'Loading...';
-        loadMediaPage(category, false);
-    });
+    btn.addEventListener('click', () => loadMediaPage(category, false));
     container.appendChild(btn);
 }
 
-function renderMediaList(category, files, append = false) {
+function renderMediaList(category, files) {
     const container = document.getElementById(`${category}-list`);
-    if (!container) return;
-    if (!append) container.innerHTML = '';
+    container.innerHTML = '';
 
-    if (category === 'music' && files && files.length > 0 && !append) {
+    if (category === 'music' && files && files.length > 0) {
         const shuffleBtn = document.createElement('button');
         shuffleBtn.className = 'primary';
         shuffleBtn.style.marginBottom = '10px';
@@ -1238,7 +891,7 @@ function renderMediaList(category, files, append = false) {
             div.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
                 if (isVideo) {
-                    playVideo(file, file.progress?.current_time || 0);
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                 } else {
                     openImageViewer(file.path, cleanTitle(file.name));
                 }
@@ -1287,7 +940,7 @@ function renderMediaList(category, files, append = false) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        playVideo(file, file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                 }
 
@@ -1325,7 +978,7 @@ function renderMediaList(category, files, append = false) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        playVideo(file, file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                 }
             } else {
@@ -1622,66 +1275,11 @@ function openPdfViewer(path, title) {
 function closeViewer() {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
-    
-    // Stop any video/audio
-    const video = body ? body.querySelector('video') : null;
-    if (video) {
-        video.pause();
-        video.src = "";
-        video.load();
-    }
-    
     if (body) body.innerHTML = '';
     if (modal) modal.classList.add('hidden');
     comicPages = [];
     comicIndex = 0;
 }
-
-// Global Keyboard Shortcuts
-window.addEventListener('keydown', (e) => {
-    // Ignore if user is typing in an input or textarea
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-    const video = document.getElementById('main-video-player');
-    const modal = document.getElementById('viewer-modal');
-    const isModalOpen = modal && !modal.classList.contains('hidden');
-
-    if (isModalOpen && video) {
-        switch (e.key.toLowerCase()) {
-            case ' ': // Space: Play/Pause
-                e.preventDefault();
-                if (video.paused) video.play();
-                else video.pause();
-                break;
-            case 'f': // F: Fullscreen
-                e.preventDefault();
-                if (document.fullscreenElement) {
-                    document.exitFullscreen();
-                } else {
-                    video.requestFullscreen().catch(() => {});
-                }
-                break;
-            case 'm': // M: Mute
-                e.preventDefault();
-                video.muted = !video.muted;
-                break;
-            case 'arrowright': // Right Arrow: Seek forward 10s
-                e.preventDefault();
-                video.currentTime = Math.min(video.duration, video.currentTime + 10);
-                break;
-            case 'arrowleft': // Left Arrow: Seek backward 10s
-                e.preventDefault();
-                video.currentTime = Math.max(0, video.currentTime - 10);
-                break;
-            case 'escape': // Escape: Close modal
-                closeViewer();
-                break;
-        }
-    } else if (isModalOpen) {
-        // Handle Esc for other viewer types (images, comics, pdfs)
-        if (e.key === 'Escape') closeViewer();
-    }
-});
 
 function openImageViewer(path, title) {
     const modal = document.getElementById('viewer-modal');
@@ -1698,29 +1296,7 @@ function openImageViewer(path, title) {
     modal.classList.remove('hidden');
 }
 
-async function playVideo(file, startSeconds = 0) {
-    if (!file || !file.path) return;
-    
-    // If metadata isn't loaded yet, fetch it now to get subtitles/trailers
-    if (!file.omdb) {
-        // Show a brief loading state if needed, but usually it's fast
-        const meta = await fetchMovieMeta(file);
-        if (meta) {
-            file.omdb = meta;
-            file.subtitles = meta.subtitles || [];
-            file.trailers = meta.trailers || [];
-        }
-    }
-    
-    const extras = {
-        subtitles: file.subtitles || [],
-        trailers: file.trailers || []
-    };
-    
-    openVideoViewer(file.path, cleanTitle(file.name), startSeconds, extras);
-}
-
-function openVideoViewer(path, title, startSeconds = 0, extras = null) {
+function openVideoViewer(path, title, startSeconds = 0) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -1743,33 +1319,9 @@ function openVideoViewer(path, title, startSeconds = 0, extras = null) {
     const safeExt = extMatch ? extMatch[0] : '.mp4';
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
-    // Subtitles and Trailers UI
-    let extrasHtml = '';
-    if (extras) {
-        if (extras.trailers && extras.trailers.length > 0) {
-            extrasHtml += `
-                <select onchange="playTrailer(this.value, '${escapeHtml(safeTitle)} Trailer')" class="player-action-btn" style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px; border-radius:4px; font-size:0.9em; cursor:pointer;">
-                    <option value="">🎞️ Trailers</option>
-                    ${extras.trailers.map(t => `<option value="${escapeHtml(t.path)}">${escapeHtml(t.name)}</option>`).join('')}
-                </select>
-            `;
-        }
-        if (extras.subtitles && extras.subtitles.length > 0) {
-            extrasHtml += `
-                <select onchange="setSubtitle(this.value)" class="player-action-btn" style="background:rgba(255,255,255,0.1); border:none; color:white; padding:5px; border-radius:4px; font-size:0.9em; cursor:pointer;">
-                    <option value="none">💬 Subtitles: Off</option>
-                    ${extras.subtitles.map((s, idx) => `<option value="${idx}">${escapeHtml(s.label)}</option>`).join('')}
-                </select>
-            `;
-        }
-    }
-
     heading.innerHTML = `
-        <div style="display:flex; align-items:center; gap:12px; width:100%; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:12px; width:100%;">
             <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</span>
-            <div class="player-extras" style="display:flex; gap:8px;">
-                ${extrasHtml}
-            </div>
             <div class="external-player-btns" style="display:flex; gap:8px;">
                 <a href="${streamUrl}" download="${escapeHtml(downloadName)}" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
@@ -1785,112 +1337,16 @@ function openVideoViewer(path, title, startSeconds = 0, extras = null) {
     console.log('Opening video:', path, 'at', streamUrl);
 
     const video = document.createElement('video');
-    video.id = 'main-video-player';
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
+    video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
+    video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     video.src = streamUrl;
-    
-    // Add subtitle tracks
-    if (extras && extras.subtitles) {
-        extras.subtitles.forEach((sub, idx) => {
-            const track = document.createElement('track');
-            track.kind = 'subtitles';
-            track.label = sub.label;
-            track.srclang = sub.label.toLowerCase().substring(0, 2);
-            
-            let subUrl = sub.path;
-            if (token) subUrl += (subUrl.includes('?') ? '&' : '?') + 'token=' + token;
-            track.src = subUrl;
-            
-            video.appendChild(track);
-        });
-    }
-
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
     body.appendChild(video);
-    
-    // Add "More Like This" section
-    const similarContainer = document.createElement('div');
-    similarContainer.className = 'similar-media-section';
-    similarContainer.style.cssText = 'padding:20px; border-top:1px solid rgba(255,255,255,0.1); margin-top:20px;';
-    similarContainer.innerHTML = '<h3 style="margin-bottom:15px; color:#ddd;">More Like This</h3><div class="similar-grid" style="display:flex; gap:15px; overflow-x:auto; padding-bottom:10px;"></div>';
-    body.appendChild(similarContainer);
-    
-    fetchSimilarMedia(path, similarContainer.querySelector('.similar-grid'));
-
     modal.classList.remove('hidden');
-}
-
-async function fetchSimilarMedia(path, container) {
-    try {
-        const res = await fetch(`${API_BASE}/media/similar?path=${encodeURIComponent(path)}`);
-        if (res.status === 401) return;
-        const items = await res.json();
-        
-        if (!items || items.length === 0) {
-            container.parentElement.style.display = 'none';
-            return;
-        }
-        
-        items.forEach(item => {
-            const card = document.createElement('div');
-            card.style.cssText = 'flex:0 0 140px; cursor:pointer; position:relative;';
-            const poster = item.poster || '/static/img/placeholder.png';
-            
-            card.innerHTML = `
-                <div style="aspect-ratio:2/3; background:#222; border-radius:6px; overflow:hidden; margin-bottom:8px;">
-                    <img src="${poster}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
-                </div>
-                <div style="font-size:0.85em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff;">${escapeHtml(item.name)}</div>
-                <div style="font-size:0.75em; color:#aaa;">${item.year || ''}</div>
-            `;
-            
-            card.onclick = () => {
-                // Close current viewer and open new one
-                playVideo(item, item.progress?.current_time || 0);
-            };
-            container.appendChild(card);
-        });
-    } catch (e) {
-        console.error('Failed to fetch similar media:', e);
-        container.parentElement.style.display = 'none';
-    }
-}
-
-function playTrailer(path, title) {
-    if (!path) return;
-    const video = document.getElementById('main-video-player');
-    if (!video) return;
-    
-    const token = getCookie('auth_token');
-    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
-    if (token) streamUrl += '&token=' + token;
-    
-    video.pause();
-    video.src = streamUrl;
-    video.currentTime = 0;
-    // Remove subtitles for trailer
-    while (video.firstChild) video.removeChild(video.firstChild);
-    
-    video.play().catch(e => console.error('Trailer play failed:', e));
-    
-    // Update heading title if possible
-    const titleSpan = document.querySelector('#viewer-title span');
-    if (titleSpan) titleSpan.textContent = title;
-}
-
-function setSubtitle(idx) {
-    const video = document.getElementById('main-video-player');
-    if (!video) return;
-    
-    const tracks = video.textTracks;
-    for (let i = 0; i < tracks.length; i++) {
-        tracks[i].mode = (idx !== 'none' && i === parseInt(idx)) ? 'showing' : 'hidden';
-    }
 }
 
 async function openComicViewer(path, title) {
@@ -2031,7 +1487,7 @@ async function loadShowsLibrary() {
     const container = document.getElementById('shows-list');
     if (!container) return;
 
-    renderSkeletons(container);
+    container.innerHTML = '<div class="loading">Loading...</div>';
     try {
         if (!showsLibraryCache) {
             const res = await fetch(`${API_BASE}/media/shows/library`);
@@ -2216,14 +1672,14 @@ function renderShows() {
 
                     div.addEventListener('click', (e) => {
                         if (e.target.closest('button')) return;
-                        playVideo(item, start);
+                        openVideoViewer(item.path, item.name, start);
                     });
 
                     const playBtn = div.querySelector('.poster-play');
                     if (playBtn) {
                         playBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            playVideo(item, start);
+                            openVideoViewer(item.path, item.name, start);
                         });
                     }
 
@@ -2354,14 +1810,14 @@ function renderShows() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            playVideo(ep, ep.progress?.current_time || 0);
+            openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
         });
 
         const btn = div.querySelector('.poster-play');
         if (btn) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                playVideo(ep, ep.progress?.current_time || 0);
+                openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
             });
         }
 
@@ -2394,18 +1850,14 @@ async function updateProgress(mediaElement, filePath) {
 }
 
 function checkResume(mediaElement, filePath, savedTime) {
-    if (savedTime > 15 && (mediaElement.duration - savedTime) > 15) {
-        // If saved time is significant, set the time.
+    if (savedTime > 60 && (mediaElement.duration - savedTime) > 60) {
+        // If saved time is significant, prompt or auto-resume? 
+        // For now, let's just set the time.
+        // mediaElement.currentTime = savedTime; 
+        // Usually better to let user choose, or just set it.
+        // Let's set it but notify
         console.log(`Resuming ${filePath} at ${savedTime}`);
         mediaElement.currentTime = savedTime;
-        
-        // Brief notification
-        const toast = document.createElement('div');
-        toast.className = 'resume-toast';
-        toast.textContent = `Resuming from ${Math.floor(savedTime / 60)}:${String(Math.floor(savedTime % 60)).padStart(2, '0')}`;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.classList.add('fade-out'), 3000);
-        setTimeout(() => toast.remove(), 4000);
     }
 }
 
@@ -2414,7 +1866,6 @@ async function loadResume() {
     const section = document.getElementById('resume-section');
     if (!container) return;
     
-    renderSkeletons(container, 4);
     try {
         const res = await fetch(`${API_BASE}/media/resume?limit=12`);
         if (res.status === 401) { logout(); return; }
@@ -2461,14 +1912,14 @@ async function loadResume() {
                  
                  div.addEventListener('click', (e) => {
                     if (e.target.closest('button')) return;
-                    playVideo(file, file.progress?.current_time || 0);
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                  });
 
                  const btn = div.querySelector('.poster-play');
                  if (btn) {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        playVideo(file, file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                  }
 
@@ -2496,7 +1947,6 @@ async function loadRecent() {
     const section = document.getElementById('recent-section');
     if (!container) return;
 
-    renderSkeletons(container, 6);
     try {
         const [mRes, sRes] = await Promise.all([
             fetch(`${API_BASE}/media/library/movies?sort=newest&limit=6`),
@@ -2544,7 +1994,7 @@ async function loadRecent() {
 
                 div.addEventListener('click', () => {
                     if (item.category === 'movies') {
-                        playVideo(item, item.progress?.current_time || 0);
+                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0);
                     } else {
                         showSection('shows');
                         setShowsLevel('seasons', item.name);
@@ -2840,183 +2290,6 @@ function cancelUpload() {
     }
 }
 
-async function findDuplicates() {
-    const statusDiv = document.getElementById('duplicates-status');
-    if (statusDiv) statusDiv.innerHTML = '<span class="loading-spinner"></span> Finding duplicates...';
-
-    try {
-        const res = await fetch(`${API_BASE}/media/duplicates`);
-        if (res.status === 401) { logout(); return; }
-        const data = await res.json();
-
-        if (statusDiv) statusDiv.innerHTML = '';
-        showDuplicatesModal(data);
-    } catch (e) {
-        console.error('Error finding duplicates:', e);
-        if (statusDiv) statusDiv.innerHTML = '<span style="color:var(--danger-color)">Error finding duplicates.</span>';
-    }
-}
-
-function showDuplicatesModal(data) {
-    const { file_duplicates, content_duplicates } = data;
-    
-    let html = `
-        <div class="duplicates-container" id="duplicates-modal-container">
-            <div class="tabs" style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-                <button data-action="switch-tab" data-tab="files" class="tab-btn active" id="tab-files-btn">File Duplicates (${file_duplicates.length})</button>
-                <button data-action="switch-tab" data-tab="content" class="tab-btn" id="tab-content-btn">Content Duplicates (${content_duplicates.length})</button>
-            </div>
-            
-            <div id="duplicate-files-section" class="duplicate-section">
-                ${file_duplicates.length === 0 ? '<p>No duplicate files found.</p>' : ''}
-                <div class="duplicate-list">
-                    ${file_duplicates.map(d => `
-                        <div class="duplicate-item card" style="margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.05);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                                <strong style="font-size:1.1em;">${escapeHtml(d.name)}</strong>
-                                <span class="badge" style="background:var(--accent-color);">${formatSize(d.size)}</span>
-                            </div>
-                            <div class="paths-list" style="font-size:0.9em; color:var(--text-muted);">
-                                ${d.paths.map((p, i) => `
-                                    <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
-                                        <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
-                                        <button data-action="delete-file" data-path="${escapeHtml(p)}" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            
-            <div id="duplicate-content-section" class="duplicate-section hidden">
-                ${content_duplicates.length === 0 ? '<p>No duplicate content found.</p>' : ''}
-                <div class="duplicate-list">
-                    ${content_duplicates.map(d => `
-                        <div class="duplicate-item card" style="margin-bottom:15px; padding:15px; background:rgba(255,255,255,0.05);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                                <strong style="font-size:1.1em;">${escapeHtml(d.title)}</strong>
-                                <span class="badge" style="background:var(--primary-color);">${escapeHtml(d.media_type)}</span>
-                            </div>
-                            <div style="font-size:0.85em; color:var(--text-muted); margin-bottom:8px;">IMDb ID: ${escapeHtml(d.imdb_id)}</div>
-                            <div class="paths-list" style="font-size:0.9em; color:var(--text-muted);">
-                                ${d.paths.map((p, i) => `
-                                    <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid rgba(255,255,255,0.05);">
-                                        <span style="word-break:break-all; flex:1;">${escapeHtml(p)}</span>
-                                        <button data-action="delete-file" data-path="${escapeHtml(p)}" class="danger btn-sm" style="margin-left:10px; padding:2px 8px; font-size:0.8em;">Delete</button>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        </div>
-    `;
-    
-    openModal('Duplicate Detection Results', html);
-
-    // Add event listeners after modal is opened
-    const container = document.getElementById('duplicates-modal-container');
-    if (container) {
-        container.addEventListener('click', (e) => {
-            const btn = e.target.closest('button');
-            if (!btn) return;
-            
-            const action = btn.dataset.action;
-            if (action === 'switch-tab') {
-                switchDuplicateTab(btn.dataset.tab);
-            } else if (action === 'delete-file') {
-                deleteDuplicate(btn.dataset.path, btn);
-            }
-        });
-    }
-}
-
-function switchDuplicateTab(tab) {
-    const fileSec = document.getElementById('duplicate-files-section');
-    const contentSec = document.getElementById('duplicate-content-section');
-    const fileBtn = document.getElementById('tab-files-btn');
-    const contentBtn = document.getElementById('tab-content-btn');
-    
-    if (tab === 'files') {
-        fileSec.classList.remove('hidden');
-        contentSec.classList.add('hidden');
-        fileBtn.classList.add('active');
-        contentBtn.classList.remove('active');
-    } else {
-        fileSec.classList.add('hidden');
-        contentSec.classList.remove('hidden');
-        fileBtn.classList.remove('active');
-        contentBtn.classList.add('active');
-    }
-}
-
-async function deleteDuplicate(path, btn) {
-    if (!confirm(`Are you sure you want to permanently delete this file?\n\n${path}`)) return;
-    
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '...';
-    
-    try {
-        const res = await fetch(`${API_BASE}/media/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-        if (res.status === 401) { logout(); return; }
-        
-        if (res.ok) {
-            const row = btn.closest('div');
-            row.style.opacity = '0.5';
-            btn.remove();
-            const span = document.createElement('span');
-            span.textContent = 'Deleted';
-            span.style.color = 'var(--danger-color)';
-            row.appendChild(span);
-        } else {
-            const data = await res.json();
-            alert(`Error deleting file: ${data.detail || 'Unknown error'}`);
-            btn.disabled = false;
-            btn.textContent = originalText;
-        }
-    } catch (e) {
-        alert(`Error deleting file: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
-}
-
-function openModal(title, contentHtml) {
-    const modal = document.getElementById('viewer-modal');
-    const titleEl = document.getElementById('viewer-title');
-    const bodyEl = document.getElementById('viewer-body');
-    
-    if (!modal || !titleEl || !bodyEl) return;
-    
-    titleEl.textContent = title;
-    bodyEl.innerHTML = contentHtml;
-    modal.classList.remove('hidden');
-}
-
-function formatClock(seconds) {
-    if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function formatSize(bytes) {
-    if (!bytes || isNaN(bytes)) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = bytes;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-        size /= 1024;
-        unitIndex++;
-    }
-    return `${size.toFixed(1)} ${units[unitIndex]}`;
-}
-
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -3029,38 +2302,8 @@ function debounce(func, wait) {
     };
 }
 
-function initSearchListeners() {
-    const categories = ['movies', 'shows', 'music', 'files', 'books', 'gallery'];
-    categories.forEach(cat => {
-        const input = document.getElementById(`${cat}-search`);
-        if (input) {
-            let timeout = null;
-            input.addEventListener('input', () => {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => {
-                    console.log(`Searching ${cat}: ${input.value}`);
-                    if (cat === 'movies') {
-                        loadMovies(true);
-                    } else if (cat === 'shows') {
-                        if (showsState.level === 'shows') loadShows(true);
-                        else renderShows(); 
-                    } else if (cat === 'files') {
-                        // File browser search is handled differently if needed, 
-                        // but currently loadMedia('files') calls loadFileBrowser
-                        loadMedia('files');
-                    } else {
-                        // music, books, gallery use loadMediaPage via loadMedia
-                        loadMedia(cat);
-                    }
-                }, 500);
-            });
-        }
-    });
-}
-
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
-    initSearchListeners();
 
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
@@ -3198,6 +2441,27 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (folderInput) {
         folderInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    }
+
+    if (moviesSearch) {
+        moviesSearch.addEventListener('input', debounce(() => {
+            loadMediaPage('movies', true);
+        }, 300));
+    }
+    if (musicSearch) {
+        musicSearch.addEventListener('input', debounce(() => {
+            loadMediaPage('music', true);
+        }, 300));
+    }
+    if (showsSearch) {
+        showsSearch.addEventListener('input', debounce(() => {
+            if (showsLibraryCache) renderShows();
+        }, 300));
+    }
+    if (filesSearch) {
+        filesSearch.addEventListener('input', debounce(() => {
+            loadMediaPage('files', true);
+        }, 300));
     }
 });
 
@@ -3726,23 +2990,49 @@ async function systemControl(action) {
         
         if (!confirm('Are you sure you want to update from GitHub? This will pull latest files and restart the service.')) return;
         
+        // Save current version before update
+        try {
+            const statusRes = await fetch(`${API_BASE}/system/status`);
+            const statusData = await statusRes.json();
+            if (statusData.version) {
+                localStorage.setItem('nomadpi_pre_update_version', statusData.version);
+            }
+        } catch (e) { console.warn('Could not save pre-update version', e); }
+
         container.classList.remove('hidden');
         logView.textContent = 'Starting update...\n';
         badge.textContent = 'Running...';
         badge.className = 'badge warning';
 
+        // Reset progress bar
+        const progressFill = document.getElementById('update-progress-fill');
+        const progressText = document.getElementById('update-progress-text');
+        if (progressFill) progressFill.style.width = '0%';
+        if (progressText) progressText.textContent = 'Initializing update...';
+
         try {
             const res = await fetch(`${API_BASE}/system/control/update`, { method: 'POST' });
             if (res.status === 401) { logout(); return; }
             
-            // Start polling for logs
-            let pollCount = 0;
+            // Start polling for logs and status
             let updateComplete = false;
             let serverRestarting = false;
+            let pollCount = 0;
             
             const pollInterval = setInterval(async () => {
                 pollCount++;
                 try {
+                    // 1. Poll Progress Status (JSON)
+                    const statusRes = await fetch(`${API_BASE}/system/update/status`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        if (statusData.progress !== undefined) {
+                            if (progressFill) progressFill.style.width = `${statusData.progress}%`;
+                            if (progressText) progressText.textContent = statusData.message || 'Updating...';
+                        }
+                    }
+
+                    // 2. Poll Logs (Text)
                     const logRes = await fetch(`${API_BASE}/system/update/log`);
                     if (logRes.ok) {
                         const data = await logRes.json();
@@ -3752,52 +3042,68 @@ async function systemControl(action) {
                             logView.scrollTop = logView.scrollHeight;
                             
                             // Check if update completed
-                            if (logText.includes('Update Complete!') && !updateComplete) {
+                            const isSuccess = logText.toLowerCase().includes('update complete!');
+                            const isFailure = logText.toLowerCase().includes('update failed!');
+                            
+                            if ((isSuccess || isFailure) && !updateComplete) {
                                 updateComplete = true;
-                                badge.textContent = 'Restarting...';
-                                badge.className = 'badge warning';
-                                logView.textContent += '\n\nServer is restarting...\nPlease wait 10-15 seconds, then refresh the page.';
+                                if (isSuccess) {
+                                    if (progressFill) progressFill.style.width = '100%';
+                                    if (progressText) progressText.textContent = 'Update complete! Restarting...';
+                                    badge.textContent = 'Restarting...';
+                                    badge.className = 'badge warning';
+                                    logView.textContent += '\n\n✅ Update script finished!\nServer is restarting...\nPlease wait, we will reconnect automatically.';
+                                } else {
+                                    badge.textContent = 'Update Failed';
+                                    badge.className = 'badge danger';
+                                    logView.textContent += '\n\n❌ Update script failed!\nPlease check the logs above for errors.';
+                                }
                                 
-                                // Wait a bit then try to detect when server is back
-                                setTimeout(() => {
+                                if (!serverRestarting) {
                                     serverRestarting = true;
                                     checkServerRestart();
-                                }, 8000);
+                                }
                             }
                         }
-                    } else if (updateComplete && !serverRestarting) {
-                        // Server went down, start checking for restart
-                        serverRestarting = true;
-                        logView.textContent += '\n\nServer is restarting...\nChecking for server availability...';
-                        checkServerRestart();
+                    } else {
+                        // Connection might be lost due to restart
+                        if (updateComplete || pollCount > 5) {
+                            if (!serverRestarting) {
+                                serverRestarting = true;
+                                logView.textContent += '\n\n📡 Server connection lost (restarting...)\nChecking for server availability...';
+                                checkServerRestart();
+                            }
+                        }
                     }
                 } catch (e) {
-                    if (updateComplete && !serverRestarting) {
-                        // Server went down during restart
+                    // Network error usually means server is down
+                    if (!serverRestarting && (updateComplete || pollCount > 5)) {
                         serverRestarting = true;
-                        logView.textContent += '\n\nServer is restarting...\nChecking for server availability...';
+                        logView.textContent += '\n\n📡 Server connection lost (restarting...)\nChecking for server availability...';
                         checkServerRestart();
                     }
                 }
                 
-                if (pollCount > 150) { // Stop polling after 5 minutes
+                if (pollCount > 600) { // Stop polling after 10 minutes (at 1s interval)
                     clearInterval(pollInterval);
-                    badge.textContent = 'Timed Out';
-                    badge.className = 'badge danger';
-                    logView.textContent += '\n\nUpdate timed out. Please check the server manually.';
+                    if (!serverRestarting) {
+                        badge.textContent = 'Timed Out';
+                        badge.className = 'badge danger';
+                        logView.textContent += '\n\nUpdate timed out. Please check the server manually.';
+                    }
                 }
-            }, 2000);
+            }, 1000); // Poll faster (1s) for better responsiveness
             
             // Function to check if server is back online
             async function checkServerRestart() {
                 clearInterval(pollInterval);
                 let attempts = 0;
-                const maxAttempts = 30; // 30 seconds
+                const maxAttempts = 60; // 60 seconds
                 
                 const checkInterval = setInterval(async () => {
                     attempts++;
                     try {
-                        const pingRes = await fetch(`${API_BASE}/system/stats`, { 
+                        const pingRes = await fetch(`${API_BASE}/system/status`, { 
                             method: 'GET',
                             cache: 'no-cache'
                         });
@@ -3805,11 +3111,12 @@ async function systemControl(action) {
                             clearInterval(checkInterval);
                             badge.textContent = 'Complete!';
                             badge.className = 'badge success';
-                            logView.textContent += '\n\n✅ Server is back online!\n\nUpdate completed successfully.\nRefreshing page in 3 seconds...';
+                            if (progressText) progressText.textContent = 'System Online!';
+                            logView.textContent += '\n\n✅ Server is back online!\n\nRefreshing page...';
                             
                             setTimeout(() => {
                                 window.location.reload();
-                            }, 3000);
+                            }, 1500);
                         }
                     } catch (e) {
                         // Server still down, keep checking
@@ -3821,7 +3128,7 @@ async function systemControl(action) {
                     
                     if (attempts >= maxAttempts) {
                         clearInterval(checkInterval);
-                        badge.textContent = 'Manual Refresh Needed';
+                        badge.textContent = 'Manual Refresh';
                         badge.className = 'badge warning';
                         logView.textContent += '\n\n⚠️ Server restart taking longer than expected.\nPlease refresh the page manually.';
                     }
@@ -3980,17 +3287,16 @@ async function mountDrive(device, name, btn) {
         }
         
         if (result.status === 'mounted' || result.status === 'not_implemented_on_windows') {
-            showToast(`Drive mounted successfully!`, 'success');
             loadDrives(); 
         } else {
-            showToast('Error: ' + (result.message || JSON.stringify(result)), 'error');
+            alert('Error: ' + (result.message || JSON.stringify(result)));
             if (btn) {
                 btn.innerText = 'Mount';
                 btn.disabled = false;
             }
         }
     } catch (e) {
-        showToast('Error: ' + e, 'error');
+        alert('Error: ' + e);
         loadDrives();
     }
 }
@@ -4010,172 +3316,102 @@ async function unmountDrive(mountpoint) {
         }
         
         if (result.status === 'unmounted' || result.status === 'not_implemented_on_windows') {
-            showToast(`Drive unmounted successfully!`, 'success');
             loadDrives();
         } else {
-            showToast('Error: ' + (result.message || JSON.stringify(result)), 'error');
+            alert('Error: ' + (result.message || JSON.stringify(result)));
         }
     } catch (e) {
-        showToast('Error: ' + e, 'error');
+        alert('Error: ' + e);
     }
 }
 
-async function saveOmdbKey() {
-    const keyInput = document.getElementById('omdb-api-key');
-    const key = keyInput.value.trim();
-    
-    try {
-        const res = await fetch(`${API_BASE}/system/settings/omdb`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: key })
-        });
-        
-        if (res.ok) {
-            showToast('OMDb API Key saved!', 'success');
-        } else {
-            showToast('Failed to save OMDb key.', 'error');
-        }
-    } catch (e) {
-        showToast('Error saving OMDb key: ' + e, 'error');
-    }
-}
+async function changePassword() {
+    const current = document.getElementById('change-pwd-current').value;
+    const newPass = document.getElementById('change-pwd-new').value;
+    const confirm = document.getElementById('change-pwd-confirm').value;
 
-async function loadOmdbKey() {
-    const keyInput = document.getElementById('omdb-api-key');
-    if (!keyInput) return;
-    
-    try {
-        const res = await fetch(`${API_BASE}/system/settings/omdb`);
-        const data = await res.json();
-        if (data.key) {
-            keyInput.value = data.key;
-        }
-    } catch (e) {
-        console.error('Error loading OMDb key:', e);
-    }
-}
-
-function toggleTheme() {
-    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
-    const newTheme = theme === 'dark' ? 'glass' : 'dark';
-    localStorage.setItem('nomadpi.theme', newTheme);
-    applyTheme();
-    showToast(`${newTheme.charAt(0).toUpperCase() + newTheme.slice(1)} Theme enabled`);
-}
-
-function toggleGlassEffect() {
-    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
-    const newNoGlass = !noGlass;
-    localStorage.setItem('nomadpi.noGlass', newNoGlass);
-    applyTheme();
-    showToast(newNoGlass ? 'Glass effects disabled' : 'Glass effects enabled');
-}
-
-function applyTheme() {
-    const theme = localStorage.getItem('nomadpi.theme') || 'glass';
-    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
-    
-    document.body.classList.remove('dark-theme', 'glass-theme');
-    document.body.classList.add(`${theme}-theme`);
-    document.body.classList.toggle('no-glass', noGlass);
-}
-
-// PWA Installation & Connectivity
-let deferredPrompt;
-
-window.addEventListener('beforeinstallprompt', (e) => {
-    // Prevent the mini-infobar from appearing on mobile
-    e.preventDefault();
-    // Stash the event so it can be triggered later.
-    deferredPrompt = e;
-    // Update UI notify the user they can install the PWA
-    showInstallPromotion();
-});
-
-window.addEventListener('appinstalled', () => {
-    // Clear the deferredPrompt so it can be garbage collected
-    deferredPrompt = null;
-    console.log('PWA was installed');
-    showToast('App installed successfully!', 'success');
-});
-
-window.addEventListener('online', () => {
-    showToast('Back online', 'success');
-    document.body.classList.remove('offline');
-});
-
-window.addEventListener('offline', () => {
-    showToast('You are offline. Some features may be limited.', 'warning');
-    document.body.classList.add('offline');
-});
-
-function showInstallPromotion() {
-    const installBtn = document.getElementById('install-pwa-btn');
-    if (installBtn) {
-        installBtn.classList.remove('hidden');
-    }
-}
-
-function showPWAInstallInstructions() {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    
-    let instructions = '';
-    if (isIOS) {
-        instructions = `
-            <div style="text-align:left; padding:10px;">
-                <p>To install on iOS:</p>
-                <ol>
-                    <li>Tap the <strong>Share</strong> button ( <span style="font-size:1.2em;">⎋</span> ) at the bottom of the screen.</li>
-                    <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-                    <li>Tap <strong>Add</strong> in the top right corner.</li>
-                </ol>
-            </div>
-        `;
-    } else {
-        instructions = `
-            <div style="text-align:left; padding:10px;">
-                <p>To install this app:</p>
-                <ul>
-                    <li><strong>Chrome/Edge:</strong> Look for the install icon ( <span style="font-size:1.2em;">⊕</span> ) in the address bar.</li>
-                    <li><strong>Firefox:</strong> This browser may not support direct installation. Try Chrome or Edge for the best PWA experience.</li>
-                    <li><strong>Mobile:</strong> Open the browser menu and select "Install app" or "Add to Home Screen".</li>
-                </ul>
-            </div>
-        `;
-    }
-    
-    openModal('Install NomadPi', instructions);
-}
-
-async function installPWA() {
-    if (!deferredPrompt) {
-        showPWAInstallInstructions();
+    if (!current || !newPass || !confirm) {
+        alert('Please fill in all password fields.');
         return;
     }
-    // Show the install prompt
-    deferredPrompt.prompt();
-    // Wait for the user to respond to the prompt
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to the install prompt: ${outcome}`);
-    // We've used the prompt, and can't use it again, throw it away
-    deferredPrompt = null;
-    
-    const installBtn = document.getElementById('install-pwa-btn');
-    if (installBtn) {
-        installBtn.classList.add('hidden');
+
+    if (newPass !== confirm) {
+        alert('New passwords do not match.');
+        return;
     }
+
+    if (newPass.length < 4) {
+        alert('New password must be at least 4 characters long.');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_password: current,
+                new_password: newPass
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            alert('Password updated successfully!');
+            // Clear fields
+            document.getElementById('change-pwd-current').value = '';
+            document.getElementById('change-pwd-new').value = '';
+            document.getElementById('change-pwd-confirm').value = '';
+        } else {
+            alert(data.detail || 'Failed to update password.');
+        }
+    } catch (e) {
+        console.error('Error updating password:', e);
+        alert('Error updating password. See console for details.');
+    }
+}
+
+function saveSettings() {
+    const serverName = document.getElementById('setting-server-name').value;
+    const sessionDays = document.getElementById('setting-session-days').value;
+    localStorage.setItem('nomadpi.serverName', serverName);
+    localStorage.setItem('nomadpi.sessionDays', sessionDays);
+    if (serverName) {
+        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
+        document.title = serverName;
+    }
+    alert('Settings saved locally! (Backend settings requires environment variables update)');
+}
+
+function setTheme(theme) {
+    if (theme === 'dark') {
+        document.body.classList.remove('glass-theme');
+        document.body.classList.add('dark-theme');
+    } else {
+        document.body.classList.remove('dark-theme');
+        document.body.classList.add('glass-theme');
+    }
+    localStorage.setItem('nomadpi.theme', theme);
 }
 
 // Initialize settings on load
 window.addEventListener('DOMContentLoaded', () => {
-    applyTheme();
-    checkAuth();
-    
-    // Check if already in standalone mode
-    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
-        console.log('Running in standalone mode');
-        document.body.classList.add('standalone');
+    const serverName = localStorage.getItem('nomadpi.serverName');
+    const sessionDays = localStorage.getItem('nomadpi.sessionDays');
+    const theme = localStorage.getItem('nomadpi.theme');
+
+    if (serverName) {
+        const nameInput = document.getElementById('setting-server-name');
+        if (nameInput) nameInput.value = serverName;
+        document.querySelectorAll('.logo').forEach(el => el.textContent = serverName);
+        document.title = serverName;
     }
+    if (sessionDays) {
+        const daysInput = document.getElementById('setting-session-days');
+        if (daysInput) daysInput.value = sessionDays;
+    }
+    if (theme) setTheme(theme);
+    
+    // Check if we just updated
+    checkPostUpdate();
 });

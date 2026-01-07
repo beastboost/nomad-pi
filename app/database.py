@@ -561,6 +561,36 @@ def find_duplicate_metadata() -> List[dict]:
     finally:
         return_db(conn)
 
+def fix_duplicate_files() -> List[str]:
+    """
+    Find duplicate files (same name and size) and return a list of paths to delete.
+    Keeps the one with the shortest path (likely already organized).
+    """
+    dupes = find_duplicate_files()
+    to_delete = []
+    for d in dupes:
+        paths = d["paths"].split("|")
+        # Sort by path length and then alphabetically to be deterministic
+        # Shorter paths (like /data/movies/Title/Title.mkv) are preferred over 
+        # longer/temporary ones (like /data/uploads/temp/Title.mkv)
+        paths.sort(key=lambda x: (len(x), x))
+        # Keep the first one, delete the rest
+        to_delete.extend(paths[1:])
+    return to_delete
+
+def fix_duplicate_content() -> List[str]:
+    """
+    Find duplicate content (same IMDb ID) and return a list of paths to delete.
+    Keeps the one with the shortest path.
+    """
+    dupes = find_duplicate_metadata()
+    to_delete = []
+    for d in dupes:
+        paths = d["paths"].split("|")
+        paths.sort(key=lambda x: (len(x), x))
+        to_delete.extend(paths[1:])
+    return to_delete
+
 def upsert_library_index_items(items: list):
     if not items:
         return

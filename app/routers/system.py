@@ -13,6 +13,8 @@ from app import database
 
 logger = logging.getLogger(__name__)
 
+VERSION = "1.5.1"
+
 router = APIRouter()
 public_router = APIRouter()
 
@@ -37,7 +39,7 @@ def save_omdb_key(request: OmdbKeyRequest):
 @public_router.get("/status")
 def get_system_status():
     """Lightweight endpoint for connectivity checks"""
-    return {"status": "online", "version": "1.5.0"}
+    return {"status": "online", "version": VERSION}
 
 @public_router.get("/samba/config")
 def get_samba_config():
@@ -646,7 +648,6 @@ def get_update_status():
 
     if os.path.exists(status_file):
         try:
-            # On Linux, perform security checks
             if platform.system() == "Linux":
                 st = os.stat(status_file)
                 if st.st_uid != os.getuid():
@@ -659,6 +660,33 @@ def get_update_status():
         except Exception:
             return {"progress": 0, "message": "Error reading status"}
     return {"progress": 0, "message": "No update in progress"}
+
+@public_router.get("/changelog")
+def get_changelog():
+    """Fetch recent git commits as a changelog"""
+    if platform.system() == "Linux":
+        try:
+            # Get last 10 commits with summary and relative date
+            output = subprocess.check_output(
+                ["git", "log", "-n", "10", "--pretty=format:%s (%cr)"],
+                text=True
+            ).splitlines()
+            return {"changelog": output}
+        except Exception as e:
+            return {"changelog": [f"Error fetching changelog: {e}"]}
+    
+    # Fallback for Windows/Testing
+    return {
+        "changelog": [
+            "Fixed mobile UI header alignment (1.5.1)",
+            "Improved PWA notch support (1.5.1)",
+            "Redesigned mobile menu transition (1.5.1)",
+            "Added mass duplicate file deletion (1.5.1)",
+            "Enhanced update feedback with changelog (1.5.1)",
+            "Optimized database queries for faster loading (1.5.0)",
+            "Initial release of Nomad Pi (1.0.0)"
+        ]
+    }
 
 @router.get("/update/log")
 def get_update_log():

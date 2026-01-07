@@ -220,6 +220,14 @@ if [ ! -w "$CURRENT_DIR/data" ]; then
     sudo chmod 775 "$CURRENT_DIR/data"
 fi
 
+# Ensure MiniDLNA user can access the media directories
+if id "minidlna" &>/dev/null; then
+    echo "Adding minidlna user to $REAL_USER group..."
+    sudo usermod -a -G "$REAL_USER" minidlna
+    # Ensure data subdirectories are readable and executable by the group
+    sudo chmod -R g+rX "$CURRENT_DIR/data"
+fi
+
 # 5. Systemd Service Setup
 echo "[5/9] Setting up Systemd service..."
 

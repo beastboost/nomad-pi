@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Nomad Pi</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -238,6 +238,7 @@
                     <h3>System Control</h3>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <button onclick="rebuildLibrary()" class="primary">Scan Library for Changes</button>
+                        <button onclick="fixDuplicates()" class="primary">Mass Fix Duplicates</button>
                         <button onclick="systemControl('update')" class="primary">Update from GitHub</button>
                         <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
                         <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
@@ -294,6 +295,12 @@
                         <div class="update-header">
                             <h4 class="update-title"><i class="fas fa-download"></i> Update Progress</h4>
                             <span id="update-status-badge" class="badge">Running...</span>
+                        </div>
+                        <div class="progress-wrapper">
+                            <div class="progress-bar">
+                                <div id="update-progress-fill" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <div id="update-progress-text" class="progress-text">Initializing...</div>
                         </div>
                         <pre id="update-log-view" class="update-log"></pre>
                     </div>
@@ -489,6 +496,32 @@
         </div>
         <audio id="global-audio" preload="auto"></audio>
     </div>
+    <div id="what-is-new-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeWhatIsNew()"></div>
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <div class="modal-title">✨ Update Successful!</div>
+                <button class="modal-close" onclick="closeWhatIsNew()">Close</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <div style="font-size: 3rem; margin-bottom: 10px;">🚀</div>
+                    <h3 style="margin: 0;">Nomad Pi <span id="new-version-tag">v1.5.1</span></h3>
+                    <p style="color: var(--text-muted);">Your system has been updated to the latest version.</p>
+                </div>
+                
+                <h4 style="margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 5px;">What's New</h4>
+                <ul id="changelog-list" style="padding-left: 20px; line-height: 1.6;">
+                    <!-- Changelog items will be injected here -->
+                </ul>
+                
+                <div style="margin-top: 25px; text-align: center;">
+                    <button onclick="closeWhatIsNew()" class="primary" style="padding: 12px 30px;">Great, let's go!</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast-container"></div>
     <script src="js/app.js?v=6"></script>
     <script>

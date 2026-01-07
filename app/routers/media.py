@@ -15,6 +15,7 @@ import subprocess
 import json
 import httpx
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from functools import lru_cache
@@ -640,17 +641,15 @@ def build_library_index(category: str):
 
 def maybe_start_index_build(category: str, force: bool = False):
     state = database.get_library_index_state(category)
-    fresh = False
-    if state and not force:
-        scanned_at = state.get("scanned_at")
-        if isinstance(scanned_at, str) and scanned_at:
-            try:
-                ts = datetime.fromisoformat(scanned_at)
-                fresh = (datetime.now() - ts) < INDEX_TTL
-            except Exception:
-                fresh = False
-
-    if fresh and not force:
+    
+    # On low-resource Pi Zero, we ONLY want to build if:
+    # 1. User explicitly requested it (force=True)
+    # 2. The index is completely empty (state is None or item_count is 0)
+    # We DO NOT want to build automatically on a timer as it kills performance.
+    
+    has_items = state and state.get("item_count", 0) > 0
+    
+    if has_items and not force:
         return {"building": False, "fresh": True, "state": state}
 
     with _index_lock:
@@ -664,15 +663,19 @@ def maybe_start_index_build(category: str, force: bool = False):
             # After indexing, if it's shows or movies, try to auto-organize a small batch of files
             if category in ["shows", "movies"]:
                 try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
                     if category == "shows":
-                        organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True, limit=50)
+                        loop.run_until_complete(organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True, limit=50))
                     else:
-                        organize_movies(dry_run=False, use_omdb=True, write_poster=True, limit=50)
+                        loop.run_until_complete(organize_movies(dry_run=False, use_omdb=True, write_poster=True, limit=50))
                 except Exception as e:
                     logger.error(f"Auto-organize error for {category}: {e}")
         finally:
             with _index_lock:
                 _index_building[category] = False
+            # Clear cache after rebuild
+            _get_paged_data_cached.cache_clear()
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
@@ -1765,7 +1768,9 @@ def _auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
     return normalized
 
 @router.post("/organize/shows")
-def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+    # Clear cache when starting organization
+    _get_paged_data_cached.cache_clear()
     show_bases = get_scan_paths("shows")
     limit = max(1, min(int(limit or 250), 5000))
     planned = []
@@ -1885,7 +1890,7 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
                     if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
                         try:
                             # Fetch show metadata
-                            meta = omdb_fetch(title=show_name, media_type="series")
+                            meta = await omdb_fetch(title=show_name, media_type="series")
                             shows_processed[show_name] = meta
                             logger.info(f"Fetched OMDB metadata for show: {show_name}")
                         except Exception as e:
@@ -1931,7 +1936,9 @@ def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Que
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
 @router.post("/organize/movies")
-def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+    # Clear cache when starting organization
+    _get_paged_data_cached.cache_clear()
     movie_bases = get_scan_paths("movies")
     limit = max(1, min(int(limit or 250), 5000))
     planned = []
@@ -2000,13 +2007,13 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
                     # Try fetching
                     for query in search_queries:
                         try:
-                            meta = omdb_fetch(title=query, year=year_guess, media_type="movie")
+                            meta = await omdb_fetch(title=query, year=year_guess, media_type="movie")
                             break
                         except Exception:
                             try:
                                 # Try without year if it failed with year
                                 if year_guess:
-                                    meta = omdb_fetch(title=query, media_type="movie")
+                                    meta = await omdb_fetch(title=query, media_type="movie")
                                     break
                             except Exception:
                                 continue
@@ -2014,9 +2021,9 @@ def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(
                     # Final fallback: Search
                     if not meta:
                         try:
-                            search_res = omdb_search(title_guess, year=year_guess, media_type="movie")
+                            search_res = await omdb_search(title_guess, year=year_guess, media_type="movie")
                             if search_res.get("Search"):
-                                meta = omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
+                                meta = await omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
                         except Exception:
                             pass
 
@@ -2379,6 +2386,49 @@ def scan_library(background_tasks: BackgroundTasks):
         
     background_tasks.add_task(run_scan)
     return {"status": "ok", "message": "Library scan and organization started in background."}
+
+@router.post("/fix_duplicates")
+def fix_duplicates(background_tasks: BackgroundTasks):
+    """Find and delete duplicate files/content across the library."""
+    def run_fix():
+        logger.info("Starting mass duplicate fix...")
+        
+        # 1. Fix duplicate files (same name and size)
+        file_dupes = database.fix_duplicate_files()
+        # 2. Fix duplicate content (same IMDb ID)
+        content_dupes = database.fix_duplicate_content()
+        
+        # Merge and remove duplicates from the list
+        all_to_delete = list(set(file_dupes + content_dupes))
+        deleted_count = 0
+        
+        for path in all_to_delete:
+            try:
+                fs_path = safe_fs_path_from_web_path(path)
+                if os.path.exists(fs_path):
+                    logger.info(f"Duplicate fix: Deleting {fs_path}")
+                    if os.path.isdir(fs_path):
+                        shutil.rmtree(fs_path)
+                    else:
+                        os.remove(fs_path)
+                    
+                    # Clean up database
+                    database.delete_library_index_item(path)
+                    deleted_count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete duplicate {path}: {e}")
+        
+        logger.info(f"Mass duplicate fix completed. Deleted {deleted_count} items.")
+        
+        # Trigger rescan to ensure library is up to date
+        for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+            try:
+                build_library_index(cat)
+            except: pass
+        trigger_dlna_rescan()
+
+    background_tasks.add_task(run_fix)
+    return {"status": "ok", "message": "Mass duplicate fix started in background."}
 
 @router.get("/duplicates")
 def get_duplicates():
