@@ -27,7 +27,8 @@ except Exception as e:
             f.write(f"\n--- {e} ---\n")
             traceback.print_exc(file=f)
     except (OSError, IOError, PermissionError) as log_err:
-        print(f"WARNING: Could not write to startup_error.log: {log_err}", file=sys.stderr)    sys.exit(1)
+        print(f"WARNING: Could not write to startup_error.log: {log_err}", file=sys.stderr)
+    sys.exit(1)
 import os
 import threading
 import mimetypes
