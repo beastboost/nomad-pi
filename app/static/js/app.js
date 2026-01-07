@@ -1534,20 +1534,38 @@ async function loadShowsLibrary() {
     container.innerHTML = '<div class="loading">Loading...</div>';
     try {
         if (!showsLibraryCache) {
+            console.log('[Shows] Fetching shows library from API...');
             const res = await fetch(`${API_BASE}/media/shows/library`);
+            console.log('[Shows] API response status:', res.status);
+
             if (res.status === 401) { logout(); return; }
+
+            if (!res.ok) {
+                throw new Error(`API returned status ${res.status}`);
+            }
+
             const data = await res.json();
+            console.log('[Shows] API response:', data);
+            console.log('[Shows] Number of shows:', data.shows ? data.shows.length : 0);
+
             showsLibraryCache = data.shows || [];
+
+            if (showsLibraryCache.length === 0) {
+                console.warn('[Shows] No shows returned from API. Database may be empty or library needs rebuilding.');
+            }
+
             // Populate filters if they are empty
             updateFilters('shows');
+        } else {
+            console.log('[Shows] Using cached shows:', showsLibraryCache.length);
         }
         if (!restoreShowsState()) {
             showsState = showsState || { level: 'shows', showName: null, seasonName: null };
         }
         renderShows();
     } catch (e) {
-        console.error(e);
-        container.innerHTML = '<p>Error loading shows.</p>';
+        console.error('[Shows] Error loading shows:', e);
+        container.innerHTML = `<div class="error-state"><p>Error loading shows</p><p style="color:var(--text-muted);font-size:0.9em;">${escapeHtml(e.message)}</p><button onclick="showsLibraryCache=null;loadShowsLibrary()" class="secondary" style="margin-top:10px;">Retry</button></div>`;
     }
 }
 

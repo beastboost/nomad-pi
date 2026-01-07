@@ -18,3 +18,10 @@ publish/
 *.txt
 !requirements.txt
 !setup.sh
+
+# Debug scripts
+check_*.py
+debug_*.py
+diagnose_*.py
+apply_fixes.py
+*.patch
