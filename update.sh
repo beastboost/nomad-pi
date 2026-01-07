@@ -57,6 +57,11 @@ git config --global http.sslVerify true
 git config --global http.version HTTP/1.1
 # Increase postBuffer to 50MB (from default 1MB) for stable large transfers without excessive memory usage
 git config --global http.postBuffer 52428800
+# Memory optimizations for Git on Pi Zero
+git config --global pack.windowMemory "10m"
+git config --global pack.packSizeLimit "20m"
+git config --global core.packedGitLimit "20m"
+git config --global core.packedGitWindowSize "10m"
 
 # Hardcode the public URL to avoid password prompts
 git remote set-url origin https://github.com/beastboost/nomad-pi.git

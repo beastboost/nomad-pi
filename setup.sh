@@ -59,6 +59,11 @@ if [ -d ".git" ]; then
     git config --global http.sslVerify true
     git config --global http.version HTTP/1.1
     git config --global http.postBuffer 52428800
+    # Memory optimizations for Git on Pi Zero
+    git config --global pack.windowMemory "10m"
+    git config --global pack.packSizeLimit "20m"
+    git config --global core.packedGitLimit "20m"
+    git config --global core.packedGitWindowSize "10m"
     
     git remote set-url origin https://github.com/beastboost/nomad-pi.git
     git config credential.helper 'cache --timeout=2592000'
