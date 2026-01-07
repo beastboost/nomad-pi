@@ -75,6 +75,10 @@ fi
 # 0.1 Proactive Swap Check (Crucial for Pi Zero 512MB RAM)
 echo "Checking system memory and power resources..."
 
+# Stop the service if it's running to free up RAM
+echo "Stopping nomad-pi service to free up memory..."
+sudo systemctl stop nomad-pi 2>/dev/null || true
+
 # Check for under-voltage/throttling (Pi specific)
 if command -v vcgencmd >/dev/null 2>&1; then
     THROTTLED=$(vcgencmd get_throttled | cut -d= -f2)
@@ -183,6 +187,13 @@ if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
         echo "The Pi Zero 2W may need a reboot or more swap space."
         exit 1
     fi
+    
+    # Final check for uvicorn
+    if [ ! -f "./venv/bin/uvicorn" ]; then
+        echo "CRITICAL: uvicorn still missing. Trying emergency install..."
+        ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
+    fi
+    
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
     echo "Dependencies are already up to date."

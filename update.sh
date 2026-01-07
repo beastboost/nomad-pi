@@ -43,6 +43,10 @@ if [ "$TOTAL_SWAP" -lt 1000 ]; then
     fi
 fi
 
+# Stop the service to free up RAM for the update
+echo "Stopping nomad-pi service to free up memory..."
+sudo systemctl stop nomad-pi 2>/dev/null || true
+
 update_status 10 "Configuring Git..."
 echo "Optimizing Git configuration..."
 
@@ -111,6 +115,12 @@ echo "Installing security and utility dependencies..."
 
 echo "Installing remaining requirements..."
 ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+# Final check for uvicorn
+if [ ! -f "./venv/bin/uvicorn" ]; then
+    echo "CRITICAL: uvicorn still missing. Trying emergency install..."
+    ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
+fi
 
 update_status 80 "Update complete. Preparing to restart..."
 echo "Update complete. Preparing to restart..."
