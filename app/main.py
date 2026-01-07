@@ -231,8 +231,8 @@ for d in DATA_DIRS:
 # Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Public system endpoints
-app.include_router(system.public_router, prefix="/api/system/public", tags=["system"])
-app.include_router(media.public_router, prefix="/api/media/public", tags=["media"])
+app.include_router(system.public_router, prefix="/api/system", tags=["system"])
+app.include_router(media.public_router, prefix="/api/media", tags=["media"])
 # Protect these routes
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
