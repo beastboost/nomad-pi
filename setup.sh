@@ -74,13 +74,12 @@ fi
 
 # 1. System Updates
 echo "[1/9] Updating system packages..."
-sudo apt-get update
-# Removed libatlas-base-dev as it causes issues on newer Debian versions and isn't strictly needed for our pure python usage
-# Added ntfs-3g and exfat-fuse for better USB drive support
-# Added avahi-daemon for mDNS (nomadpi.local) support
-# Added samba and samba-common-bin for file sharing
-# Added minidlna for Smart TV support
-sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
+# Only update if install fails to save time and bandwidth
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools; then
+    echo "Some packages missing, updating list and trying again..."
+    sudo apt-get update
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
+fi
 
 # 2. Set Hostname (for http://nomadpi.local:8000)
 echo "[2/9] Configuring Hostname and mDNS..."
@@ -114,9 +113,31 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv
 fi
 
-echo "Installing Python dependencies..."
-./venv/bin/pip install --upgrade pip
-./venv/bin/pip install -r requirements.txt
+echo "Checking Python dependencies..."
+# Use a hash to skip pip install if requirements haven't changed
+REQ_HASH_FILE="data/.req_hash"
+mkdir -p data
+CURRENT_HASH=$(md5sum requirements.txt | cut -d' ' -f1)
+PREV_HASH=""
+if [ -f "$REQ_HASH_FILE" ]; then
+    PREV_HASH=$(cat "$REQ_HASH_FILE")
+fi
+
+if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
+    echo "Installing/Updating Python dependencies (this may take a while on Pi Zero)..."
+    ./venv/bin/pip install --upgrade pip
+    # --no-cache-dir saves RAM and disk space on small SBCs
+    # --prefer-binary avoids compiling from source (OOM risk)
+    if ! ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt; then
+        echo "Error: Dependency installation failed. This often happens due to Low Memory (OOM) on Pi Zero."
+        echo "Try running: sudo dphys-swapfile swapoff && sudo dd if=/dev/zero of=/var/swap bs=1M count=1024 && sudo mkswap /var/swap && sudo dphys-swapfile swapon"
+        echo "to increase swap space temporarily."
+        exit 1
+    fi
+    echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
+else
+    echo "Dependencies are already up to date."
+fi
 
 # 4. Create Directories
 echo "[4/9] Ensuring data directories exist..."
