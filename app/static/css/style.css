@@ -269,6 +269,9 @@ nav button.active {
 }
 
 .media-card {
+    width: 100%;
+    max-width: 160px;
+    aspect-ratio: 2/3;
     border-radius: var(--radius-md);
     overflow: hidden;
     position: relative;
@@ -1142,6 +1145,9 @@ h1, h2, h3 {
 }
 
 .media-card {
+    width: 100%;
+    max-width: 160px;
+    aspect-ratio: 2/3;
     border-radius: 8px;
 }
 
@@ -1551,6 +1557,7 @@ h1, h2, h3 {
 }
 
 .media-item {
+    max-width: 160px;
     background: #1e1e1e;
     border-radius: 8px;
     overflow: hidden;

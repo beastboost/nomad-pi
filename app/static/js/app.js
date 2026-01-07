@@ -1389,6 +1389,12 @@ function openVideoViewer(path, title, startSeconds = 0) {
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
+    // Auto-detect and load subtitles
+    loadSubtitlesForVideo(video, path);
+
+    // Auto-play next episode when current one ends
+    video.addEventListener('ended', () => handleVideoEnded(path, title));
+
     body.appendChild(video);
     modal.classList.remove('hidden');
 }
@@ -3687,3 +3693,196 @@ async function resetUserPassword(userId, username) {
         showToast('Network error', 'error');
     }
 }
+
+// Auto-detect and load subtitle files (.srt, .vtt)
+async function loadSubtitlesForVideo(videoElement, videoPath) {
+    const basePath = videoPath.replace(/\.[^.]+$/, ''); // Remove extension
+    const subtitleExts = ['.srt', '.vtt', '.en.srt', '.eng.srt'];
+
+    for (const ext of subtitleExts) {
+        try {
+            const subPath = basePath + ext;
+            const token = getCookie('auth_token');
+            let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(subPath)}`;
+            if (token) subUrl += '&token=' + token;
+
+            // Check if subtitle file exists
+            const response = await fetch(subUrl, { method: 'HEAD' });
+            if (response.ok) {
+                console.log('[Subtitles] Found:', subPath);
+                const track = document.createElement('track');
+                track.kind = 'subtitles';
+                track.label = 'English';
+                track.srclang = 'en';
+                track.src = subUrl;
+                track.default = true;
+                videoElement.appendChild(track);
+
+                // Enable subtitles by default
+                setTimeout(() => {
+                    if (videoElement.textTracks.length > 0) {
+                        videoElement.textTracks[0].mode = 'showing';
+                    }
+                }, 100);
+
+                break; // Use first found subtitle file
+            }
+        } catch (e) {
+            // Subtitle file doesn't exist, try next
+            console.log('[Subtitles] Not found for:', basePath + ext);
+        }
+    }
+}
+
+// Handle video ended - auto-play next episode
+async function handleVideoEnded(currentPath, currentTitle) {
+    console.log('[Auto-Play] Video ended:', currentPath);
+
+    // Check if this is a TV show episode
+    const nextEpisode = await findNextEpisode(currentPath);
+
+    if (nextEpisode) {
+        // Show countdown modal
+        showNextEpisodeCountdown(nextEpisode, () => {
+            closeViewer();
+            setTimeout(() => {
+                openVideoViewer(nextEpisode.path, nextEpisode.name, 0);
+            }, 100);
+        });
+    } else {
+        console.log('[Auto-Play] No next episode found');
+    }
+}
+
+// Find the next episode in the series
+async function findNextEpisode(currentPath) {
+    // Extract show, season, and episode info from path
+    // Path format: /data/shows/ShowName/Season X/Episode.mkv
+    const pathParts = currentPath.split('/');
+    if (pathParts.length < 5 || !currentPath.includes('/shows/')) {
+        return null; // Not a TV show
+    }
+
+    const showName = pathParts[3];
+    const seasonName = pathParts[4];
+
+    // Get current episode number
+    const currentEpNum = parseEpisodeNumber(pathParts[pathParts.length - 1]);
+    if (currentEpNum === null) return null;
+
+    console.log('[Auto-Play] Looking for next episode after:', currentEpNum, 'in', showName, seasonName);
+
+    // Fetch the shows library to find next episode
+    try {
+        const res = await fetch(`${API_BASE}/media/shows/library`);
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        // Find the show
+        const show = data.shows?.find(s => s.name === showName);
+        if (!show) return null;
+
+        // Find the season
+        const season = show.seasons?.find(s => s.name === seasonName);
+        if (!season) return null;
+
+        // Find next episode
+        const sortedEpisodes = season.episodes.sort((a, b) => a.ep_num - b.ep_num);
+        const currentIndex = sortedEpisodes.findIndex(ep => ep.ep_num === currentEpNum);
+
+        if (currentIndex >= 0 && currentIndex < sortedEpisodes.length - 1) {
+            const next = sortedEpisodes[currentIndex + 1];
+            console.log('[Auto-Play] Found next episode:', next.name);
+            return next;
+        }
+    } catch (e) {
+        console.error('[Auto-Play] Error finding next episode:', e);
+    }
+
+    return null;
+}
+
+// Parse episode number from filename
+function parseEpisodeNumber(filename) {
+    // Try SxxExx format
+    let match = filename.match(/S\d+E(\d+)/i);
+    if (match) return parseInt(match[1]);
+
+    // Try 1x01 format
+    match = filename.match(/\d+x(\d+)/i);
+    if (match) return parseInt(match[1]);
+
+    // Try Episode XX format
+    match = filename.match(/Episode\s*(\d+)/i);
+    if (match) return parseInt(match[1]);
+
+    // Try just numbers
+    match = filename.match(/E(\d+)/i);
+    if (match) return parseInt(match[1]);
+
+    return null;
+}
+
+// Show countdown modal for next episode
+function showNextEpisodeCountdown(nextEpisode, onPlay) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+
+    const box = document.createElement('div');
+    box.style.cssText = `
+        background: var(--card-bg);
+        padding: 30px;
+        border-radius: 12px;
+        text-align: center;
+        max-width: 400px;
+    `;
+
+    box.innerHTML = `
+        <h3 style="margin: 0 0 15px 0;">Next Episode</h3>
+        <p style="margin: 10px 0; color: var(--text-muted);">${escapeHtml(nextEpisode.name)}</p>
+        <p style="font-size: 2rem; margin: 20px 0; font-weight: bold;" id="countdown-timer">10</p>
+        <div style="display: flex; gap: 10px; justify-content: center;">
+            <button class="secondary" id="cancel-autoplay">Cancel</button>
+            <button class="primary" id="play-now">Play Now</button>
+        </div>
+    `;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    let countdown = 10;
+    const timer = document.getElementById('countdown-timer');
+
+    const interval = setInterval(() => {
+        countdown--;
+        if (timer) timer.textContent = countdown;
+        if (countdown <= 0) {
+            clearInterval(interval);
+            document.body.removeChild(overlay);
+            onPlay();
+        }
+    }, 1000);
+
+    document.getElementById('cancel-autoplay').onclick = () => {
+        clearInterval(interval);
+        document.body.removeChild(overlay);
+    };
+
+    document.getElementById('play-now').onclick = () => {
+        clearInterval(interval);
+        document.body.removeChild(overlay);
+        onPlay();
+    };
+}
+
