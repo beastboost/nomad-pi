@@ -68,7 +68,17 @@ if [ -d ".git" ]; then
 fi
 
 # 0.1 Proactive Swap Check (Crucial for Pi Zero 512MB RAM)
-echo "Checking system memory resources..."
+echo "Checking system memory and power resources..."
+
+# Check for under-voltage/throttling (Pi specific)
+if command -v vcgencmd >/dev/null 2>&1; then
+    THROTTLED=$(vcgencmd get_throttled | cut -d= -f2)
+    if [ "$THROTTLED" != "0x0" ]; then
+        echo "WARNING: Your Pi is reporting throttling/under-voltage ($THROTTLED)!"
+        echo "This is a major cause of crashes during setup. Please check your power supply."
+    fi
+fi
+
 TOTAL_SWAP=$(free -m | awk '/Swap/ {print $2}')
 if [ "$TOTAL_SWAP" -lt 1000 ]; then
     echo "Total swap ($TOTAL_SWAP MB) is less than 1GB. Increasing swap to prevent OOM crashes..."
