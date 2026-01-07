@@ -18,12 +18,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "💾 Committing changes with message: '$commitMessage'..."
 git commit -m "$commitMessage"
 if ($LASTEXITCODE -ne 0) {
-    # If there's nothing to commit, git commit returns 1. 
-    # We should decide if we want to treat that as a failure or continue to push.
-    # Usually, if there's nothing to commit, we might still want to push (if there are already committed changes).
-    # But for an automated script, failing is safer.
-    Write-Host "❌ 'git commit' failed. Aborting push." -ForegroundColor Red
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -eq 1) {
+        Write-Host "Nothing to commit, continuing..." -ForegroundColor Yellow
+    } else {
+        Write-Host "❌ 'git commit' failed. Aborting push." -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
 }
 
 Write-Host "📤 Pushing to GitHub..."

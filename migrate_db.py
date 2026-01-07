@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import sys
 
 DB_PATH = "data/nomad.db"
 
@@ -25,7 +26,7 @@ def migrate():
         c.execute("SELECT id FROM users WHERE id = 1")
         if not c.fetchone():
             print("Error: User with id 1 does not exist. Cannot migrate progress.")
-            return
+            sys.exit(1)
 
         # Since it's a primary key change, we need to recreate the table
         c.execute("ALTER TABLE progress RENAME TO progress_old")
@@ -77,13 +78,14 @@ def migrate():
          c.execute("SELECT COUNT(*) FROM profiles")
          row_count = c.fetchone()[0]
          if row_count > 1:
-             print(f"Warning: Multiple profiles ({row_count}) found in old schema. Mapping all to user_id 1.")
+             print(f"Error: Multiple profiles ({row_count}) found in old schema. Migration cannot proceed automatically.")
+             sys.exit(1)
          
          # Check if user 1 exists for FK constraint
          c.execute("SELECT id FROM users WHERE id = 1")
          if not c.fetchone():
              print("Error: User with id 1 does not exist. Cannot migrate profiles.")
-             return
+             sys.exit(1)
 
          c.execute("ALTER TABLE profiles RENAME TO profiles_old")
          c.execute('''
@@ -112,7 +114,7 @@ def migrate():
              # Use a subquery or a simple join to ensure we only insert if user 1 exists (already checked but safer)
              c.execute(f'''
                 INSERT INTO profiles (user_id, {target_str})
-                SELECT 1, {source_str} FROM profiles_old
+                SELECT 1, {source_str} FROM profiles_old LIMIT 1
             ''')
          
          c.execute("DROP TABLE profiles_old")
