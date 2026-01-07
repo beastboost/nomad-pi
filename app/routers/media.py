@@ -40,7 +40,7 @@ def _get_paged_data_cached(category: str, q: str, offset: int, limit: int, sort:
 
 def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, rebuild: bool, user_id: int):
     idx_info = maybe_start_index_build(category, force=bool(rebuild))
-    items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year)
+    items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year, user_id=user_id)
 
     all_progress = database.get_all_progress(user_id)
     out = []
@@ -420,9 +420,9 @@ async def cache_remote_poster(poster_url: str):
     return f"/data/{rel}"
 
 @router.get("/shows/library")
-def get_shows_library():
-    items, total = database.query_library_index("shows", limit=1000000)
-    all_progress = database.get_all_progress()
+def get_shows_library(user_id: int = Depends(get_current_user_id)):
+    items, total = database.query_library_index("shows", limit=1000000, user_id=user_id)
+    all_progress = database.get_all_progress(user_id)
     
     shows_dict = {}
     
@@ -515,7 +515,7 @@ def get_shows_library():
     return {"shows": out}
 
 @router.get("/stats")
-def get_media_stats():
+def get_media_stats(user_id: int = Depends(get_current_user_id)):
     stats = {
         "movies": 0,
         "shows": 0,
@@ -526,7 +526,7 @@ def get_media_stats():
     for category in stats.keys():
         try:
             # Check library index
-            items, total = database.query_library_index(category, limit=1)
+            items, total = database.query_library_index(category, limit=1, user_id=user_id)
             stats[category] = total
         except Exception:
             # Fallback to file count if index doesn't exist
@@ -541,7 +541,7 @@ def get_media_stats():
     return stats
 
 @router.post("/rebuild")
-def rebuild_library(background_tasks: BackgroundTasks):
+def rebuild_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     for category in ["movies", "shows", "music", "books"]:
         background_tasks.add_task(build_library_index, category)
     # Also trigger MiniDLNA rescan and auto-organization
@@ -781,11 +781,11 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
     return matched[offset: offset + limit]
 
 @router.get("/genres")
-def get_genres(category: str = Query(...)):
+def get_genres(category: str = Query(...), user_id: int = Depends(get_current_user_id)):
     return database.get_unique_genres(category)
 
 @router.get("/years")
-def get_years(category: str = Query(...)):
+def get_years(category: str = Query(...), user_id: int = Depends(get_current_user_id)):
     return database.get_unique_years(category)
 
 @router.post("/play_count")
@@ -812,7 +812,8 @@ def get_library(
     limit: int = Query(default=50),
     sort: str = Query(default='name'),
     genre: str = Query(default=None),
-    year: str = Query(default=None)
+    year: str = Query(default=None),
+    user_id: int = Depends(get_current_user_id)
 ):
     # Handle FastAPI Query objects if passed directly in tests
     if hasattr(q, 'default'): q = q.default
@@ -842,11 +843,17 @@ def get_library(
     # Try to use database index if available
     try:
         if category == 'shows':
-            items, total = database.query_shows(q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year)
+            items, total = database.query_shows(q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year, user_id=user_id)
         else:
-            items, total = database.query_library_index(category, q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year)
+            items, total = database.query_library_index(category, q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year, user_id=user_id)
             
         if total > 0 or q or genre or year:
+            # Add progress information for the user
+            all_progress = database.get_all_progress(user_id)
+            for item in items:
+                if item.get('path') in all_progress:
+                    item['progress'] = all_progress[item['path']]
+
             return {
                 "items": items, 
                 "total": total, 
@@ -859,6 +866,16 @@ def get_library(
 
     # Fallback to filesystem scan (less features)
     items = scan_media_page(category, q, offset, limit)
+    
+    # Add progress information even for filesystem results if possible
+    try:
+        all_progress = database.get_all_progress(user_id)
+        for item in items:
+            if item.get('path') in all_progress:
+                item['progress'] = all_progress[item['path']]
+    except Exception:
+        pass
+
     return {
         "items": items, 
         "total": len(items), 
@@ -993,7 +1010,7 @@ def find_trailers(media_fs_path: str) -> List[Dict[str, str]]:
     return trailers
 
 @router.get("/meta")
-async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None)):
+async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False), force: bool = Query(default=False), media_type: str = Query(default=None), user_id: int = Depends(get_current_user_id)):
     if not isinstance(path, str) or not path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid path")
 
@@ -1233,7 +1250,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 import mimetypes
 
 @router.get("/info")
-def get_media_info(path: str = Query(...)):
+def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
     """Get technical info about a media file using ffprobe."""
     try:
         fs_path = safe_fs_path_from_web_path(path)
@@ -1296,7 +1313,7 @@ def get_media_info(path: str = Query(...)):
         return {"error": str(e)}
 
 @router.get("/stream")
-async def stream_media(path: str = Query(...), token: str = Query(None)):
+async def stream_media(path: str = Query(...), token: str = Query(None), user_id: int = Depends(get_current_user_id)):
     # The middleware already checks for token, but we can double check here if needed
     # However, if it got here, it's either authenticated or it's a path that doesn't start with /data or /api/media
     
@@ -1346,7 +1363,7 @@ def refresh_external_links():
                 pass
 
 @router.get("/browse")
-def browse_files(path: str = Query(default="/data")):
+def browse_files(path: str = Query(default="/data"), user_id: int = Depends(get_current_user_id)):
     # Proactively refresh external links if browsing /data or /data/external
     if path == "/data" or path.startswith("/data/external"):
         refresh_external_links()
@@ -1429,7 +1446,8 @@ def list_media_paged(
     rebuild: bool = Query(default=False),
     sort: str = Query(default='name'),
     genre: str = Query(default=None),
-    year: str = Query(default=None)
+    year: str = Query(default=None),
+    user_id: int = Depends(get_current_user_id)
 ):
     if category not in ["movies", "shows", "music", "books", "gallery", "files"]:
         raise HTTPException(status_code=400, detail="Invalid category")
@@ -1437,9 +1455,9 @@ def list_media_paged(
     # Use cache if not rebuilding
     if not rebuild:
         cache_key = build_cache_key(category, q, offset, limit, sort, genre, year)
-        return _get_paged_data_cached(category, cache_key, q, offset, limit, sort, genre, year)
+        return _get_paged_data_cached(category, q, offset, limit, sort, genre, year, user_id)
 
-    return _get_paged_data(category, q, offset, limit, sort, genre, year, rebuild)
+    return _get_paged_data(category, q, offset, limit, sort, genre, year, rebuild, user_id)
 
 def extract_archive_to_dir(archive_path: str, out_dir: str):
     attempts = []
@@ -1489,12 +1507,12 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
     raise HTTPException(status_code=500, detail=last_err or "Failed to extract archive.")
 
 @router.get("/list/{category}")
-def list_media(category: str):
+def list_media(category: str, user_id: int = Depends(get_current_user_id)):
     paths_to_scan = get_scan_paths(category)
     files = []
     
     # Get all progress to merge
-    all_progress = database.get_all_progress()
+    all_progress = database.get_all_progress(user_id)
 
     for path in paths_to_scan:
         if not os.path.exists(path):
@@ -1574,7 +1592,7 @@ def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user
         return {"status": "error", "message": str(e)}
 
 @router.post("/rename")
-def rename_media(data: Dict = Body(...), background_tasks: BackgroundTasks = None):
+def rename_media(data: Dict = Body(...), background_tasks: BackgroundTasks = None, user_id: int = Depends(get_current_user_id)):
     old_path = data.get("old_path") or data.get("path")
     new_path = data.get("new_path") or data.get("dest_path")
     if not isinstance(old_path, str) or not old_path.startswith("/data/"):
@@ -1768,7 +1786,7 @@ def _auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
     return normalized
 
 @router.post("/organize/shows")
-async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
     # Clear cache when starting organization
     _get_paged_data_cached.cache_clear()
     show_bases = get_scan_paths("shows")
@@ -1936,7 +1954,7 @@ async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
 @router.post("/organize/movies")
-async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250)):
+async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
     # Clear cache when starting organization
     _get_paged_data_cached.cache_clear()
     movie_bases = get_scan_paths("movies")
@@ -2187,7 +2205,7 @@ def trigger_auto_organize():
         logger.error(f"Automated organization failed: {e}")
 
 @router.post("/upload/{category}")
-async def upload_file(category: str, background_tasks: BackgroundTasks, files: UploadFile = File(...)):
+async def upload_file(category: str, background_tasks: BackgroundTasks, files: UploadFile = File(...), user_id: int = Depends(get_current_user_id)):
     # Note: 'files' param name matches frontend FormData.append('files', ...)
     # But since we send one by one, it receives a single UploadFile if not defined as List
     # To support both, we can use List and handle it, or just stick to List.
@@ -2246,7 +2264,7 @@ async def upload_file(category: str, background_tasks: BackgroundTasks, files: U
 import aiofiles
 
 @router.post("/upload_stream/{category}")
-async def upload_stream(category: str, request: Request, background_tasks: BackgroundTasks, path: str = Query(default="")):
+async def upload_stream(category: str, request: Request, background_tasks: BackgroundTasks, path: str = Query(default=""), user_id: int = Depends(get_current_user_id)):
     incoming_name = path or request.headers.get("x-file-path", "")
     incoming_name = (incoming_name or "").replace("\\", "/")
     normalized = posixpath.normpath(incoming_name).lstrip("/")
@@ -2296,7 +2314,7 @@ async def upload_stream(category: str, request: Request, background_tasks: Backg
     return {"info": "Uploaded 1 file", "files": [dest_rel]}
 
 @router.delete("/delete")
-def delete_media(path: str, background_tasks: BackgroundTasks):
+def delete_media(path: str, background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     fs_path = safe_fs_path_from_web_path(path)
     if not os.path.exists(fs_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -2348,7 +2366,7 @@ def delete_media(path: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
 
 @router.post("/system/prepare_drive")
-def prepare_drive(path: str):
+def prepare_drive(path: str, user_id: int = Depends(get_current_user_id)):
     """Create standard media folders on the specified drive path."""
     if not os.path.exists(path):
          raise HTTPException(status_code=404, detail="Drive path not found")
@@ -2366,13 +2384,13 @@ def prepare_drive(path: str):
     return {"status": "ok", "created": created, "message": f"Created {len(created)} folders on drive."}
 
 @router.post("/organize")
-def manual_organize(background_tasks: BackgroundTasks):
+def manual_organize(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     """Manually trigger automated media organization"""
     background_tasks.add_task(trigger_auto_organize)
     return {"status": "ok", "message": "Automated organization started in background"}
 
 @router.post("/scan")
-def scan_library(background_tasks: BackgroundTasks):
+def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     def run_scan():
         # Scan all categories
         for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
@@ -2388,7 +2406,7 @@ def scan_library(background_tasks: BackgroundTasks):
     return {"status": "ok", "message": "Library scan and organization started in background."}
 
 @router.post("/fix_duplicates")
-def fix_duplicates(background_tasks: BackgroundTasks):
+def fix_duplicates(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     """Find and delete duplicate files/content across the library."""
     def run_fix():
         logger.info("Starting mass duplicate fix...")
@@ -2431,7 +2449,7 @@ def fix_duplicates(background_tasks: BackgroundTasks):
     return {"status": "ok", "message": "Mass duplicate fix started in background."}
 
 @router.get("/duplicates")
-def get_duplicates():
+def get_duplicates(user_id: int = Depends(get_current_user_id)):
     """Find and return duplicate files and media content."""
     try:
         file_dupes = database.find_duplicate_files()
@@ -2500,8 +2518,8 @@ def find_file_poster(web_path: str):
     return None
 
 @router.get("/resume")
-def resume(limit: int = 12):
-    all_progress = database.get_all_progress()
+def resume(limit: int = 12, user_id: int = Depends(get_current_user_id)):
+    all_progress = database.get_all_progress(user_id)
     items = []
     for web_path, prog in all_progress.items():
         try:
@@ -2541,7 +2559,7 @@ def resume(limit: int = 12):
     return {"items": items[: max(1, min(int(limit), 50))]}
 
 @router.get("/books/comic/pages")
-def comic_pages(path: str):
+def comic_pages(path: str, user_id: int = Depends(get_current_user_id)):
     fs_path = safe_fs_path_from_web_path(path)
     if not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="File not found")

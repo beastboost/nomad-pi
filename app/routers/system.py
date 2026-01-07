@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, validator
 import psutil
 import os
@@ -10,6 +10,7 @@ import shutil
 import re
 from datetime import datetime
 from app import database
+from app.routers.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ def get_aggregate_disk_usage():
     return total, used, free, percent
 
 @router.get("/stats")
-def get_stats():
+def get_stats(user_id: int = Depends(get_current_user_id)):
     # Use aggregate disk usage for consistency across panels
     disk_total, disk_used, disk_free, disk_percent = get_aggregate_disk_usage()
     
@@ -252,7 +253,7 @@ def get_stats():
     }
 
 @router.get("/storage/info")
-def get_storage_info():
+def get_storage_info(user_id: int = Depends(get_current_user_id)):
     disk_total, disk_used, disk_free, disk_percent = get_aggregate_disk_usage()
     
     drives = []
@@ -342,12 +343,12 @@ def get_storage_info():
     }
 
 @router.post("/storage/scan")
-def scan_storage():
+def scan_storage(user_id: int = Depends(get_current_user_id)):
     # In a real app, this might trigger a rescan of block devices
     return {"status": "success", "message": "Storage scan complete"}
 
 @router.get("/services")
-def get_services():
+def get_services(user_id: int = Depends(get_current_user_id)):
     services = []
     if platform.system() == "Linux":
         # Check some common services we might care about
@@ -366,7 +367,7 @@ def get_services():
     return {"services": services}
 
 @router.get("/storage")
-def get_storage():
+def get_storage(user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
         app_path = os.getcwd()
         disk_path = app_path
@@ -392,7 +393,7 @@ def get_storage():
     }
 
 @router.get("/drives")
-def list_drives():
+def list_drives(user_id: int = Depends(get_current_user_id)):
     drives = []
     if platform.system() == "Linux":
         try:
@@ -463,7 +464,7 @@ def list_drives():
     return {"blockdevices": drives}
 
 @router.post("/mount")
-def mount_drive(device: str, mount_point: str):
+def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
@@ -482,7 +483,7 @@ def mount_drive(device: str, mount_point: str):
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
 
 @router.post("/unmount")
-def unmount_drive(target: str):
+def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
         try:
             subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
@@ -492,7 +493,7 @@ def unmount_drive(target: str):
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
 
 @router.get("/wifi/status")
-def get_wifi_status():
+def get_wifi_status(user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         return {"status": "unsupported", "enabled": True}
     
@@ -511,7 +512,7 @@ def get_wifi_status():
         return {"status": "error", "message": str(e)}
 
 @router.post("/wifi/toggle")
-def toggle_wifi(enable: bool):
+def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
     
@@ -530,7 +531,7 @@ def toggle_wifi(enable: bool):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/logs")
-def get_logs(lines: int = 100):
+def get_logs(lines: int = 100, user_id: int = Depends(get_current_user_id)):
     """Retrieve the last N lines of the application log"""
     # Try the configured log file first
     log_file = os.environ.get("NOMAD_LOG_FILE", "data/app.log")
@@ -559,11 +560,11 @@ def get_logs(lines: int = 100):
     return {"logs": ["No logs available. Check if data/app.log exists or if journalctl is accessible."]}
 
 @router.post("/control")
-def system_control_body(request: ControlRequest):
-    return system_control(request.action)
+def system_control_body(request: ControlRequest, user_id: int = Depends(get_current_user_id)):
+    return system_control(request.action, user_id=user_id)
 
 @router.post("/control/{action}")
-def system_control(action: str):
+def system_control(action: str, user_id: int = Depends(get_current_user_id)):
     if action not in ["shutdown", "reboot", "update", "restart"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     
@@ -627,7 +628,7 @@ def system_control(action: str):
     return {"status": "error", "message": f"{action.capitalize()} not supported on this OS"}
 
 @router.get("/update/check")
-def check_update():
+def check_update(user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
         try:
             subprocess.run(["git", "fetch"], check=True)
@@ -640,7 +641,7 @@ def check_update():
     return {"available": True, "message": "Update check simulated (Windows)"}
 
 @router.get("/update/status")
-def get_update_status():
+def get_update_status(user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Windows":
         status_file = "update_status.json"
     else:
@@ -689,7 +690,7 @@ def get_changelog():
     }
 
 @router.get("/update/log")
-def get_update_log():
+def get_update_log(user_id: int = Depends(get_current_user_id)):
     log_path = os.path.abspath("update.log")
     if os.path.exists(log_path):
         try:
@@ -702,7 +703,7 @@ def get_update_log():
 
 # WiFi and Hotspot Management
 @router.get("/wifi/info")
-def get_wifi_info():
+def get_wifi_info(user_id: int = Depends(get_current_user_id)):
     """Get detailed WiFi connection information"""
     if platform.system() != "Linux":
         return {
@@ -823,7 +824,7 @@ def get_wifi_info():
         return {"mode": "error", "message": str(e)}
 
 @router.post("/wifi/toggle-hotspot")
-def toggle_hotspot(enable: bool = True):
+def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_id)):
     """Toggle hotspot mode on/off"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
@@ -877,7 +878,7 @@ def toggle_hotspot(enable: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/wifi/scan")
-def scan_wifi():
+def scan_wifi(user_id: int = Depends(get_current_user_id)):
     """Scan for available WiFi networks with better discovery"""
     if platform.system() != "Linux":
         # Mock data for Windows
@@ -968,7 +969,7 @@ class WifiConnectRequest(BaseModel):
         return v
 
 @router.post("/wifi/connect")
-def connect_wifi(request: WifiConnectRequest):
+def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current_user_id)):
     """Connect to a new WiFi network"""
     if platform.system() != "Linux":
         return {"status": "success", "message": f"Simulated connection to {request.ssid}"}
@@ -1031,7 +1032,7 @@ def connect_wifi(request: WifiConnectRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/wifi/reconnect")
-def reconnect_wifi(ssid: str = None):
+def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)):
     """Reconnect to WiFi network"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
@@ -1115,7 +1116,7 @@ def reconnect_wifi(ssid: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/wifi/saved")
-def get_saved_wifi():
+def get_saved_wifi(user_id: int = Depends(get_current_user_id)):
     """Get list of saved WiFi connections"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
@@ -1141,7 +1142,7 @@ def get_saved_wifi():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dlna/info")
-def get_dlna_info():
+def get_dlna_info(user_id: int = Depends(get_current_user_id)):
     """Get DLNA server information"""
     if platform.system() != "Linux":
         return {"enabled": False, "message": "DLNA only available on Linux"}
@@ -1181,7 +1182,7 @@ def get_dlna_info():
         return {"enabled": False, "message": str(e)}
 
 @router.post("/dlna/restart")
-def restart_dlna():
+def restart_dlna(user_id: int = Depends(get_current_user_id)):
     """Restart DLNA server"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
@@ -1195,7 +1196,7 @@ def restart_dlna():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/info")
-def get_system_info():
+def get_system_info(user_id: int = Depends(get_current_user_id)):
     """Get detailed system information"""
     info = {
         "hostname": platform.node(),
@@ -1279,7 +1280,7 @@ def get_system_info():
     return info
 
 @router.get("/processes")
-def get_processes():
+def get_processes(user_id: int = Depends(get_current_user_id)):
     """Get list of running processes"""
     try:
         processes = []
@@ -1305,7 +1306,7 @@ def get_processes():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/logs/all")
-def get_system_logs(lines: int = 50):
+def get_system_logs(lines: int = 50, user_id: int = Depends(get_current_user_id)):
     """Get recent system logs"""
     if platform.system() != "Linux":
         return {"logs": ["System logs only available on Linux"]}
@@ -1336,7 +1337,7 @@ def get_system_logs(lines: int = 50):
         return {"logs": [f"Error reading logs: {str(e)}"]}
 
 @router.get("/network/interfaces")
-def get_network_interfaces():
+def get_network_interfaces(user_id: int = Depends(get_current_user_id)):
     """Get network interface information"""
     try:
         interfaces = []

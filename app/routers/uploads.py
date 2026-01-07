@@ -18,11 +18,13 @@ from typing import Optional, AsyncGenerator, Dict, List
 from datetime import datetime
 from io import BytesIO
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 import aiofiles
 import aiofiles.os
 from pydantic import BaseModel, Field
+
+from app.routers.auth import get_current_user_id
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -248,6 +250,7 @@ async def upload_single_file(
     file: UploadFile = File(...),
     file_id: Optional[str] = Query(None),
     category: str = Query("files"),
+    user_id: str = Depends(get_current_user_id),
 ) -> UploadResponse:
     """
     Upload a single file with progress tracking.
@@ -342,7 +345,8 @@ async def upload_single_file(
 async def upload_multiple_files(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
-    category: str = Query("files")
+    category: str = Query("files"),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Upload multiple files with individual progress tracking.
@@ -448,7 +452,10 @@ async def upload_multiple_files(
 
 
 @router.get("/progress/{file_id}")
-async def get_upload_progress(file_id: str) -> UploadProgress:
+async def get_upload_progress(
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> UploadProgress:
     """
     Get current upload progress for a file.
     
@@ -465,7 +472,11 @@ async def get_upload_progress(file_id: str) -> UploadProgress:
 
 
 @router.get("/download/{file_id}/{filename}")
-async def download_file(file_id: str, filename: str):
+async def download_file(
+    file_id: str, 
+    filename: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """
     Download a previously uploaded file with streaming.
     
@@ -507,7 +518,10 @@ async def download_file(file_id: str, filename: str):
 
 
 @router.delete("/{file_id}")
-async def delete_upload(file_id: str):
+async def delete_upload(
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """
     Delete an uploaded file.
     
@@ -557,7 +571,12 @@ async def delete_upload(file_id: str):
 
 
 @router.post("/verify/{file_id}/{filename}")
-async def verify_file_integrity(file_id: str, filename: str, expected_checksum: str):
+async def verify_file_integrity(
+    file_id: str, 
+    filename: str, 
+    expected_checksum: str,
+    user_id: str = Depends(get_current_user_id),
+):
     """
     Verify integrity of uploaded file against checksum.
     
@@ -595,7 +614,10 @@ async def verify_file_integrity(file_id: str, filename: str, expected_checksum: 
 
 
 @router.get("/info/{file_id}")
-async def get_file_info(file_id: str) -> Dict:
+async def get_file_info(
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> Dict:
     """
     Get information about an uploaded file.
     

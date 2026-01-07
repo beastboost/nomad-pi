@@ -736,15 +736,11 @@ def get_unique_years(category: str) -> List[str]:
     finally:
         return_db(conn)
 
-def query_library_index(category: str, q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+def query_library_index(category: str, q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None, user_id: int = None):
     # Validation
     allowed_sorts = ['name', 'newest', 'oldest', 'year_desc', 'year_asc', 'recently_played', 'top_watched']
     if sort not in allowed_sorts:
         sort = 'name'
-
-    if category == 'shows' and offset == 0 and not q and not genre and not year and sort == 'name':
-        # Optional: We could call query_shows here, but let's keep it separate for now
-        pass
 
     # Handle FastAPI Query objects if passed directly in tests
     if hasattr(q, 'default'): q = q.default
@@ -763,13 +759,24 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         c = conn.cursor()
         
         # Base query joins with progress for sorting by last_played or play_count
-        sql = '''
-            SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
-            FROM library_index l
-            LEFT JOIN progress p ON l.path = p.path
-            WHERE l.category = ?
-        '''
-        params = [category]
+        # Base query joins with progress for sorting by last_played or play_count
+        # We always join or simulate progress to keep sorting logic consistent
+        if user_id is not None:
+            sql = '''
+                SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
+                FROM library_index l
+                LEFT JOIN progress p ON l.path = p.path AND p.user_id = ?
+                WHERE l.category = ?
+            '''
+            params = [user_id, category]
+        else:
+            sql = '''
+                SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
+                FROM library_index l
+                LEFT JOIN (SELECT NULL as path, NULL as current_time, NULL as duration, 0 as play_count, NULL as last_played) p ON 1=0
+                WHERE l.category = ?
+            '''
+            params = [category]
         
         if q:
             # Sanitize query to prevent SQL injection
@@ -843,7 +850,7 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
     finally:
         return_db(conn)
 
-def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None):
+def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'name', genre: str = None, year: str = None, user_id: int = None):
     # Handle FastAPI Query objects if passed directly in tests
     if hasattr(q, 'default'): q = q.default
     if hasattr(genre, 'default'): genre = genre.default
@@ -862,23 +869,40 @@ def query_shows(q: str = None, offset: int = 0, limit: int = 50, sort: str = 'na
         c = conn.cursor()
         
         # Subquery to extract show name and include relevant columns
-        sql_base = '''
-            FROM (
-                SELECT 
-                    CASE 
-                        WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
-                        WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
-                        ELSE folder 
-                    END as show_name,
-                    folder, path, poster, mtime, genre, year
-                FROM library_index
-                WHERE category = 'shows'
-            ) l
-            LEFT JOIN progress p ON l.path = p.path
-        '''
+        if user_id is not None:
+            sql_base = '''
+                FROM (
+                    SELECT 
+                        CASE 
+                            WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
+                            WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
+                            ELSE folder 
+                        END as show_name,
+                        folder, path, poster, mtime, genre, year
+                    FROM library_index
+                    WHERE category = 'shows'
+                ) l
+                LEFT JOIN progress p ON l.path = p.path AND p.user_id = ?
+            '''
+            params = [user_id]
+        else:
+            sql_base = '''
+                FROM (
+                    SELECT 
+                        CASE 
+                            WHEN INSTR(folder, '/') > 0 THEN SUBSTR(folder, 1, INSTR(folder, '/') - 1)
+                            WHEN folder LIKE '% Season %' THEN TRIM(SUBSTR(folder, 1, INSTR(UPPER(folder), ' SEASON ') - 1))
+                            ELSE folder 
+                        END as show_name,
+                        folder, path, poster, mtime, genre, year
+                    FROM library_index
+                    WHERE category = 'shows'
+                ) l
+                LEFT JOIN (SELECT NULL as path, NULL as last_played, 0 as play_count) p ON 1=0
+            '''
+            params = []
         
         where_clauses = []
-        params = []
         
         if q:
             safe_q = sanitize_like_pattern(q)
