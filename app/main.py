@@ -26,9 +26,8 @@ except Exception as e:
         with open("data/startup_error.log", "a") as f:
             f.write(f"\n--- {e} ---\n")
             traceback.print_exc(file=f)
-    except:
-        pass
-    sys.exit(1)
+    except (OSError, IOError, PermissionError) as log_err:
+        print(f"WARNING: Could not write to startup_error.log: {log_err}", file=sys.stderr)    sys.exit(1)
 import os
 import threading
 import mimetypes
@@ -231,12 +230,12 @@ for d in DATA_DIRS:
 # Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Public system endpoints
-app.include_router(system.public_router, prefix="/api/system", tags=["system"])
-app.include_router(media.public_router, prefix="/api/media", tags=["media"])
+app.include_router(system.public_router, prefix="/api/system/public", tags=["system"])
+app.include_router(media.public_router, prefix="/api/media/public", tags=["media"])
 # Protect these routes
-app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user)])
-app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user)])
-app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user)])
+app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user_id)])
+app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
+app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_id)])
 
 @app.on_event("startup")
 def _startup_tasks():
