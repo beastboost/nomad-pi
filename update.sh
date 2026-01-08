@@ -74,11 +74,11 @@ git config credential.helper 'cache --timeout=2592000'
 
 update_status 10 "Pulling latest changes from Git..."
 echo "Pulling latest changes from Git..."
-# TEMPORARY: Pull from mobile menu fix branch
+# Force reset to origin/main to solve any local change conflicts automatically
 update_status 30 "Fetching latest changes..."
 git fetch origin
-update_status 40 "Applying mobile menu fixes..."
-git reset --hard origin/claude/fix-mobile-burger-menu-qEre1
+update_status 40 "Resetting to latest version..."
+git reset --hard origin/main
 
 # Fix permissions immediately after pull
 chmod +x *.sh

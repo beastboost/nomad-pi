@@ -526,34 +526,11 @@
     <script src="js/app.js?v=6"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            // Force unregister old service workers
-            navigator.serviceWorker.getRegistrations().then(registrations => {
-                registrations.forEach(registration => {
-                    registration.unregister().then(() => {
-                        console.log('Old service worker unregistered');
-                    });
-                });
-            });
-
-            // Clear all caches
-            if ('caches' in window) {
-                caches.keys().then(cacheNames => {
-                    cacheNames.forEach(cacheName => {
-                        caches.delete(cacheName);
-                        console.log('Cache deleted:', cacheName);
-                    });
-                });
-            }
-
-            // Register new service worker after clearing
-            setTimeout(() => {
+            window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js')
-                    .then(reg => {
-                        console.log('Service Worker registered!', reg);
-                        reg.update(); // Force update check
-                    })
+                    .then(reg => console.log('Service Worker registered!', reg))
                     .catch(err => console.error('Service Worker registration failed:', err));
-            }, 500);
+            });
         }
     </script>
 </body>
