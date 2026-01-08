@@ -3925,4 +3925,98 @@ function showNextEpisodeCountdown(nextEpisode, onPlay) {
         onPlay();
     };
 }
+// Duplicate Detection Functions
+async function findDuplicates() {
+    const statusDiv = document.getElementById('duplicates-status');
+    if (!statusDiv) return;
+
+    statusDiv.innerHTML = '<div style="padding:20px; text-align:center;"><div class="spinner" style="margin:0 auto 10px;"></div><p>Scanning for duplicates...</p></div>';
+
+    try {
+        const res = await fetch(`${API_BASE}/media/duplicates`);
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        const fileCount = data.file_duplicates?.length || 0;
+        const contentCount = data.content_duplicates?.length || 0;
+        const total = fileCount + contentCount;
+
+        if (total === 0) {
+            statusDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--success-color);"><i class="fas fa-check-circle" style="font-size:2rem; margin-bottom:10px;"></i><p>No duplicates found!</p></div>';
+            return;
+        }
+
+        let html = `<div style="padding:20px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:12px; margin-top:15px;">
+            <h3 style="margin-bottom:15px;"><i class="fas fa-exclamation-triangle" style="color:var(--warning-color);"></i> Found ${total} Duplicate${total > 1 ? 's' : ''}</h3>`;
+
+        if (fileCount > 0) {
+            html += `<h4 style="margin-top:20px; margin-bottom:10px; color:var(--accent-color);">File Duplicates (${fileCount})</h4>`;
+            data.file_duplicates.forEach(dup => {
+                html += `<div style="margin-bottom:15px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
+                    <div style="font-weight:600; margin-bottom:5px;">${dup.name}</div>
+                    <div style="font-size:0.85em; color:var(--text-muted);">Size: ${(dup.size / 1024 / 1024).toFixed(2)} MB • ${dup.count} copies</div>
+                    <div style="margin-top:8px; font-size:0.85em;">`;
+                dup.paths.forEach((path, i) => {
+                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${path}</div>`;
+                });
+                html += `</div></div>`;
+            });
+        }
+
+        if (contentCount > 0) {
+            html += `<h4 style="margin-top:20px; margin-bottom:10px; color:var(--accent-color);">Content Duplicates (${contentCount})</h4>`;
+            data.content_duplicates.forEach(dup => {
+                html += `<div style="margin-bottom:15px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
+                    <div style="font-weight:600; margin-bottom:5px;">${dup.title || 'Unknown'}</div>
+                    <div style="font-size:0.85em; color:var(--text-muted);">IMDb: ${dup.imdb_id} • ${dup.count} copies</div>
+                    <div style="margin-top:8px; font-size:0.85em;">`;
+                dup.paths.forEach((path, i) => {
+                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${path}</div>`;
+                });
+                html += `</div></div>`;
+            });
+        }
+
+        html += `<div style="margin-top:20px; padding:12px; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); border-radius:8px;">
+            <p style="margin:0; font-size:0.9em;"><i class="fas fa-info-circle"></i> Files marked with ✓ will be kept. Others will be deleted if you run Mass Fix.</p>
+        </div></div>`;
+
+        statusDiv.innerHTML = html;
+
+    } catch (e) {
+        statusDiv.innerHTML = `<div style="padding:20px; text-align:center; color:var(--danger-color);"><i class="fas fa-times-circle" style="font-size:2rem; margin-bottom:10px;"></i><p>Error: ${e.message}</p></div>`;
+        console.error('Failed to find duplicates:', e);
+    }
+}
+
+async function fixDuplicates() {
+    if (!confirm('This will permanently delete duplicate files, keeping only one copy of each. The shortest path (likely already organized) will be kept. Continue?')) {
+        return;
+    }
+
+    showToast('Starting mass duplicate fix...', 'info');
+
+    try {
+        const res = await fetch(`${API_BASE}/media/fix_duplicates`, { method: 'POST' });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        showToast(data.message || 'Duplicate fix started. Check logs for progress.', 'success');
+
+        // Clear any existing duplicate results
+        const statusDiv = document.getElementById('duplicates-status');
+        if (statusDiv) {
+            statusDiv.innerHTML = '<div style="padding:20px; text-align:center; color:var(--success-color);"><i class="fas fa-check-circle" style="font-size:2rem; margin-bottom:10px;"></i><p>Mass duplicate fix running in background...</p></div>';
+        }
+
+        // Refresh stats after a delay
+        setTimeout(() => {
+            loadStorageStats();
+        }, 3000);
+
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+        console.error('Failed to fix duplicates:', e);
+    }
+}
 
