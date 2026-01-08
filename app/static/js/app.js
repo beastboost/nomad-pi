@@ -346,7 +346,7 @@ function toggleMobileMenu() {
         backdrop = document.createElement('div');
         backdrop.id = 'mobile-menu-backdrop';
         backdrop.className = 'mobile-menu-backdrop';
-        backdrop.onclick = toggleMobileMenu; // Close menu when clicking backdrop
+        backdrop.onclick = toggleMobileMenu;
         document.body.appendChild(backdrop);
     }
 
@@ -360,12 +360,17 @@ function toggleMobileMenu() {
         document.body.style.overflow = '';
         document.body.classList.remove('menu-open');
     } else if (nav) {
-        // Open menu
+        // Open menu - add visual debug
         nav.classList.add('mobile-menu-open');
+        // Add bright border to see if menu is there
+        nav.style.border = '5px solid red';
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        document.body.style.overflow = 'hidden';
         document.body.classList.add('menu-open');
+        // Log computed style to console
+        const computedRight = window.getComputedStyle(nav).right;
+        console.log('Menu opened - right position:', computedRight);
     }
 }
 
