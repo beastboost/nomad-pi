@@ -14,7 +14,7 @@ from app.routers.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 
 router = APIRouter()
 public_router = APIRouter()
