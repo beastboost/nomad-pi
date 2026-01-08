@@ -340,17 +340,13 @@ function toggleMobileMenu() {
     const nav = document.getElementById('main-nav');
     const menuBtn = document.querySelector('.mobile-menu-btn');
 
-    // Debug: Check if CSS loaded properly
-    const rightPos = nav ? window.getComputedStyle(nav).right : null;
-    console.log('Menu toggle - Current right position:', rightPos);
-
     // Create backdrop if it doesn't exist
     let backdrop = document.getElementById('mobile-menu-backdrop');
     if (!backdrop) {
         backdrop = document.createElement('div');
         backdrop.id = 'mobile-menu-backdrop';
         backdrop.className = 'mobile-menu-backdrop';
-        backdrop.onclick = toggleMobileMenu; // Close menu when clicking backdrop
+        backdrop.onclick = toggleMobileMenu;
         document.body.appendChild(backdrop);
     }
 
@@ -359,23 +355,22 @@ function toggleMobileMenu() {
     if (isOpen) {
         // Close menu
         nav.classList.remove('mobile-menu-open');
-        // Fallback: ensure menu slides out
-        nav.style.right = '-100%';
         backdrop.classList.remove('show');
         if (menuBtn) menuBtn.textContent = '☰';
         document.body.style.overflow = '';
         document.body.classList.remove('menu-open');
-        console.log('Menu closed');
     } else if (nav) {
-        // Open menu
+        // Open menu - add visual debug
         nav.classList.add('mobile-menu-open');
-        // Fallback: force menu to slide in if CSS isn't working
-        nav.style.right = '0';
+        // Add bright border to see if menu is there
+        nav.style.border = '5px solid red';
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        document.body.style.overflow = 'hidden';
         document.body.classList.add('menu-open');
-        console.log('Menu opened - should be visible now');
+        // Log computed style to console
+        const computedRight = window.getComputedStyle(nav).right;
+        console.log('Menu opened - right position:', computedRight);
     }
 }
 

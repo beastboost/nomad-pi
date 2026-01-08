@@ -168,30 +168,29 @@ nav button.active {
     }
 
     header nav#main-nav {
-        position: fixed;
-        top: 0;
-        right: -100%;
-        width: 80%;
-        max-width: 320px;
-        height: 100vh;
-        background: rgba(15, 23, 42, 0.98);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        flex-direction: column;
-        padding: 80px 20px 20px 20px;
-        gap: 8px;
-        z-index: 9999;
-        border-left: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
-        overflow-y: auto;
-        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: fixed !important;
+        top: 0 !important;
+        right: -100% !important;
+        width: 80% !important;
+        max-width: 320px !important;
+        height: 100vh !important;
+        background: #ff0000 !important; /* DEBUG: Bright red to see if visible */
+        flex-direction: column !important;
+        padding: 80px 20px 20px 20px !important;
+        gap: 8px !important;
+        z-index: 9999 !important;
+        border-left: 5px solid yellow !important; /* DEBUG */
+        box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5) !important;
+        overflow-y: auto !important;
+        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
         display: flex !important;
-        pointer-events: auto;
+        pointer-events: auto !important;
     }
 
     header nav#main-nav.mobile-menu-open {
         right: 0 !important;
         display: flex !important;
+        background: #00ff00 !important; /* DEBUG: Green when open */
     }
 
     header nav#main-nav button {
