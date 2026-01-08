@@ -340,13 +340,28 @@ function toggleMobileMenu() {
     const nav = document.getElementById('main-nav');
     const menuBtn = document.querySelector('.mobile-menu-btn');
 
-    if (nav) {
-        nav.classList.toggle('mobile-menu-open');
+    // Create backdrop if it doesn't exist
+    let backdrop = document.getElementById('mobile-menu-backdrop');
+    if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'mobile-menu-backdrop';
+        backdrop.className = 'mobile-menu-backdrop';
+        backdrop.onclick = toggleMobileMenu; // Close menu when clicking backdrop
+        document.body.appendChild(backdrop);
+    }
 
-        // Toggle hamburger icon
-        if (menuBtn) {
-            menuBtn.textContent = nav.classList.contains('mobile-menu-open') ? '✕' : '☰';
-        }
+    if (nav && nav.classList.contains('mobile-menu-open')) {
+        // Close menu
+        nav.classList.remove('mobile-menu-open');
+        backdrop.classList.remove('show');
+        if (menuBtn) menuBtn.textContent = '☰';
+        document.body.style.overflow = '';
+    } else if (nav) {
+        // Open menu
+        nav.classList.add('mobile-menu-open');
+        backdrop.classList.add('show');
+        if (menuBtn) menuBtn.textContent = '✕';
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
     }
 }
 
