@@ -173,23 +173,35 @@ if command -v systemctl >/dev/null 2>&1; then
     if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
         sudo systemctl daemon-reload
         sudo systemctl enable nomad-pi.service
-        # Background the restart so the script can finish and the UI gets the final status
-        echo "Restarting service in background..." >> update.log
-        # Increased sleep to 5 seconds for Pi Zero stability
-        nohup bash -c "
-            sudo systemctl stop nomad-pi
-            echo 'Service stopped, waiting for clean shutdown...' >> update.log
-            sleep 5
-            echo 'Starting service...' >> update.log
-            sudo systemctl start nomad-pi
+        # Restart service synchronously for reliability
+        echo "Restarting service..." >> update.log
+
+        # Stop service
+        sudo systemctl stop nomad-pi >> update.log 2>&1
+        echo "Service stopped, waiting for clean shutdown..." >> update.log
+        sleep 6
+
+        # Start service
+        echo "Starting service..." >> update.log
+        sudo systemctl start nomad-pi >> update.log 2>&1
+        sleep 3
+
+        # Verify it started
+        if systemctl is-active --quiet nomad-pi; then
+            echo "Service restart successful!" >> update.log
+        else
+            echo "WARNING: Service failed to start! Trying one more time..." >> update.log
+            sleep 2
+            sudo systemctl start nomad-pi >> update.log 2>&1
             sleep 2
             if systemctl is-active --quiet nomad-pi; then
-                echo 'Service restart successful!' >> update.log
+                echo "Service started on second attempt!" >> update.log
             else
-                echo 'WARNING: Service failed to start after update!' >> update.log
+                echo "ERROR: Service failed to start after update!" >> update.log
             fi
-        " >> update.log 2>&1 &
-        echo "Service restart command issued in background." >> update.log
+        fi
+
+        echo "Restart complete." >> update.log
     else
         echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
     fi

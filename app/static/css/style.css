@@ -257,7 +257,7 @@ nav button.active {
 /* Cards (Movies/Shows) */
 .media-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 1.5rem;
 }
 
@@ -2153,3 +2153,24 @@ button.small {
     margin-bottom: 15px;
     color: var(--accent-color);
 }
+
+/* File Browser Grid Layout - Better Space Usage */
+#files-list.list-view {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important;
+    gap: 20px !important;
+    padding: 20px !important;
+}
+
+#files-list .media-item {
+    max-width: none !important;
+    width: 100% !important;
+}
+
+#files-list .media-card {
+    width: 100% !important;
+    max-width: none !important;
+    aspect-ratio: auto !important;
+    min-height: 80px !important;
+}
+
