@@ -336,7 +336,32 @@ function handleLoginKey(e) {
     if (e.key === 'Enter') login();
 }
 
+function toggleMobileMenu() {
+    const nav = document.getElementById('main-nav');
+    const menuBtn = document.querySelector('.mobile-menu-btn');
+
+    if (nav) {
+        nav.classList.toggle('mobile-menu-open');
+
+        // Toggle hamburger icon
+        if (menuBtn) {
+            menuBtn.textContent = nav.classList.contains('mobile-menu-open') ? '✕' : '☰';
+        }
+    }
+}
+
 function showSection(id) {
+    // Close mobile menu when navigating
+    const nav = document.getElementById('main-nav');
+    if (nav && nav.classList.contains('mobile-menu-open')) {
+        nav.classList.remove('mobile-menu-open');
+        const menuBtn = document.querySelector('.mobile-menu-btn');
+        if (menuBtn) {
+            menuBtn.textContent = '☰';
+        }
+    }
+
+
     document.querySelectorAll('main > section').forEach(sec => {
         sec.classList.add('hidden');
         sec.style.display = 'none'; // Force hide
