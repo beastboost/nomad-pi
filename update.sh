@@ -149,6 +149,21 @@ else
     echo "No migration script found, skipping..." >> update.log
 fi
 
+
+# Fix MiniDLNA permissions after update
+echo "Checking MiniDLNA configuration..." >> update.log
+if command -v minidlnad >/dev/null 2>&1; then
+    echo "Fixing MiniDLNA cache permissions..." >> update.log
+    sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
+    sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
+
+    # Restart MiniDLNA if it's running
+    if systemctl is-active --quiet minidlna; then
+        echo "Restarting MiniDLNA..." >> update.log
+        sudo systemctl restart minidlna >> update.log 2>&1 || echo "MiniDLNA restart failed (non-critical)" >> update.log
+    fi
+fi
+
 update_status 90 "Update complete. Finalizing..."
 echo "Update complete. Preparing to restart..."
 
