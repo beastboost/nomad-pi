@@ -157,10 +157,18 @@ nav button.active {
 }
 
 @media (max-width: 768px) {
+    body {
+        overflow-x: visible !important;
+    }
+
+    header {
+        overflow: visible !important;
+    }
+
     .mobile-bottom-nav {
         display: flex;
     }
-    
+
     header nav#main-nav {
         position: fixed;
         top: 0;
