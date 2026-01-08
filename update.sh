@@ -173,35 +173,50 @@ if command -v systemctl >/dev/null 2>&1; then
     if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
         sudo systemctl daemon-reload
         sudo systemctl enable nomad-pi.service
-        # Restart service synchronously for reliability
-        echo "Restarting service..." >> update.log
+        # Use systemd-run to defer restart (avoids self-restart issues)
+        echo "Scheduling deferred service restart..." >> update.log
 
-        # Stop service
-        sudo systemctl stop nomad-pi >> update.log 2>&1
-        echo "Service stopped, waiting for clean shutdown..." >> update.log
-        sleep 6
+        # Create a one-shot script to restart the service after a delay
+        echo "Creating restart script..." >> update.log
+        cat > /tmp/nomad-restart.sh << 'RESTART_EOF'
+#!/bin/bash
+echo "$(date): Deferred restart starting..." >> /home/pi/nomad-pi/update.log
+sleep 3
+systemctl stop nomad-pi
+echo "$(date): Service stopped" >> /home/pi/nomad-pi/update.log
+sleep 7
+systemctl start nomad-pi
+echo "$(date): Service start command issued" >> /home/pi/nomad-pi/update.log
+sleep 3
+if systemctl is-active --quiet nomad-pi; then
+    echo "$(date): Service restart successful!" >> /home/pi/nomad-pi/update.log
+else
+    echo "$(date): First start failed, retrying..." >> /home/pi/nomad-pi/update.log
+    sleep 2
+    systemctl start nomad-pi
+    sleep 2
+    if systemctl is-active --quiet nomad-pi; then
+        echo "$(date): Service started on retry!" >> /home/pi/nomad-pi/update.log
+    else
+        echo "$(date): ERROR: Service failed to start!" >> /home/pi/nomad-pi/update.log
+    fi
+fi
+rm -f /tmp/nomad-restart.sh
+RESTART_EOF
 
-        # Start service
-        echo "Starting service..." >> update.log
-        sudo systemctl start nomad-pi >> update.log 2>&1
-        sleep 3
+        chmod +x /tmp/nomad-restart.sh
+        echo "Launching deferred restart in background..." >> update.log
 
-        # Verify it started
-        if systemctl is-active --quiet nomad-pi; then
-            echo "Service restart successful!" >> update.log
+        # Use systemd-run if available, otherwise nohup
+        if command -v systemd-run >/dev/null 2>&1; then
+            sudo systemd-run --unit=nomad-pi-restart --description="Nomad Pi Deferred Restart" /tmp/nomad-restart.sh
+            echo "Restart scheduled via systemd-run" >> update.log
         else
-            echo "WARNING: Service failed to start! Trying one more time..." >> update.log
-            sleep 2
-            sudo systemctl start nomad-pi >> update.log 2>&1
-            sleep 2
-            if systemctl is-active --quiet nomad-pi; then
-                echo "Service started on second attempt!" >> update.log
-            else
-                echo "ERROR: Service failed to start after update!" >> update.log
-            fi
+            sudo nohup /tmp/nomad-restart.sh >/dev/null 2>&1 &
+            echo "Restart scheduled via nohup" >> update.log
         fi
 
-        echo "Restart complete." >> update.log
+        echo "Update complete. Service will restart in ~10 seconds." >> update.log
     else
         echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
     fi
