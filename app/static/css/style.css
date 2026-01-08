@@ -179,11 +179,12 @@ nav button.active {
         box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
         overflow-y: auto;
         transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        display: flex !important; /* Force display */
     }
 
     header nav#main-nav.mobile-menu-open {
-        right: 0;
-        display: flex;
+        right: 0 !important;
+        display: flex !important;
     }
 
     header nav#main-nav button {
@@ -192,9 +193,11 @@ nav button.active {
         padding: 16px 20px;
         font-size: 1rem;
         border-radius: 10px;
-        background: transparent;
-        color: var(--text-color);
+        background: rgba(255, 255, 255, 0.05) !important;
+        color: #ffffff !important;
         transition: all 0.2s;
+        display: flex !important;
+        align-items: center;
     }
 
     header nav#main-nav button:active {
