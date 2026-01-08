@@ -193,6 +193,7 @@ nav button.active {
         font-size: 1rem;
         border-radius: 10px;
         background: transparent;
+        color: var(--text-color);
         transition: all 0.2s;
     }
 
