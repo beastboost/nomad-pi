@@ -340,6 +340,10 @@ function toggleMobileMenu() {
     const nav = document.getElementById('main-nav');
     const menuBtn = document.querySelector('.mobile-menu-btn');
 
+    // Debug: Check if CSS loaded properly
+    const rightPos = nav ? window.getComputedStyle(nav).right : null;
+    console.log('Menu toggle - Current right position:', rightPos);
+
     // Create backdrop if it doesn't exist
     let backdrop = document.getElementById('mobile-menu-backdrop');
     if (!backdrop) {
@@ -355,17 +359,23 @@ function toggleMobileMenu() {
     if (isOpen) {
         // Close menu
         nav.classList.remove('mobile-menu-open');
+        // Fallback: ensure menu slides out
+        nav.style.right = '-100%';
         backdrop.classList.remove('show');
         if (menuBtn) menuBtn.textContent = '☰';
         document.body.style.overflow = '';
         document.body.classList.remove('menu-open');
+        console.log('Menu closed');
     } else if (nav) {
         // Open menu
         nav.classList.add('mobile-menu-open');
+        // Fallback: force menu to slide in if CSS isn't working
+        nav.style.right = '0';
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
         document.body.style.overflow = 'hidden'; // Prevent background scrolling
         document.body.classList.add('menu-open');
+        console.log('Menu opened - should be visible now');
     }
 }
 
