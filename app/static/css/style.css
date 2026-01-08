@@ -69,6 +69,12 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+body.menu-open {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+}
+
 /* Glass Elements */
 .glass {
     background: var(--header-bg);
@@ -157,14 +163,6 @@ nav button.active {
 }
 
 @media (max-width: 768px) {
-    body {
-        overflow-x: visible !important;
-    }
-
-    header {
-        overflow: visible !important;
-    }
-
     .mobile-bottom-nav {
         display: flex;
     }
@@ -187,7 +185,8 @@ nav button.active {
         box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
         overflow-y: auto;
         transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex !important; /* Force display */
+        display: flex !important;
+        pointer-events: auto;
     }
 
     header nav#main-nav.mobile-menu-open {
@@ -206,15 +205,25 @@ nav button.active {
         transition: all 0.2s;
         display: flex !important;
         align-items: center;
+        border: none;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        min-height: 48px;
+    }
+
+    header nav#main-nav button:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
     }
 
     header nav#main-nav button:active {
         transform: scale(0.98);
+        background: rgba(255, 255, 255, 0.15) !important;
     }
 
     header nav#main-nav button.active {
-        background: rgba(59, 130, 246, 0.2);
-        color: #60a5fa;
+        background: rgba(59, 130, 246, 0.2) !important;
+        color: #60a5fa !important;
     }
 
     header nav#main-nav button i {
@@ -250,12 +259,14 @@ nav button.active {
     z-index: 9998;
     opacity: 0;
     visibility: hidden;
+    pointer-events: none;
     transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .mobile-menu-backdrop.show {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto;
 }
 
 }
@@ -1117,6 +1128,10 @@ header {
     font-size: 1.8rem;
     cursor: pointer;
     padding: 10px;
+    z-index: 10000;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
 }
 
 nav {
