@@ -2,37 +2,47 @@ console.log("App v1.2 loaded - Plex-style UI & External Players");
 const API_BASE = '/api';
 
 async function checkPostUpdate() {
-    const preUpdateVersion = localStorage.getItem('nomadpi_pre_update_version');
-    if (!preUpdateVersion) return;
-
     try {
         const res = await fetch(`${API_BASE}/system/status`);
         const data = await res.json();
-        
-        if (data.version && data.version !== preUpdateVersion) {
-            // Version changed! Clear the flag and show modal
+
+        if (!data.version) return;
+
+        // Check both pre-update version (from update button) and last seen version
+        const preUpdateVersion = localStorage.getItem('nomadpi_pre_update_version');
+        const lastSeenVersion = localStorage.getItem('nomadpi_last_seen_version');
+
+        // Determine if version changed
+        const versionChanged = preUpdateVersion ?
+            (data.version !== preUpdateVersion) :
+            (lastSeenVersion && data.version !== lastSeenVersion);
+
+        if (versionChanged) {
+            // Version changed! Clear flags and show modal
             localStorage.removeItem('nomadpi_pre_update_version');
-            
+            localStorage.setItem('nomadpi_last_seen_version', data.version);
+
             // Update version tag in modal
             const versionTag = document.getElementById('new-version-tag');
             if (versionTag) versionTag.textContent = `v${data.version}`;
-            
+
             // Fetch changelog
             const logRes = await fetch(`${API_BASE}/system/changelog`);
             const logData = await logRes.json();
-            
+
             const list = document.getElementById('changelog-list');
             if (list && logData.changelog) {
                 list.innerHTML = logData.changelog.map(item => `<li>${item}</li>`).join('');
             }
-            
+
             // Show modal
             const modal = document.getElementById('what-is-new-modal');
             if (modal) modal.classList.remove('hidden');
-        } else if (data.version === preUpdateVersion) {
-            // Version didn't change (maybe update failed or no new version)
-            // We'll clear it after a while anyway to avoid stuck state
-            // For now, let's keep it in case they refresh again during restart
+        } else {
+            // No change detected, just update last seen version
+            if (!lastSeenVersion) {
+                localStorage.setItem('nomadpi_last_seen_version', data.version);
+            }
         }
     } catch (e) {
         console.error('Error checking post-update status:', e);
