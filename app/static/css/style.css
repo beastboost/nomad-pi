@@ -2474,6 +2474,56 @@ button.small {
     }
 }
 
+/* Portrait-specific spacing adjustments */
+@media (max-width: 768px) and (orientation: portrait) {
+    .player-bar:not(.hidden) {
+        padding: 14px 12px !important;
+        gap: 14px !important;
+    }
+
+    .player-title {
+        margin-bottom: 10px;
+    }
+
+    .player-controls {
+        gap: 20px;
+    }
+
+    /* More padding in portrait for better visibility */
+    main:has(~ .player-bar:not(.hidden)) {
+        padding-bottom: 230px !important;
+    }
+}
+
+/* Landscape-specific spacing adjustments */
+@media (max-width: 768px) and (orientation: landscape) {
+    .player-bar:not(.hidden) {
+        padding: 8px 10px !important;
+        gap: 8px !important;
+        bottom: 70px !important; /* Closer to nav in landscape */
+    }
+
+    .player-title {
+        font-size: 0.9rem;
+        margin-bottom: 6px;
+    }
+
+    .player-controls {
+        gap: 12px;
+    }
+
+    .player-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 1.1rem;
+    }
+
+    /* Less padding in landscape to maximize content area */
+    main:has(~ .player-bar:not(.hidden)) {
+        padding-bottom: 160px !important;
+    }
+}
+
 /* Password Change Section */
 .settings-group {
     margin-bottom: 25px;
