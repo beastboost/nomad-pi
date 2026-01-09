@@ -545,7 +545,8 @@ def find_duplicate_files() -> List[dict]:
         return_db(conn)
 
 def find_duplicate_metadata() -> List[dict]:
-    """Find media items that represent the same content based on IMDb ID."""
+    """Find media items that represent the same content based on IMDb ID.
+    EXCLUDES TV series episodes to prevent false positives (all episodes share the same series IMDb ID)."""
     conn = get_db()
     try:
         c = conn.cursor()
@@ -553,6 +554,7 @@ def find_duplicate_metadata() -> List[dict]:
             SELECT imdb_id, title, media_type, GROUP_CONCAT(path, '|') as paths, COUNT(*) as count
             FROM file_metadata
             WHERE imdb_id IS NOT NULL AND imdb_id != 'N/A' AND imdb_id != ''
+            AND media_type != 'series'
             GROUP BY imdb_id
             HAVING count > 1
             ORDER BY count DESC

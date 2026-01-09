@@ -262,7 +262,7 @@ nav button.active {
 .mobile-menu-backdrop.show {
     opacity: 1;
     visibility: visible;
-    pointer-events: auto;
+    pointer-events: auto; /* Allows clicking backdrop to close menu */
 }
 
 }

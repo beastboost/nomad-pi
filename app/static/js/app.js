@@ -1417,7 +1417,7 @@ function openVideoViewer(path, title, startSeconds = 0) {
         <div style="display:flex; align-items:center; gap:12px; width:100%;">
             <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</span>
             <div class="external-player-btns" style="display:flex; gap:8px;">
-                <a href="${streamUrl}" download="${escapeHtml(downloadName)}" class="player-action-btn" title="Download for offline playback">
+                <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
                 </a>
                 <a href="${vlcUrl}" class="player-action-btn vlc-btn" title="Open in VLC (Fixes playback issues)">

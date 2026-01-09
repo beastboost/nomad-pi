@@ -1338,10 +1338,10 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
         return {"error": str(e)}
 
 @router.get("/stream")
-async def stream_media(path: str = Query(...), token: str = Query(None), user_id: int = Depends(get_current_user_id)):
+async def stream_media(path: str = Query(...), token: str = Query(None), download: bool = Query(False), user_id: int = Depends(get_current_user_id)):
     # The middleware already checks for token, but we can double check here if needed
     # However, if it got here, it's either authenticated or it's a path that doesn't start with /data or /api/media
-    
+
     # We should ensure the path is valid
     if not os.path.isabs(path) and not path.startswith("/data/"):
         # Try to resolve relative to BASE_DIR if it's not absolute
@@ -1358,6 +1358,17 @@ async def stream_media(path: str = Query(...), token: str = Query(None), user_id
 
     if not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="File not found")
+
+    # If download=true, force browser to download with proper headers
+    if download:
+        filename = os.path.basename(fs_path)
+        return FileResponse(
+            fs_path,
+            media_type='application/octet-stream',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
 
     # Simple FileResponse for now, it supports range requests
     return FileResponse(fs_path)

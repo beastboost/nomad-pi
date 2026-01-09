@@ -38,17 +38,17 @@
             <div class="logo">Nomad Pi ✨</div>
             <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
             <nav id="main-nav">
-                <button onclick="showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
-                <button onclick="showSection('movies')"><i class="fas fa-film"></i> Movies</button>
-                <button onclick="showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
-                <button onclick="showSection('music')"><i class="fas fa-music"></i> Music</button>
-                <button onclick="showSection('books')"><i class="fas fa-book"></i> Books</button>
-                <button onclick="showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
-                <button onclick="showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
-                <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
-                <button onclick="showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
+                <button onclick="event.stopPropagation(); showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
+                <button onclick="event.stopPropagation(); showSection('movies')"><i class="fas fa-film"></i> Movies</button>
+                <button onclick="event.stopPropagation(); showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
+                <button onclick="event.stopPropagation(); showSection('music')"><i class="fas fa-music"></i> Music</button>
+                <button onclick="event.stopPropagation(); showSection('books')"><i class="fas fa-book"></i> Books</button>
+                <button onclick="event.stopPropagation(); showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
+                <button onclick="event.stopPropagation(); showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
+                <button onclick="event.stopPropagation(); showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
+                <button onclick="event.stopPropagation(); showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
                 <span id="header-stats" class="header-stats"></span>
-                <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+                <button onclick="event.stopPropagation(); logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
             </nav>
         </header>
 
