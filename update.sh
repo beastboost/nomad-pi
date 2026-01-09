@@ -167,11 +167,20 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
     NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
 
-    sudo bash -c "cat > $SUDOERS_FILE" <<EOL
+    # Write to temp file first and validate before installing
+    SUDOERS_TMP=$(mktemp)
+    cat > "$SUDOERS_TMP" <<EOL
 $REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
 EOL
-    sudo chmod 0440 $SUDOERS_FILE
-    echo "Sudoers permissions restored." >> update.log
+    # Validate sudoers syntax before installing - a malformed file can lock out sudo access
+    if sudo visudo -cf "$SUDOERS_TMP"; then
+        sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
+        sudo chmod 0440 "$SUDOERS_FILE"
+        echo "Sudoers permissions restored." >> update.log
+    else
+        echo "ERROR: Generated sudoers file failed syntax validation. Not installing." >> update.log
+    fi
+    rm -f "$SUDOERS_TMP"
 fi
 
 if command -v minidlnad >/dev/null 2>&1; then
