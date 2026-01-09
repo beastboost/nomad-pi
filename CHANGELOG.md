@@ -2,6 +2,11 @@
 
 All notable changes to Nomad Pi will be documented in this file.
 
+## [1.1.1] - 2026-01-09
+
+### Fixed
+- Music player orientation-specific spacing (portrait vs landscape optimizations)
+
 ## [1.1.0] - 2026-01-09
 
 ### Added
