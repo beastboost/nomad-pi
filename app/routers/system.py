@@ -1285,6 +1285,117 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
     
     return info
 
+@router.get("/diagnostics")
+def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
+    """Check system for missing dependencies and common issues"""
+    diagnostics = {
+        "status": "healthy",
+        "issues": [],
+        "warnings": [],
+        "dependencies": {}
+    }
+
+    # Check for comic book extraction tools
+    comic_tools = {
+        "7z": shutil.which("7z") or shutil.which("7zz") or shutil.which("7zr"),
+        "unar": shutil.which("unar"),
+        "bsdtar": shutil.which("bsdtar")
+    }
+
+    comic_tools_available = any(comic_tools.values())
+    diagnostics["dependencies"]["comic_extraction"] = {
+        "status": "ok" if comic_tools_available else "missing",
+        "tools_found": [tool for tool, path in comic_tools.items() if path],
+        "description": "Required for CBR/RAR comic book files"
+    }
+
+    if not comic_tools_available:
+        diagnostics["issues"].append({
+            "severity": "error",
+            "component": "Comic Book Viewer",
+            "message": "CBR/RAR extraction tools not installed",
+            "fix": "Run: sudo apt-get update && sudo apt-get install -y p7zip-full unar libarchive-tools",
+            "impact": "Cannot read .cbr comic book files (CBZ files still work)"
+        })
+        diagnostics["status"] = "issues_found"
+
+    # Check for MiniDLNA
+    minidlna_installed = shutil.which("minidlnad") is not None
+    diagnostics["dependencies"]["minidlna"] = {
+        "status": "ok" if minidlna_installed else "missing",
+        "description": "DLNA media server for smart TVs"
+    }
+
+    if not minidlna_installed:
+        diagnostics["warnings"].append({
+            "severity": "warning",
+            "component": "MiniDLNA",
+            "message": "MiniDLNA not installed",
+            "fix": "Run: sudo apt-get install -y minidlna",
+            "impact": "Cannot stream media to smart TVs via DLNA"
+        })
+
+    # Check sudoers file
+    sudoers_exists = os.path.exists("/etc/sudoers.d/nomad-pi")
+    diagnostics["dependencies"]["sudo_permissions"] = {
+        "status": "ok" if sudoers_exists else "missing",
+        "description": "Passwordless sudo for system operations"
+    }
+
+    if not sudoers_exists:
+        diagnostics["warnings"].append({
+            "severity": "warning",
+            "component": "System Permissions",
+            "message": "Sudoers file not found",
+            "fix": "Re-run setup.sh or update.sh to restore permissions",
+            "impact": "Some admin features may require manual password entry"
+        })
+
+    # Check for available disk space
+    try:
+        disk = psutil.disk_usage("/")
+        free_gb = disk.free / (1024**3)
+        diagnostics["storage"] = {
+            "free_gb": round(free_gb, 2),
+            "percent_used": disk.percent
+        }
+
+        if free_gb < 1:
+            diagnostics["issues"].append({
+                "severity": "critical",
+                "component": "Disk Space",
+                "message": f"Very low disk space: {free_gb:.2f} GB remaining",
+                "fix": "Delete unused media files or expand storage",
+                "impact": "May cause system instability or prevent new uploads"
+            })
+            diagnostics["status"] = "critical"
+        elif free_gb < 5:
+            diagnostics["warnings"].append({
+                "severity": "warning",
+                "component": "Disk Space",
+                "message": f"Low disk space: {free_gb:.2f} GB remaining",
+                "fix": "Consider cleaning up media files",
+                "impact": "Limited space for new media"
+            })
+    except:
+        pass
+
+    # Check memory usage
+    try:
+        mem = psutil.virtual_memory()
+        if mem.percent > 90:
+            diagnostics["warnings"].append({
+                "severity": "warning",
+                "component": "Memory",
+                "message": f"High memory usage: {mem.percent}%",
+                "fix": "Consider restarting the system",
+                "impact": "May cause slow performance"
+            })
+    except:
+        pass
+
+    return diagnostics
+
 @router.get("/processes")
 def get_processes(user_id: int = Depends(get_current_user_id)):
     """Get list of running processes"""

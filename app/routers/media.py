@@ -1494,6 +1494,13 @@ def list_media_paged(
     return _get_paged_data(category, q, offset, limit, sort, genre, year, rebuild, user_id)
 
 def extract_archive_to_dir(archive_path: str, out_dir: str):
+    """Extract CBR/RAR archives using available system tools.
+
+    Tries multiple extraction tools in order of preference:
+    1. 7-Zip variants (7zz, 7z, 7zr)
+    2. unar (The Unarchiver)
+    3. bsdtar (libarchive-tools)
+    """
     attempts = []
 
     # Common Windows 7-Zip paths
@@ -1505,22 +1512,35 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
         if os.path.exists(p):
             attempts.append((f"7z (Windows)", [p, "x", archive_path, f"-o{out_dir}", "-y"]))
 
+    # Try 7-Zip variants (most reliable for CBR/RAR files)
     for candidate in ["7zz", "7z", "7zr"]:
         p = shutil.which(candidate)
         if p:
             attempts.append((candidate, [p, "x", "-y", "-aoa", f"-o{out_dir}", archive_path]))
 
+    # Try unar (The Unarchiver - good alternative)
     p = shutil.which("unar")
     if p:
         attempts.append(("unar", [p, "-o", out_dir, "-f", archive_path]))
 
+    # Try bsdtar (from libarchive-tools)
     p = shutil.which("bsdtar")
     if p:
         attempts.append(("bsdtar", [p, "-xf", archive_path, "-C", out_dir]))
 
     if not attempts:
+        error_msg = (
+            "❌ CBR/RAR extraction tools not found!\n\n"
+            "📦 Required packages are missing. To fix this:\n\n"
+            "1️⃣ SSH into your Raspberry Pi\n"
+            "2️⃣ Run: sudo apt-get update && sudo apt-get install -y p7zip-full unar libarchive-tools\n"
+            "3️⃣ Restart Nomad Pi service\n\n"
+            "📝 Note: These packages should have been installed by setup.sh. "
+            "If you recently ran a system update, they may have been removed by apt autoremove.\n\n"
+            "💡 Tip: CBZ (ZIP) files work without these tools. Only CBR (RAR) files require them."
+        )
         print("CBR Extraction Error: No extractor tools found (checked 7zz, 7z, 7zr, unar, bsdtar, and standard Windows paths).")
-        raise HTTPException(status_code=500, detail="No extractor installed for CBR. Install 7-Zip (Windows) or p7zip-full/unar (Linux).")
+        raise HTTPException(status_code=500, detail=error_msg)
 
     last_err = None
     for tool, cmd in attempts:
