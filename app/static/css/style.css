@@ -2417,8 +2417,15 @@ button.small {
         flex-direction: column;
         gap: 15px;
         height: auto;
-        bottom: 0;
+        /* Position above the bottom nav (70px + safe area) */
+        bottom: calc(70px + env(safe-area-inset-bottom));
+        left: 0;
+        right: 0;
         border-radius: 15px 15px 0 0;
+        /* Higher z-index to appear above bottom nav */
+        z-index: 1100;
+        /* Adjust margin for better spacing */
+        margin: 0;
     }
 
     .player-title {
@@ -2452,10 +2459,11 @@ button.small {
     .player-time {
         font-size: 0.85rem;
     }
-    
-    /* Ensure main content doesn't get covered by the tall mobile player bar */
+
+    /* Ensure main content doesn't get covered by the player bar + bottom nav */
+    /* Player bar ~120px + bottom nav 70px + safe area = ~200px total */
     main {
-        padding-bottom: 180px !important;
+        padding-bottom: calc(200px + env(safe-area-inset-bottom)) !important;
     }
 }
 
