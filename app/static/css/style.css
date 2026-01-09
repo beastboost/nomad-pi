@@ -2413,12 +2413,19 @@ button.small {
 /* Mobile Media Player Optimizations */
 @media (max-width: 768px) {
     .player-bar {
-        padding: 15px 10px;
-        flex-direction: column;
-        gap: 15px;
-        height: auto;
-        bottom: 0;
-        border-radius: 15px 15px 0 0;
+        padding: 15px 10px !important;
+        flex-direction: column !important;
+        gap: 15px !important;
+        height: auto !important;
+        /* Position above the bottom nav - fixed at 70px to match bottom nav height */
+        bottom: 70px !important;
+        left: 0 !important;
+        right: 0 !important;
+        border-radius: 15px 15px 0 0 !important;
+        /* Much higher z-index to ensure it's above everything */
+        z-index: 1100 !important;
+        margin: 0 !important;
+        display: grid !important; /* Ensure it's displayed */
     }
 
     .player-title {
@@ -2452,10 +2459,11 @@ button.small {
     .player-time {
         font-size: 0.85rem;
     }
-    
-    /* Ensure main content doesn't get covered by the tall mobile player bar */
+
+    /* Ensure main content doesn't get covered by the player bar + bottom nav */
+    /* Player bar ~120-140px + bottom nav 70px = ~210px total */
     main {
-        padding-bottom: 180px !important;
+        padding-bottom: 210px !important;
     }
 }
 
