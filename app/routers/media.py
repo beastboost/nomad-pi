@@ -1365,9 +1365,7 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
         return FileResponse(
             fs_path,
             media_type='application/octet-stream',
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"'
-            }
+            filename=filename
         )
 
     # Simple FileResponse for now, it supports range requests
