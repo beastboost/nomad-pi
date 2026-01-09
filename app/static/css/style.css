@@ -2413,43 +2413,50 @@ button.small {
 /* Mobile Media Player Optimizations */
 @media (max-width: 768px) {
     .player-bar {
-        padding: 15px 10px !important;
+        padding: 12px 10px !important;
         flex-direction: column !important;
-        gap: 15px !important;
+        gap: 12px !important;
         height: auto !important;
-        /* Position above the bottom nav - fixed at 70px to match bottom nav height */
-        bottom: 70px !important;
+        /* Position above the bottom nav - must match nav's total height */
+        /* Bottom nav is 70px + safe-area, so we position at 90px to ensure clearance */
+        bottom: 90px !important;
         left: 0 !important;
         right: 0 !important;
-        border-radius: 15px 15px 0 0 !important;
+        border-radius: 12px 12px 0 0 !important;
         /* Much higher z-index to ensure it's above everything */
         z-index: 1100 !important;
         margin: 0 !important;
         display: grid !important; /* Ensure it's displayed */
+        grid-template-columns: 1fr !important; /* Single column on mobile */
+        background: rgba(20, 20, 20, 0.98) !important; /* More opaque for visibility */
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
     }
 
     .player-title {
         text-align: center;
         width: 100%;
-        font-size: 1.1rem;
-        margin-bottom: 5px;
+        font-size: 1rem;
+        margin-bottom: 8px;
+        font-weight: 600;
     }
 
     .player-controls {
         justify-content: center;
         width: 100%;
-        gap: 20px;
+        gap: 16px;
     }
 
     .player-btn {
-        width: 50px;
-        height: 50px;
-        font-size: 1.5rem;
+        width: 48px;
+        height: 48px;
+        font-size: 1.3rem;
     }
 
     .player-progress {
         width: 100%;
         margin: 0;
+        order: -1; /* Put progress bar at the top */
     }
 
     .player-volume {
@@ -2457,13 +2464,13 @@ button.small {
     }
 
     .player-time {
-        font-size: 0.85rem;
+        font-size: 0.8rem;
     }
 
     /* Ensure main content doesn't get covered by the player bar + bottom nav */
-    /* Player bar ~120-140px + bottom nav 70px = ~210px total */
+    /* Player bar ~110-130px + bottom nav 90px = ~220px total */
     main {
-        padding-bottom: 210px !important;
+        padding-bottom: 220px !important;
     }
 }
 
