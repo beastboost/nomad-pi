@@ -2,6 +2,16 @@
 
 All notable changes to Nomad Pi will be documented in this file.
 
+## [1.1.4] - 2026-01-09
+
+### Fixed
+- **CRITICAL**: PWA service worker serving stale CSS (music player buttons still squished after update)
+  - Updated cache name from v3.1 to v1.1.4 to force cache invalidation
+  - This ensures all PWA clients get the new CSS with proper button spacing
+- **CRITICAL**: Changelog popup not appearing after manual updates (git pull/merge)
+  - Now tracks both pre-update version and last-seen version in localStorage
+  - Works with any update method, not just the "Update from GitHub" button
+
 ## [1.1.3] - 2026-01-09
 
 ### Fixed
