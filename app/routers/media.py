@@ -111,7 +111,7 @@ def get_scan_paths(category: str):
     # Add auto-mounting logic for Linux (Pi)
     if platform.system() == "Linux":
         # Check /media/pi or /media/ (standard mount points)
-        for mount_root in ["/media/pi", "/media"]:
+        for mount_root in ["/media/pi", "/media", "/mnt"]:
             if os.path.exists(mount_root):
                 try:
                     for drive in os.listdir(mount_root):
@@ -132,13 +132,32 @@ def get_scan_paths(category: str):
                              # Use the symlinked path for consistency with web /data/ paths
                              base_to_use = external_link if os.path.exists(external_link) else drive_path
 
-                             # Check for category folder
-                             for cat_name in [category, category.capitalize(), category.upper()]:
+                             # Check for category folder with more synonyms
+                             synonyms = [category, category.capitalize(), category.upper()]
+                             if category == "shows":
+                                 synonyms += ["TV Shows", "TV", "Series", "TV Series", "tvshows", "tv"]
+                             elif category == "movies":
+                                 synonyms += ["Films", "Cinema", "My Movies", "movies"]
+                             elif category == "music":
+                                 synonyms += ["My Music", "Audio", "Songs"]
+                             elif category == "books":
+                                 synonyms += ["Comics", "Ebooks", "Magazines"]
+
+                             found_cat = False
+                             for cat_name in synonyms:
                                 cat_path = os.path.join(base_to_use, cat_name)
                                 if os.path.exists(cat_path):
                                     if cat_path not in paths:
                                         paths.append(cat_path)
+                                    found_cat = True
                                     break
+                             
+                             # If no category folder found, but the drive name matches the category, scan the whole drive
+                             if not found_cat:
+                                 drive_lower = drive.lower()
+                                 if category in drive_lower or (category == "shows" and ("tv" in drive_lower or "series" in drive_lower)):
+                                     if base_to_use not in paths:
+                                         paths.append(base_to_use)
                 except Exception:
                     pass
     return paths
@@ -184,6 +203,20 @@ def safe_fs_path_from_web_path(web_path: str):
         raise HTTPException(status_code=400, detail="Invalid path format")
 
     rel = posixpath.normpath(web_path[len("/data/"):]).lstrip("/")
+    
+    # SPECIAL HANDLING FOR EXTERNAL DRIVES ON LINUX
+    # If the path starts with "external/" but the symlink doesn't exist, 
+    # try to map it directly to /media/pi/ or /media/
+    if platform.system() == "Linux" and rel.startswith("external/"):
+        parts = rel.split("/")
+        if len(parts) >= 2:
+            drive_name = parts[1]
+            rest = "/".join(parts[2:])
+            for mount_root in ["/media/pi", "/media", "/mnt"]:
+                potential_path = os.path.join(mount_root, drive_name, rest)
+                if os.path.exists(potential_path):
+                    return potential_path
+
     if rel.startswith("..") or rel == ".":
         raise HTTPException(status_code=400, detail="Invalid path traversal")
 
@@ -608,14 +641,60 @@ def build_library_index(category: str):
                     continue
 
                 try:
-                    rel_path = os.path.relpath(full_path, BASE_DIR)
-                    url_path = rel_path.replace(os.sep, '/')
-                    web_path = f"/data/{url_path}"
-                except Exception:
+                    # Check if full_path is within BASE_DIR
+                    abs_full = os.path.abspath(full_path)
+                    abs_base_dir = os.path.abspath(BASE_DIR)
+                    
+                    if abs_full.startswith(abs_base_dir):
+                        rel_path = os.path.relpath(full_path, BASE_DIR)
+                        url_path = rel_path.replace(os.sep, '/')
+                        web_path = f"/data/{url_path}"
+                    else:
+                        # Outside BASE_DIR (e.g. external drive)
+                        # Find which drive it's on
+                        drive_info = None
+                        for mount_root in ["/media/pi", "/media", "/mnt"]:
+                            if full_path.startswith(mount_root):
+                                rel_to_mount = os.path.relpath(full_path, mount_root)
+                                parts = rel_to_mount.split(os.sep)
+                                drive_name = parts[0]
+                                rest = os.path.join(*parts[1:]) if len(parts) > 1 else ""
+                                web_path = f"/data/external/{drive_name}/{rest}".replace(os.sep, '/')
+                                drive_info = True
+                                break
+                        
+                        if not drive_info:
+                            # Fallback to relpath if possible, though it might have ..
+                            rel_path = os.path.relpath(full_path, BASE_DIR)
+                            url_path = rel_path.replace(os.sep, '/')
+                            web_path = f"/data/{url_path}"
+                        
+                        # Ensure rel_path is defined even for external drives
+                        # We use the web_path (minus the /data/ prefix) as a virtual rel_path
+                        rel_path = web_path.replace("/data/", "").replace("/", os.sep)
+                except Exception as e:
+                    logger.error(f"Error calculating paths for {full_path}: {e}")
                     continue
 
                 try:
-                    folder = os.path.relpath(root, base).replace(os.sep, '/')
+                    # Smarter folder calculation for 'shows'
+                    rel_folder = os.path.relpath(root, base).replace(os.sep, '/')
+                    
+                    if category == "shows":
+                        # If the scan path (base) itself seems to be a show folder
+                        # (i.e., it's not named 'shows', 'tv shows', etc.), 
+                        # prepend its name to the folder path.
+                        base_name = os.path.basename(base)
+                        synonyms = ["shows", "tv shows", "tv", "series", "tv series", "tvshows", "media", "external"]
+                        if base_name.lower() not in synonyms:
+                            if rel_folder == ".":
+                                folder = base_name
+                            else:
+                                folder = f"{base_name}/{rel_folder}"
+                        else:
+                            folder = rel_folder
+                    else:
+                        folder = rel_folder
                 except Exception:
                     folder = "."
 
@@ -1516,12 +1595,20 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
     for candidate in ["7zz", "7z", "7zr"]:
         p = shutil.which(candidate)
         if p:
+            # -aoa: Overwrite all existing files without prompt
             attempts.append((candidate, [p, "x", "-y", "-aoa", f"-o{out_dir}", archive_path]))
 
-    # Try unar (The Unarchiver - good alternative)
+    # Try unrar (Official RAR extractor)
+    p = shutil.which("unrar")
+    if p:
+        # x: Extract with full path, -y: Assume Yes on all queries, -o+: Overwrite existing files
+        attempts.append(("unrar", [p, "x", "-y", "-o+", archive_path, out_dir + os.sep]))
+
+    # Try unar (The Unarchiver - very good with various formats)
     p = shutil.which("unar")
     if p:
-        attempts.append(("unar", [p, "-o", out_dir, "-f", archive_path]))
+        # -f: Force overwrite, -o: Output directory
+        attempts.append(("unar", [p, "-f", "-o", out_dir, archive_path]))
 
     # Try bsdtar (from libarchive-tools)
     p = shutil.which("bsdtar")
@@ -1545,19 +1632,33 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
     last_err = None
     for tool, cmd in attempts:
         try:
-            print(f"Attempting extraction with {tool}: {' '.join(cmd)}")
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            print(f"Extraction successful with {tool}")
-            return tool
-        except subprocess.CalledProcessError as e:
-            err = (e.stderr or e.stdout or "").strip()
-            last_err = f"{tool} failed: {err}" if err else f"{tool} failed with exit code {e.returncode}"
-            print(f"Extraction error ({tool}): {last_err}")
+            logger.info(f"Attempting extraction with {tool}: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                logger.info(f"Extraction successful with {tool}")
+                return tool
+            else:
+                err = (result.stderr or result.stdout or "").strip()
+                last_err = f"{tool} failed (exit {result.returncode}): {err}"
+                logger.warning(f"Extraction error ({tool}): {last_err}")
+        except subprocess.TimeoutExpired:
+            last_err = f"{tool} timed out after 30s"
+            logger.warning(last_err)
         except Exception as e:
-            last_err = f"{tool} error: {e}"
-            print(f"Extraction exception ({tool}): {e}")
+            last_err = f"{tool} exception: {str(e)}"
+            logger.error(f"Extraction exception ({tool}): {e}")
 
-    print(f"All extraction attempts failed. Last error: {last_err}")
+    logger.error(f"All extraction attempts failed. Last error: {last_err}")
+    
+    # If we are on Linux, suggest installing tools if everything failed
+    if platform.system() == "Linux":
+        missing_tools = []
+        for t in ["7z", "unar", "unrar", "bsdtar"]:
+            if not shutil.which(t):
+                missing_tools.append(t)
+        if missing_tools:
+            last_err += f"\n\nMissing tools on system: {', '.join(missing_tools)}. Run 'sudo apt update && sudo apt install -y p7zip-full unar unrar libarchive-tools' to fix."
+
     raise HTTPException(status_code=500, detail=last_err or "Failed to extract archive.")
 
 @router.get("/list/{category}")

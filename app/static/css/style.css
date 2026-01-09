@@ -2447,9 +2447,22 @@ button.small {
         justify-content: center;
         align-items: center;
         width: 100%;
-        gap: 24px !important;
+        gap: 16px !important; /* Reduced from 24px to prevent squishing */
         display: flex !important;
         flex-wrap: nowrap !important;
+    }
+
+    @media (max-width: 380px) {
+        .player-controls {
+            gap: 10px !important; /* Even smaller gap for tiny screens */
+        }
+        .player-btn {
+            min-width: 42px !important;
+            min-height: 42px !important;
+            width: 42px !important;
+            height: 42px !important;
+            font-size: 1.1rem !important;
+        }
     }
 
     .player-btn {
@@ -2490,11 +2503,11 @@ button.small {
 @media (max-width: 768px) and (orientation: portrait) {
     .player-bar:not(.hidden) {
         padding: 18px 12px !important;
-        gap: 18px !important;
+        gap: 12px !important; /* Reduced from 18px */
     }
 
     .player-controls {
-        gap: 28px !important;
+        gap: 16px !important; /* Reduced from 28px - 28px was definitely too much for small screens */
     }
 
     /* More padding in portrait for better visibility */
@@ -2552,9 +2565,9 @@ button.small {
 /* File Browser Grid Layout - Better Space Usage */
 #files-list.list-view {
     display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important;
-    gap: 20px !important;
-    padding: 20px !important;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+    gap: 12px !important;
+    padding: 15px !important;
 }
 
 #files-list .media-item {
@@ -2566,6 +2579,27 @@ button.small {
     width: 100% !important;
     max-width: none !important;
     aspect-ratio: auto !important;
-    min-height: 80px !important;
+    min-height: 100px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    padding: 10px !important;
+}
+
+#files-list .media-info h3 {
+    font-size: 0.85rem !important;
+    margin: 0 !important;
+    word-break: break-all !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+}
+
+#files-list .media-info p {
+    font-size: 0.75rem !important;
+    margin-top: 4px !important;
 }
 

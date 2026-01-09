@@ -673,19 +673,61 @@ def get_update_status(user_id: int = Depends(get_current_user_id)):
 
 @public_router.get("/changelog")
 def get_changelog():
-    """Fetch recent git commits as a changelog"""
-    if platform.system() == "Linux":
+    """Fetch recent git commits as a changelog with fallback to CHANGELOG.md"""
+    logger.info("Changelog requested")
+    # Try git first
+    if platform.system() == "Linux" or os.path.exists(".git"):
         try:
             # Get last 10 commits with summary and relative date
             output = subprocess.check_output(
                 ["git", "log", "-n", "10", "--pretty=format:%s (%cr)"],
-                text=True
+                text=True,
+                stderr=subprocess.DEVNULL
             ).splitlines()
-            return {"changelog": output}
+            if output:
+                logger.info(f"Returning {len(output)} commits from git log")
+                return {"changelog": output}
         except Exception as e:
-            return {"changelog": [f"Error fetching changelog: {e}"]}
+            logger.debug(f"Git log failed: {e}")
+            pass
+
+    # Fallback to CHANGELOG.md
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    changelog_path = os.path.join(project_root, "CHANGELOG.md")
+    logger.info(f"Checking for CHANGELOG.md at: {changelog_path}")
     
-    # Fallback for Windows/Testing
+    if os.path.exists(changelog_path):
+        try:
+            with open(changelog_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                entries = []
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Include version headers and list items
+                    if line.startswith("#") or line.startswith("-") or line.startswith("*") or (line and line[0].isdigit()):
+                        # Clean up headers for display
+                        if line.startswith("###"):
+                            line = f"<b>{line.replace('###', '').strip()}</b>"
+                        elif line.startswith("##"):
+                            line = f"<u>{line.replace('##', '').strip()}</u>"
+                        elif line.startswith("#"):
+                            line = f"<b>{line.replace('#', '').strip()}</b>"
+                        
+                        entries.append(line)
+                    
+                    if len(entries) >= 20:
+                        break
+                if entries:
+                    logger.info(f"Returning {len(entries)} entries from CHANGELOG.md")
+                    return {"changelog": entries}
+        except Exception as e:
+            logger.error(f"Error reading CHANGELOG.md: {e}")
+            pass
+    
+    # Static Fallback
+    logger.info("Returning static fallback changelog")
     return {
         "changelog": [
             "Fixed service restart timing for Pi Zero stability (1.7.0)",
