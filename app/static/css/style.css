@@ -2412,7 +2412,8 @@ button.small {
 
 /* Mobile Media Player Optimizations */
 @media (max-width: 768px) {
-    .player-bar {
+    /* Only apply these styles when player is NOT hidden */
+    .player-bar:not(.hidden) {
         padding: 12px 10px !important;
         flex-direction: column !important;
         gap: 12px !important;
@@ -2467,9 +2468,8 @@ button.small {
         font-size: 0.8rem;
     }
 
-    /* Ensure main content doesn't get covered by the player bar + bottom nav */
-    /* Player bar ~110-130px + bottom nav 90px = ~220px total */
-    main {
+    /* Only add bottom padding when player is visible */
+    main:has(~ .player-bar:not(.hidden)) {
         padding-bottom: 220px !important;
     }
 }
