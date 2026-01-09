@@ -14,7 +14,16 @@ from app.routers.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
-VERSION = "1.7.1"
+# Read version from VERSION file
+def get_version():
+    version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "VERSION")
+    try:
+        with open(version_file, 'r') as f:
+            return f.read().strip()
+    except Exception:
+        return "1.0.0"  # Fallback version
+
+VERSION = get_version()
 
 router = APIRouter()
 public_router = APIRouter()
