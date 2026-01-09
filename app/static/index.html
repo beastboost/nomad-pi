@@ -522,6 +522,88 @@
         </div>
     </div>
 
+    <!-- Welcome Screen Modal -->
+    <div id="welcome-modal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Welcome to Nomad Pi! 🎉</div>
+                <button class="modal-close" onclick="closeWelcome()">×</button>
+            </div>
+            <div class="modal-body" style="padding: 30px;">
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <div style="font-size: 4rem; margin-bottom: 15px;">✨</div>
+                    <h2 style="margin: 0 0 10px 0;">Your Personal Media Server is Ready!</h2>
+                    <p style="color: var(--text-muted); font-size: 1.05rem;">Let's take a quick tour of what Nomad Pi can do for you</p>
+                </div>
+
+                <div class="welcome-features">
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">🎬</div>
+                        <div class="welcome-content">
+                            <h3>Movies & TV Shows</h3>
+                            <p>Automatically organized with posters, metadata, and resume playback. Just drop your files and we'll handle the rest!</p>
+                        </div>
+                    </div>
+
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">📂</div>
+                        <div class="welcome-content">
+                            <h3>Easy File Management</h3>
+                            <p>Upload files via the web, access via Samba at <code>\\nomadpi.local\data</code>, or plug in a USB drive.</p>
+                        </div>
+                    </div>
+
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">📡</div>
+                        <div class="welcome-content">
+                            <h3>Built-in Wi-Fi Hotspot</h3>
+                            <p>Can't connect to your network? Nomad Pi creates a hotspot called <strong>NomadPi</strong> (password: <code>nomadpassword</code>).</p>
+                        </div>
+                    </div>
+
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">📺</div>
+                        <div class="welcome-content">
+                            <h3>DLNA Smart TV Streaming</h3>
+                            <p>Your smart TV can discover and play your media automatically via MiniDLNA—no apps needed!</p>
+                        </div>
+                    </div>
+
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">🎵</div>
+                        <div class="welcome-content">
+                            <h3>Music, Books & Gallery</h3>
+                            <p>Full library support for music playback, PDF/EPUB/Comic readers, and photo galleries.</p>
+                        </div>
+                    </div>
+
+                    <div class="welcome-feature">
+                        <div class="welcome-icon">🔧</div>
+                        <div class="welcome-content">
+                            <h3>One-Click Updates</h3>
+                            <p>Head to <strong>Admin → Update from GitHub</strong> to always stay up to date with the latest features.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px; padding: 20px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--accent-color);">🚀 Quick Start Tips</h4>
+                    <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                        <li>Start by adding media in the <strong>Admin</strong> section</li>
+                        <li>Scan your library to fetch metadata automatically</li>
+                        <li>Mount USB drives or network shares in <strong>Admin → Storage</strong></li>
+                        <li>Manage Wi-Fi networks in <strong>Admin → Network</strong></li>
+                    </ul>
+                </div>
+
+                <div style="margin-top: 30px; text-align: center;">
+                    <button onclick="closeWelcome()" class="primary" style="padding: 14px 40px; font-size: 1.05rem;">Let's Get Started! 🎉</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast-container"></div>
     <script src="js/app.js?v=1767906495"></script>
     <script>
