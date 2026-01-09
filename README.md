@@ -2,6 +2,8 @@
 
 A high-performance, sleek, and portable media server optimized for **Raspberry Pi (Zero 2W, 3, 4, 5)** and **Radxa** boards. Turn your SBC into a powerful, offline-first media hub with a modern glassmorphism UI.
 
+> **Note:** This project is a fork of [Jcorp Nomad](https://github.com/Jstudner/jcorp-nomad) by Jstudner, with significant enhancements and optimizations for mobile UX, PWA support, and additional features.
+
 ## 🚀 Key Features
 
 - **Modern Glassmorphism UI**: A stunning, responsive interface with dark mode and real-time glass effects.
