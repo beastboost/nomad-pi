@@ -52,9 +52,25 @@ Simply go to the **Admin** panel in the web UI and click **Update from GitHub**.
 - **Unified Playback**: Consistent metadata handling (subtitles, trailers) across all entry points.
 - **Library Organization**: Tools to automatically group shows and movies into standard folder structures.
 
+## 📡 Wi-Fi & Network Access
+
+Nomad Pi automatically creates a Wi-Fi hotspot as a fallback when no home network is available:
+
+- **Hotspot Name**: `NomadPi`
+- **Password**: `nomadpassword`
+- **Access URL**: `http://10.42.0.1:8000` (when connected to hotspot)
+- **mDNS Access**: `http://nomadpi.local:8000` (works on home network)
+
+The system will automatically:
+1. Try to connect to any saved Wi-Fi networks
+2. Fall back to hotspot mode if no networks are available
+3. Allow you to manage Wi-Fi networks from the Admin panel
+
 ## 📂 File Transfer
 - **Web Upload**: Drag & drop files directly into the Admin panel.
-- **Samba (SMB)**: Access your media via network shares at `\\nomadpi.local\nomadpi`.
+- **Samba (SMB)**: Access your media via network shares at `\\nomadpi.local\data`
+  - **Username**: Your Pi username (default: `pi` or `user`)
+  - **Password**: `nomad` (default, can be changed)
 - **USB Import**: Plug in a drive and use the **Storage Management** tool to mount and index files.
 
 ## 🔐 Security & First Login

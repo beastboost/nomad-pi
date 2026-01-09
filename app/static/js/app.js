@@ -263,6 +263,9 @@ async function login() {
             loadStorageStats();
             loadResume();
             startStatsAutoRefresh();
+
+            // Check if this is first login and show welcome screen
+            checkAndShowWelcome();
         } else {
             errorMsg.style.display = 'block';
             passwordInput.value = '';
@@ -330,6 +333,35 @@ function showToast(message, type = 'info') {
         toast.style.animation = 'fade-out 0.3s ease-in forwards';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+// Welcome Screen Functions
+function checkAndShowWelcome() {
+    // Check if welcome screen has been shown before
+    const hasSeenWelcome = localStorage.getItem('nomadpi_welcome_seen');
+
+    if (!hasSeenWelcome) {
+        // Delay showing welcome slightly to let the UI settle
+        setTimeout(() => {
+            showWelcome();
+        }, 500);
+    }
+}
+
+function showWelcome() {
+    const modal = document.getElementById('welcome-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeWelcome() {
+    const modal = document.getElementById('welcome-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        // Mark welcome as seen so it doesn't show again
+        localStorage.setItem('nomadpi_welcome_seen', 'true');
+    }
 }
 
 function handleLoginKey(e) {
