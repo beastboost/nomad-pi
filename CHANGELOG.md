@@ -2,7 +2,7 @@
 
 All notable changes to Nomad Pi will be documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-01-09
 
 ### Added
 - Welcome screen with feature tutorial for first-time users
@@ -17,6 +17,11 @@ All notable changes to Nomad Pi will be documented in this file.
 - **CRITICAL**: Bottom navigation bar no longer clips into page content
   - Proper safe-area padding for notched devices
   - Content padding adjusted to prevent overlap
+- **CRITICAL**: Music player bar now only appears when music is playing
+  - Fixed permanent bar visibility issue on mobile
+  - Player properly positioned above bottom nav (90px in portrait, 70px in landscape)
+  - Orientation-specific spacing for optimal experience
+  - Content padding adjusts automatically when player is visible
 - Comic book viewer (CBR) extraction with detailed troubleshooting
 - MiniDLNA sudo permissions now persist after system updates
 - Duplicate scan no longer deletes TV show episodes (excluded series from detection)
