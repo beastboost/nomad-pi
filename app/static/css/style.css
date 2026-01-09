@@ -151,15 +151,20 @@ nav button.active {
 .mobile-bottom-nav {
     display: none;
     position: fixed;
-    bottom: 15px;
-    left: 15px;
-    right: 15px;
-    height: 65px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(70px + env(safe-area-inset-bottom));
     z-index: 1000;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom)) 12px;
     justify-content: space-around;
     align-items: center;
-    border-radius: var(--radius-lg);
+    border-radius: 24px 24px 0 0;
+    background: rgba(15, 17, 21, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
 }
 
 @media (max-width: 768px) {
@@ -240,32 +245,33 @@ nav button.active {
     header nav#main-nav .logout-btn:hover {
         background: rgba(229, 9, 20, 0.3);
     }
-    
+
     main {
-        padding-bottom: 90px !important;
+        padding-bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+        min-height: calc(100vh - 70px);
     }
 
 .mobile-menu-backdrop {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
+    right: 100%; /* Initially covers no area */
     height: 100%;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.5);
     z-index: 9998;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.3s ease, visibility 0.3s ease;
+    transition: opacity 0.3s ease, visibility 0.3s ease, right 0s 0.3s;
 }
 
 .mobile-menu-backdrop.show {
     opacity: 1;
     visibility: visible;
-    /* Only make the LEFT side clickable - the menu area (right 80%) should NOT receive pointer events from backdrop */
     pointer-events: auto;
-    /* Clip the clickable area to exclude the menu */
-    clip-path: inset(0 min(320px, 80%) 0 0);
+    /* Expand to cover everything EXCEPT the menu area */
+    right: min(320px, 80%);
+    transition: opacity 0.3s ease, visibility 0.3s ease, right 0s;
 }
 
 }
@@ -274,25 +280,50 @@ nav button.active {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     background: transparent;
     border: none;
     color: var(--text-muted);
     gap: 4px;
     cursor: pointer;
-    transition: var(--transition-base);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 8px 12px;
+    border-radius: 12px;
+    min-width: 60px;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.nav-item:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .nav-item.active {
     color: var(--accent-color);
 }
 
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 3px;
+    background: var(--accent-color);
+    border-radius: 999px;
+}
+
 .nav-icon {
-    font-size: 1.25rem;
+    font-size: 1.4rem;
+    line-height: 1;
 }
 
 .nav-label {
     font-size: 0.7rem;
     font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 /* Stats Grid Improvements */
