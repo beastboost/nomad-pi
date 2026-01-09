@@ -150,8 +150,30 @@ else
 fi
 
 
-# Fix MiniDLNA permissions after update
+# Fix MiniDLNA permissions and sudoers after update
 echo "Checking MiniDLNA configuration..." >> update.log
+
+# Re-verify sudoers configuration (in case it was removed by system update)
+REAL_USER=${SUDO_USER:-$USER}
+SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
+MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
+SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+
+if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Re-applying sudoers permissions for MiniDLNA..." >> update.log
+    MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
+    UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
+    SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
+    REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
+    NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
+
+    sudo bash -c "cat > $SUDOERS_FILE" <<EOL
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
+EOL
+    sudo chmod 0440 $SUDOERS_FILE
+    echo "Sudoers permissions restored." >> update.log
+fi
+
 if command -v minidlnad >/dev/null 2>&1; then
     echo "Fixing MiniDLNA cache permissions..." >> update.log
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true

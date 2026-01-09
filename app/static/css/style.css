@@ -251,7 +251,7 @@ nav button.active {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.8);
+    background: transparent;
     z-index: 9998;
     opacity: 0;
     visibility: hidden;
@@ -262,7 +262,7 @@ nav button.active {
 .mobile-menu-backdrop.show {
     opacity: 1;
     visibility: visible;
-    pointer-events: auto;
+    pointer-events: auto; /* Allows clicking backdrop to close menu */
 }
 
 }
