@@ -262,7 +262,10 @@ nav button.active {
 .mobile-menu-backdrop.show {
     opacity: 1;
     visibility: visible;
-    pointer-events: auto; /* Allows clicking backdrop to close menu */
+    /* Only make the LEFT side clickable - the menu area (right 80%) should NOT receive pointer events from backdrop */
+    pointer-events: auto;
+    /* Clip the clickable area to exclude the menu */
+    clip-path: inset(0 min(320px, 80%) 0 0);
 }
 
 }

@@ -350,6 +350,15 @@ function toggleMobileMenu() {
         document.body.appendChild(backdrop);
     }
 
+    // Prevent clicks inside the nav from closing the menu
+    if (nav && !nav._clickHandlerAttached) {
+        nav.addEventListener('click', function(e) {
+            // Stop clicks from bubbling to backdrop
+            e.stopPropagation();
+        });
+        nav._clickHandlerAttached = true;
+    }
+
     const isOpen = nav && nav.classList.contains('mobile-menu-open');
 
     if (isOpen) {
