@@ -2,6 +2,11 @@
 
 All notable changes to Nomad Pi will be documented in this file.
 
+## [1.1.2] - 2026-01-09
+
+### Fixed
+- **CRITICAL**: Changelog popup not appearing after updates (VERSION was hardcoded instead of reading from file)
+
 ## [1.1.1] - 2026-01-09
 
 ### Fixed
