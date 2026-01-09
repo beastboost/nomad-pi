@@ -2,6 +2,20 @@
 
 All notable changes to Nomad Pi will be documented in this file.
 
+## [1.1.3] - 2026-01-09
+
+### Fixed
+- **CRITICAL**: Music player controls overlapping/clipping on mobile
+  - Increased gap between buttons (24-28px depending on orientation)
+  - Fixed button sizing conflicts with proper padding and flex properties
+  - Added horizontal padding to title and progress bar
+  - Improved overall spacing and breathing room
+
+## [1.1.2] - 2026-01-09
+
+### Fixed
+- **CRITICAL**: Changelog popup not appearing after updates (VERSION was hardcoded instead of reading from file)
+
 ## [1.1.1] - 2026-01-09
 
 ### Fixed
