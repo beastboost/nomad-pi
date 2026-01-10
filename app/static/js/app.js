@@ -277,6 +277,10 @@ async function login() {
             if (data.token) {
                 localStorage.setItem('nomad_auth_token', data.token);
             }
+            if (errorMsg) {
+                errorMsg.style.display = 'none';
+                errorMsg.textContent = '';
+            }
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             // Load initial data
@@ -286,8 +290,25 @@ async function login() {
 
             // Check if this is first login and show welcome screen
             checkAndShowWelcome();
+            if (data.user && data.user.must_change_password) {
+                showToast('Please change your password to continue', 'info');
+                showSection('settings');
+                setTimeout(() => {
+                    const el = document.getElementById('change-pw-current');
+                    if (el) el.focus();
+                }, 50);
+            }
         } else {
-            errorMsg.style.display = 'block';
+            const data = await res.json().catch(() => ({}));
+            const msg =
+                (data && (data.detail || data.message)) ||
+                (res.status === 401 ? 'Invalid username or password' : `Login failed (${res.status})`);
+            if (errorMsg) {
+                errorMsg.textContent = msg;
+                errorMsg.style.display = 'block';
+            } else {
+                showToast(msg, 'error');
+            }
             passwordInput.value = '';
         }
     } catch (e) {
@@ -318,6 +339,10 @@ async function checkAuth() {
             loadStorageStats();
             loadResume();
             startStatsAutoRefresh();
+            if (data.user && data.user.must_change_password) {
+                showToast('Please change your password', 'info');
+                showSection('settings');
+            }
         } else {
             // Ensure login screen is visible
             document.getElementById('login-screen').style.display = 'flex';
@@ -3646,8 +3671,23 @@ async function changePassword() {
         return;
     }
 
-    if (newPass.length < 4) {
-        alert('New password must be at least 4 characters long.');
+    if (newPass.length < 8) {
+        alert('New password must be at least 8 characters long.');
+        return;
+    }
+
+    if (!/[A-Z]/.test(newPass)) {
+        alert('New password must contain at least one uppercase letter.');
+        return;
+    }
+
+    if (!/[a-z]/.test(newPass)) {
+        alert('New password must contain at least one lowercase letter.');
+        return;
+    }
+
+    if (!/[0-9]/.test(newPass)) {
+        alert('New password must contain at least one digit.');
         return;
     }
 
@@ -4215,13 +4255,3 @@ async function fixDuplicates() {
         console.error('Failed to fix duplicates:', e);
     }
 }
-
-            loadStorageStats();
-        }, 3000);
-
-    } catch (e) {
-        showToast(`Error: ${e.message}`, 'error');
-        console.error('Failed to fix duplicates:', e);
-    }
-}
-
