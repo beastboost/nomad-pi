@@ -54,14 +54,26 @@ echo "Optimizing Git configuration..."
 # System update to pick up GnuTLS/security fixes (optional but recommended for handshake issues)
 # sudo apt update && sudo apt full-upgrade -y
 
-update_status 15 "Optimizing Git configuration..."
+update_status 15 "Ensuring repository permissions..."
 # Fix repository ownership if it was accidentally changed to root
+# This is a common issue when running parts of the setup with sudo
 echo "Ensuring correct repository permissions..."
-sudo chown -R $USER:$USER . 2>/dev/null || true
-# Mark directory as safe for git (common issue on newer git versions)
-git config --global --add safe.directory $(pwd) 2>/dev/null || true
+REAL_USER=${SUDO_USER:-$USER}
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
-# Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
+sudo chown -R "$REAL_USER:$REAL_USER" . 2>/dev/null || true
+# Mark directory as safe for git (common issue on newer git versions)
+git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
+
+# Check if we can actually run git commands here
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "ERROR: Not a git repository or insufficient permissions to read .git"
+    update_status 15 "ERROR: Git permission issue. Try: sudo chown -R $USER:$USER ."
+    exit 1
+fi
+
+update_status 20 "Optimizing Git configuration..."
 git config --global --unset http.sslBackend 2>/dev/null || true
 git config --global http.sslVerify true
 # Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub

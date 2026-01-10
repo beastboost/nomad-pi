@@ -553,12 +553,15 @@ button:disabled {
     right: 0;
     padding: 0.75rem;
     background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 70%, transparent 100%);
-    opacity: 0;
+    opacity: 1 !important;
+    visibility: visible !important;
     transition: opacity 0.3s ease;
+    z-index: 4;
 }
 
 .media-card:hover .media-info {
-    opacity: 1;
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 /* Mobile optimizations for cards */
@@ -1595,6 +1598,13 @@ h1, h2, h3 {
         right: 0;
         border-radius: 16px 16px 0 0;
         margin: 0;
+        grid-template-columns: 1fr;
+        grid-template-areas: 
+            "title"
+            "progress"
+            "controls";
+        gap: 10px;
+        padding: 15px 10px;
     }
 
     .player-title {
@@ -1847,7 +1857,7 @@ h1, h2, h3 {
     right: 0;
     padding: 40px 12px 12px 12px;
     background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 50%, rgba(0,0,0,0) 100%);
-    opacity: 0;
+    opacity: 1;
     transition: opacity 0.3s ease;
     z-index: 4;
     pointer-events: none;
@@ -2414,24 +2424,21 @@ button.small {
 @media (max-width: 768px) {
     /* Only apply these styles when player is NOT hidden */
     .player-bar:not(.hidden) {
-        padding: 16px 12px !important;
-        flex-direction: column !important;
-        gap: 16px !important;
+        padding: 12px 12px !important;
+        display: grid !important;
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
         height: auto !important;
-        /* Position above the bottom nav - must match nav's total height */
-        /* Bottom nav is 70px + safe-area, so we position at 90px to ensure clearance */
-        bottom: 90px !important;
+        bottom: 80px !important; /* Reduced from 90px for tighter layout above nav */
         left: 0 !important;
         right: 0 !important;
-        border-radius: 12px 12px 0 0 !important;
-        /* Much higher z-index to ensure it's above everything */
+        border-radius: 16px 16px 0 0 !important;
         z-index: 1100 !important;
         margin: 0 !important;
-        display: grid !important; /* Ensure it's displayed */
-        grid-template-columns: 1fr !important; /* Single column on mobile */
-        background: rgba(20, 20, 20, 0.98) !important; /* More opaque for visibility */
+        background: rgba(20, 20, 20, 0.98) !important;
         backdrop-filter: blur(20px) !important;
         -webkit-backdrop-filter: blur(20px) !important;
+        box-shadow: 0 -10px 30px rgba(0,0,0,0.5) !important;
     }
 
     .player-title {
@@ -2502,17 +2509,17 @@ button.small {
 /* Portrait-specific spacing adjustments */
 @media (max-width: 768px) and (orientation: portrait) {
     .player-bar:not(.hidden) {
-        padding: 18px 12px !important;
-        gap: 12px !important; /* Reduced from 18px */
+        padding: 10px 12px 14px 12px !important;
+        gap: 8px !important; /* Tighter vertical spacing */
     }
 
     .player-controls {
-        gap: 16px !important; /* Reduced from 28px - 28px was definitely too much for small screens */
+        gap: 12px !important; /* Tighter horizontal spacing for controls */
     }
 
     /* More padding in portrait for better visibility */
     main:has(~ .player-bar:not(.hidden)) {
-        padding-bottom: 250px !important;
+        padding-bottom: 220px !important; /* Adjusted for tighter player bar */
     }
 }
 
@@ -2579,13 +2586,28 @@ button.small {
     width: 100% !important;
     max-width: none !important;
     aspect-ratio: auto !important;
-    min-height: 100px !important;
+    min-height: 120px !important; /* Increased from 100px */
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
     align-items: center !important;
     text-align: center !important;
-    padding: 10px !important;
+    padding: 12px !important;
+}
+
+#files-list .media-info {
+    opacity: 1 !important;
+    position: static !important;
+    background: none !important;
+    padding: 0 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+    visibility: visible !important; /* Added visibility */
+}
+
+#files-list .media-card:hover .media-info {
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
 #files-list .media-info h3 {
@@ -2596,10 +2618,12 @@ button.small {
     -webkit-line-clamp: 2 !important;
     -webkit-box-orient: vertical !important;
     overflow: hidden !important;
+    color: var(--text-color) !important;
 }
 
 #files-list .media-info p {
     font-size: 0.75rem !important;
     margin-top: 4px !important;
+    color: var(--text-muted) !important;
 }
 

@@ -716,6 +716,17 @@ def build_library_index(category: str):
                         if parent != base and parent != BASE_DIR:
                             p_url = find_local_poster(parent)
 
+                # Priority 4: Database-cached poster (from previous OMDb fetches)
+                if not p_url:
+                    meta = database.get_file_metadata(web_path)
+                    if meta and meta.get("poster"):
+                        p_url = meta.get("poster")
+                    elif meta and meta.get("meta"):
+                        # Check nested OMDB data if available
+                        m_data = meta.get("meta")
+                        if isinstance(m_data, dict) and m_data.get("Poster") and m_data["Poster"] != "N/A":
+                            p_url = m_data["Poster"]
+
                 item = {
                     "path": web_path,
                     "category": category,
@@ -1263,7 +1274,11 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                 if q_low not in ret_title and ret_title not in q_low:
                     # But don't reject if the query is very short (could be a legit short title)
                     if len(q_low) > 3:
-                        logger.warning(f"OMDB returned suspicious match for '{q_title}': '{meta.get('Title')}'")
+                        # Use similarity score for better check
+                        if _get_similarity(q_title, meta.get("Title", "")) < 0.4:
+                            logger.warning(f"OMDB returned suspicious match for '{q_title}': '{meta.get('Title')}'")
+                            meta = None
+                            continue
                 break
         except HTTPException as e:
             if e.status_code != 404:
@@ -1283,7 +1298,6 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                 results = search.get("Search") or []
                 if results:
                     # Score and pick best
-                    want = normalize_title(q_title)
                     best = None
                     best_score = -1
                     for r in results[:10]: # Increase to top 10 for better coverage
@@ -1291,24 +1305,15 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                         y = r.get("Year")
                         if not t: continue
                         
-                        score = 0
-                        norm_t = normalize_title(t)
+                        score = _get_similarity(q_title, t) * 50
                         
-                        # Exact match is highest priority
-                        if norm_t == want: 
-                            score += 50
-                        # Sequel match (e.g. "Toy Story 2" matches "Toy Story 2")
-                        elif want in norm_t or norm_t in want: 
-                            score += 20
-                        
-                        # Year matching is very important for series
+                        # Year matching is very important
                         if q_year and y:
                             # Handle "2001–2004" or "2001-" year formats from OMDb
                             y_str = str(y)
-                            if q_year in y_str:
+                            if str(q_year) in y_str:
                                 score += 30
                             elif any(char.isdigit() for char in y_str):
-                                # Check if the year is within a reasonable range (e.g. +/- 1 year)
                                 try:
                                     y_val = int(re.search(r'\d{4}', y_str).group())
                                     if abs(y_val - int(q_year)) <= 1:
@@ -1323,15 +1328,35 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                             best = r
                             best_score = score
                     
-                    if best and best_score >= 20: # Higher threshold for better accuracy
+                    if best and best_score >= 20: # Reasonable threshold (lowered slightly from 25)
                         meta = await omdb_fetch(imdb_id=best.get("imdbID"), media_type=media_type)
                         break
             except Exception:
                 continue
 
     if not meta:
+        # One last ditch effort: search without media_type if we haven't already
+        try:
+            search = await omdb_search(query=title_guess)
+            results = search.get("Search") or []
+            if results:
+                best = None
+                best_score = -1
+                for r in results:
+                    score = _get_similarity(title_guess, r.get("Title", ""))
+                    if score > best_score:
+                        best_score = score
+                        best = r
+                
+                if best and best_score > 0.5:
+                    meta = await omdb_fetch(imdb_id=best.get("imdbID"))
+        except:
+            pass
+
+    if not meta:
         if last_error: raise last_error
         raise HTTPException(status_code=404, detail="Could not find metadata for this file. Try renaming it to a cleaner title.")
+
 
     # Cache poster if available
     if meta.get("Poster") and meta["Poster"] != "N/A":
@@ -1742,9 +1767,11 @@ def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user
     duration = data.get("duration")
     
     if not path or time is None:
+        logger.warning(f"Progress update failed: Missing path or current_time (path={path}, time={time})")
         return {"status": "error", "message": "Missing path or current_time"}
         
     try:
+        logger.debug(f"Updating progress for user {user_id}: {path} at {time}/{duration}")
         database.update_progress(user_id, path, time, duration)
         
         # If progress is near the end (e.g., > 95%), mark as played
@@ -1951,8 +1978,45 @@ def _auto_dest_rel(category: str, normalized: str, rename_files: bool = True):
 
     return normalized
 
+def _cleanup_empty_folders(bases: List[str]):
+    """Recursively remove empty directories under bases, excluding bases themselves."""
+    for base in bases:
+        if not os.path.isdir(base):
+            continue
+        for root, dirs, files in os.walk(base, topdown=False):
+            if root == base:
+                continue
+            # Check if directory is empty or only contains junk/posters
+            try:
+                entries = os.listdir(root)
+                junk = {".ds_store", "thumbs.db", "desktop.ini", "poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png", "fanart.jpg", "movie.nfo", "banner.jpg", "clearart.png", "disc.png", "logo.png", "landscape.jpg", "metadata.nfo"}
+                if not entries or all(e.lower() in junk for e in entries):
+                    logger.info(f"Cleaning up empty/junk folder: {root}")
+                    shutil.rmtree(root)
+            except Exception as e:
+                logger.error(f"Error cleaning up folder {root}: {e}")
+
 @router.post("/organize/shows")
 async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
+    return await _organize_shows_internal(dry_run, rename_files, use_omdb, write_poster, limit)
+
+def _get_similarity(a: str, b: str) -> float:
+    """Simple string similarity score (0.0 to 1.0)"""
+    a = a.lower().strip()
+    b = b.lower().strip()
+    if not a or not b: return 0.0
+    if a == b: return 1.0
+    
+    # Very basic: ratio of common characters or common words
+    a_words = set(re.findall(r'\w+', a))
+    b_words = set(re.findall(r'\w+', b))
+    if not a_words or not b_words: return 0.0
+    
+    intersection = a_words.intersection(b_words)
+    union = a_words.union(b_words)
+    return len(intersection) / len(union)
+
+async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = True, use_omdb: bool = True, write_poster: bool = True, limit: int = 250):
     # Clear cache when starting organization
     _get_paged_data_cached.cache_clear()
     show_bases = get_scan_paths("shows")
@@ -2007,6 +2071,14 @@ async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool
 
                 if not show_name:
                     show_name = _infer_show_name_from_filename(f) or "Unsorted"
+                
+                # Extract year if present in show name
+                show_year = None
+                year_match = re.search(r'\((\d{4})\)', show_name)
+                if year_match:
+                    show_year = year_match.group(1)
+                    show_name = show_name.replace(year_match.group(0), "").strip()
+
                 show_name = _sanitize_show_part(show_name) or "Unsorted"
 
                 season_part = parts[1] if len(parts) >= 3 else ""
@@ -2074,9 +2146,50 @@ async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool
                     if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
                         try:
                             # Fetch show metadata
-                            meta = await omdb_fetch(title=show_name, media_type="series")
-                            shows_processed[show_name] = meta
-                            logger.info(f"Fetched OMDB metadata for show: {show_name}")
+                            try:
+                                # Try direct fetch first
+                                meta = await omdb_fetch(title=show_name, year=show_year, media_type="series")
+                            except Exception:
+                                # Try a search if direct fetch fails
+                                search = await omdb_search(query=show_name, year=show_year, media_type="series")
+                                results = search.get("Search") or []
+                                if results:
+                                    # Pick the best match from search results
+                                    best_match = results[0]
+                                    best_score = _get_similarity(show_name, best_match.get("Title", ""))
+                                    for res in results:
+                                        score = _get_similarity(show_name, res.get("Title", ""))
+                                        if score > best_score:
+                                            best_score = score
+                                            best_match = res
+                                        elif score == best_score and res.get("Year", "").startswith(str(show_year or "")):
+                                            best_match = res
+                                            
+                                    if best_score > 0.5: # Only use if reasonably similar
+                                        meta = await omdb_fetch(imdb_id=best_match["imdbID"], media_type="series")
+                                else:
+                                    # Try without year if we had one and it failed
+                                    if show_year:
+                                        try:
+                                            meta = await omdb_fetch(title=show_name, media_type="series")
+                                        except Exception:
+                                            search = await omdb_search(query=show_name, media_type="series")
+                                            results = search.get("Search") or []
+                                            if results:
+                                                best_match = results[0]
+                                                best_score = _get_similarity(show_name, best_match.get("Title", ""))
+                                                for res in results:
+                                                    score = _get_similarity(show_name, res.get("Title", ""))
+                                                    if score > best_score:
+                                                        best_score = score
+                                                        best_match = res
+                                                
+                                                if best_score > 0.5:
+                                                    meta = await omdb_fetch(imdb_id=best_match["imdbID"], media_type="series")
+                            
+                            if meta:
+                                shows_processed[show_name] = meta
+                                logger.info(f"Fetched OMDB metadata for show: {show_name}")
                         except Exception as e:
                             logger.warning(f"Error fetching OMDB data for {show_name}: {e}")
 
@@ -2117,10 +2230,16 @@ async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool
         if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
             break
 
+    if not dry_run:
+        _cleanup_empty_folders(show_bases)
+
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
 @router.post("/organize/movies")
 async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
+    return await _organize_movies_internal(dry_run, use_omdb, write_poster, limit)
+
+async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True, write_poster: bool = True, limit: int = 250):
     # Clear cache when starting organization
     _get_paged_data_cached.cache_clear()
     movie_bases = get_scan_paths("movies")
@@ -2206,8 +2325,21 @@ async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = 
                     if not meta:
                         try:
                             search_res = await omdb_search(title_guess, year=year_guess, media_type="movie")
-                            if search_res.get("Search"):
-                                meta = await omdb_fetch(imdb_id=search_res["Search"][0].get("imdbID"))
+                            results = search_res.get("Search") or []
+                            if results:
+                                # Pick best match from search
+                                best_match = results[0]
+                                best_score = _get_similarity(title_guess, best_match.get("Title", ""))
+                                for res in results:
+                                    score = _get_similarity(title_guess, res.get("Title", ""))
+                                    if score > best_score:
+                                        best_score = score
+                                        best_match = res
+                                    elif score == best_score and res.get("Year", "") == str(year_guess or ""):
+                                        best_match = res
+                                
+                                if best_score > 0.5:
+                                    meta = await omdb_fetch(imdb_id=best_match.get("imdbID"), media_type="movie")
                         except Exception:
                             pass
 
@@ -2325,11 +2457,13 @@ async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = 
                 moved += 1
                 if moved >= limit:
                     break
-
             if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
                 break
         if (dry_run and len(planned) >= limit) or ((not dry_run) and moved >= limit):
             break
+
+    if not dry_run:
+        _cleanup_empty_folders(movie_bases)
 
     return {"status": "ok", "dry_run": bool(dry_run), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "planned": planned[: min(len(planned), 1000)]}
 
@@ -2356,15 +2490,18 @@ def trigger_dlna_rescan():
         except Exception as e:
             logger.error(f"Failed to trigger MiniDLNA rescan: {e}")
 
-def trigger_auto_organize():
+async def trigger_auto_organize():
     """Trigger automated organization of shows and movies"""
     try:
-        # We can call the organization functions with dry_run=False
-        # Note: We don't want to use OMDB every time as it might be slow/hit limits
-        # But for new uploads it's probably fine.
-        organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True)
-        organize_movies(dry_run=False, use_omdb=True, write_poster=True)
-        logger.info("Automated media organization completed")
+        # We call the internal organization functions with dry_run=False
+        await _organize_shows_internal(dry_run=False, rename_files=True, use_omdb=True, write_poster=True)
+        await _organize_movies_internal(dry_run=False, use_omdb=True, write_poster=True)
+        
+        # Also clean up empty folders for other categories
+        for cat in ["music", "books", "gallery", "files"]:
+            _cleanup_empty_folders(get_scan_paths(cat))
+            
+        logger.info("Automated media organization and cleanup completed")
         # Trigger DLNA rescan after organization is done
         trigger_dlna_rescan()
     except Exception as e:
@@ -2517,8 +2654,8 @@ def delete_media(path: str, background_tasks: BackgroundTasks, user_id: int = De
         if os.path.exists(parent) and parent != BASE_DIR:
             remaining = os.listdir(parent)
             # If only common metadata files remain, clean them up too
-            junk = {"poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png", "fanart.jpg", "movie.nfo"}
-            if all(f.lower() in junk for f in remaining):
+            junk = {".ds_store", "thumbs.db", "desktop.ini", "poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png", "fanart.jpg", "movie.nfo", "banner.jpg", "clearart.png", "disc.png", "logo.png", "landscape.jpg", "metadata.nfo"}
+            if not remaining or all(f.lower() in junk for f in remaining):
                 try:
                     shutil.rmtree(parent)
                 except:
@@ -2557,7 +2694,7 @@ def manual_organize(background_tasks: BackgroundTasks, user_id: int = Depends(ge
 
 @router.post("/scan")
 def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
-    def run_scan():
+    async def run_scan():
         # Scan all categories
         for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
              try:
@@ -2566,7 +2703,7 @@ def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_c
                  print(f"Scan error {cat}: {e}")
         # Also trigger MiniDLNA rescan and auto-organization
         trigger_dlna_rescan()
-        trigger_auto_organize()
+        await trigger_auto_organize()
         
     background_tasks.add_task(run_scan)
     return {"status": "ok", "message": "Library scan and organization started in background."}
@@ -2603,6 +2740,10 @@ def fix_duplicates(background_tasks: BackgroundTasks, user_id: int = Depends(get
                 logger.error(f"Failed to delete duplicate {path}: {e}")
         
         logger.info(f"Mass duplicate fix completed. Deleted {deleted_count} items.")
+        
+        # Also clean up empty folders after mass deletion
+        for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+            _cleanup_empty_folders(get_scan_paths(cat))
         
         # Trigger rescan to ensure library is up to date
         for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
@@ -2693,7 +2834,7 @@ def resume(limit: int = 12, user_id: int = Depends(get_current_user_id)):
             d = float(prog.get("duration") or 0)
         except Exception:
             continue
-        if not (t > 60 and d > 0 and (d - t) > 60):
+        if not (t > 10 and d > 0 and (d - t) > 10):
             continue
 
         try:

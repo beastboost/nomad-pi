@@ -65,6 +65,9 @@ echo "=========================================="
 if [ -d ".git" ]; then
     echo "[0/9] Optimizing Git configuration..."
     
+    # Mark directory as safe for git (common issue on newer git versions)
+    git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
+
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
     git config --global --unset http.sslBackend 2>/dev/null || true
     git config --global http.sslVerify true

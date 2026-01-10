@@ -764,9 +764,13 @@ createApp({
         },
 
         async apiCall(endpoint, method = 'GET', data = null) {
+            const token = localStorage.getItem('nomad_auth_token');
             const options = {
                 method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
                 credentials: 'same-origin'
             };
             if (data) {

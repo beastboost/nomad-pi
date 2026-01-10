@@ -3,7 +3,9 @@ const API_BASE = '/api';
 
 async function checkPostUpdate() {
     try {
-        const res = await fetch(`${API_BASE}/system/status`);
+        const res = await fetch(`${API_BASE}/system/status`, {
+            headers: getAuthHeaders()
+        });
         const data = await res.json();
 
         if (!data.version) return;
@@ -27,7 +29,9 @@ async function checkPostUpdate() {
             if (versionTag) versionTag.textContent = `v${data.version}`;
 
             // Fetch changelog
-            const logRes = await fetch(`${API_BASE}/system/changelog`);
+            const logRes = await fetch(`${API_BASE}/system/changelog`, {
+                headers: getAuthHeaders()
+            });
             const logData = await logRes.json();
 
             const list = document.getElementById('changelog-list');
@@ -128,7 +132,9 @@ function pumpMovieMetaQueue() {
 
 async function fetchMovieMeta(file) {
     try {
-        const res = await fetch(`${API_BASE}/media/meta?path=${encodeURIComponent(file.path)}&fetch=1&media_type=movie`);
+        const res = await fetch(`${API_BASE}/media/meta?path=${encodeURIComponent(file.path)}&fetch=1&media_type=movie`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return null; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || data.configured === false) return null;
@@ -267,6 +273,10 @@ async function login() {
         });
 
         if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+                localStorage.setItem('nomad_auth_token', data.token);
+            }
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             // Load initial data
@@ -287,13 +297,20 @@ async function login() {
 }
 
 async function logout() {
-    await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    const headers = getAuthHeaders();
+    localStorage.removeItem('nomad_auth_token');
+    await fetch(`${API_BASE}/auth/logout`, { 
+        method: 'POST',
+        headers: headers
+    });
     location.reload();
 }
 
 async function checkAuth() {
     try {
-        const res = await fetch(`${API_BASE}/auth/check`);
+        const res = await fetch(`${API_BASE}/auth/check`, {
+            headers: getAuthHeaders()
+        });
         const data = await res.json();
         if (data.authenticated) {
             document.getElementById('login-screen').style.display = 'none';
@@ -516,7 +533,9 @@ async function loadFileBrowser(path) {
     // Check if we should show drive list (Windows)
     if (path === 'DRIVES') {
         try {
-            const res = await fetch(`${API_BASE}/system/drives`);
+            const res = await fetch(`${API_BASE}/system/drives`, {
+                headers: getAuthHeaders()
+            });
             const data = await res.json();
             container.innerHTML = '<h2>Available Drives</h2>';
             const drives = data.blockdevices || [];
@@ -554,7 +573,9 @@ async function loadFileBrowser(path) {
 
     try {
         const url = `${API_BASE}/media/browse?path=${encodeURIComponent(path)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
         
@@ -728,7 +749,9 @@ async function loadMediaPage(category, reset) {
         if (state.genre) url += `&genre=${encodeURIComponent(state.genre)}`;
         if (state.year) url += `&year=${state.year}`;
         
-        const res = await fetch(url);
+        const res = await fetch(url, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.detail || 'Failed to load media');
@@ -760,7 +783,9 @@ async function updateFilters(category) {
     try {
         // Fetch genres
         if (genreSelect) {
-            const gRes = await fetch(`${API_BASE}/media/genres?category=${category}`);
+            const gRes = await fetch(`${API_BASE}/media/genres?category=${category}`, {
+                headers: getAuthHeaders()
+            });
             if (gRes.ok) {
                 const genres = await gRes.json();
                 const currentGenre = genreSelect.value;
@@ -777,7 +802,9 @@ async function updateFilters(category) {
 
         // Fetch years
         if (yearSelect) {
-            const yRes = await fetch(`${API_BASE}/media/years?category=${category}`);
+            const yRes = await fetch(`${API_BASE}/media/years?category=${category}`, {
+                headers: getAuthHeaders()
+            });
             if (yRes.ok) {
                 const years = await yRes.json();
                 const currentYear = yearSelect.value;
@@ -1192,7 +1219,10 @@ async function promptRenameShowPart(oldPath, oldName) {
 async function renameMediaPath(oldPath, newPath) {
     const res = await fetch(`${API_BASE}/media/rename`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            ...getAuthHeaders(),
+            'Content-Type': 'application/json' 
+        },
         body: JSON.stringify({ old_path: oldPath, new_path: newPath })
     });
     if (res.status === 401) { logout(); return; }
@@ -1205,7 +1235,10 @@ async function organizeShows(preview) {
     const out = document.getElementById('organize-status');
     if (out) out.textContent = preview ? 'Previewing…' : 'Organizing…';
     try {
-        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=1&use_omdb=1&write_poster=1`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=1&use_omdb=1&write_poster=1`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.detail || 'Organize failed');
@@ -1227,7 +1260,10 @@ async function organizeMovies(preview) {
     const out = document.getElementById('organize-status');
     if (out) out.textContent = preview ? 'Previewing…' : 'Organizing…';
     try {
-        const res = await fetch(`${API_BASE}/media/organize/movies?dry_run=${preview ? 1 : 0}&use_omdb=1&write_poster=1`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/organize/movies?dry_run=${preview ? 1 : 0}&use_omdb=1&write_poster=1`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) throw new Error(data?.detail || 'Organize failed');
@@ -1509,7 +1545,9 @@ async function openComicViewer(path, title) {
     comicZoom = 1;
 
     try {
-        const res = await fetch(`${API_BASE}/media/books/comic/pages?path=${encodeURIComponent(path)}`);
+        const res = await fetch(`${API_BASE}/media/books/comic/pages?path=${encodeURIComponent(path)}`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1633,7 +1671,9 @@ async function loadShowsLibrary() {
     try {
         if (!showsLibraryCache) {
             console.log('[Shows] Fetching shows library from API...');
-            const res = await fetch(`${API_BASE}/media/shows/library`);
+            const res = await fetch(`${API_BASE}/media/shows/library`, {
+                headers: getAuthHeaders()
+            });
             console.log('[Shows] API response status:', res.status);
 
             if (res.status === 401) { logout(); return; }
@@ -2032,19 +2072,23 @@ async function updateProgress(mediaElement, filePath) {
     if (Math.abs(mediaElement.currentTime - (mediaElement.lastTime || 0)) < 5) return;
     mediaElement.lastTime = mediaElement.currentTime;
 
-    await fetch(`${API_BASE}/media/progress`, {
+    const res = await fetch(`${API_BASE}/media/progress`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+            ...getAuthHeaders(),
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
             file_path: filePath,
             current_time: mediaElement.currentTime,
             duration: mediaElement.duration || 0
         })
     });
+    if (res.status === 401) { logout(); }
 }
 
 function checkResume(mediaElement, filePath, savedTime) {
-    if (savedTime > 60 && (mediaElement.duration - savedTime) > 60) {
+    if (savedTime > 10 && (mediaElement.duration - savedTime) > 10) {
         // If saved time is significant, prompt or auto-resume? 
         // For now, let's just set the time.
         // mediaElement.currentTime = savedTime; 
@@ -2061,7 +2105,9 @@ async function loadResume() {
     if (!container) return;
     
     try {
-        const res = await fetch(`${API_BASE}/media/resume?limit=12`);
+        const res = await fetch(`${API_BASE}/media/resume?limit=12`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
         const watching = Array.isArray(data.items) ? data.items : [];
@@ -2143,8 +2189,8 @@ async function loadRecent() {
 
     try {
         const [mRes, sRes] = await Promise.all([
-            fetch(`${API_BASE}/media/library/movies?sort=newest&limit=6`),
-            fetch(`${API_BASE}/media/library/shows?sort=newest&limit=6`)
+            fetch(`${API_BASE}/media/library/movies?sort=newest&limit=6`, { headers: getAuthHeaders() }),
+            fetch(`${API_BASE}/media/library/shows?sort=newest&limit=6`, { headers: getAuthHeaders() })
         ]);
 
         const mData = await mRes.json();
@@ -2210,7 +2256,7 @@ let wifiEnabled = true;
 
 async function loadWifiStatus() {
     try {
-        const res = await fetch(`${API_BASE}/system/wifi/status`);
+        const res = await fetch(`${API_BASE}/system/wifi/status`, { headers: getAuthHeaders() });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
         
@@ -2236,7 +2282,7 @@ async function loadWifiStatus() {
 
             // If enabled, also get detailed info
             if (wifiEnabled) {
-                const infoRes = await fetch(`${API_BASE}/system/wifi/info`);
+                const infoRes = await fetch(`${API_BASE}/system/wifi/info`, { headers: getAuthHeaders() });
                 if (infoRes.ok) {
                     const info = await infoRes.json();
                     if (details) {
@@ -2278,7 +2324,7 @@ async function scanWifi() {
     `;
 
     try {
-        const res = await fetch(`${API_BASE}/system/wifi/scan`);
+        const res = await fetch(`${API_BASE}/system/wifi/scan`, { headers: getAuthHeaders() });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
 
@@ -2394,7 +2440,10 @@ async function connectToWifi(ssid, password) {
     try {
         const res = await fetch(`${API_BASE}/system/wifi/connect`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({ ssid, password })
         });
         
@@ -2436,7 +2485,10 @@ async function toggleWifiUI() {
     btn.textContent = newState ? 'Enabling...' : 'Disabling...';
     
     try {
-        const res = await fetch(`${API_BASE}/system/wifi/toggle?enable=${newState}`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/system/wifi/toggle?enable=${newState}`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         
         if (res.ok) {
@@ -2782,6 +2834,10 @@ async function uploadFiles() {
             await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', `${API_BASE}/media/upload_stream/${category}?path=${encodeURIComponent(displayName)}`, true);
+                const authHeaders = getAuthHeaders();
+                if (authHeaders.Authorization) {
+                    xhr.setRequestHeader('Authorization', authHeaders.Authorization);
+                }
                 xhr.setRequestHeader('Content-Type', 'application/octet-stream');
                 xhr.setRequestHeader('X-File-Path', displayName);
                 xhr.upload.onprogress = function(e) {
@@ -2899,7 +2955,10 @@ async function uploadFiles() {
 async function deleteItem(path) {
     if (!confirm('Are you sure you want to delete this item? This cannot be undone.')) return;
     try {
-        const res = await fetch(`${API_BASE}/media/delete?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/media/delete?path=${encodeURIComponent(path)}`, { 
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
@@ -2922,14 +2981,33 @@ async function deleteItem(path) {
     }
 }
 
+function getAuthHeaders() {
+    const token = localStorage.getItem('nomad_auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 async function rescanLibrary() {
     if (!confirm('Rescan all libraries? This may take a while.')) return;
     try {
-        const res = await fetch(`${API_BASE}/media/scan`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/scan`, { 
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                ...getAuthHeaders()
+            }
+        });
+        
+        if (res.status === 401) {
+            alert('Session expired. Please log in again.');
+            logout();
+            return;
+        }
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Scan failed');
         alert(data.message);
     } catch (e) {
+        console.error('Scan error:', e);
         alert(e.message);
     }
 }
@@ -2937,7 +3015,10 @@ async function rescanLibrary() {
 async function prepareDrive(path) {
     if (!confirm(`Create standard folders (movies, shows, etc.) on ${path}?`)) return;
     try {
-        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
         alert(data.message);
@@ -2958,7 +3039,9 @@ function inferShowNameFromFilename(pathOrName) {
 
 async function loadStorageStats() {
     try {
-        const res = await fetch(`${API_BASE}/system/stats`);
+        const res = await fetch(`${API_BASE}/system/stats`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) return;
         const data = await res.json();
         
@@ -3123,7 +3206,10 @@ async function changePassword() {
     try {
         const res = await fetch(`${API_BASE}/auth/change-password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({ current_password: currentPw, new_password: newPw })
         });
 
@@ -3147,7 +3233,10 @@ async function changePassword() {
 
 async function rebuildLibrary() {
     try {
-        const res = await fetch(`${API_BASE}/media/rebuild`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/rebuild`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
         alert(data.status || 'Library scan started in background');
@@ -3162,7 +3251,10 @@ async function systemControl(action) {
     if (action === 'wifi_restart') {
         if (!confirm('Are you sure you want to restart Wi-Fi? This will temporarily disconnect all wireless connections.')) return;
         try {
-            const res = await fetch(`${API_BASE}/system/wifi/restart`, { method: 'POST' });
+            const res = await fetch(`${API_BASE}/system/wifi/restart`, { 
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
             if (res.status === 401) { logout(); return; }
             if (res.ok) {
                 alert('Wi-Fi restart initiated.');
@@ -3186,7 +3278,7 @@ async function systemControl(action) {
         
         // Save current version before update
         try {
-            const statusRes = await fetch(`${API_BASE}/system/status`);
+            const statusRes = await fetch(`${API_BASE}/system/status`, { headers: getAuthHeaders() });
             const statusData = await statusRes.json();
             if (statusData.version) {
                 localStorage.setItem('nomadpi_pre_update_version', statusData.version);
@@ -3205,7 +3297,10 @@ async function systemControl(action) {
         if (progressText) progressText.textContent = 'Initializing update...';
 
         try {
-            const res = await fetch(`${API_BASE}/system/control/update`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/system/control/update`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
             if (res.status === 401) { logout(); return; }
             
             // Start polling for logs and status
@@ -3217,7 +3312,7 @@ async function systemControl(action) {
                 pollCount++;
                 try {
                     // 1. Poll Progress Status (JSON)
-                    const statusRes = await fetch(`${API_BASE}/system/update/status`);
+                    const statusRes = await fetch(`${API_BASE}/system/update/status`, { headers: getAuthHeaders() });
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
                         if (statusData.progress !== undefined) {
@@ -3227,7 +3322,7 @@ async function systemControl(action) {
                     }
 
                     // 2. Poll Logs (Text)
-                    const logRes = await fetch(`${API_BASE}/system/update/log`);
+                    const logRes = await fetch(`${API_BASE}/system/update/log`, { headers: getAuthHeaders() });
                     if (logRes.ok) {
                         const data = await logRes.json();
                         if (data.log) {
@@ -3299,6 +3394,7 @@ async function systemControl(action) {
                     try {
                         const pingRes = await fetch(`${API_BASE}/system/status`, { 
                             method: 'GET',
+                            headers: getAuthHeaders(),
                             cache: 'no-cache'
                         });
                         if (pingRes.ok) {
@@ -3342,7 +3438,10 @@ async function systemControl(action) {
     if (!confirm(msg)) return;
 
     try {
-        const res = await fetch(`${API_BASE}/system/control/${action}`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/system/control/${action}`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -3361,7 +3460,9 @@ async function loadDrives(silent = false) {
     if (!silent) container.innerHTML = '<div class="loading">Scanning...</div>';
     
     try {
-        const res = await fetch(`${API_BASE}/system/drives`);
+        const res = await fetch(`${API_BASE}/system/drives`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
         
@@ -3472,7 +3573,8 @@ async function mountDrive(device, name, btn) {
         }
 
         const res = await fetch(`${API_BASE}/system/mount?device=${devPath}&mount_point=${name}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         if (res.status === 401) { logout(); return; }
         const result = await res.json().catch(() => ({}));
@@ -3501,7 +3603,8 @@ async function unmountDrive(mountpoint) {
     
     try {
         const res = await fetch(`${API_BASE}/system/unmount?target=${encodeURIComponent(mountpoint)}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         if (res.status === 401) { logout(); return; }
         const result = await res.json().catch(() => ({}));
@@ -3542,7 +3645,10 @@ async function changePassword() {
     try {
         const res = await fetch(`${API_BASE}/auth/change-password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({
                 current_password: current,
                 new_password: newPass
@@ -3615,7 +3721,7 @@ async function loadUsers() {
     if (!container) return;
 
     try {
-        const res = await fetch(`${API_BASE}/auth/users`);
+        const res = await fetch(`${API_BASE}/auth/users`, { headers: getAuthHeaders() });
         if (res.status === 401) { logout(); return; }
         if (res.status === 403) {
             container.innerHTML = '<p class="error">Admin privileges required.</p>';
@@ -3701,9 +3807,14 @@ async function addUser() {
     try {
         const res = await fetch(`${API_BASE}/auth/users`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({ username, password, is_admin })
         });
+
+        if (res.status === 401) { logout(); return; }
 
         if (res.ok) {
             showToast(`User ${username} created`, 'success');
@@ -3726,8 +3837,11 @@ async function deleteUser(userId, username) {
 
     try {
         const res = await fetch(`${API_BASE}/auth/users/${userId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
+
+        if (res.status === 401) { logout(); return; }
 
         if (res.ok) {
             showToast('User deleted', 'success');
@@ -3746,9 +3860,14 @@ async function toggleUserAdmin(userId, makeAdmin) {
     try {
         const res = await fetch(`${API_BASE}/auth/users/${userId}/role`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({ is_admin: makeAdmin })
         });
+
+        if (res.status === 401) { logout(); return; }
 
         if (res.ok) {
             showToast('User role updated', 'success');
@@ -3770,9 +3889,14 @@ async function resetUserPassword(userId, username) {
     try {
         const res = await fetch(`${API_BASE}/auth/users/${userId}/password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify({ new_password: newPassword })
         });
+
+        if (res.status === 401) { logout(); return; }
 
         if (res.ok) {
             showToast('Password reset successfully', 'success');
@@ -3799,7 +3923,10 @@ async function loadSubtitlesForVideo(videoElement, videoPath) {
             if (token) subUrl += '&token=' + token;
 
             // Check if subtitle file exists
-            const response = await fetch(subUrl, { method: 'HEAD' });
+            const response = await fetch(subUrl, { 
+                method: 'HEAD',
+                headers: getAuthHeaders()
+            });
             if (response.ok) {
                 console.log('[Subtitles] Found:', subPath);
                 const track = document.createElement('track');
@@ -3866,7 +3993,10 @@ async function findNextEpisode(currentPath) {
 
     // Fetch the shows library to find next episode
     try {
-        const res = await fetch(`${API_BASE}/media/shows/library`);
+        const res = await fetch(`${API_BASE}/media/shows/library`, {
+            headers: getAuthHeaders()
+        });
+        if (res.status === 401) { logout(); return null; }
         if (!res.ok) return null;
         const data = await res.json();
 
@@ -3985,7 +4115,9 @@ async function findDuplicates() {
     statusDiv.innerHTML = '<div style="padding:20px; text-align:center;"><div class="spinner" style="margin:0 auto 10px;"></div><p>Scanning for duplicates...</p></div>';
 
     try {
-        const res = await fetch(`${API_BASE}/media/duplicates`);
+        const res = await fetch(`${API_BASE}/media/duplicates`, {
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
 
@@ -4049,7 +4181,10 @@ async function fixDuplicates() {
     showToast('Starting mass duplicate fix...', 'info');
 
     try {
-        const res = await fetch(`${API_BASE}/media/fix_duplicates`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/media/fix_duplicates`, { 
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
 
@@ -4063,6 +4198,15 @@ async function fixDuplicates() {
 
         // Refresh stats after a delay
         setTimeout(() => {
+            loadStorageStats();
+        }, 3000);
+
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+        console.error('Failed to fix duplicates:', e);
+    }
+}
+
             loadStorageStats();
         }, 3000);
 
