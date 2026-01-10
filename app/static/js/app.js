@@ -1746,7 +1746,7 @@ function shouldContinue(progress) {
     const t = Number(progress.current_time || 0);
     const d = Number(progress.duration || 0);
     if (!Number.isFinite(t) || !Number.isFinite(d)) return false;
-    return t > 60 && (d - t) > 60;
+    return t > 10 && (d - t) > 10;
 }
 
 function collectContinueEpisodes(showName = null) {
@@ -2069,22 +2069,31 @@ function escapeHtml(str) {
 }
 
 async function updateProgress(mediaElement, filePath) {
-    if (Math.abs(mediaElement.currentTime - (mediaElement.lastTime || 0)) < 5) return;
+    if (!mediaElement || !filePath) return;
+    
+    // Only update every 5 seconds or if we're at the very end
+    const isNearEnd = mediaElement.duration > 0 && (mediaElement.duration - mediaElement.currentTime) < 5;
+    if (Math.abs(mediaElement.currentTime - (mediaElement.lastTime || 0)) < 5 && !isNearEnd) return;
+    
     mediaElement.lastTime = mediaElement.currentTime;
 
-    const res = await fetch(`${API_BASE}/media/progress`, {
-        method: 'POST',
-        headers: {
-            ...getAuthHeaders(),
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            file_path: filePath,
-            current_time: mediaElement.currentTime,
-            duration: mediaElement.duration || 0
-        })
-    });
-    if (res.status === 401) { logout(); }
+    try {
+        const res = await fetch(`${API_BASE}/media/progress`, {
+            method: 'POST',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file_path: filePath,
+                current_time: mediaElement.currentTime,
+                duration: mediaElement.duration || 0
+            })
+        });
+        if (res.status === 401) { logout(); }
+    } catch (e) {
+        console.error('Failed to update progress:', e);
+    }
 }
 
 function checkResume(mediaElement, filePath, savedTime) {

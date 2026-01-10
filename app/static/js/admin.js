@@ -33,7 +33,7 @@ createApp({
             isAuthenticated: false,
             currentUser: null,
             currentUserId: null,
-            apiToken: localStorage.getItem('adminToken') || null,
+            apiToken: localStorage.getItem('nomad_auth_token') || null,
 
             // Users State
             users: [],

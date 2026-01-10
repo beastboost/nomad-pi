@@ -271,9 +271,31 @@ def logout(request: Request):
     response.delete_cookie("auth_token")
     return response
 
+@router.get("/me")
+def get_me(user_id: int = Depends(get_current_user_id)):
+    user = database.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "user": {
+            "id": user['id'],
+            "username": user['username'],
+            "is_admin": bool(user['is_admin']),
+            "must_change_password": bool(user.get('must_change_password', 0))
+        }
+    }
+
 @router.get("/check")
 def check_auth(request: Request):
+    # Try all possible token sources (cookie, query, header)
     token = request.cookies.get("auth_token")
+    if not token:
+        token = request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+
     if token:
         session = database.get_session(token)
         if session:
