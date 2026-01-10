@@ -597,10 +597,16 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
 
     if action == "update":
         log_file = os.path.abspath("update.log")
+        status_file = os.path.abspath("update_status.json")
         # Ensure log file is clean before starting
         if os.path.exists(log_file):
             try:
                 os.remove(log_file)
+            except:
+                pass
+        if os.path.exists(status_file):
+            try:
+                os.remove(status_file)
             except:
                 pass
         
@@ -649,7 +655,7 @@ def get_update_status(user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Windows":
         status_file = "update_status.json"
     else:
-        status_file = "/tmp/nomad-pi-update.json"
+        status_file = os.path.abspath("update_status.json")
 
     if os.path.exists(status_file):
         try:

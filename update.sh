@@ -1,10 +1,13 @@
 #!/bin/bash
 set -e
-STATUS_FILE="/tmp/nomad-pi-update.json"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+STATUS_FILE="$SCRIPT_DIR/update_status.json"
+STATUS_DIR="$SCRIPT_DIR"
 
 update_status() {
-    # Construct JSON safely using a temporary file and atomic replace
-    local tmp_file=$(mktemp)
+    local tmp_file
+    tmp_file=$(mktemp "$STATUS_DIR/.update_status.tmp.XXXXXX" 2>/dev/null) || tmp_file="$STATUS_DIR/.update_status.tmp.$$"
     # Use jq to build valid JSON if available, otherwise fallback to simple printf escaping
     if command -v jq >/dev/null 2>&1; then
         jq -n \
@@ -18,8 +21,8 @@ update_status() {
         printf '{"progress": %d, "message": "%s", "timestamp": "%s"}' \
                "$1" "$escaped_msg" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp_file"
     fi
-    chmod 600 "$tmp_file"
-    mv "$tmp_file" "$STATUS_FILE"
+    chmod 600 "$tmp_file" 2>/dev/null || true
+    mv -f "$tmp_file" "$STATUS_FILE"
 }
 
 update_status 5 "Checking System Health..."
@@ -59,8 +62,6 @@ update_status 15 "Ensuring repository permissions..."
 # This is a common issue when running parts of the setup with sudo
 echo "Ensuring correct repository permissions..."
 REAL_USER=${SUDO_USER:-$USER}
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR"
 
 sudo chown -R "$REAL_USER:$REAL_USER" . 2>/dev/null || true
 # Mark directory as safe for git (common issue on newer git versions)
