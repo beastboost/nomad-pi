@@ -8,7 +8,7 @@ Write-Host "Transferring files to $PiUser@$PiHost:$TargetDir ..." -ForegroundCol
 ssh $PiUser@$PiHost "mkdir -p $TargetDir"
 
 # Copy files
-scp -r .\app .\requirements.txt .\setup.sh .\update.sh .\check_db.py .\rebuild_index.py "$PiUser@$PiHost`:$TargetDir"
+scp -r .\app .\requirements.txt .\setup.sh .\update.sh "$PiUser@$PiHost`:$TargetDir"
 
 Write-Host "Transfer complete!" -ForegroundColor Green
 Write-Host "You can now run the setup script on the Pi:" -ForegroundColor Yellow

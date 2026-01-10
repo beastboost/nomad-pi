@@ -318,6 +318,31 @@ def normalize_title(s: str):
     s = re.sub(r'\s+', ' ', s).strip().lower()
     return s
 
+def _strip_show_root_prefix(folder: str) -> str:
+    parts = [p for p in (folder or "").split("/") if p and p != "."]
+    if not parts:
+        return "."
+    synonyms = {
+        "shows", "show", "tv shows", "tv", "series", "tv series", "tvshows", "television", "telly",
+        "media",
+    }
+    lowered = [p.strip().lower() for p in parts]
+    cut = None
+    for i, seg in enumerate(lowered):
+        if seg in synonyms:
+            cut = i + 1
+            break
+    if cut is not None:
+        parts = parts[cut:]
+    return "/".join(parts) if parts else "."
+
+def _guess_show_dir_from_episode_path(ep_fs: str) -> str:
+    season_dir = os.path.dirname(ep_fs)
+    base = os.path.basename(season_dir).strip().lower()
+    if re.match(r"^(season|series)\s*\d{1,3}$", base) or re.match(r"^s\d{1,3}$", base) or base in {"specials", "extra", "extras"}:
+        return os.path.dirname(season_dir)
+    return season_dir
+
 _poster_cache = OrderedDict()
 _poster_cache_max = 2048
 
@@ -340,8 +365,7 @@ def find_local_poster(dir_path: str, filename: str = None):
         p = os.path.join(dir_path, name)
         if os.path.isfile(p):
             try:
-                rel_from_data = os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
-                v = f"/data/{rel_from_data}"
+                v = fs_path_to_web_path(p)
                 break
             except Exception:
                 continue
@@ -455,7 +479,7 @@ async def cache_remote_poster(poster_url: str):
     return f"/data/{rel}"
 
 @router.get("/shows/library")
-def get_shows_library(user_id: int = Depends(get_current_user_id)):
+async def get_shows_library(user_id: int = Depends(get_current_user_id)):
     items, total = database.query_library_index("shows", limit=1000000, user_id=user_id)
     all_progress = database.get_all_progress(user_id)
     
@@ -497,7 +521,8 @@ def get_shows_library(user_id: int = Depends(get_current_user_id)):
                 "genres": set(),
                 "years": set(),
                 "mtime": 0,
-                "path": os.path.join("/data/shows", show_name).replace(os.sep, '/')
+                "path": os.path.join("/data/shows", show_name).replace(os.sep, '/'),
+                "_sample_path": web_path
             }
         
         # Aggregate genres and years
@@ -555,6 +580,76 @@ def get_shows_library(user_id: int = Depends(get_current_user_id)):
                 shows_dict[show_name]["seasons"][season_name]["poster"] = r.get("poster")
 
         shows_dict[show_name]["seasons"][season_name]["episodes"].append(ep)
+
+    show_poster_cache = {}
+    omdb_configured = bool(os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"))
+    for show_name, show in shows_dict.items():
+        if show.get("poster"):
+            continue
+
+        sample = show.get("_sample_path")
+        if not isinstance(sample, str) or not sample.startswith("/data/"):
+            continue
+
+        if sample in show_poster_cache:
+            show["poster"] = show_poster_cache[sample]
+            continue
+
+        show_title = show_name
+        show_year = None
+        m = re.search(r"\((\d{4})\)", show_title)
+        if m:
+            show_year = m.group(1)
+            show_title = show_title.replace(m.group(0), "").strip()
+        show_title = re.sub(r"\s+", " ", show_title).strip()
+
+        try:
+            ep_fs = safe_fs_path_from_web_path(sample)
+            show_dir_fs = _guess_show_dir_from_episode_path(ep_fs)
+        except Exception:
+            continue
+
+        p = find_local_poster(show_dir_fs)
+        if not p and omdb_configured and show_title != "Unsorted":
+            meta = None
+            try:
+                try:
+                    meta = await omdb_fetch(title=show_title, year=show_year, media_type="series")
+                except Exception:
+                    search = await omdb_search(query=show_title, year=show_year, media_type="series")
+                    results = search.get("Search") or []
+                    if results:
+                        best = results[0]
+                        best_score = _get_similarity(show_title, best.get("Title", ""))
+                        for r in results:
+                            score = _get_similarity(show_title, r.get("Title", ""))
+                            if score > best_score:
+                                best_score = score
+                                best = r
+                        if best_score > 0.5 and best.get("imdbID"):
+                            meta = await omdb_fetch(imdb_id=best.get("imdbID"), media_type="series")
+            except Exception:
+                meta = None
+
+            if meta and meta.get("Poster") and meta.get("Poster") != "N/A":
+                cached = await cache_remote_poster(meta["Poster"])
+                if cached:
+                    try:
+                        poster_dest = os.path.join(show_dir_fs, "poster.jpg")
+                        cached_fs = safe_fs_path_from_web_path(cached)
+                        if os.path.isfile(cached_fs):
+                            os.makedirs(os.path.dirname(poster_dest), exist_ok=True)
+                            shutil.copy2(cached_fs, poster_dest)
+                            p = fs_path_to_web_path(poster_dest)
+                    except Exception:
+                        p = cached
+
+        if p:
+            show["poster"] = p
+            for season in show.get("seasons", {}).values():
+                if season and not season.get("poster"):
+                    season["poster"] = p
+            show_poster_cache[sample] = p
         
     # Convert to list structure
     out = []
@@ -570,6 +665,7 @@ def get_shows_library(user_id: int = Depends(get_current_user_id)):
         # Convert sets to sorted lists
         show["genres"] = sorted(list(show.get("genres", [])))
         show["years"] = sorted(list(show.get("years", [])))
+        show.pop("_sample_path", None)
         out.append(show)
         
     return {"shows": out}
@@ -683,9 +779,6 @@ def build_library_index(category: str):
                     rel_folder = os.path.relpath(root, base).replace(os.sep, '/')
                     
                     if category == "shows":
-                        # If the scan path (base) itself seems to be a show folder
-                        # (i.e., it's not named 'shows', 'tv shows', etc.), 
-                        # prepend its name to the folder path.
                         base_name = os.path.basename(base)
                         synonyms = ["shows", "tv shows", "tv", "series", "tv series", "tvshows", "media", "external"]
                         if base_name.lower() not in synonyms:
@@ -695,6 +788,7 @@ def build_library_index(category: str):
                                 folder = f"{base_name}/{rel_folder}"
                         else:
                             folder = rel_folder
+                        folder = _strip_show_root_prefix(folder)
                     else:
                         folder = rel_folder
                 except Exception:
@@ -831,12 +925,24 @@ def scan_media_page(category: str, q: str, offset: int, limit: int):
                     if qn not in text:
                         continue
                 full_path = os.path.join(root, f)
+                web_path = None
+                rel_path = None
                 try:
-                    rel_path = os.path.relpath(full_path, BASE_DIR)
-                    url_path = rel_path.replace(os.sep, '/')
-                    web_path = f"/data/{url_path}"
+                    web_path = fs_path_to_web_path(full_path)
                 except Exception:
-                    continue
+                    web_path = None
+
+                if isinstance(web_path, str) and web_path.startswith("/data/"):
+                    rel_path = web_path.replace("/data/", "").replace("/", os.sep)
+                else:
+                    try:
+                        rel_path = os.path.relpath(full_path, BASE_DIR)
+                        if rel_path.startswith(".."):
+                            continue
+                        url_path = rel_path.replace(os.sep, '/')
+                        web_path = f"/data/{url_path}"
+                    except Exception:
+                        continue
 
                 try:
                     folder = os.path.relpath(root, base).replace(os.sep, '/')
@@ -1009,6 +1115,33 @@ def fs_path_to_web_path(fs_path: str) -> str:
     if fs_abs.startswith(base_abs):
         rel_path = os.path.relpath(fs_abs, base_abs).replace(os.sep, "/")
         return f"/data/{rel_path}"
+
+    if platform.system() == "Linux":
+        ext_root = os.path.join(base_abs, "external")
+        if fs_abs.startswith(os.path.abspath(ext_root) + os.sep):
+            rel = os.path.relpath(fs_abs, ext_root).replace(os.sep, "/")
+            parts = rel.split("/", 1)
+            drive = parts[0]
+            rest = parts[1] if len(parts) > 1 else ""
+            return f"/data/external/{drive}/{rest}".rstrip("/")
+
+        for mount_root in ["/media/pi", "/media", "/mnt"]:
+            mount_abs = os.path.abspath(mount_root)
+            if fs_abs.startswith(mount_abs + os.sep):
+                rel = os.path.relpath(fs_abs, mount_abs).replace(os.sep, "/")
+                parts = rel.split("/", 1)
+                drive = parts[0]
+                rest = parts[1] if len(parts) > 1 else ""
+                try:
+                    os.makedirs(ext_root, exist_ok=True)
+                    link_path = os.path.join(ext_root, drive)
+                    target = os.path.join(mount_root, drive)
+                    if not os.path.exists(link_path) and os.path.exists(target):
+                        os.symlink(target, link_path)
+                except Exception:
+                    pass
+                return f"/data/external/{drive}/{rest}".rstrip("/")
+
     return fs_abs
 
 def find_subtitles(media_fs_path: str) -> List[Dict[str, str]]:
@@ -2102,8 +2235,12 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
 
                 # Correct web paths relative to BASE_DIR
                 try:
-                    from_web = f"/data/{os.path.relpath(src_fs, BASE_DIR).replace(os.sep, '/')}"
-                    to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                    from_web = fs_path_to_web_path(src_fs)
+                    to_web = fs_path_to_web_path(dest_fs)
+                    if not (isinstance(from_web, str) and from_web.startswith("/data/")):
+                        raise ValueError("Invalid from_web")
+                    if not (isinstance(to_web, str) and to_web.startswith("/data/")):
+                        raise ValueError("Invalid to_web")
                 except Exception:
                     from_web = f"/data/shows/{rel_under}"
                     to_web = f"/data/shows/{os.path.relpath(dest_fs, base).replace(os.sep, '/')}"
@@ -2127,7 +2264,7 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                         logger.info(f"Organized show file: {src_fs} -> {dest_fs}")
                         try:
                             # Update path in database if it was moved
-                            to_web = f"/data/{os.path.relpath(dest_fs, BASE_DIR).replace(os.sep, '/')}"
+                            to_web = fs_path_to_web_path(dest_fs)
                             database.rename_media_path(from_web, to_web)
                         except Exception:
                             pass
@@ -2199,19 +2336,19 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                     if os.path.exists(poster_dest):
                         try:
                             if not meta: meta = {"Title": show_name}
-                            meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
+                            meta["Poster"] = fs_path_to_web_path(poster_dest)
                         except Exception: pass
                     # 2. Otherwise try to download from OMDB if we have meta
                     elif meta and meta.get("Poster") and meta["Poster"] != "N/A":
                         try:
                             poster_url = meta["Poster"]
-                            cached_poster = cache_remote_poster(poster_url)
+                            cached_poster = await cache_remote_poster(poster_url)
                             if cached_poster:
                                 # Also save as poster.jpg in show directory
                                 cached_fs = safe_fs_path_from_web_path(cached_poster)
                                 if os.path.exists(cached_fs):
                                     shutil.copy2(cached_fs, poster_dest)
-                                    meta["Poster"] = f"/data/{os.path.relpath(poster_dest, BASE_DIR).replace(os.sep, '/')}"
+                                    meta["Poster"] = fs_path_to_web_path(poster_dest)
                                     logger.info(f"Saved OMDB poster for {show_name} to local folder")
                         except Exception as e:
                             logger.warning(f"Failed to save OMDB poster for {show_name}: {e}")
@@ -2948,5 +3085,3 @@ def comic_pages(path: str, user_id: int = Depends(get_current_user_id)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read comic: {e}")
-
-

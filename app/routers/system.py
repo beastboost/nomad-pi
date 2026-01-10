@@ -49,7 +49,12 @@ def save_omdb_key(request: OmdbKeyRequest):
 @public_router.get("/status")
 def get_system_status():
     """Lightweight endpoint for connectivity checks"""
-    return {"status": "online", "version": VERSION}
+    commit = None
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")), text=True).strip()
+    except Exception:
+        commit = None
+    return {"status": "online", "version": VERSION, "commit": commit}
 
 @public_router.get("/samba/config")
 def get_samba_config():
@@ -611,17 +616,7 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
-        elif platform.system() == "Windows":
-            # Support for testing update on Windows
-            try:
-                # Use powershell to append to log and add completion marker
-                pwsh_cmd = "powershell.exe -ExecutionPolicy Bypass -Command \"& { ./update.ps1 | Out-File -FilePath update.log -Append -Encoding utf8; if ($?) { Add-Content update.log '`nUpdate complete!' } else { Add-Content update.log '`nUpdate failed!' } }\""
-                subprocess.Popen(pwsh_cmd, shell=True, cwd=os.getcwd())
-                return {"status": "Update initiated (Windows)."}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-        else:
-            return {"status": "update_simulated", "message": "Update script would run on Linux or Windows"}
+        return {"status": "error", "message": "Update is only supported on Linux"}
 
     if platform.system() == "Linux":
         shutdown_bin = _get_bin_path("shutdown", "/usr/sbin/shutdown")
@@ -647,7 +642,7 @@ def check_update(user_id: int = Depends(get_current_user_id)):
             return {"available": False, "message": "System is up to date"}
         except Exception as e:
             return {"available": False, "error": str(e)}
-    return {"available": True, "message": "Update check simulated (Windows)"}
+    return {"available": False, "message": "Update check only supported on Linux"}
 
 @router.get("/update/status")
 def get_update_status(user_id: int = Depends(get_current_user_id)):

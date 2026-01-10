@@ -62,7 +62,10 @@ def ensure_admin_user():
             password = None
             must_change = False # If pre-hashed, assume it's secure
         else:
-            password = secrets.token_urlsafe(16)
+            if ALLOW_INSECURE_DEFAULT:
+                password = "nomad"
+            else:
+                password = secrets.token_urlsafe(16)
             
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
         database.create_user("admin", h, is_admin=True, must_change_password=must_change)
@@ -142,7 +145,15 @@ def login(request: LoginRequest, request_obj: Request):
         )
 
     user = database.get_user_by_username(request.username)
-    if user and pwd_context.verify(request.password, user['password_hash']):
+    verified = False
+    if user:
+        try:
+            verified = pwd_context.verify(request.password, user['password_hash'])
+        except Exception as e:
+            logger.error(f"Password verification failed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Password verification backend error. Check logs.")
+
+    if user and verified:
         # Clear attempts on success
         login_attempts[client_ip] = []
         token = str(uuid.uuid4())
