@@ -56,6 +56,38 @@ def get_system_status():
         commit = None
     return {"status": "online", "version": VERSION, "commit": commit}
 
+@public_router.get("/setup/status")
+def get_setup_status():
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    admin_password_hash = os.environ.get("ADMIN_PASSWORD_HASH")
+    allow_insecure_default = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
+
+    users = []
+    try:
+        users = database.get_all_users() or []
+    except Exception:
+        users = []
+
+    admin_user = None
+    try:
+        admin_user = database.get_user_by_username("admin")
+    except Exception:
+        admin_user = None
+
+    admin_must_change_password = bool(admin_user.get("must_change_password", 0)) if admin_user else False
+
+    password_hint = None
+    if admin_must_change_password and allow_insecure_default and not admin_password and not admin_password_hash:
+        password_hint = "nomad"
+
+    return {
+        "users_exist": bool(users),
+        "default_username": "admin",
+        "password_hint": password_hint,
+        "admin_must_change_password": admin_must_change_password,
+        "omdb_configured": bool(database.get_setting("omdb_api_key") or os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")),
+    }
+
 @public_router.get("/samba/config")
 def get_samba_config():
     """Get Samba configuration for NomadTransferTool auto-setup"""

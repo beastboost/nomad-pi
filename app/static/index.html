@@ -27,9 +27,10 @@
             <div class="logo">Nomad Pi ✨</div>
             <p>Sign in to access your media</p>
             <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;">
-            <input type="password" id="password-input" placeholder="Password (default: nomad)" onkeypress="handleLoginKey(event)">
+            <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
             <button onclick="login()" class="primary">Enter</button>
             <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect username or password</p>
+            <p id="setup-hint" style="color: var(--text-muted); font-size: 0.9em; margin-top: 10px; display:none;"></p>
         </div>
     </div>
 

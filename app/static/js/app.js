@@ -2585,6 +2585,26 @@ function debounce(func, wait) {
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
 
+    const setupHintEl = document.getElementById('setup-hint');
+    const passwordInput = document.getElementById('password-input');
+    if (setupHintEl && passwordInput) {
+        fetch(`${API_BASE}/system/setup/status`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (!data) return;
+                if (data.admin_must_change_password && data.password_hint) {
+                    setupHintEl.textContent = `First-time setup: default password is "${data.password_hint}". Please change it after login.`;
+                    setupHintEl.style.display = 'block';
+                    passwordInput.placeholder = `Password (default: ${data.password_hint})`;
+                } else {
+                    setupHintEl.style.display = 'none';
+                    setupHintEl.textContent = '';
+                    passwordInput.placeholder = 'Password';
+                }
+            })
+            .catch(() => {});
+    }
+
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const folderInput = document.getElementById('folder-input');
