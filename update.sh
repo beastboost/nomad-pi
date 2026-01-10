@@ -55,6 +55,12 @@ echo "Optimizing Git configuration..."
 # sudo apt update && sudo apt full-upgrade -y
 
 update_status 15 "Optimizing Git configuration..."
+# Fix repository ownership if it was accidentally changed to root
+echo "Ensuring correct repository permissions..."
+sudo chown -R $USER:$USER . 2>/dev/null || true
+# Mark directory as safe for git (common issue on newer git versions)
+git config --global --add safe.directory $(pwd) 2>/dev/null || true
+
 # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
 git config --global --unset http.sslBackend 2>/dev/null || true
 git config --global http.sslVerify true
