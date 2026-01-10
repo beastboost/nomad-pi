@@ -2,12 +2,12 @@
 set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
-STATUS_FILE="$SCRIPT_DIR/update_status.json"
-STATUS_DIR="$SCRIPT_DIR"
+STATUS_FILE="/tmp/nomad-pi-update.json"
+STATUS_DIR="/tmp"
 
 update_status() {
     local tmp_file
-    tmp_file=$(mktemp "$STATUS_DIR/.update_status.tmp.XXXXXX" 2>/dev/null) || tmp_file="$STATUS_DIR/.update_status.tmp.$$"
+    tmp_file=$(mktemp "$STATUS_DIR/nomad-pi-update.tmp.XXXXXX" 2>/dev/null) || tmp_file="$STATUS_DIR/nomad-pi-update.tmp.$$"
     # Use jq to build valid JSON if available, otherwise fallback to simple printf escaping
     if command -v jq >/dev/null 2>&1; then
         jq -n \
@@ -21,7 +21,7 @@ update_status() {
         printf '{"progress": %d, "message": "%s", "timestamp": "%s"}' \
                "$1" "$escaped_msg" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp_file"
     fi
-    chmod 600 "$tmp_file" 2>/dev/null || true
+    chmod 644 "$tmp_file" 2>/dev/null || true
     mv -f "$tmp_file" "$STATUS_FILE"
 }
 

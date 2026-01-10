@@ -597,7 +597,7 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
 
     if action == "update":
         log_file = os.path.abspath("update.log")
-        status_file = os.path.abspath("update_status.json")
+        status_file = "/tmp/nomad-pi-update.json" if platform.system() == "Linux" else os.path.abspath("update_status.json")
         # Ensure log file is clean before starting
         if os.path.exists(log_file):
             try:
@@ -617,7 +617,10 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
             # Run the update script in the background
             try:
                 # Use a shell wrapper to ensure output is flushed and we have a clear completion marker
-                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
+                if os.geteuid() == 0:
+                    cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
+                else:
+                    cmd = "sudo -n bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
                 subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
@@ -655,18 +658,19 @@ def get_update_status(user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Windows":
         status_file = "update_status.json"
     else:
-        status_file = os.path.abspath("update_status.json")
+        tmp_status = "/tmp/nomad-pi-update.json"
+        status_file = tmp_status if os.path.exists(tmp_status) else os.path.abspath("update_status.json")
 
     if os.path.exists(status_file):
         try:
             if platform.system() == "Linux":
                 st = os.stat(status_file)
-                if st.st_uid != os.getuid():
+                if st.st_uid not in {0, os.getuid()}:
                     return {"progress": 0, "message": "Security error: invalid file ownership"}
-                if st.st_mode & 0o002:
+                if st.st_mode & 0o022:
                     return {"progress": 0, "message": "Security error: invalid file permissions"}
                 
-            with open(status_file, "r") as f:
+            with open(status_file, "r", encoding="utf-8", errors="ignore") as f:
                 return json.load(f)
         except Exception:
             return {"progress": 0, "message": "Error reading status"}
