@@ -282,8 +282,10 @@ def guess_title_year(name: str):
         title_part = s
 
     # 4. Final cleanup of title
-    # Remove file extension if present
-    title = os.path.splitext(title_part)[0]
+    # We DON'T call os.path.splitext(title_part) here because title_part is already 
+    # derived from s (which had the extension removed at the start). 
+    # Calling it again would treat dots in titles (like 'Big.Mouth') as extensions!
+    title = title_part
     
     # Remove quality/source tags from the title part
     for tag in tags:
@@ -1253,7 +1255,16 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
         try:
             # Try direct fetch first
             meta = await omdb_fetch(title=q_title, year=q_year, media_type=media_type)
-            if meta: break
+            if meta:
+                # Sanity check: Ensure returned title isn't completely different (fuzzy match)
+                ret_title = meta.get("Title", "").lower()
+                q_low = q_title.lower()
+                # If neither contains the other, it might be a bad match (e.g. 'Big' vs 'The Big Bang Theory')
+                if q_low not in ret_title and ret_title not in q_low:
+                    # But don't reject if the query is very short (could be a legit short title)
+                    if len(q_low) > 3:
+                        logger.warning(f"OMDB returned suspicious match for '{q_title}': '{meta.get('Title')}'")
+                break
         except HTTPException as e:
             if e.status_code != 404:
                 last_error = e
