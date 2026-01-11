@@ -90,6 +90,11 @@ let movieMetaActive = 0;
 const MOVIE_META_CONCURRENCY = 2;
 const mediaPageState = {};
 const mediaState = { path: '/data' };
+let activeVideoProgressInterval = null;
+let activeVideoEl = null;
+let activeVideoPath = null;
+let playbackHeartbeatInstalled = false;
+const progressDebugSent = new Set();
 
 function getPageState(category) {
     if (!mediaPageState[category]) {
@@ -1097,10 +1102,11 @@ function renderMediaList(category, files) {
             });
 
             let progressHtml = '';
-    if (file.progress && file.progress.current_time > 0) {
-        const pct = (file.progress.current_time / file.progress.duration) * 100;
-        progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
-    }
+            const duration = Number(file?.progress?.duration || 0);
+            if (file.progress && file.progress.current_time > 0 && Number.isFinite(duration) && duration > 0) {
+                const pct = (Number(file.progress.current_time || 0) / duration) * 100;
+                progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
+            }
 
             if (category === 'movies' && isVideo) {
                 div.className = 'media-item media-card';
@@ -1483,6 +1489,13 @@ function openPdfViewer(path, title) {
 }
 
 function closeViewer() {
+    if (activeVideoProgressInterval) {
+        clearInterval(activeVideoProgressInterval);
+        activeVideoProgressInterval = null;
+    }
+    try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
+    activeVideoEl = null;
+    activeVideoPath = null;
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     if (body) body.innerHTML = '';
@@ -1648,6 +1661,18 @@ function openVideoViewer(path, title, startSeconds = 0) {
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
+    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} });
+    video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} });
+    video.addEventListener('play', () => {
+        if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
+        activeVideoProgressInterval = setInterval(() => {
+            try { updateProgress(video, path); } catch (e) {}
+        }, 5000);
+    });
+    video.addEventListener('ended', () => {
+        if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
+        activeVideoProgressInterval = null;
+    });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
     // Auto-detect and load subtitles
@@ -1657,9 +1682,22 @@ function openVideoViewer(path, title, startSeconds = 0) {
 
     // Auto-play next episode when current one ends
     video.addEventListener('ended', async () => {
-        try { await updateProgress(video, path); } catch (e) {}
+        try { await updateProgress(video, path, true); } catch (e) {}
         await handleVideoEnded(path, title);
     });
+
+    activeVideoEl = video;
+    activeVideoPath = path;
+    if (!playbackHeartbeatInstalled) {
+        playbackHeartbeatInstalled = true;
+        window.addEventListener('pagehide', () => {
+            try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'hidden') return;
+            try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
+        });
+    }
 
     videoWrap.appendChild(video);
     body.appendChild(videoWrap);
@@ -2156,8 +2194,9 @@ function renderShows() {
             : `<div class="poster-placeholder"></div>`;
 
         let progressHtml = '';
-        if (ep.progress && ep.progress.current_time > 0) {
-            const pct = (ep.progress.current_time / ep.progress.duration) * 100;
+        const duration = Number(ep?.progress?.duration || 0);
+        if (ep.progress && ep.progress.current_time > 0 && Number.isFinite(duration) && duration > 0) {
+            const pct = (Number(ep.progress.current_time || 0) / duration) * 100;
             progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
         }
 
@@ -2207,29 +2246,39 @@ function escapeHtml(str) {
         .replaceAll("'", '&#039;');
 }
 
-async function updateProgress(mediaElement, filePath) {
+async function updateProgress(mediaElement, filePath, force = false, opts = null) {
     if (!mediaElement || !filePath) return;
     
     // Only update every 5 seconds or if we're at the very end
     const isNearEnd = mediaElement.duration > 0 && (mediaElement.duration - mediaElement.currentTime) < 5;
-    if (Math.abs(mediaElement.currentTime - (mediaElement.lastTime || 0)) < 5 && !isNearEnd) return;
+    if (!force && Math.abs(mediaElement.currentTime - (mediaElement.lastTime || 0)) < 5 && !isNearEnd) return;
     
     mediaElement.lastTime = mediaElement.currentTime;
 
     try {
+        const duration = Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.duration : null;
+        const payload = {
+            file_path: filePath,
+            current_time: mediaElement.currentTime
+        };
+        if (duration !== null) payload.duration = duration;
         const res = await fetch(`${API_BASE}/media/progress`, {
             method: 'POST',
             headers: {
                 ...getAuthHeaders(),
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                file_path: filePath,
-                current_time: mediaElement.currentTime,
-                duration: mediaElement.duration || 0
-            })
+            keepalive: Boolean(opts && opts.keepalive),
+            body: JSON.stringify(payload)
         });
         if (res.status === 401) { logout(); }
+        else if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            console.warn('Progress update failed:', res.status, data);
+        } else if (!progressDebugSent.has(filePath)) {
+            progressDebugSent.add(filePath);
+            console.log('[Progress] Saved:', filePath);
+        }
     } catch (e) {
         console.error('Failed to update progress:', e);
     }
@@ -2282,17 +2331,19 @@ function showResumePrompt(mediaElement, filePath, savedTime) {
 
     const setProgressNow = async (time, duration) => {
         try {
+            const payload = {
+                file_path: filePath,
+                current_time: time
+            };
+            const d = Number.isFinite(duration) && duration > 0 ? duration : null;
+            if (d !== null) payload.duration = d;
             await fetch(`${API_BASE}/media/progress`, {
                 method: 'POST',
                 headers: {
                     ...getAuthHeaders(),
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    file_path: filePath,
-                    current_time: time,
-                    duration: duration || 0
-                })
+                body: JSON.stringify(payload)
             });
         } catch {}
     };

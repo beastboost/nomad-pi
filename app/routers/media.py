@@ -22,13 +22,15 @@ from collections import OrderedDict
 from functools import lru_cache
 from hashlib import md5
 import threading
-import shutil
+import math
+import time as time_module
 from app import database
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 public_router = APIRouter()
+_progress_log_next_at = {}
 
 BASE_DIR = os.path.abspath("data")
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
@@ -711,6 +713,80 @@ def get_next_show_episode(path: str = Query(...), user_id: int = Depends(get_cur
             return int(m.group(1))
         return 0
 
+    def parse_show_season_from_web_path(web_path: str) -> tuple[str, str]:
+        rel = web_path.replace("/data/", "", 1)
+        parts = [p for p in rel.split("/") if p]
+        show_name = ""
+        season_name = ""
+        show_index = next((i for i, p in enumerate(parts) if p.lower() == "shows"), -1)
+        if show_index != -1:
+            if len(parts) > show_index + 1:
+                show_name = parts[show_index + 1]
+            if len(parts) > show_index + 2:
+                season_name = parts[show_index + 2]
+        elif parts:
+            show_name = parts[0]
+            season_name = parts[1] if len(parts) > 1 else ""
+        return show_name, season_name
+
+    def fs_fallback_next() -> Optional[dict]:
+        try:
+            ep_fs = safe_fs_path_from_web_path(path)
+        except Exception:
+            return None
+        if not os.path.isfile(ep_fs):
+            return None
+        season_dir = os.path.dirname(ep_fs)
+        if not os.path.isdir(season_dir):
+            return None
+
+        exts = {".mp4", ".mkv", ".avi", ".mov", ".webm"}
+        entries = []
+        try:
+            for name in os.listdir(season_dir):
+                full = os.path.join(season_dir, name)
+                if not os.path.isfile(full):
+                    continue
+                _, ext = os.path.splitext(name)
+                if ext.lower() not in exts:
+                    continue
+                try:
+                    web = fs_path_to_web_path(full)
+                except Exception:
+                    continue
+                entries.append(
+                    {
+                        "name": name,
+                        "path": web,
+                        "poster": find_local_poster(season_dir, name) or find_local_poster(season_dir) or None,
+                        "ep_num": parse_ep_num(name),
+                    }
+                )
+        except Exception:
+            return None
+
+        if not entries:
+            return None
+
+        entries.sort(key=lambda x: (x["ep_num"], database.natural_sort_key_list(x.get("name") or "")))
+        cur_index = next((i for i, ep in enumerate(entries) if ep.get("path") == path), -1)
+        if cur_index == -1:
+            try:
+                current_ep = parse_ep_num(os.path.basename(ep_fs))
+            except Exception:
+                current_ep = 999
+            cur_index = next((i for i, ep in enumerate(entries) if ep.get("ep_num") == current_ep), -1)
+        if not (0 <= cur_index < len(entries) - 1):
+            return None
+
+        show_name, season_name = parse_show_season_from_web_path(path)
+        nxt = entries[cur_index + 1]
+        if show_name:
+            nxt["show"] = show_name
+        if season_name:
+            nxt["season"] = season_name
+        return nxt
+
     conn = database.get_db()
     try:
         c = conn.cursor()
@@ -718,16 +794,19 @@ def get_next_show_episode(path: str = Query(...), user_id: int = Depends(get_cur
             "SELECT path, name, folder, poster FROM library_index WHERE category = 'shows' AND path = ? LIMIT 1",
             (path,),
         )
-        cur = c.fetchone()
-        if not cur:
-            return {"next": None}
+        cur_row = c.fetchone()
+        if not cur_row:
+            nxt = fs_fallback_next()
+            return {"next": nxt} if nxt else {"next": None}
 
+        cur = dict(cur_row)
         folder = (cur.get("folder") or "").strip()
         parts = folder.split("/") if folder else []
         show_name = parts[0] if len(parts) >= 1 else ""
         season_name = parts[1] if len(parts) >= 2 else ""
-        if not show_name or not folder:
-            return {"next": None}
+        if not show_name or not folder or folder == ".":
+            nxt = fs_fallback_next()
+            return {"next": nxt} if nxt else {"next": None}
 
         current_ep = parse_ep_num(cur.get("name") or "")
 
@@ -814,6 +893,9 @@ def get_next_show_episode(path: str = Query(...), user_id: int = Depends(get_cur
         first["show"] = show_name
         first["season"] = next_season["season"]
         return {"next": first}
+    except Exception as e:
+        logger.error(f"Error finding next episode for {path}: {e}")
+        return {"next": None}
     finally:
         database.return_db(conn)
 
@@ -2043,20 +2125,41 @@ def list_media(category: str, user_id: int = Depends(get_current_user_id)):
 @router.post("/progress")
 def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
     path = data.get("path") or data.get("file_path")
-    time = data.get("current_time")
-    duration = data.get("duration")
+    time_raw = data.get("current_time")
+    duration_raw = data.get("duration")
     
-    if not path or time is None:
-        logger.warning(f"Progress update failed: Missing path or current_time (path={path}, time={time})")
+    if not path or time_raw is None:
+        logger.warning(f"Progress update failed: Missing path or current_time (path={path}, time={time_raw})")
         return {"status": "error", "message": "Missing path or current_time"}
         
     try:
-        logger.debug(f"Updating progress for user {user_id}: {path} at {time}/{duration}")
-        database.update_progress(user_id, path, time, duration)
+        try:
+            current_time = float(time_raw)
+        except Exception:
+            return {"status": "error", "message": "Invalid current_time"}
+        if not math.isfinite(current_time) or current_time < 0:
+            return {"status": "error", "message": "Invalid current_time"}
+
+        duration = None
+        if duration_raw is not None:
+            try:
+                duration = float(duration_raw)
+            except Exception:
+                duration = None
+        if duration is not None and (not math.isfinite(duration) or duration <= 0):
+            duration = None
+
+        now = time_module.time()
+        log_key = (int(user_id), str(path))
+        if now >= float(_progress_log_next_at.get(log_key) or 0):
+            _progress_log_next_at[log_key] = now + 60.0
+            logger.info(f"Progress user={user_id} path={path} t={current_time:.1f} d={(duration or 0):.1f}")
+
+        database.update_progress(user_id, path, current_time, float(duration or 0))
         
         # If progress is near the end (e.g., > 95%), mark as played
         if duration and duration > 0:
-            if (time / duration) > 0.95:
+            if (current_time / duration) > 0.95:
                 database.increment_play_count(user_id, path)
                 
         return {"status": "ok"}

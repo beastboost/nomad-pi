@@ -349,7 +349,7 @@ def update_progress(user_id: int, path: str, current_time: float, duration: floa
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
             ON CONFLICT(user_id, path) DO UPDATE SET
                 current_time = excluded.current_time,
-                duration = excluded.duration,
+                duration = COALESCE(NULLIF(excluded.duration, 0), progress.duration),
                 last_played = CURRENT_TIMESTAMP
         ''', (user_id, path, current_time, duration))
         conn.commit()
