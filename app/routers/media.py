@@ -670,6 +670,148 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
         
     return {"shows": out}
 
+@router.get("/shows/next")
+def get_next_show_episode(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    if not isinstance(path, str) or "/shows/" not in path:
+        return {"next": None}
+
+    def parse_ep_num(name: str) -> int:
+        if not name:
+            return 999
+        m = re.search(r"(?i)\bE(\d{1,3})\b", name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(?i)\b\d+x(\d{1,3})\b", name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(?i)S\d{1,3}E(\d{1,3})\b", name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(?i)\b(\d{1,3})\b", name)
+        if m:
+            return int(m.group(1))
+        return 999
+
+    def parse_season_num(season_name: str) -> int:
+        if not season_name:
+            return 0
+        m = re.search(r"(?i)\b(?:season|series)\s*(\d{1,3})\b", season_name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(?i)\bs(\d{1,3})\b", season_name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"(\d{1,3})", season_name)
+        if m:
+            return int(m.group(1))
+        return 0
+
+    conn = database.get_db()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "SELECT path, name, folder, poster FROM library_index WHERE category = 'shows' AND path = ? LIMIT 1",
+            (path,),
+        )
+        cur = c.fetchone()
+        if not cur:
+            return {"next": None}
+
+        folder = (cur.get("folder") or "").strip()
+        parts = folder.split("/") if folder else []
+        show_name = parts[0] if len(parts) >= 1 else ""
+        season_name = parts[1] if len(parts) >= 2 else ""
+        if not show_name or not folder:
+            return {"next": None}
+
+        current_ep = parse_ep_num(cur.get("name") or "")
+
+        c.execute(
+            "SELECT path, name, poster FROM library_index WHERE category = 'shows' AND folder = ?",
+            (folder,),
+        )
+        season_rows = [dict(r) for r in c.fetchall()]
+        season_eps = [
+            {
+                "name": r.get("name"),
+                "path": r.get("path"),
+                "poster": r.get("poster"),
+                "ep_num": parse_ep_num(r.get("name") or ""),
+            }
+            for r in season_rows
+        ]
+        season_eps.sort(key=lambda x: (x["ep_num"], database.natural_sort_key_list(x.get("name") or "")))
+
+        cur_index = next((i for i, ep in enumerate(season_eps) if ep.get("path") == path), -1)
+        if cur_index == -1:
+            cur_index = next((i for i, ep in enumerate(season_eps) if ep.get("ep_num") == current_ep), -1)
+
+        if 0 <= cur_index < len(season_eps) - 1:
+            next_ep = season_eps[cur_index + 1]
+            next_ep["show"] = show_name
+            next_ep["season"] = season_name
+            return {"next": next_ep}
+
+        c.execute(
+            "SELECT DISTINCT folder FROM library_index WHERE category = 'shows' AND folder LIKE ?",
+            (f"{show_name}/%",),
+        )
+        season_folders = [r["folder"] for r in c.fetchall() if r.get("folder")]
+        seasons = []
+        for f in season_folders:
+            f_parts = f.split("/")
+            if len(f_parts) < 2:
+                continue
+            s_name = f_parts[1]
+            seasons.append(
+                {
+                    "folder": f,
+                    "season": s_name,
+                    "season_num": parse_season_num(s_name),
+                }
+            )
+
+        if not seasons:
+            return {"next": None}
+
+        seasons.sort(key=lambda s: (s["season_num"], database.natural_sort_key_list(s["season"])))
+        cur_season_num = parse_season_num(season_name)
+        next_season = None
+        for s in seasons:
+            if s["folder"] == folder:
+                continue
+            if s["season_num"] > cur_season_num:
+                next_season = s
+                break
+
+        if not next_season:
+            return {"next": None}
+
+        c.execute(
+            "SELECT path, name, poster FROM library_index WHERE category = 'shows' AND folder = ?",
+            (next_season["folder"],),
+        )
+        next_rows = [dict(r) for r in c.fetchall()]
+        next_eps = [
+            {
+                "name": r.get("name"),
+                "path": r.get("path"),
+                "poster": r.get("poster"),
+                "ep_num": parse_ep_num(r.get("name") or ""),
+            }
+            for r in next_rows
+        ]
+        next_eps.sort(key=lambda x: (x["ep_num"], database.natural_sort_key_list(x.get("name") or "")))
+        if not next_eps:
+            return {"next": None}
+
+        first = next_eps[0]
+        first["show"] = show_name
+        first["season"] = next_season["season"]
+        return {"next": first}
+    finally:
+        database.return_db(conn)
+
 @router.get("/stats")
 def get_media_stats(user_id: int = Depends(get_current_user_id)):
     stats = {

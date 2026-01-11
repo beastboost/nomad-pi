@@ -1546,7 +1546,10 @@ function openVideoViewer(path, title, startSeconds = 0) {
     loadSubtitlesForVideo(video, path);
 
     // Auto-play next episode when current one ends
-    video.addEventListener('ended', () => handleVideoEnded(path, title));
+    video.addEventListener('ended', async () => {
+        try { await updateProgress(video, path); } catch (e) {}
+        await handleVideoEnded(path, title);
+    });
 
     body.appendChild(video);
     modal.classList.remove('hidden');
@@ -4044,45 +4047,15 @@ async function handleVideoEnded(currentPath, currentTitle) {
 
 // Find the next episode in the series
 async function findNextEpisode(currentPath) {
-    // Extract show, season, and episode info from path
-    // Path format: /data/shows/ShowName/Season X/Episode.mkv
-    const pathParts = currentPath.split('/');
-    if (pathParts.length < 5 || !currentPath.includes('/shows/')) {
-        return null; // Not a TV show
-    }
-
-    const showName = pathParts[3];
-    const seasonName = pathParts[4];
-
-    // Get current episode number
-    const currentEpNum = parseEpisodeNumber(pathParts[pathParts.length - 1]);
-    if (currentEpNum === null) return null;
-
-    console.log('[Auto-Play] Looking for next episode after:', currentEpNum, 'in', showName, seasonName);
-
-    // Fetch the shows library to find next episode
     try {
-        const res = await fetch(`${API_BASE}/media/shows/library`, {
+        const res = await fetch(`${API_BASE}/media/shows/next?path=${encodeURIComponent(currentPath)}`, {
             headers: getAuthHeaders()
         });
         if (res.status === 401) { logout(); return null; }
         if (!res.ok) return null;
-        const data = await res.json();
-
-        // Find the show
-        const show = data.shows?.find(s => s.name === showName);
-        if (!show) return null;
-
-        // Find the season
-        const season = show.seasons?.find(s => s.name === seasonName);
-        if (!season) return null;
-
-        // Find next episode
-        const sortedEpisodes = season.episodes.sort((a, b) => a.ep_num - b.ep_num);
-        const currentIndex = sortedEpisodes.findIndex(ep => ep.ep_num === currentEpNum);
-
-        if (currentIndex >= 0 && currentIndex < sortedEpisodes.length - 1) {
-            const next = sortedEpisodes[currentIndex + 1];
+        const data = await res.json().catch(() => ({}));
+        const next = data?.next;
+        if (next && next.path) {
             console.log('[Auto-Play] Found next episode:', next.name);
             return next;
         }
