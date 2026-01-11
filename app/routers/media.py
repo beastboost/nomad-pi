@@ -3242,7 +3242,7 @@ def resume(limit: int = 12, user_id: int = Depends(get_current_user_id)):
             d = float(prog.get("duration") or 0)
         except Exception:
             continue
-        if not (t > 10 and d > 0 and (d - t) > 10):
+        if not (t > 10 and (d <= 0 or (d - t) > 10)):
             continue
 
         try:

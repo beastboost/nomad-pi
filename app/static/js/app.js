@@ -515,7 +515,10 @@ function showSection(id) {
 
     if (['movies', 'music', 'books', 'gallery'].includes(id)) loadMedia(id);
     if (id === 'files') loadMedia('files');
-    if (id === 'shows') loadShowsLibrary();
+    if (id === 'shows') {
+        showsLibraryCache = null;
+        loadShowsLibrary();
+    }
     if (id === 'home') {
         loadResume();
         loadRecent();
@@ -1122,6 +1125,7 @@ function renderMediaList(category, files) {
                     : (metaPoster ? `<img class="poster-img" src="${metaPoster}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
                 
                 const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
+                const playLabel = Number(file?.progress?.current_time || 0) > 10 ? 'Resume' : 'Play';
 
                 div.innerHTML = `
                     ${cardDeleteBtn}
@@ -1132,7 +1136,7 @@ function renderMediaList(category, files) {
                             <h3>${escapeHtml(metaTitle)}</h3>
                             <div class="media-details">${subtitle}</div>
                         </div>
-                        <button class="poster-play">Play</button>
+                        <button class="poster-play">${playLabel}</button>
                     </div>
                     <div class="card-meta">
                         <div class="card-title">${escapeHtml(metaTitle)}</div>
@@ -1163,6 +1167,7 @@ function renderMediaList(category, files) {
             } else if (isVideo) {
                 const subtitle = file.folder && file.folder !== '.' ? escapeHtml(file.folder) : '';
                 div.className = 'media-item media-card';
+                const playLabel = Number(file?.progress?.current_time || 0) > 10 ? 'Resume' : 'Play';
                 div.innerHTML = `
                     ${cardDeleteBtn}
                     <div class="poster-shell">
@@ -1171,7 +1176,7 @@ function renderMediaList(category, files) {
                             <h3>${escapeHtml(cleanTitle(file.name))}</h3>
                             <div class="media-details">${subtitle || 'Video'}</div>
                         </div>
-                        <button class="poster-play">Play</button>
+                        <button class="poster-play">${playLabel}</button>
                     </div>
                     <div class="card-meta">
                         <div class="card-title">${escapeHtml(cleanTitle(file.name))}</div>
@@ -1922,8 +1927,49 @@ function shouldContinue(progress) {
     if (!progress) return false;
     const t = Number(progress.current_time || 0);
     const d = Number(progress.duration || 0);
-    if (!Number.isFinite(t) || !Number.isFinite(d)) return false;
+    if (!Number.isFinite(t)) return false;
+    if (!Number.isFinite(d) || d <= 0) return t > 10;
     return t > 10 && (d - t) > 10;
+}
+
+function applyLocalProgressUpdate(filePath, currentTime, duration) {
+    const t = Number(currentTime || 0);
+    const d = Number(duration || 0);
+    if (!filePath || !Number.isFinite(t) || t < 0) return;
+    const nowIso = new Date().toISOString();
+
+    for (const cat of ['movies', 'shows']) {
+        const state = mediaPageState?.[cat];
+        const items = state?.items;
+        if (!Array.isArray(items) || items.length === 0) continue;
+        const item = items.find(x => x?.path === filePath);
+        if (!item) continue;
+        const prev = item.progress && typeof item.progress === 'object' ? item.progress : {};
+        const next = { ...prev, current_time: t, last_played: nowIso };
+        if (Number.isFinite(d) && d > 0) next.duration = d;
+        item.progress = next;
+    }
+
+    if (Array.isArray(showsLibraryCache)) {
+        for (const show of showsLibraryCache) {
+            const seasons = show?.seasons;
+            if (!Array.isArray(seasons)) continue;
+            for (const season of seasons) {
+                const episodes = season?.episodes;
+                if (!Array.isArray(episodes)) continue;
+                for (const ep of episodes) {
+                    if (!ep || ep.path !== filePath) continue;
+                    const prev = ep.progress && typeof ep.progress === 'object' ? ep.progress : {};
+                    const next = { ...prev, current_time: t, last_played: nowIso };
+                    if (Number.isFinite(d) && d > 0) next.duration = d;
+                    ep.progress = next;
+                    show.last_played = nowIso;
+                    season.last_played = nowIso;
+                    return;
+                }
+            }
+        }
+    }
 }
 
 function collectContinueEpisodes(showName = null) {
@@ -2072,7 +2118,7 @@ function renderShows() {
                                 <h3>${escapeHtml(item.name)}</h3>
                                 <div class="media-details">${subtitle}</div>
                             </div>
-                            <button class="poster-play">Play</button>
+                            <button class="poster-play">Resume</button>
                         </div>
                         <div class="card-meta">
                             <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${subtitle}</div>
@@ -2104,11 +2150,20 @@ function renderShows() {
         list.forEach(show => {
             const div = document.createElement('div');
             div.className = 'media-item show-card';
+            const contEp = collectContinueEpisodes(show.name)[0] || null;
             const poster = show.poster
                 ? `<img class="show-poster" src="${show.poster}" loading="lazy" alt="${escapeHtml(show.name)}">`
                 : `<div class="show-poster" style="background: radial-gradient(circle at 30% 20%, rgba(229, 9, 20, 0.35), rgba(20, 20, 20, 0.95) 60%);"></div>`;
             
-            const subtitle = `${(show.seasons || []).length} season(s)`;
+            const subtitle = contEp ? `Continue • ${escapeHtml(contEp.seasonName || '')}` : `${(show.seasons || []).length} season(s)`;
+            const resumeBtn = contEp ? `<button class="poster-play">Resume</button>` : '';
+
+            let progressHtml = '';
+            const duration = Number(contEp?.progress?.duration || 0);
+            if (contEp?.progress && Number(contEp.progress.current_time || 0) > 0 && Number.isFinite(duration) && duration > 0) {
+                const pct = (Number(contEp.progress.current_time || 0) / duration) * 100;
+                progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
+            }
             
             div.innerHTML = `
                 ${getDelBtn(show.path)}
@@ -2119,14 +2174,24 @@ function renderShows() {
                         <h3>${escapeHtml(show.name)}</h3>
                         <div class="media-details">${subtitle}</div>
                     </div>
+                    ${resumeBtn}
                 </div>
                 <div class="show-meta">
                     <h3 class="show-title">${escapeHtml(show.name)}</h3>
                     <div class="show-subtitle">${subtitle}</div>
                 </div>
+                ${progressHtml}
             `;
             div.style.cursor = 'pointer';
             div.onclick = () => setShowsLevel('seasons', show.name, null);
+            const resume = div.querySelector('.poster-play');
+            if (resume && contEp) {
+                const start = Number(contEp.progress?.current_time || 0);
+                resume.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openVideoViewer(contEp.path, contEp.name, start);
+                });
+            }
             container.appendChild(div);
         });
         return;
@@ -2149,7 +2214,16 @@ function renderShows() {
                 ? `<img class="poster-img" src="${season.poster}" loading="lazy" alt="${escapeHtml(season.name)}">`
                 : `<div class="poster-placeholder"></div>`;
 
-            const subtitle = `${season.episodes.length} episode(s)`;
+            const contEp = Array.isArray(season.episodes) ? season.episodes.find(ep => shouldContinue(ep?.progress)) : null;
+            const subtitle = contEp ? `Continue • ${escapeHtml(contEp.name)}` : `${season.episodes.length} episode(s)`;
+
+            let progressHtml = '';
+            const duration = Number(contEp?.progress?.duration || 0);
+            if (contEp?.progress && Number(contEp.progress.current_time || 0) > 0 && Number.isFinite(duration) && duration > 0) {
+                const pct = (Number(contEp.progress.current_time || 0) / duration) * 100;
+                progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
+            }
+            const resumeBtn = contEp ? `<button class="poster-play">Resume</button>` : '';
 
             div.innerHTML = `
                 ${getDelBtn(season.path)}
@@ -2160,13 +2234,23 @@ function renderShows() {
                         <h3>${escapeHtml(season.name)}</h3>
                         <div class="media-details">${subtitle}</div>
                     </div>
+                    ${resumeBtn}
                 </div>
                 <div class="card-meta">
                     <div class="card-title">${escapeHtml(season.name)}</div>
                     <div class="card-subtitle">${subtitle}</div>
                 </div>
+                ${progressHtml}
             `;
             div.onclick = () => setShowsLevel('episodes', show.name, season.name);
+            const resume = div.querySelector('.poster-play');
+            if (resume && contEp) {
+                const start = Number(contEp.progress?.current_time || 0);
+                resume.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openVideoViewer(contEp.path, contEp.name, start);
+                });
+            }
             container.appendChild(div);
         });
         return;
@@ -2184,10 +2268,10 @@ function renderShows() {
         return;
     }
 
-    episodes.forEach(ep => {
-        const div = document.createElement('div');
-        div.className = 'media-item media-card';
-        div.style.cursor = 'pointer';
+        episodes.forEach(ep => {
+            const div = document.createElement('div');
+            div.className = 'media-item media-card';
+            div.style.cursor = 'pointer';
         
         const posterHtml = ep.poster 
             ? `<img class="poster-img" src="${ep.poster}" loading="lazy" alt="${escapeHtml(ep.name)}">`
@@ -2201,6 +2285,7 @@ function renderShows() {
         }
 
         const subtitle = `${escapeHtml(show.name)} • ${escapeHtml(season.name)}`;
+        const playLabel = shouldContinue(ep.progress) ? 'Resume' : 'Play';
 
         div.innerHTML = `
             ${getDelBtn(ep.path)}
@@ -2211,7 +2296,7 @@ function renderShows() {
                     <h3>${escapeHtml(ep.name)}</h3>
                     <div class="media-details">${subtitle}</div>
                 </div>
-                <button class="poster-play">Play</button>
+                <button class="poster-play">${playLabel}</button>
             </div>
             <div class="card-meta">
                 <div class="card-title">${escapeHtml(ep.name)}</div>
@@ -2276,8 +2361,24 @@ async function updateProgress(mediaElement, filePath, force = false, opts = null
             const data = await res.json().catch(() => ({}));
             console.warn('Progress update failed:', res.status, data);
         } else if (!progressDebugSent.has(filePath)) {
+            applyLocalProgressUpdate(filePath, payload.current_time, payload.duration);
             progressDebugSent.add(filePath);
             console.log('[Progress] Saved:', filePath);
+        } else {
+            applyLocalProgressUpdate(filePath, payload.current_time, payload.duration);
+        }
+        if (force) {
+            const isVisible = (id) => {
+                const el = document.getElementById(id);
+                return el && !el.classList.contains('hidden') && el.style.display !== 'none';
+            };
+            if (isVisible('movies')) {
+                const st = getPageState('movies');
+                renderMediaListPaged('movies', st.items, st.hasMore);
+            }
+            if (isVisible('shows')) {
+                renderShows();
+            }
         }
     } catch (e) {
         console.error('Failed to update progress:', e);
