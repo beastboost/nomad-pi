@@ -238,6 +238,31 @@ sleep 2
 
 # Try to restart the service, with fallback if service doesn't exist
 if command -v systemctl >/dev/null 2>&1; then
+    SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
+    ENV_FILE="/etc/nomadpi.env"
+    USER_NAME=${SUDO_USER:-$USER}
+    if [ -f "$SERVICE_FILE" ]; then
+        sudo bash -c "cat > \"$SERVICE_FILE\"" <<EOL
+[Unit]
+Description=Nomad Pi Media Server
+After=network.target
+
+[Service]
+User=$USER_NAME
+WorkingDirectory=$SCRIPT_DIR
+EnvironmentFile=-$ENV_FILE
+ExecStart=$SCRIPT_DIR/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOL
+        sudo systemctl daemon-reload
+    fi
+
     echo "Attempting to restart nomad-pi service via systemctl..." >> update.log
     if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
         sudo systemctl daemon-reload

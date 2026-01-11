@@ -1914,7 +1914,7 @@ function setShowsLevel(level, showName = null, seasonName = null) {
         if (breadcrumb) breadcrumb.style.display = 'none';
         
         const continueSection = document.getElementById('shows-continue');
-        if (continueSection) continueSection.style.display = 'none';
+        if (continueSection) continueSection.style.display = 'block';
         
         showsLibraryCache = null; // Clear cache for a fresh fetch
         loadShowsLibrary();
@@ -2179,6 +2179,7 @@ function renderShows() {
                 <div class="show-meta">
                     <h3 class="show-title">${escapeHtml(show.name)}</h3>
                     <div class="show-subtitle">${subtitle}</div>
+                    ${contEp ? `<button class="secondary show-resume-inline" style="width:100%; margin-top:10px;">Resume</button>` : ''}
                 </div>
                 ${progressHtml}
             `;
@@ -2188,6 +2189,14 @@ function renderShows() {
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
                 resume.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openVideoViewer(contEp.path, contEp.name, start);
+                });
+            }
+            const resumeInline = div.querySelector('.show-resume-inline');
+            if (resumeInline && contEp) {
+                const start = Number(contEp.progress?.current_time || 0);
+                resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
                     openVideoViewer(contEp.path, contEp.name, start);
                 });
@@ -2239,6 +2248,7 @@ function renderShows() {
                 <div class="card-meta">
                     <div class="card-title">${escapeHtml(season.name)}</div>
                     <div class="card-subtitle">${subtitle}</div>
+                    ${contEp ? `<button class="secondary season-resume-inline" style="width:100%; margin-top:10px;">Resume</button>` : ''}
                 </div>
                 ${progressHtml}
             `;
@@ -2247,6 +2257,14 @@ function renderShows() {
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
                 resume.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openVideoViewer(contEp.path, contEp.name, start);
+                });
+            }
+            const resumeInline = div.querySelector('.season-resume-inline');
+            if (resumeInline && contEp) {
+                const start = Number(contEp.progress?.current_time || 0);
+                resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
                     openVideoViewer(contEp.path, contEp.name, start);
                 });
