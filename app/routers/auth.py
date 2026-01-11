@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, Field, validator
+from typing import Optional
 import uuid
 import os
 import secrets
@@ -125,8 +126,8 @@ class UserPasswordResetRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     name: str
-    avatar: str = None
-    preferences: dict = {}
+    avatar: Optional[str] = None
+    preferences: dict = Field(default_factory=dict)
     parental_controls: int = 0
 
 @router.post("/login")
