@@ -1,5 +1,10 @@
 console.log("App v1.2 loaded - Plex-style UI & External Players");
 const API_BASE = '/api';
+const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
+const UP_NEXT_QUEUE_LIMIT = 12;
+let statsFailureCount = 0;
+let statsNextAllowedAt = 0;
+let statsLastErrorLogAt = 0;
 
 async function checkPostUpdate() {
     try {
@@ -67,6 +72,7 @@ function getCookie(name) {
     return null;
 }
 let currentMedia = null;
+let currentProfile = null;
 let driveScanInterval = null;
 let statsInterval = null;
 let comicPages = [];
@@ -286,6 +292,8 @@ async function login() {
             // Load initial data
             loadStorageStats();
             loadResume();
+            loadUpNext();
+            loadProfileUI();
             startStatsAutoRefresh();
 
             // Check if this is first login and show welcome screen
@@ -338,6 +346,8 @@ async function checkAuth() {
             document.getElementById('app').classList.remove('hidden');
             loadStorageStats();
             loadResume();
+            loadUpNext();
+            loadProfileUI();
             startStatsAutoRefresh();
             if (data.user && data.user.must_change_password) {
                 showToast('Please change your password', 'info');
@@ -1079,17 +1089,18 @@ function renderMediaList(category, files) {
             div.addEventListener('click', (e) => {
                 if (e.target.closest('button')) return;
                 if (isVideo) {
-                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    if (category === 'movies') openMovieDetails(file);
+                    else openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                 } else {
                     openImageViewer(file.path, cleanTitle(file.name));
                 }
             });
 
             let progressHtml = '';
-            if (file.progress && file.progress.current_time > 0) {
-                const pct = (file.progress.current_time / file.progress.duration) * 100;
-                progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
-            }
+    if (file.progress && file.progress.current_time > 0) {
+        const pct = (file.progress.current_time / file.progress.duration) * 100;
+        progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
+    }
 
             if (category === 'movies' && isVideo) {
                 div.className = 'media-item media-card';
@@ -1260,7 +1271,9 @@ async function organizeShows(preview) {
     const out = document.getElementById('organize-status');
     if (out) out.textContent = preview ? 'Previewing…' : 'Organizing…';
     try {
-        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=1&use_omdb=1&write_poster=1`, { 
+        const renameToggle = document.getElementById('show-organize-rename-files');
+        const renameFiles = renameToggle ? (renameToggle.checked ? 1 : 0) : 0;
+        const res = await fetch(`${API_BASE}/media/organize/shows?dry_run=${preview ? 1 : 0}&rename_files=${renameFiles}&use_omdb=1&write_poster=1`, { 
             method: 'POST',
             headers: getAuthHeaders()
         });
@@ -1493,6 +1506,96 @@ function openImageViewer(path, title) {
     modal.classList.remove('hidden');
 }
 
+async function openMovieDetails(file) {
+    const modal = document.getElementById('viewer-modal');
+    const body = document.getElementById('viewer-body');
+    const heading = document.getElementById('viewer-title');
+    if (!modal || !body || !heading || !file?.path) {
+        openVideoViewer(file?.path, cleanTitle(file?.name || 'Movie'), file?.progress?.current_time || 0);
+        return;
+    }
+
+    const baseTitle = file.omdb?.title || file.omdb?.meta?.Title || cleanTitle(file.name || 'Movie');
+    const startSeconds = Number(file.progress?.current_time || 0);
+
+    body.innerHTML = `
+        <div style="padding: 18px;">
+            <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+                <div style="width: 180px; flex: 0 0 180px;">
+                    <div style="width:100%; aspect-ratio:2/3; border-radius: 14px; overflow:hidden; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);">
+                        ${file.poster ? `<img src="${file.poster}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
+                    </div>
+                </div>
+                <div style="flex: 1 1 260px; min-width: 240px;">
+                    <div style="font-weight: 900; font-size: 1.25rem; margin-bottom: 8px;">${escapeHtml(baseTitle)}</div>
+                    <div id="movie-meta-line" style="color: var(--text-muted); margin-bottom: 10px;"></div>
+                    <div id="movie-plot" style="color: #d7dde8; line-height: 1.5; margin-bottom: 14px;"></div>
+                    ${startSeconds > 10 ? `<div style="color: var(--text-muted); margin-bottom: 12px;">Resume at ${escapeHtml(formatClock(startSeconds))}</div>` : ``}
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="primary" id="movie-play-btn">${startSeconds > 10 ? 'Resume' : 'Play'}</button>
+                        <button class="secondary" id="movie-play-from-start-btn">Play From Start</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const token = getCookie('auth_token');
+    let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(file.path)}`;
+    if (token) streamUrl += '&token=' + token;
+    const fullUrl = window.location.origin + streamUrl;
+    const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
+
+    heading.innerHTML = `
+        <div style="display:flex; align-items:center; gap:12px; width:100%;">
+            <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(baseTitle)}</span>
+            <div class="external-player-btns" style="display:flex; gap:8px;">
+                <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
+                    <span>💾</span><span class="btn-text">Download</span>
+                </a>
+                <a href="${vlcUrl}" class="player-action-btn vlc-btn" title="Open in VLC (Fixes playback issues)">
+                    <span>🧡</span><span class="btn-text">VLC</span>
+                </a>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+
+    const applyMeta = (data) => {
+        const year = data?.year || data?.meta?.Year;
+        const rated = data?.rated || data?.meta?.Rated;
+        const runtime = data?.runtime || data?.meta?.Runtime;
+        const genre = data?.genre || data?.meta?.Genre;
+        const parts = [year, rated, runtime, genre].filter(v => v && v !== 'N/A');
+        const line = document.getElementById('movie-meta-line');
+        if (line) line.textContent = parts.join(' • ');
+
+        const plot = data?.plot || data?.meta?.Plot;
+        const plotEl = document.getElementById('movie-plot');
+        if (plotEl) plotEl.textContent = plot && plot !== 'N/A' ? plot : '';
+
+        const poster = data?.poster || data?.meta?.Poster;
+        if (!file.poster && poster && poster !== 'N/A') file.poster = poster;
+    };
+
+    if (file.omdb) {
+        applyMeta(file.omdb);
+    } else {
+        document.getElementById('movie-meta-line')?.replaceChildren();
+        document.getElementById('movie-plot')?.replaceChildren();
+        const meta = await fetchMovieMeta(file);
+        if (meta) applyMeta(meta);
+    }
+
+    document.getElementById('movie-play-btn')?.addEventListener('click', () => {
+        openVideoViewer(file.path, baseTitle, startSeconds);
+    });
+    document.getElementById('movie-play-from-start-btn')?.addEventListener('click', () => {
+        openVideoViewer(file.path, baseTitle, 0);
+    });
+}
+
 function openVideoViewer(path, title, startSeconds = 0) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
@@ -1533,6 +1636,11 @@ function openVideoViewer(path, title, startSeconds = 0) {
 
     console.log('Opening video:', path, 'at', streamUrl);
 
+    const videoWrap = document.createElement('div');
+    videoWrap.style.position = 'relative';
+    videoWrap.style.width = '100%';
+    videoWrap.style.height = '100%';
+
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
@@ -1545,13 +1653,16 @@ function openVideoViewer(path, title, startSeconds = 0) {
     // Auto-detect and load subtitles
     loadSubtitlesForVideo(video, path);
 
+    prefetchAndQueueNextEpisode(path);
+
     // Auto-play next episode when current one ends
     video.addEventListener('ended', async () => {
         try { await updateProgress(video, path); } catch (e) {}
         await handleVideoEnded(path, title);
     });
 
-    body.appendChild(video);
+    videoWrap.appendChild(video);
+    body.appendChild(videoWrap);
     modal.classList.remove('hidden');
 }
 
@@ -1911,7 +2022,7 @@ function renderShows() {
                     let progressHtml = '';
                     if (item.progress?.duration) {
                         const pct = (Number(item.progress.current_time || 0) / Number(item.progress.duration || 1)) * 100;
-                        progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+                        progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
                     }
 
                     const subtitle = `${escapeHtml(item.showName)} • ${escapeHtml(item.seasonName)}`;
@@ -2047,7 +2158,7 @@ function renderShows() {
         let progressHtml = '';
         if (ep.progress && ep.progress.current_time > 0) {
             const pct = (ep.progress.current_time / ep.progress.duration) * 100;
-            progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+            progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
         }
 
         const subtitle = `${escapeHtml(show.name)} • ${escapeHtml(season.name)}`;
@@ -2124,15 +2235,94 @@ async function updateProgress(mediaElement, filePath) {
     }
 }
 
+function showResumePrompt(mediaElement, filePath, savedTime) {
+    const container = mediaElement?.parentElement || document.getElementById('viewer-body') || document.body;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position:absolute;
+        inset:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background: rgba(0,0,0,0.55);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 50;
+        padding: 16px;
+    `;
+
+    const box = document.createElement('div');
+    box.style.cssText = `
+        width: 100%;
+        max-width: 420px;
+        background: rgba(20, 20, 28, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 18px;
+        box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+        padding: 18px 18px 16px 18px;
+        text-align: center;
+    `;
+
+    const resumeFrom = formatClock(savedTime);
+    box.innerHTML = `
+        <div style="font-weight:800; font-size:1.1rem; margin-bottom:6px;">Resume playback?</div>
+        <div style="color: var(--text-muted); margin-bottom:14px;">Saved position: ${escapeHtml(resumeFrom)}</div>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <button class="secondary" id="resume-startover-btn" style="min-width:140px;">Start Over</button>
+            <button class="primary" id="resume-continue-btn" style="min-width:140px;">Resume</button>
+        </div>
+    `;
+
+    overlay.appendChild(box);
+    container.appendChild(overlay);
+
+    const cleanup = () => {
+        try { overlay.remove(); } catch {}
+    };
+
+    const setProgressNow = async (time, duration) => {
+        try {
+            await fetch(`${API_BASE}/media/progress`, {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    file_path: filePath,
+                    current_time: time,
+                    duration: duration || 0
+                })
+            });
+        } catch {}
+    };
+
+    overlay.querySelector('#resume-continue-btn')?.addEventListener('click', async () => {
+        cleanup();
+        try {
+            mediaElement.currentTime = savedTime;
+        } catch {}
+        mediaElement.lastTime = null;
+        const p = mediaElement.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    });
+
+    overlay.querySelector('#resume-startover-btn')?.addEventListener('click', async () => {
+        cleanup();
+        try {
+            mediaElement.currentTime = 0;
+        } catch {}
+        mediaElement.lastTime = null;
+        await setProgressNow(0, mediaElement.duration);
+        const p = mediaElement.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    });
+}
+
 function checkResume(mediaElement, filePath, savedTime) {
     if (savedTime > 10 && (mediaElement.duration - savedTime) > 10) {
-        // If saved time is significant, prompt or auto-resume? 
-        // For now, let's just set the time.
-        // mediaElement.currentTime = savedTime; 
-        // Usually better to let user choose, or just set it.
-        // Let's set it but notify
-        console.log(`Resuming ${filePath} at ${savedTime}`);
-        mediaElement.currentTime = savedTime;
+        try { mediaElement.pause(); } catch {}
+        showResumePrompt(mediaElement, filePath, savedTime);
     }
 }
 
@@ -2167,7 +2357,7 @@ async function loadResume() {
                  let progressHtml = '';
                  if (file.progress && file.progress.duration) {
                     const pct = (file.progress.current_time / file.progress.duration) * 100;
-                    progressHtml = `<div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>`;
+                    progressHtml = `<div class="card-progress"><div class="fill" style="width:${pct}%"></div></div>`;
                  }
 
                  div.innerHTML = `
@@ -3095,12 +3285,18 @@ function inferShowNameFromFilename(pathOrName) {
 }
 
 async function loadStorageStats() {
+    if (window.location.protocol === 'file:') return;
+    const now = Date.now();
+    if (now < statsNextAllowedAt) return;
+
     try {
         const res = await fetch(`${API_BASE}/system/stats`, {
             headers: getAuthHeaders()
         });
         if (res.status === 401) return;
         const data = await res.json();
+        statsFailureCount = 0;
+        statsNextAllowedAt = 0;
         
         // Disk Stats
         const diskPercent = Number(data.disk_percent || 0);
@@ -3212,7 +3408,15 @@ async function loadStorageStats() {
         }
 
     } catch (e) {
-        console.error('Failed to load system stats:', e);
+        statsFailureCount = Math.min(statsFailureCount + 1, 10);
+        const delay = Math.min(60000, 2000 * Math.pow(2, Math.max(0, statsFailureCount - 1)));
+        statsNextAllowedAt = Date.now() + delay;
+
+        const logNow = Date.now();
+        if (logNow - statsLastErrorLogAt > 30000) {
+            statsLastErrorLogAt = logNow;
+            console.error('Failed to load system stats:', e);
+        }
     }
 }
 
@@ -3743,6 +3947,77 @@ async function changePassword() {
     }
 }
 
+async function loadProfileUI() {
+    const nameEl = document.getElementById('profile-name');
+    const avatarEl = document.getElementById('profile-avatar');
+    const parentalEl = document.getElementById('profile-parental');
+    if (!nameEl && !avatarEl && !parentalEl) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/profile`, { headers: getAuthHeaders() });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data) return;
+
+        currentProfile = data;
+        if (nameEl && typeof data.name === 'string') nameEl.value = data.name;
+        if (avatarEl) avatarEl.value = data.avatar || '';
+        if (parentalEl) parentalEl.value = String(Number(data.parental_controls || 0));
+    } catch {}
+}
+
+async function saveProfileUI() {
+    const nameEl = document.getElementById('profile-name');
+    const avatarEl = document.getElementById('profile-avatar');
+    const parentalEl = document.getElementById('profile-parental');
+    if (!nameEl) return;
+
+    const name = String(nameEl.value || '').trim();
+    if (!name) {
+        showToast('Display name is required', 'error');
+        return;
+    }
+
+    const avatarRaw = avatarEl ? String(avatarEl.value || '').trim() : '';
+    const avatar = avatarRaw ? avatarRaw : null;
+    const parental_controls = parentalEl ? Number(parentalEl.value || 0) : 0;
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/profile`, {
+            method: 'POST',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name,
+                avatar,
+                preferences: currentProfile?.preferences || {},
+                parental_controls: Number.isFinite(parental_controls) ? parental_controls : 0
+            })
+        });
+        if (res.status === 401) { logout(); return; }
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            showToast(data.detail || 'Failed to update profile', 'error');
+            return;
+        }
+
+        currentProfile = {
+            ...(currentProfile || {}),
+            name,
+            avatar,
+            parental_controls: Number.isFinite(parental_controls) ? parental_controls : 0
+        };
+        showToast('Profile updated', 'success');
+    } catch {
+        showToast('Network error updating profile', 'error');
+    }
+}
+
+window.saveProfileUI = saveProfileUI;
+window.loadProfileUI = loadProfileUI;
+
 function saveSettings() {
     const serverName = document.getElementById('setting-server-name').value;
     const sessionDays = document.getElementById('setting-session-days').value;
@@ -3984,45 +4259,148 @@ async function resetUserPassword(userId, username) {
 
 // Auto-detect and load subtitle files (.srt, .vtt)
 async function loadSubtitlesForVideo(videoElement, videoPath) {
-    const basePath = videoPath.replace(/\.[^.]+$/, ''); // Remove extension
-    const subtitleExts = ['.srt', '.vtt', '.en.srt', '.eng.srt'];
+    if (!videoElement || !videoPath) return;
 
-    for (const ext of subtitleExts) {
-        try {
-            const subPath = basePath + ext;
-            const token = getCookie('auth_token');
-            let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(subPath)}`;
+    try {
+        videoElement.querySelectorAll('track').forEach(t => t.remove());
+    } catch {}
+
+    try {
+        const res = await fetch(`${API_BASE}/media/meta?path=${encodeURIComponent(videoPath)}`, {
+            headers: getAuthHeaders()
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => ({}));
+        const subs = Array.isArray(data?.subtitles) ? data.subtitles : [];
+        if (subs.length === 0) return;
+
+        const token = getCookie('auth_token');
+        const makeSrc = (p) => {
+            let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(p)}`;
             if (token) subUrl += '&token=' + token;
+            return subUrl;
+        };
 
-            // Check if subtitle file exists
-            const response = await fetch(subUrl, { 
-                method: 'HEAD',
-                headers: getAuthHeaders()
-            });
-            if (response.ok) {
-                console.log('[Subtitles] Found:', subPath);
-                const track = document.createElement('track');
-                track.kind = 'subtitles';
-                track.label = 'English';
-                track.srclang = 'en';
-                track.src = subUrl;
-                track.default = true;
-                videoElement.appendChild(track);
+        let anyTrack = false;
+        for (const s of subs) {
+            if (!s || !s.path) continue;
+            const track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = s.label || 'Subtitles';
+            const guessed = String(s.label || '').trim();
+            const lang = guessed.length === 2 || guessed.length === 3 ? guessed.toLowerCase() : 'en';
+            track.srclang = lang;
+            track.src = makeSrc(s.path);
+            track.default = !anyTrack;
+            videoElement.appendChild(track);
+            anyTrack = true;
+        }
 
-                // Enable subtitles by default
-                setTimeout(() => {
-                    if (videoElement.textTracks.length > 0) {
+        if (anyTrack) {
+            setTimeout(() => {
+                try {
+                    if (videoElement.textTracks && videoElement.textTracks.length > 0) {
                         videoElement.textTracks[0].mode = 'showing';
                     }
-                }, 100);
-
-                break; // Use first found subtitle file
-            }
-        } catch (e) {
-            // Subtitle file doesn't exist, try next
-            console.log('[Subtitles] Not found for:', basePath + ext);
+                } catch {}
+            }, 150);
         }
+    } catch {}
+}
+
+function readUpNextQueue() {
+    try {
+        const raw = localStorage.getItem(UP_NEXT_QUEUE_KEY);
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
     }
+}
+
+function writeUpNextQueue(items) {
+    try {
+        localStorage.setItem(UP_NEXT_QUEUE_KEY, JSON.stringify(items.slice(0, UP_NEXT_QUEUE_LIMIT)));
+    } catch {}
+}
+
+function upNextQueueAdd(item) {
+    if (!item || !item.path) return;
+    const queue = readUpNextQueue();
+    const next = [item, ...queue.filter(q => q && q.path && q.path !== item.path)];
+    writeUpNextQueue(next);
+    renderUpNext(next);
+}
+
+function renderUpNext(items) {
+    const section = document.getElementById('up-next-section');
+    const container = document.getElementById('up-next-list');
+    if (!container || !section) return;
+
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) {
+        section.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+    }
+
+    section.classList.remove('hidden');
+    container.innerHTML = '';
+    list.slice(0, UP_NEXT_QUEUE_LIMIT).forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'media-item media-card';
+        div.style.cursor = 'pointer';
+
+        const posterHtml = item.poster
+            ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
+            : `<div class="poster-placeholder"></div>`;
+
+        const subtitleParts = [item.show, item.season].filter(Boolean).map(v => escapeHtml(v));
+        const subtitle = subtitleParts.length ? subtitleParts.join(' • ') : 'Up Next';
+
+        div.innerHTML = `
+            <div class="poster-shell">
+                ${posterHtml}
+                <div class="media-info">
+                    <h3>${escapeHtml(item.name)}</h3>
+                    <div class="media-details">${subtitle}</div>
+                </div>
+                <button class="poster-play">Play</button>
+            </div>
+            <div class="card-meta">
+                <div class="card-title">${escapeHtml(item.name)}</div>
+                <div class="card-subtitle">${subtitle}</div>
+            </div>
+        `;
+
+        div.addEventListener('click', (e) => {
+            if (e.target.closest('button')) return;
+            openVideoViewer(item.path, item.name, 0);
+        });
+
+        div.querySelector('.poster-play')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openVideoViewer(item.path, item.name, 0);
+        });
+
+        container.appendChild(div);
+    });
+}
+
+function loadUpNext() {
+    renderUpNext(readUpNextQueue());
+}
+
+async function prefetchAndQueueNextEpisode(currentPath) {
+    const next = await findNextEpisode(currentPath);
+    if (!next) return;
+    upNextQueueAdd({
+        path: next.path,
+        name: next.name || 'Next Episode',
+        poster: next.poster || null,
+        show: next.show || null,
+        season: next.season || null
+    });
 }
 
 // Handle video ended - auto-play next episode
@@ -4033,6 +4411,13 @@ async function handleVideoEnded(currentPath, currentTitle) {
     const nextEpisode = await findNextEpisode(currentPath);
 
     if (nextEpisode) {
+        upNextQueueAdd({
+            path: nextEpisode.path,
+            name: nextEpisode.name || 'Next Episode',
+            poster: nextEpisode.poster || null,
+            show: nextEpisode.show || null,
+            season: nextEpisode.season || null
+        });
         // Show countdown modal
         showNextEpisodeCountdown(nextEpisode, () => {
             closeViewer();

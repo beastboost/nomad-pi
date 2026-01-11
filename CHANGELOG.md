@@ -1,6 +1,10 @@
 # Changelog
 
-All notable changes to Nomad Pi will be documented in this file.
+## [1.1.5] - 2026-01-11
+
+### Fixed
+- NomadTransferTool: server scan now authenticates (no more “scan unauthorized” after transfer)
+- NomadTransferTool: remote logs and restart now work after login
 
 ## [1.1.4] - 2026-01-09
 

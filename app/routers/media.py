@@ -16,6 +16,7 @@ import json
 import httpx
 import logging
 import asyncio
+import difflib
 from datetime import datetime, timedelta
 from collections import OrderedDict
 from functools import lru_cache
@@ -616,6 +617,10 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
                 try:
                     meta = await omdb_fetch(title=show_title, year=show_year, media_type="series")
                 except Exception:
+                    norm_title = normalize_title(show_title)
+                    title_words = re.findall(r"\w+", norm_title)
+                    if len(norm_title) < 4 or (len(title_words) == 1 and len(title_words[0]) < 5):
+                        raise Exception("Title too ambiguous for OMDb search")
                     search = await omdb_search(query=show_title, year=show_year, media_type="series")
                     results = search.get("Search") or []
                     if results:
@@ -626,7 +631,7 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
                             if score > best_score:
                                 best_score = score
                                 best = r
-                        if best_score > 0.5 and best.get("imdbID"):
+                        if best_score >= 0.7 and best.get("imdbID"):
                             meta = await omdb_fetch(imdb_id=best.get("imdbID"), media_type="series")
             except Exception:
                 meta = None
@@ -672,7 +677,7 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/shows/next")
 def get_next_show_episode(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
-    if not isinstance(path, str) or "/shows/" not in path:
+    if not isinstance(path, str) or not path.startswith("/data/"):
         return {"next": None}
 
     def parse_ep_num(name: str) -> int:
@@ -1019,7 +1024,7 @@ def maybe_start_index_build(category: str, force: bool = False):
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     if category == "shows":
-                        loop.run_until_complete(organize_shows(dry_run=False, rename_files=True, use_omdb=True, write_poster=True, limit=50))
+                        loop.run_until_complete(organize_shows(dry_run=False, rename_files=False, use_omdb=True, write_poster=True, limit=50))
                     else:
                         loop.run_until_complete(organize_movies(dry_run=False, use_omdb=True, write_poster=True, limit=50))
                 except Exception as e:
@@ -2119,16 +2124,25 @@ def _sanitize_show_part(s: str):
 def _infer_show_name_from_filename(path_or_name: str):
     base = os.path.basename(str(path_or_name or ""))
     name = os.path.splitext(base)[0]
-    # Handle dots, underscores, hyphens as spaces for extraction
-    clean_name = re.sub(r'[\._\-]+', ' ', name)
-    m = re.match(r"^(.*?)(?:\bS\d{1,3}\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b|\bEpisode\s*\d{1,3}\b)", clean_name, flags=re.IGNORECASE)
-    if not m or not m.group(1):
-        # Try a more aggressive match if no standard SxxExx
-        # e.g. "Family Guy 14x01" or "Family Guy S14E01"
-        m = re.search(r"^(.*?)(?:\bS\d{1,3}|\b\d{1,3}x)", clean_name, flags=re.IGNORECASE)
-        if not m or not m.group(1):
-            return ""
-    cleaned = _sanitize_show_part(m.group(1))
+    clean_name = re.sub(r"[\._\-]+", " ", name)
+    clean_name = re.sub(r"\s+", " ", clean_name).strip()
+
+    marker = re.search(
+        r"(?i)\bS\d{1,3}\s*[\.\-_\s]*\s*E\d{1,3}\b|"
+        r"\b\d{1,3}x\d{1,3}\b|"
+        r"\bseason\s*\d{1,3}\s*[\.\-_\s]*\s*episode\s*\d{1,3}\b|"
+        r"\bepisode\s*\d{1,3}\b",
+        clean_name,
+    )
+    if not marker:
+        return ""
+
+    prefix = clean_name[: marker.start()].strip()
+    prefix = re.sub(r"\[[^\]]*\]", " ", prefix)
+    prefix = re.sub(r"\((?!\s*\d{4}\s*\))[^\)]*\)", " ", prefix)
+    prefix = re.sub(r"\s+", " ", prefix).strip()
+
+    cleaned = _sanitize_show_part(prefix)
     return cleaned if len(cleaned) >= 2 else ""
 
 def _parse_season_episode(filename: str):
@@ -2272,24 +2286,26 @@ def _cleanup_empty_folders(bases: List[str]):
                 logger.error(f"Error cleaning up folder {root}: {e}")
 
 @router.post("/organize/shows")
-async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
+async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=False), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
     return await _organize_shows_internal(dry_run, rename_files, use_omdb, write_poster, limit)
 
 def _get_similarity(a: str, b: str) -> float:
-    """Simple string similarity score (0.0 to 1.0)"""
-    a = a.lower().strip()
-    b = b.lower().strip()
-    if not a or not b: return 0.0
-    if a == b: return 1.0
-    
-    # Very basic: ratio of common characters or common words
-    a_words = set(re.findall(r'\w+', a))
-    b_words = set(re.findall(r'\w+', b))
-    if not a_words or not b_words: return 0.0
-    
+    a = normalize_title(a)
+    b = normalize_title(b)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+
+    ratio = difflib.SequenceMatcher(None, a, b).ratio()
+    a_words = set(re.findall(r"\w+", a))
+    b_words = set(re.findall(r"\w+", b))
+    if not a_words or not b_words:
+        return ratio
     intersection = a_words.intersection(b_words)
     union = a_words.union(b_words)
-    return len(intersection) / len(union)
+    jaccard = (len(intersection) / len(union)) if union else 0.0
+    return (0.65 * ratio) + (0.35 * jaccard)
 
 async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = True, use_omdb: bool = True, write_poster: bool = True, limit: int = 250):
     # Clear cache when starting organization
@@ -2325,6 +2341,9 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                 if len(parts) >= 2:
                     first = parts[0]
                     first_l = first.lower()
+                    first_looks_like_release = bool(re.search(r"(?i)\bS\d{1,3}\s*[\.\-_\s]*\s*E\d{1,3}\b|\b\d{1,3}x\d{1,3}\b", first))
+                    if not first_looks_like_release:
+                        first_looks_like_release = bool(re.search(r"(?i)\b(480p|720p|1080p|2160p|4k|8k|webrip|web[- ]dl|bluray|hdtv|hdr|x264|x265|h264|h265|hevc)\b", first))
                     
                     # Better show name extraction
                     if ' - season ' in first_l or ' season ' in first_l:
@@ -2340,7 +2359,7 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                         s_match = re.search(r'season\s*(\d+)', first, re.IGNORECASE)
                         if s_match:
                             season_num_from_folder = int(s_match.group(1))
-                    elif not (first_l.startswith("season") or first_l.startswith("series") 
+                    elif not first_looks_like_release and not (first_l.startswith("season") or first_l.startswith("series") 
                               or re.match(r"^s\d{1,3}$", first_l or "")):
                         show_name = first
 
@@ -2423,7 +2442,12 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                 # Try to fetch from OMDB if needed
                 if use_omdb and show_name != "Unsorted" and not meta:
                     if os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY"):
+                        norm_show = normalize_title(show_name)
+                        show_words = re.findall(r"\w+", norm_show)
+                        too_ambiguous_for_search = len(norm_show) < 4 or (len(show_words) == 1 and len(show_words[0]) < 5)
                         try:
+                            if too_ambiguous_for_search:
+                                raise Exception("Title too ambiguous for OMDb")
                             # Fetch show metadata
                             try:
                                 # Try direct fetch first
@@ -2444,8 +2468,9 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                                         elif score == best_score and res.get("Year", "").startswith(str(show_year or "")):
                                             best_match = res
                                             
-                                    if best_score > 0.5: # Only use if reasonably similar
-                                        meta = await omdb_fetch(imdb_id=best_match["imdbID"], media_type="series")
+                                    imdb_id = best_match.get("imdbID")
+                                    if imdb_id and best_score >= 0.7:
+                                        meta = await omdb_fetch(imdb_id=imdb_id, media_type="series")
                                 else:
                                     # Try without year if we had one and it failed
                                     if show_year:
@@ -2463,8 +2488,9 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
                                                         best_score = score
                                                         best_match = res
                                                 
-                                                if best_score > 0.5:
-                                                    meta = await omdb_fetch(imdb_id=best_match["imdbID"], media_type="series")
+                                                imdb_id = best_match.get("imdbID")
+                                                if imdb_id and best_score >= 0.7:
+                                                    meta = await omdb_fetch(imdb_id=imdb_id, media_type="series")
                             
                             if meta:
                                 shows_processed[show_name] = meta
@@ -2773,7 +2799,7 @@ async def trigger_auto_organize():
     """Trigger automated organization of shows and movies"""
     try:
         # We call the internal organization functions with dry_run=False
-        await _organize_shows_internal(dry_run=False, rename_files=True, use_omdb=True, write_poster=True)
+        await _organize_shows_internal(dry_run=False, rename_files=False, use_omdb=True, write_poster=True)
         await _organize_movies_internal(dry_run=False, use_omdb=True, write_poster=True)
         
         # Also clean up empty folders for other categories

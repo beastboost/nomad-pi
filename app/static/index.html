@@ -157,6 +157,11 @@
                     <div id="resume-list" class="media-grid"></div>
                 </div>
 
+                <div id="up-next-section" class="hidden">
+                    <h2>Up Next</h2>
+                    <div id="up-next-list" class="media-grid"></div>
+                </div>
+
                 <div id="recent-section" class="hidden">
                     <h2>Recently Added</h2>
                     <div id="recent-list" class="media-grid"></div>
@@ -380,6 +385,10 @@
                 <div class="admin-panel">
                     <h3>Library Tools (v1.1)</h3>
                     <button onclick="rescanLibrary()">Rescan Library</button>
+                    <label style="display:flex; align-items:center; gap:8px; margin:10px 0; color:var(--text-muted); font-size:0.9rem;">
+                        <input type="checkbox" id="show-organize-rename-files" style="width:auto; height:auto;">
+                        Rename episodes to SxxEyy (optional)
+                    </label>
                     <button onclick="organizeShows(true)">Preview Show Organize</button>
                     <button onclick="organizeShows(false)" class="warning">Apply Show Organize</button>
                     <button onclick="organizeMovies(true)">Preview Movie Organize</button>
@@ -507,7 +516,7 @@
             <div class="modal-body">
                 <div style="text-align: center; margin-bottom: 20px;">
                     <div style="font-size: 3rem; margin-bottom: 10px;">🚀</div>
-                    <h3 style="margin: 0;">Nomad Pi <span id="new-version-tag">v1.5.1</span></h3>
+                    <h3 style="margin: 0;">Nomad Pi <span id="new-version-tag">v1.1.5</span></h3>
                     <p style="color: var(--text-muted);">Your system has been updated to the latest version.</p>
                 </div>
                 
@@ -606,7 +615,7 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="js/app.js?v=1767906495"></script>
+    <script src="js/app.js?v=1768102000"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

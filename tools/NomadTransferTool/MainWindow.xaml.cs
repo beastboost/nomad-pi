@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -37,7 +38,7 @@ namespace NomadTransferTool
 
     public partial class MainWindow : Window, INotifyPropertyChanged, IDisposable
     {
-        private const string APP_VERSION = "1.5.0";
+        private const string APP_VERSION = "1.5.1";
         private const string DEFAULT_SERVER_IP = "nomadpi.local";
         private const string STATUS_READY = "Ready";
         private const string DATA_SHARE = "data";
@@ -112,6 +113,13 @@ namespace NomadTransferTool
         public System.Windows.Media.Brush ServerStatusColor { get => _serverStatusColor; set { _serverStatusColor = value; OnPropertyChanged(); } }
         private string OMDB_API_KEY = "";
         private string mediaServerDataPath = "";
+        private string _serverUsername = "admin";
+        private string _serverPassword = "";
+        private string _authToken = "";
+        private string _authStatus = "Not logged in";
+
+        public string ServerUsername { get => _serverUsername; set { _serverUsername = value; OnPropertyChanged(); } }
+        public string AuthStatus { get => _authStatus; set { _authStatus = value; OnPropertyChanged(); } }
 
         // UI State
         private bool _isTransferring;
@@ -318,13 +326,14 @@ namespace NomadTransferTool
                 {
                     var content = await omdbRes.Content.ReadAsStringAsync();
                     var omdbData = JsonConvert.DeserializeObject<dynamic>(content);
-                    if (omdbData?.key != null && !string.IsNullOrEmpty((string)omdbData.key))
+                    string? key = null;
+                    try { key = (string?)omdbData?.key; } catch { key = null; }
+                    if (!string.IsNullOrEmpty(key))
                     {
-                        string key = (string)omdbData.key;
                         Dispatcher.Invoke(() => {
-                            OMDB_API_KEY = key;
-                            OmdbKeyBox.Password = key;
-                            File.WriteAllText(OMDB_FILE, EncryptString(key));
+                            OMDB_API_KEY = key!;
+                            OmdbKeyBox.Password = key!;
+                            File.WriteAllText(OMDB_FILE, EncryptString(key!));
                         });
                         AddLog("OMDb API Key synchronized from Pi.");
                     }
@@ -394,6 +403,90 @@ namespace NomadTransferTool
         private void SambaPassBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
             SambaPassword = SambaPassBox.Password;
+        }
+
+        private void NomadPassBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            _serverPassword = NomadPassBox.Password;
+        }
+
+        private async void Login_Click(object sender, RoutedEventArgs e)
+        {
+            await EnsureAuthenticated(true);
+        }
+
+        private async Task<bool> EnsureAuthenticated(bool showUserErrors = false)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_authToken))
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get, $"{API_BASE}/auth/check");
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
+                    var checkRes = await client.SendAsync(req);
+                    if (checkRes.IsSuccessStatusCode)
+                    {
+                        var content = await checkRes.Content.ReadAsStringAsync();
+                        var data = JsonConvert.DeserializeObject<dynamic>(content);
+                        if (data != null && data.authenticated == true)
+                        {
+                            AuthStatus = $"Logged in as {ServerUsername}";
+                            return true;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(ServerUsername))
+                {
+                    AuthStatus = "Login failed";
+                    if (showUserErrors) System.Windows.MessageBox.Show("Please enter a username.", "Login Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(_serverPassword))
+                {
+                    AuthStatus = "Login failed";
+                    if (showUserErrors) System.Windows.MessageBox.Show("Please enter your Nomad password.", "Login Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return false;
+                }
+
+                AuthStatus = "Logging in...";
+                var payload = JsonConvert.SerializeObject(new { username = ServerUsername, password = _serverPassword });
+                using var loginContent = new StringContent(payload, Encoding.UTF8, "application/json");
+                var res = await client.PostAsync($"{API_BASE}/auth/login", loginContent);
+                var resBody = await res.Content.ReadAsStringAsync();
+
+                if (!res.IsSuccessStatusCode)
+                {
+                    AuthStatus = "Login failed";
+                    if (showUserErrors) System.Windows.MessageBox.Show($"Login failed: {res.StatusCode}", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AddLog($"Login failed: {res.StatusCode} {resBody}");
+                    return false;
+                }
+
+                var data2 = JsonConvert.DeserializeObject<dynamic>(resBody);
+                string token = data2?.token;
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    AuthStatus = "Login failed";
+                    if (showUserErrors) System.Windows.MessageBox.Show("Login response did not include a token.", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    AddLog("Login failed: No token returned from server.");
+                    return false;
+                }
+
+                _authToken = token.Trim();
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
+                AuthStatus = $"Logged in as {ServerUsername}";
+                AddLog("Authenticated with Nomad Pi.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AuthStatus = "Login failed";
+                AddLog($"Login error: {ex.Message}");
+                if (showUserErrors) System.Windows.MessageBox.Show($"Login error: {ex.Message}", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
         }
 
         public bool IsTransferring { get => _isTransferring; set { _isTransferring = value; OnPropertyChanged(); } }
@@ -837,6 +930,7 @@ namespace NomadTransferTool
             try
             {
                 AddLog("Sending restart command...");
+                if (!await EnsureAuthenticated(true)) return;
                 // Note: We use the standardized control endpoint. 
                 // We'll add a 'reboot' action or specific 'service_restart' if needed, 
                 // but usually reboot is what's wanted for a clean state.
@@ -868,6 +962,7 @@ namespace NomadTransferTool
             try
             {
                 AddLog("Fetching remote logs...");
+                if (!await EnsureAuthenticated(true)) return;
                 var res = await client.GetAsync($"{API_BASE}/system/logs?lines=50");
                 if (res.IsSuccessStatusCode)
                 {
@@ -1275,8 +1370,9 @@ namespace NomadTransferTool
 
                             if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == Categories.Movies || item.Category == Categories.Shows))
                             {
-                                var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
-                                if (meta != null)
+                                var inferredTitle = item.Title;
+                                var meta = await FetchOMDBMetadata(inferredTitle, item.Category, item.Season);
+                                if (meta != null && ShouldApplyOmdbMetadata(inferredTitle, meta, item.Category))
                                 {
                                     item.Title = meta.Title;
                                     item.Year = meta.Year;
@@ -1556,7 +1652,7 @@ namespace NomadTransferTool
             try
             {
                 var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
-                if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                if (meta != null && ShouldApplyOmdbMetadata(item.Title, meta, item.Category) && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                 {
                     string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                     string posterBase;
@@ -1795,13 +1891,13 @@ namespace NomadTransferTool
                                     {
                                         try {
                                             var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
-                                            if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
+                                            if (meta != null && ShouldApplyOmdbMetadata(item.Title, meta, item.Category) && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                                             {
                                                 string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
                                                 string posterBase;
                                                 string posterName;
 
-                                                if (item.Category == "shows")
+                                                if (item.Category == Categories.Shows)
                                                 {
                                                     if (!string.IsNullOrEmpty(item.Season))
                                                     {
@@ -2037,6 +2133,11 @@ namespace NomadTransferTool
                 _ = Task.Run(async () => {
                     try {
                         AddLog("Triggering server library scan...");
+                        if (!await EnsureAuthenticated(false))
+                        {
+                            AddLog("Server library scan requires login. Open Nomad Login and sign in.");
+                            return;
+                        }
                         var response = await client.PostAsync($"{API_BASE}/media/scan", null);
                         if (response.IsSuccessStatusCode) AddLog("Server library scan started.");
                         else AddLog($"Server library scan trigger failed: {response.StatusCode}");
@@ -2124,6 +2225,59 @@ namespace NomadTransferTool
         private async Task CopyFileWithProgress(MediaItem item, string dest, System.Threading.CancellationToken token)
         {
             await CopyFileWithProgress(item, item.SourcePath, dest, token);
+        }
+
+        private static bool ShouldApplyOmdbMetadata(string inferredTitle, OmdbResult meta, string category)
+        {
+            if (string.IsNullOrWhiteSpace(inferredTitle)) return false;
+            if (meta == null || string.IsNullOrWhiteSpace(meta.Title)) return false;
+
+            if (category != Categories.Shows) return true;
+
+            var a = NormalizeForTitleComparison(inferredTitle);
+            var b = NormalizeForTitleComparison(meta.Title);
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            if (a == b) return true;
+
+            if (a.Length < 4) return false;
+
+            var sim = GetJaccardSimilarity(a, b);
+            return sim >= 0.70;
+        }
+
+        private static string NormalizeForTitleComparison(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "";
+            var s = value.Trim().ToLowerInvariant();
+            s = Regex.Replace(s, @"[\._\-]+", " ");
+            s = Regex.Replace(s, @"[^\w\s]+", " ");
+            s = Regex.Replace(s, @"\s+", " ").Trim();
+            return s;
+        }
+
+        private static double GetJaccardSimilarity(string a, string b)
+        {
+            var aWords = new HashSet<string>();
+            foreach (Match m in Regex.Matches(a, @"\w+"))
+            {
+                if (!string.IsNullOrEmpty(m.Value)) aWords.Add(m.Value);
+            }
+
+            var bWords = new HashSet<string>();
+            foreach (Match m in Regex.Matches(b, @"\w+"))
+            {
+                if (!string.IsNullOrEmpty(m.Value)) bWords.Add(m.Value);
+            }
+            if (aWords.Count == 0 || bWords.Count == 0) return 0.0;
+
+            int intersection = 0;
+            foreach (var w in aWords)
+            {
+                if (bWords.Contains(w)) intersection++;
+            }
+
+            var union = aWords.Count + bWords.Count - intersection;
+            return union <= 0 ? 0.0 : (double)intersection / union;
         }
 
         private async Task<OmdbResult?> FetchOMDBMetadata(string fileName, string category, string? season = null)
