@@ -93,11 +93,15 @@ git config credential.helper 'cache --timeout=2592000'
 
 update_status 10 "Pulling latest changes from Git..."
 echo "Pulling latest changes from Git..."
+echo "Git remote:"
+git remote -v || true
 # Force reset to origin/main to solve any local change conflicts automatically
 update_status 30 "Fetching latest changes..."
 git fetch origin
 update_status 40 "Resetting to latest version..."
 git reset --hard origin/main
+echo "Updated to commit:"
+git log -1 --oneline --no-decorate || true
 
 # Fix permissions immediately after pull
 chmod +x *.sh
