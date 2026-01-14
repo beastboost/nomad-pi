@@ -2018,13 +2018,13 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
             "❌ CBR/RAR extraction tools not found!\n\n"
             "📦 Required packages are missing. To fix this:\n\n"
             "1️⃣ SSH into your Raspberry Pi\n"
-            "2️⃣ Run: sudo apt-get update && sudo apt-get install -y p7zip-full unar libarchive-tools\n"
+            "2️⃣ Run: sudo apt-get update && sudo apt-get install -y p7zip-full unrar unar libarchive-tools\n"
             "3️⃣ Restart Nomad Pi service\n\n"
-            "📝 Note: These packages should have been installed by setup.sh. "
+            "📝 Note: These packages should have been installed by setup.sh or during updates. "
             "If you recently ran a system update, they may have been removed by apt autoremove.\n\n"
             "💡 Tip: CBZ (ZIP) files work without these tools. Only CBR (RAR) files require them."
         )
-        print("CBR Extraction Error: No extractor tools found (checked 7zz, 7z, 7zr, unar, bsdtar, and standard Windows paths).")
+        print("CBR Extraction Error: No extractor tools found (checked 7zz, 7z, 7zr, unrar, unar, bsdtar, and standard Windows paths).")
         raise HTTPException(status_code=500, detail=error_msg)
 
     last_err = None
