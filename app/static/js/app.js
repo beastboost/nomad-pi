@@ -326,12 +326,7 @@ async function login() {
         }
     } catch (e) {
         console.error(e);
-        // Use ErrorHandler if available (TEST)
-        if (typeof errorHandler !== 'undefined') {
-            errorHandler.handle(e, 'Login', { username: usernameInput.value });
-        } else {
-            showToast('Login error: ' + e, 'error');
-        }
+        alert('Login error: ' + e);
     }
 }
 
@@ -375,21 +370,6 @@ async function checkAuth() {
 }
 
 function showToast(message, type = 'info') {
-    // Using enhanced Toast utility from ui-utils.js (TEST)
-    if (typeof Toast !== 'undefined') {
-        switch(type) {
-            case 'success':
-                return Toast.success(message);
-            case 'error':
-                return Toast.error(message);
-            case 'warning':
-                return Toast.warning(message);
-            default:
-                return Toast.info(message);
-        }
-    }
-
-    // Fallback to old implementation if Toast utility not loaded
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.style.position = 'fixed';
@@ -402,7 +382,7 @@ function showToast(message, type = 'info') {
     toast.style.animation = 'fade-in 0.3s ease-out';
     toast.style.backdropFilter = 'blur(10px)';
     toast.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
-
+    
     if (type === 'success') {
         toast.style.background = 'rgba(40, 167, 69, 0.8)';
         toast.innerHTML = `<i class="fas fa-check-circle" style="margin-right:8px;"></i> ${message}`;
@@ -415,7 +395,7 @@ function showToast(message, type = 'info') {
     }
 
     document.body.appendChild(toast);
-
+    
     setTimeout(() => {
         toast.style.animation = 'fade-out 0.3s ease-in forwards';
         setTimeout(() => toast.remove(), 300);
@@ -2968,31 +2948,6 @@ function debounce(func, wait) {
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
 
-    // Initialize FormValidator for login form (TEST)
-    if (typeof FormValidator !== 'undefined') {
-        const loginForm = document.getElementById('login-form');
-        if (loginForm) {
-            window.loginValidator = new FormValidator(loginForm, {
-                validateOnSubmit: false, // Don't prevent default submit
-                showErrorMessages: true,
-                customErrorMessages: {
-                    required: 'This field is required',
-                    minlength: 'Too short'
-                }
-            });
-            console.log('✅ FormValidator initialized for login form');
-        }
-    }
-
-    // Initialize ErrorHandler (TEST)
-    if (typeof errorHandler !== 'undefined') {
-        console.log('✅ ErrorHandler initialized and ready to use');
-        // You can register custom error callbacks
-        errorHandler.onError((errorData) => {
-            console.log('📊 Error logged:', errorData);
-        });
-    }
-
     const setupHintEl = document.getElementById('setup-hint');
     const passwordInput = document.getElementById('password-input');
     if (setupHintEl && passwordInput) {
@@ -3234,7 +3189,7 @@ async function uploadFiles() {
     const rawShowName = (document.getElementById('upload-show-name')?.value || '').trim();
     
     if (uploadQueue.length === 0) {
-        showToast("No files selected!", 'warning');
+        alert("No files selected!");
         return;
     }
 
@@ -4114,32 +4069,32 @@ async function changePassword() {
     const confirm = document.getElementById('change-pwd-confirm').value;
 
     if (!current || !newPass || !confirm) {
-        showToast('Please fill in all password fields.', 'warning');
+        alert('Please fill in all password fields.');
         return;
     }
 
     if (newPass !== confirm) {
-        showToast('New passwords do not match.', 'warning');
+        alert('New passwords do not match.');
         return;
     }
 
     if (newPass.length < 8) {
-        showToast('New password must be at least 8 characters long.', 'warning');
+        alert('New password must be at least 8 characters long.');
         return;
     }
 
     if (!/[A-Z]/.test(newPass)) {
-        showToast('New password must contain at least one uppercase letter.', 'warning');
+        alert('New password must contain at least one uppercase letter.');
         return;
     }
 
     if (!/[a-z]/.test(newPass)) {
-        showToast('New password must contain at least one lowercase letter.', 'warning');
+        alert('New password must contain at least one lowercase letter.');
         return;
     }
 
     if (!/[0-9]/.test(newPass)) {
-        showToast('New password must contain at least one digit.', 'warning');
+        alert('New password must contain at least one digit.');
         return;
     }
 
@@ -4158,17 +4113,17 @@ async function changePassword() {
 
         const data = await res.json();
         if (res.ok) {
-            showToast('Password updated successfully!', 'success');
+            alert('Password updated successfully!');
             // Clear fields
             document.getElementById('change-pwd-current').value = '';
             document.getElementById('change-pwd-new').value = '';
             document.getElementById('change-pwd-confirm').value = '';
         } else {
-            showToast(data.detail || 'Failed to update password.', 'error');
+            alert(data.detail || 'Failed to update password.');
         }
     } catch (e) {
         console.error('Error updating password:', e);
-        showToast('Error updating password. See console for details.', 'error');
+        alert('Error updating password. See console for details.');
     }
 }
 
