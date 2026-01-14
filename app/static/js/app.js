@@ -326,7 +326,7 @@ async function login() {
         }
     } catch (e) {
         console.error(e);
-        alert('Login error: ' + e);
+        showToast('Login failed. Please check your connection and try again.', 'error');
     }
 }
 
@@ -2971,7 +2971,7 @@ function openWifiModal(ssid) {
     connectBtn.onclick = () => {
         const password = passwordInput.value;
         if (!password) {
-            alert('Please enter a password');
+            showToast('Please enter a password', 'warning');
             return;
         }
         connectToWifi(ssid, password);
@@ -3036,10 +3036,10 @@ async function connectToWifi(ssid, password) {
             document.getElementById('wifi-scan-container').classList.add('hidden');
             loadWifiStatus();
         } else {
-            alert(`Failed to connect: ${data.detail || 'Unknown error'}`);
+            showToast(`Failed to connect: ${data.detail || 'Unknown error'}`, 'error');
         }
     } catch (e) {
-        alert(`Error: ${e.message}`);
+        showToast(`Connection error: ${e.message}`, 'error');
     } finally {
         connectBtn.disabled = false;
         connectBtn.textContent = originalText;
@@ -3129,6 +3129,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             })
             .catch(() => {});
+    }
+
+    // Inline form validation for login
+    const usernameInput = document.getElementById('username-input');
+    if (usernameInput) {
+        usernameInput.addEventListener('blur', () => {
+            const value = usernameInput.value.trim();
+            if (value && !FormValidator.minLength(value, 3)) {
+                FormValidator.showError(usernameInput, 'Username must be at least 3 characters');
+            } else {
+                FormValidator.clearError(usernameInput);
+            }
+        });
+        usernameInput.addEventListener('input', () => {
+            if (usernameInput.value.trim().length >= 3) {
+                FormValidator.clearError(usernameInput);
+            }
+        });
+    }
+
+    if (passwordInput) {
+        passwordInput.addEventListener('input', () => {
+            if (passwordInput.value.length > 0) {
+                FormValidator.clearError(passwordInput);
+            }
+        });
+    }
+
+    // Password change form validation
+    const changePwNew = document.getElementById('change-pw-new');
+    const changePwConfirm = document.getElementById('change-pw-confirm');
+
+    if (changePwNew) {
+        changePwNew.addEventListener('input', debounce(() => {
+            const value = changePwNew.value;
+            if (value) {
+                const strength = FormValidator.passwordStrength(value);
+                if (strength.score < 3) {
+                    FormValidator.showError(changePwNew, strength.feedback.join(', '));
+                } else {
+                    FormValidator.clearError(changePwNew);
+                }
+            } else {
+                FormValidator.clearError(changePwNew);
+            }
+        }, 500));
+    }
+
+    if (changePwConfirm && changePwNew) {
+        changePwConfirm.addEventListener('input', () => {
+            const newPw = changePwNew.value;
+            const confirmPw = changePwConfirm.value;
+            if (confirmPw && newPw !== confirmPw) {
+                FormValidator.showError(changePwConfirm, 'Passwords do not match');
+            } else {
+                FormValidator.clearError(changePwConfirm);
+            }
+        });
     }
 
     const dropZone = document.getElementById('drop-zone');
@@ -3350,15 +3408,15 @@ async function uploadFiles() {
     const category = document.getElementById('upload-category').value;
     const statusDiv = document.getElementById('upload-status');
     const rawShowName = (document.getElementById('upload-show-name')?.value || '').trim();
-    
+
     if (uploadQueue.length === 0) {
-        alert("No files selected!");
+        showToast("Please select files to upload", 'warning');
         return;
     }
 
     statusDiv.innerHTML = '<div class="progress-container"><div id="upload-progress-bar" class="progress-fill" style="width:0%">0%</div></div>';
     const progressBar = document.getElementById('upload-progress-bar');
-    
+
     const items = uploadQueue.filter(e => e.file && e.file.size > 0);
     const totalFiles = items.length;
     const totalBytes = items.reduce((sum, e) => sum + (e.file?.size || 0), 0);
@@ -3369,7 +3427,7 @@ async function uploadFiles() {
     const errorList = [];
 
     if (totalFiles === 0) {
-        alert("No files selected!");
+        showToast("Please select valid files to upload", 'warning');
         return;
     }
     
@@ -3588,32 +3646,32 @@ async function rescanLibrary() {
         });
         
         if (res.status === 401) {
-            alert('Session expired. Please log in again.');
+            showToast('Session expired. Please log in again.', 'warning');
             logout();
             return;
         }
 
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Scan failed');
-        alert(data.message);
+        showToast(data.message, 'success');
     } catch (e) {
         console.error('Scan error:', e);
-        alert(e.message);
+        showToast(e.message, 'error');
     }
 }
 
 async function prepareDrive(path) {
     if (!confirm(`Create standard folders (movies, shows, etc.) on ${path}?`)) return;
     try {
-        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, { 
+        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, {
             method: 'POST',
             headers: getAuthHeaders()
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        alert(data.message);
+        showToast(data.message, 'success');
     } catch (e) {
-        alert(e.message);
+        showToast(e.message, 'error');
     }
 }
 
@@ -3843,11 +3901,11 @@ async function rebuildLibrary() {
         });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
-        alert(data.status || 'Library scan started in background');
+        showToast(data.status || 'Library scan started in background', 'success');
         // Refresh stats after a short delay
         setTimeout(loadStorageStats, 2000);
     } catch (err) {
-        alert('Failed to start scan: ' + err);
+        showToast('Failed to start scan: ' + err, 'error');
     }
 }
 
