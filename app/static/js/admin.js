@@ -631,6 +631,29 @@ createApp({
             }
         },
 
+        async formatDrive(drive) {
+            if (!confirm(`WARNING: This will ERASE ALL DATA on ${drive.device}. Continue?`)) return;
+            
+            const label = prompt("Enter a label for the drive (e.g. USB_DATA):", "NomadDrive");
+            if (label === null) return;
+            
+            try {
+                this.isLoading = true;
+                this.showNotification('Formatting drive... This may take a while.', 'info');
+                await this.apiCall('/api/system/storage/format', 'POST', {
+                    device: drive.device,
+                    label: label || 'NomadDrive',
+                    fstype: 'ext4'
+                });
+                this.showNotification(`Drive ${drive.device} formatted and mounted!`, 'success');
+                await this.loadStorageInfo();
+            } catch (error) {
+                this.showNotification(`Format failed: ${error.message || error}`, 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
         toggleSidebar() {
             if (window.innerWidth <= 768) {
                 const sidebar = document.querySelector('.sidebar');
@@ -677,11 +700,12 @@ createApp({
         },
 
         formatBytes(bytes) {
-            if (bytes === 0) return '0 B';
+            const n = Number(bytes);
+            if (n === 0 || isNaN(n)) return '0 B';
             const k = 1024;
             const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            const i = Math.floor(Math.log(n) / Math.log(k));
+            return parseFloat((n / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         },
 
         getFileIcon(filename) {

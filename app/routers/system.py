@@ -509,6 +509,29 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                 pass
     return {"blockdevices": drives}
 
+PERSISTENT_MOUNTS_FILE = "data/mounts.json"
+
+def save_mount(device, mount_point):
+    mounts = {}
+    if os.path.exists(PERSISTENT_MOUNTS_FILE):
+        try:
+            with open(PERSISTENT_MOUNTS_FILE, 'r') as f:
+                mounts = json.load(f)
+        except: pass
+    mounts[device] = mount_point
+    with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
+        json.dump(mounts, f)
+
+def remove_mount(target):
+    if os.path.exists(PERSISTENT_MOUNTS_FILE):
+        try:
+            with open(PERSISTENT_MOUNTS_FILE, 'r') as f:
+                mounts = json.load(f)
+            mounts = {k: v for k, v in mounts.items() if v != target}
+            with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
+                json.dump(mounts, f)
+        except: pass
+
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
@@ -523,6 +546,7 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         try:
             # Check if already mounted
             subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+            save_mount(device, target)
             return {"status": "mounted", "device": device, "target": target}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -533,10 +557,48 @@ def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
         try:
             subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
+            remove_mount(target)
             return {"status": "unmounted", "target": target}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
+
+@router.post("/storage/format")
+def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current_user_id)):
+    if platform.system() != "Linux":
+        return {"status": "success", "message": "Simulated format success"}
+        
+    device = request.device
+    label = request.label
+    fstype = request.fstype
+    
+    if not device.startswith("/dev/sd") and not device.startswith("/dev/nvme") and not device.startswith("/dev/mmcblk"):
+         raise HTTPException(status_code=400, detail="Invalid device path")
+         
+    try:
+        subprocess.run(["sudo", "umount", device], check=False)
+        
+        mkfs_cmd = ["sudo", "mkfs", "-t", fstype]
+        if label:
+            mkfs_cmd.extend(["-L", label])
+        if fstype == "ext4":
+            mkfs_cmd.append("-F")
+        mkfs_cmd.append(device)
+            
+        subprocess.run(mkfs_cmd, check=True, input="y\n", text=True)
+        
+        clean_name = "".join(c for c in (label or "drive") if c.isalnum() or c in ('-', '_')).strip()
+        if not clean_name: clean_name = "usb_drive"
+        target = os.path.join("data", "external", clean_name)
+        os.makedirs(target, exist_ok=True)
+        
+        subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+        save_mount(device, target)
+        
+        return {"status": "formatted", "device": device, "target": target}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Format failed: {str(e)}")
 
 @router.get("/wifi/status")
 def get_wifi_status(user_id: int = Depends(get_current_user_id)):
@@ -1061,6 +1123,11 @@ class WifiConnectRequest(BaseModel):
         if len(v) > 32:
             raise ValueError("SSID too long (max 32 characters)")
         return v
+
+class FormatDriveRequest(BaseModel):
+    device: str
+    label: str
+    fstype: str = "ext4"
 
 @router.post("/wifi/connect")
 def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current_user_id)):

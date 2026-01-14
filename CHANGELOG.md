@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.6] - 2026-01-14
+
+### Added
+- **Mobile**: Close button to media player to stop playback and hide the bar
+- **Admin**: Format drive functionality (ext4) in Storage Management
+- **System**: Persistent drive mounting (mounts survive reboots via `mounts.json`)
+
+### Fixed
+- **Admin**: Drive size display now correctly formats GB/MB (robust handling of string/number types)
+- **System**: Auto-mount logic ensures drives are accessible after formatting
+
 ## [1.1.5] - 2026-01-11
 
 ### Fixed

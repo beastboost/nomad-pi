@@ -240,6 +240,40 @@ app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_i
 
 @app.on_event("startup")
 def _startup_tasks():
+    # Restore persistent mounts
+    try:
+        import json
+        import subprocess
+        import platform
+        
+        if platform.system() == "Linux":
+            mounts_file = "data/mounts.json"
+            if os.path.exists(mounts_file):
+                logger.info("Restoring persistent mounts...")
+                try:
+                    with open(mounts_file, "r") as f:
+                        mounts = json.load(f)
+                        
+                    for device, target in mounts.items():
+                        try:
+                            if not os.path.exists(device):
+                                logger.warning(f"Skipping mount: device {device} not found")
+                                continue
+                                
+                            if os.path.ismount(target):
+                                logger.info(f"Drive {device} already mounted at {target}")
+                                continue
+                                
+                            os.makedirs(target, exist_ok=True)
+                            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+                            logger.info(f"Restored mount: {device} -> {target}")
+                        except Exception as e:
+                            logger.error(f"Failed to restore mount {device}: {e}")
+                except Exception as e:
+                    logger.error(f"Failed to load persistent mounts: {e}")
+    except Exception as e:
+        logger.error(f"Error during mount restoration: {e}")
+
     # Start scheduler
     scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
     scheduler.start()

@@ -3043,6 +3043,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    const btnClosePlayer = document.getElementById('player-close');
+    if (btnClosePlayer && audio && bar) {
+        btnClosePlayer.addEventListener('click', () => {
+            audio.pause();
+            audio.currentTime = 0;
+            bar.classList.add('hidden');
+            musicQueue = [];
+            currentMedia = null;
+        });
+    }
     if (seek && audio) {
         seek.addEventListener('input', () => {
             const pct = Number(seek.value || 0) / 100;
