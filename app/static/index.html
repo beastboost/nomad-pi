@@ -26,9 +26,15 @@
         <div class="login-box">
             <div class="logo">Nomad Pi ✨</div>
             <p>Sign in to access your media</p>
-            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;">
-            <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
-            <button onclick="login()" class="primary">Enter</button>
+            <form id="login-form">
+                <input type="text" id="username-input" name="username" placeholder="Username" value="admin"
+                       onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;"
+                       required minlength="3" data-rules="required|minlength:3">
+                <input type="password" id="password-input" name="password" placeholder="Password"
+                       onkeypress="handleLoginKey(event)"
+                       required minlength="4" data-rules="required|minlength:4">
+                <button type="button" onclick="login()" class="primary">Enter</button>
+            </form>
             <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect username or password</p>
             <p id="setup-hint" style="color: var(--text-muted); font-size: 0.9em; margin-top: 10px; display:none;"></p>
         </div>
@@ -616,6 +622,9 @@
     </div>
 
     <div id="toast-container"></div>
+    <!-- UI Utilities and Form Validator (TEST) -->
+    <script src="js/ui-utils.js"></script>
+    <script src="js/form-validator.js"></script>
     <script src="js/app.js?v=1768131100"></script>
     <script>
         if ('serviceWorker' in navigator) {
