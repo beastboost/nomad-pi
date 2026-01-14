@@ -112,10 +112,11 @@ echo "Installing/Updating system dependencies..."
 # Ensure all required system packages are present
 # We only run update if install fails to save time on Pi
 # Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar unrar libarchive-tools; then
+# Note: 7zip replaces p7zip-full on Ubuntu 24.04+
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools; then
     echo "Some packages missing, updating list and trying again..." >> update.log
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar unrar libarchive-tools
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools
 fi
 update_status 60 "Installing Python dependencies..."
 echo "Installing Python dependencies..."
