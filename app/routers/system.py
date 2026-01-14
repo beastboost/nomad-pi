@@ -34,6 +34,11 @@ class OmdbKeyRequest(BaseModel):
 class ControlRequest(BaseModel):
     action: str
 
+class FormatDriveRequest(BaseModel):
+    device: str
+    label: str
+    fstype: str = "ext4"
+
 @public_router.get("/settings/omdb")
 def get_omdb_key():
     key = database.get_setting("omdb_api_key")
@@ -1123,11 +1128,6 @@ class WifiConnectRequest(BaseModel):
         if len(v) > 32:
             raise ValueError("SSID too long (max 32 characters)")
         return v
-
-class FormatDriveRequest(BaseModel):
-    device: str
-    label: str
-    fstype: str = "ext4"
 
 @router.post("/wifi/connect")
 def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current_user_id)):
