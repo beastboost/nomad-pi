@@ -326,7 +326,7 @@ async function login() {
         }
     } catch (e) {
         console.error(e);
-        alert('Login error: ' + e);
+        showToast('Login failed. Please check your connection and try again.', 'error');
     }
 }
 
@@ -369,38 +369,211 @@ async function checkAuth() {
     }
 }
 
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.style.position = 'fixed';
-    toast.style.bottom = '20px';
-    toast.style.right = '20px';
-    toast.style.padding = '12px 20px';
-    toast.style.borderRadius = '8px';
-    toast.style.color = '#fff';
-    toast.style.zIndex = '9999';
-    toast.style.animation = 'fade-in 0.3s ease-out';
-    toast.style.backdropFilter = 'blur(10px)';
-    toast.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
-    
-    if (type === 'success') {
-        toast.style.background = 'rgba(40, 167, 69, 0.8)';
-        toast.innerHTML = `<i class="fas fa-check-circle" style="margin-right:8px;"></i> ${message}`;
-    } else if (type === 'error') {
-        toast.style.background = 'rgba(220, 53, 69, 0.8)';
-        toast.innerHTML = `<i class="fas fa-exclamation-circle" style="margin-right:8px;"></i> ${message}`;
-    } else {
-        toast.style.background = 'rgba(0, 123, 255, 0.8)';
-        toast.innerHTML = `<i class="fas fa-info-circle" style="margin-right:8px;"></i> ${message}`;
-    }
+// Enhanced Toast Notification System
+const ToastManager = {
+    container: null,
+    toasts: [],
+    maxToasts: 5,
 
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.animation = 'fade-out 0.3s ease-in forwards';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    init() {
+        if (!this.container) {
+            this.container = document.createElement('div');
+            this.container.id = 'toast-stack';
+            this.container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:12px;max-width:420px;pointer-events:none;';
+            document.body.appendChild(this.container);
+        }
+    },
+
+    show(message, type = 'info', options = {}) {
+        this.init();
+
+        const duration = options.duration || 4000;
+        const dismissible = options.dismissible !== false;
+
+        // Remove oldest if too many
+        if (this.toasts.length >= this.maxToasts) {
+            this.remove(this.toasts[0]);
+        }
+
+        // Create toast
+        const toast = document.createElement('div');
+        toast.className = 'toast-notification';
+        toast.style.cssText = `
+            background: rgba(26, 32, 44, 0.95);
+            backdrop-filter: blur(12px);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.1);
+            transform: translateX(400px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: all;
+            max-width: 420px;
+            word-wrap: break-word;
+        `;
+
+        // Icon and colors
+        const icons = {
+            success: { icon: 'fa-check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' },
+            error: { icon: 'fa-exclamation-circle', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' },
+            warning: { icon: 'fa-exclamation-triangle', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+            info: { icon: 'fa-info-circle', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' },
+            loading: { icon: 'fa-spinner fa-spin', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' }
+        };
+
+        const config = icons[type] || icons.info;
+
+        // Build toast HTML
+        toast.innerHTML = `
+            <div style="flex-shrink:0;width:40px;height:40px;border-radius:8px;background:${config.bg};display:flex;align-items:center;justify-content:center;">
+                <i class="fas ${config.icon}" style="color:${config.color};font-size:18px;"></i>
+            </div>
+            <div style="flex:1;color:#fff;font-size:14px;line-height:1.5;">${this.escapeHtml(message)}</div>
+            ${dismissible ? `<button class="toast-close" style="flex-shrink:0;background:none;border:none;color:rgba(255,255,255,0.5);font-size:20px;cursor:pointer;padding:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)';this.style.color='#fff'" onmouseout="this.style.background='none';this.style.color='rgba(255,255,255,0.5)'">&times;</button>` : ''}
+        `;
+
+        // Add toast to container
+        this.container.appendChild(toast);
+        this.toasts.push(toast);
+
+        // Trigger animation
+        setTimeout(() => {
+            toast.style.transform = 'translateX(0)';
+            toast.style.opacity = '1';
+        }, 10);
+
+        // Close button
+        if (dismissible) {
+            const closeBtn = toast.querySelector('.toast-close');
+            closeBtn.addEventListener('click', () => this.remove(toast));
+        }
+
+        // Pause on hover
+        let timeout;
+        const startTimer = () => {
+            if (type !== 'loading') {
+                timeout = setTimeout(() => this.remove(toast), duration);
+            }
+        };
+
+        toast.addEventListener('mouseenter', () => clearTimeout(timeout));
+        toast.addEventListener('mouseleave', startTimer);
+
+        startTimer();
+
+        return {
+            dismiss: () => this.remove(toast),
+            element: toast
+        };
+    },
+
+    remove(toast) {
+        if (!toast || !toast.parentNode) return;
+
+        toast.style.transform = 'translateX(400px)';
+        toast.style.opacity = '0';
+
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+            const index = this.toasts.indexOf(toast);
+            if (index > -1) {
+                this.toasts.splice(index, 1);
+            }
+        }, 300);
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+// Legacy function for compatibility
+function showToast(message, type = 'info', duration = 4000) {
+    return ToastManager.show(message, type, { duration });
 }
+
+// Debounce utility for performance optimization
+function debounce(func, wait = 300) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Form Validation Helpers
+const FormValidator = {
+    // Validate email
+    email(value) {
+        const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return regex.test(value);
+    },
+
+    // Validate minimum length
+    minLength(value, min) {
+        return value.length >= min;
+    },
+
+    // Validate password strength
+    passwordStrength(value) {
+        const strength = {
+            score: 0,
+            feedback: []
+        };
+
+        if (value.length >= 8) strength.score++;
+        if (value.length >= 12) strength.score++;
+        if (/[a-z]/.test(value)) strength.score++;
+        if (/[A-Z]/.test(value)) strength.score++;
+        if (/\d/.test(value)) strength.score++;
+        if (/[^a-zA-Z0-9]/.test(value)) strength.score++;
+
+        if (!/[A-Z]/.test(value)) strength.feedback.push('Add uppercase letters');
+        if (!/[a-z]/.test(value)) strength.feedback.push('Add lowercase letters');
+        if (!/\d/.test(value)) strength.feedback.push('Add numbers');
+        if (!/[^a-zA-Z0-9]/.test(value)) strength.feedback.push('Add special characters');
+        if (value.length < 8) strength.feedback.push('Use at least 8 characters');
+
+        return strength;
+    },
+
+    // Show inline error
+    showError(input, message) {
+        const errorId = `${input.id}-error`;
+        let errorEl = document.getElementById(errorId);
+
+        if (!errorEl) {
+            errorEl = document.createElement('div');
+            errorEl.id = errorId;
+            errorEl.style.cssText = 'color:#ef4444;font-size:12px;margin-top:4px;';
+            input.parentNode.insertBefore(errorEl, input.nextSibling);
+        }
+
+        errorEl.textContent = message;
+        input.style.borderColor = '#ef4444';
+    },
+
+    // Clear error
+    clearError(input) {
+        const errorId = `${input.id}-error`;
+        const errorEl = document.getElementById(errorId);
+        if (errorEl) {
+            errorEl.remove();
+        }
+        input.style.borderColor = '';
+    }
+};
 
 // Welcome Screen Functions
 function checkAndShowWelcome() {
@@ -2798,7 +2971,7 @@ function openWifiModal(ssid) {
     connectBtn.onclick = () => {
         const password = passwordInput.value;
         if (!password) {
-            alert('Please enter a password');
+            showToast('Please enter a password', 'warning');
             return;
         }
         connectToWifi(ssid, password);
@@ -2863,10 +3036,10 @@ async function connectToWifi(ssid, password) {
             document.getElementById('wifi-scan-container').classList.add('hidden');
             loadWifiStatus();
         } else {
-            alert(`Failed to connect: ${data.detail || 'Unknown error'}`);
+            showToast(`Failed to connect: ${data.detail || 'Unknown error'}`, 'error');
         }
     } catch (e) {
-        alert(`Error: ${e.message}`);
+        showToast(`Connection error: ${e.message}`, 'error');
     } finally {
         connectBtn.disabled = false;
         connectBtn.textContent = originalText;
@@ -2933,17 +3106,7 @@ function cancelUpload() {
     }
 }
 
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
+// Debounce function moved to utilities section (line ~503)
 
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth(); // Check auth on load
@@ -2966,6 +3129,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             })
             .catch(() => {});
+    }
+
+    // Inline form validation for login
+    const usernameInput = document.getElementById('username-input');
+    if (usernameInput) {
+        usernameInput.addEventListener('blur', () => {
+            const value = usernameInput.value.trim();
+            if (value && !FormValidator.minLength(value, 3)) {
+                FormValidator.showError(usernameInput, 'Username must be at least 3 characters');
+            } else {
+                FormValidator.clearError(usernameInput);
+            }
+        });
+        usernameInput.addEventListener('input', () => {
+            if (usernameInput.value.trim().length >= 3) {
+                FormValidator.clearError(usernameInput);
+            }
+        });
+    }
+
+    if (passwordInput) {
+        passwordInput.addEventListener('input', () => {
+            if (passwordInput.value.length > 0) {
+                FormValidator.clearError(passwordInput);
+            }
+        });
+    }
+
+    // Password change form validation
+    const changePwNew = document.getElementById('change-pw-new');
+    const changePwConfirm = document.getElementById('change-pw-confirm');
+
+    if (changePwNew) {
+        changePwNew.addEventListener('input', debounce(() => {
+            const value = changePwNew.value;
+            if (value) {
+                const strength = FormValidator.passwordStrength(value);
+                if (strength.score < 3) {
+                    FormValidator.showError(changePwNew, strength.feedback.join(', '));
+                } else {
+                    FormValidator.clearError(changePwNew);
+                }
+            } else {
+                FormValidator.clearError(changePwNew);
+            }
+        }, 500));
+    }
+
+    if (changePwConfirm && changePwNew) {
+        changePwConfirm.addEventListener('input', () => {
+            const newPw = changePwNew.value;
+            const confirmPw = changePwConfirm.value;
+            if (confirmPw && newPw !== confirmPw) {
+                FormValidator.showError(changePwConfirm, 'Passwords do not match');
+            } else {
+                FormValidator.clearError(changePwConfirm);
+            }
+        });
     }
 
     const dropZone = document.getElementById('drop-zone');
@@ -3187,15 +3408,15 @@ async function uploadFiles() {
     const category = document.getElementById('upload-category').value;
     const statusDiv = document.getElementById('upload-status');
     const rawShowName = (document.getElementById('upload-show-name')?.value || '').trim();
-    
+
     if (uploadQueue.length === 0) {
-        alert("No files selected!");
+        showToast("Please select files to upload", 'warning');
         return;
     }
 
     statusDiv.innerHTML = '<div class="progress-container"><div id="upload-progress-bar" class="progress-fill" style="width:0%">0%</div></div>';
     const progressBar = document.getElementById('upload-progress-bar');
-    
+
     const items = uploadQueue.filter(e => e.file && e.file.size > 0);
     const totalFiles = items.length;
     const totalBytes = items.reduce((sum, e) => sum + (e.file?.size || 0), 0);
@@ -3206,7 +3427,7 @@ async function uploadFiles() {
     const errorList = [];
 
     if (totalFiles === 0) {
-        alert("No files selected!");
+        showToast("Please select valid files to upload", 'warning');
         return;
     }
     
@@ -3425,32 +3646,32 @@ async function rescanLibrary() {
         });
         
         if (res.status === 401) {
-            alert('Session expired. Please log in again.');
+            showToast('Session expired. Please log in again.', 'warning');
             logout();
             return;
         }
 
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Scan failed');
-        alert(data.message);
+        showToast(data.message, 'success');
     } catch (e) {
         console.error('Scan error:', e);
-        alert(e.message);
+        showToast(e.message, 'error');
     }
 }
 
 async function prepareDrive(path) {
     if (!confirm(`Create standard folders (movies, shows, etc.) on ${path}?`)) return;
     try {
-        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, { 
+        const res = await fetch(`${API_BASE}/media/system/prepare_drive?path=${encodeURIComponent(path)}`, {
             method: 'POST',
             headers: getAuthHeaders()
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
-        alert(data.message);
+        showToast(data.message, 'success');
     } catch (e) {
-        alert(e.message);
+        showToast(e.message, 'error');
     }
 }
 
@@ -3680,11 +3901,11 @@ async function rebuildLibrary() {
         });
         if (res.status === 401) { logout(); return; }
         const data = await res.json();
-        alert(data.status || 'Library scan started in background');
+        showToast(data.status || 'Library scan started in background', 'success');
         // Refresh stats after a short delay
         setTimeout(loadStorageStats, 2000);
     } catch (err) {
-        alert('Failed to start scan: ' + err);
+        showToast('Failed to start scan: ' + err, 'error');
     }
 }
 
