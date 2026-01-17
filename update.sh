@@ -22,7 +22,8 @@ update_status() {
                "$1" "$escaped_msg" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp_file"
     fi
     chmod 644 "$tmp_file" 2>/dev/null || true
-    mv -f "$tmp_file" "$STATUS_FILE"
+    # Try to move, if fails (e.g. permission denied), try sudo, otherwise fail silently so script doesn't crash
+    mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || sudo mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || true
 }
 
 update_status 5 "Checking System Health..."
