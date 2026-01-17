@@ -1310,10 +1310,19 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
 
     try:
-        # Check if Tailscale is installed
-        which_result = subprocess.run(["which", "tailscale"], capture_output=True)
-        if which_result.returncode != 0:
-            return {"installed": False, "connected": False, "message": "Tailscale not installed"}
+        # Check if Tailscale is installed (check multiple paths)
+        paths_to_check = ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]
+        tailscale_path = shutil.which("tailscale")
+        
+        if not tailscale_path:
+            # Fallback check
+            for path in paths_to_check:
+                if os.path.exists(path):
+                    tailscale_path = path
+                    break
+        
+        if not tailscale_path:
+            return {"installed": False, "connected": False, "message": "Tailscale not found in PATH"}
 
         # Check if tailscaled service is running
         service_result = subprocess.run(
