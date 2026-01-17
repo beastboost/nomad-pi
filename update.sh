@@ -192,11 +192,12 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
     REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
     NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
+    TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
 
     # Write to temp file first and validate before installing
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then
