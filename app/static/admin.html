@@ -575,10 +575,10 @@
 
                                         <!-- Auth Key Input (only show if not connected) -->
                                         <div v-if="tailscale.status.installed && !tailscale.status.connected" class="form-group">
-                                            <label>Auth Key (optional)</label>
+                                            <label for="tailscale-auth-key">Auth Key (optional)</label>
                                             <div class="input-with-button">
-                                                <input type="password" v-model="tailscale.authKey" placeholder="tskey-auth-...">
-                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary">
+                                                <input id="tailscale-auth-key" type="password" v-model="tailscale.authKey" placeholder="tskey-auth-..." title="Tailscale Auth Key">
+                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary" title="Save Auth Key">
                                                     <i class="fas fa-save"></i>
                                                 </button>
                                             </div>
