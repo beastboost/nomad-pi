@@ -721,6 +721,7 @@ function showSection(id) {
         loadDrives();
         loadWifiStatus();
         loadUsers();
+        checkTailscale();
         // Auto-refresh drives every 5 seconds while in admin panel
         driveScanInterval = setInterval(() => {
             // Only refresh if we are not currently interacting (simple check)
@@ -5032,5 +5033,191 @@ async function fixDuplicates() {
     } catch (e) {
         showToast(`Error: ${e.message}`, 'error');
         console.error('Failed to fix duplicates:', e);
+    }
+}
+
+// Tailscale VPN Management
+async function checkTailscale() {
+    const panel = document.getElementById('tailscale-panel');
+    if (!panel) return;
+
+    const loading = document.getElementById('ts-loading');
+    const content = document.getElementById('ts-content');
+    const badge = document.getElementById('ts-status-badge');
+    const ipContainer = document.getElementById('ts-ip-container');
+    const ipEl = document.getElementById('ts-ip');
+    const authSection = document.getElementById('ts-auth-section');
+    const btnConnect = document.getElementById('btn-ts-connect');
+    const btnDisconnect = document.getElementById('btn-ts-disconnect');
+    const messageEl = document.getElementById('ts-message');
+
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/status`, {
+            headers: getAuthHeaders()
+        });
+        const status = await res.json();
+
+        if (loading) loading.style.display = 'none';
+        if (content) content.style.display = 'block';
+
+        if (!status.installed) {
+            if (badge) {
+                badge.textContent = 'Not Installed';
+                badge.style.background = '#f59e0b'; // warning color
+                badge.style.color = '#fff';
+            }
+            if (messageEl) messageEl.innerHTML = 'Tailscale is not installed. Run setup script or install manually.';
+            if (btnConnect) btnConnect.disabled = true;
+            return;
+        }
+
+        if (status.connected) {
+            if (badge) {
+                badge.textContent = 'Connected';
+                badge.style.background = '#10b981'; // success color
+                badge.style.color = '#fff';
+            }
+            
+            // Get IP
+            try {
+                const ipRes = await fetch(`${API_BASE}/system/tailscale/ip`, {
+                    headers: getAuthHeaders()
+                });
+                const ipData = await ipRes.json();
+                
+                if (ipData.ip && ipEl) {
+                    if (ipContainer) ipContainer.style.display = 'flex';
+                    ipEl.textContent = ipData.ip;
+                }
+            } catch(e) { console.error('IP fetch error', e); }
+
+            if (btnConnect) btnConnect.style.display = 'none';
+            if (btnDisconnect) btnDisconnect.style.display = 'inline-block';
+            if (authSection) authSection.style.display = 'none';
+            if (messageEl) messageEl.textContent = '';
+        } else {
+            if (badge) {
+                badge.textContent = 'Disconnected';
+                badge.style.background = '#ef4444'; // danger color
+                badge.style.color = '#fff';
+            }
+            
+            if (ipContainer) ipContainer.style.display = 'none';
+            if (btnConnect) {
+                btnConnect.style.display = 'inline-block';
+                btnConnect.disabled = false;
+            }
+            if (btnDisconnect) btnDisconnect.style.display = 'none';
+            
+            // Check if auth key is saved
+            try {
+                const authRes = await fetch(`${API_BASE}/system/tailscale/auth-key`, {
+                    headers: getAuthHeaders()
+                });
+                const authData = await authRes.json();
+                
+                if (authSection) authSection.style.display = 'block';
+                const keyInput = document.getElementById('ts-auth-key');
+                if (keyInput && authData.has_key) {
+                    keyInput.placeholder = "Auth key saved (enter new to overwrite)";
+                }
+            } catch(e) { console.error('Auth key check error', e); }
+        }
+
+    } catch (e) {
+        console.error('Error checking Tailscale:', e);
+        if (loading) loading.textContent = 'Error loading status';
+    }
+}
+
+async function connectTailscale() {
+    const btn = document.getElementById('btn-ts-connect');
+    const msg = document.getElementById('ts-message');
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Connecting...';
+    }
+    if (msg) msg.textContent = '';
+
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/up`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast('Tailscale connected!', 'success');
+            checkTailscale();
+        } else if (data.status === 'needs_auth') {
+            const authUrl = (data.output && data.output.match(/https:\/\/[^\s]+/)) ? data.output.match(/https:\/\/[^\s]+/)[0] : '#';
+            if (msg) msg.innerHTML = `Authentication required. <a href="${authUrl}" target="_blank" style="color:#3b82f6;text-decoration:underline;">Click here to authenticate</a>`;
+            showToast('Authentication required', 'warning');
+        } else {
+            const err = data.detail || 'Connection failed';
+            showToast(err, 'error');
+            if (msg) msg.textContent = err;
+        }
+    } catch (e) {
+        showToast('Connection failed: ' + e.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Connect';
+        }
+    }
+}
+
+async function disconnectTailscale() {
+    if (!confirm('Are you sure you want to disconnect Tailscale? Remote access will be lost.')) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/down`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        
+        if (res.ok) {
+            showToast('Tailscale disconnected', 'success');
+            checkTailscale();
+        } else {
+            showToast('Failed to disconnect', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function saveTsKey() {
+    const input = document.getElementById('ts-auth-key');
+    if (!input) return;
+    
+    const key = input.value.trim();
+    if (!key) {
+        showToast('Please enter an auth key', 'warning');
+        return;
+    }
+
+    try {
+        const headers = getAuthHeaders();
+        headers['Content-Type'] = 'application/json';
+        
+        const res = await fetch(`${API_BASE}/system/tailscale/set-auth-key`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ auth_key: key })
+        });
+
+        if (res.ok) {
+            showToast('Auth key saved', 'success');
+            input.value = '';
+            checkTailscale();
+        } else {
+            const data = await res.json();
+            showToast(data.detail || 'Failed to save key', 'error');
+        }
+    } catch (e) {
+        showToast('Error saving key', 'error');
     }
 }

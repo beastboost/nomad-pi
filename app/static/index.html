@@ -256,6 +256,38 @@
                         <button onclick="systemControl('wifi_restart')" class="warning">Restart Wi-Fi</button>
                         <button onclick="scanWifi()" class="secondary">Scan Networks</button>
                     </div>
+
+                    <h4 style="margin-top:20px; margin-bottom:10px;">Tailscale VPN</h4>
+                    <div id="tailscale-panel" style="margin-bottom: 20px;">
+                        <div id="ts-loading" style="color:var(--text-muted);">Loading Tailscale status...</div>
+                        <div id="ts-content" style="display:none;">
+                            <div style="margin-bottom: 15px; display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+                                <div>
+                                    <span style="color:var(--text-muted); margin-right:5px;">Status:</span>
+                                    <span id="ts-status-badge" style="padding:4px 10px; border-radius:12px; font-weight:bold; font-size:0.9rem;">Unknown</span>
+                                </div>
+                                <div id="ts-ip-container" style="display:none;">
+                                    <span style="color:var(--text-muted); margin-right:5px;">IP:</span>
+                                    <code id="ts-ip" style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; font-family:monospace;"></code>
+                                </div>
+                            </div>
+
+                            <div id="ts-auth-section" style="margin-bottom:15px; display:none;">
+                                <label style="display:block; margin-bottom:5px; font-size:0.9rem;">Auth Key (if required):</label>
+                                <div style="display:flex; gap:10px;">
+                                    <input type="password" id="ts-auth-key" placeholder="tskey-auth-..." style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                                    <button onclick="saveTsKey()" class="secondary" style="padding:8px 15px;">Save</button>
+                                </div>
+                            </div>
+
+                            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                                <button id="btn-ts-connect" onclick="connectTailscale()" class="primary">Connect</button>
+                                <button id="btn-ts-disconnect" onclick="disconnectTailscale()" class="warning" style="display:none;">Disconnect</button>
+                                <button onclick="checkTailscale()" class="secondary">Refresh</button>
+                            </div>
+                            <div id="ts-message" style="margin-top:10px; font-size:0.9rem; color:var(--text-muted);"></div>
+                        </div>
+                    </div>
                     
                     <div id="wifi-status-info" class="glass" style="padding:12px 20px; border-radius:12px; margin-bottom:15px; display:flex; align-items:center; gap:12px;">
                         <div id="wifi-status-icon" style="font-size:1.5em;">📡</div>
