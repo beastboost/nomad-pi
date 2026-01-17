@@ -119,6 +119,29 @@ if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager do
     sudo apt-get update
     sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools
 fi
+
+# Ensure Tailscale is installed (for updates via UI)
+update_status 55 "Checking Tailscale..."
+if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale is already installed."
+else
+    echo "Installing Tailscale..."
+    if curl -fsSL https://tailscale.com/install.sh | sh; then
+        echo "Tailscale installed successfully!"
+    else
+        echo "WARNING: Failed to install Tailscale. Check logs."
+    fi
+fi
+
+# Ensure Tailscale service is running
+if command -v tailscale >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet tailscaled 2>/dev/null; then
+        echo "Starting Tailscale service..."
+        sudo systemctl enable tailscaled 2>/dev/null || true
+        sudo systemctl start tailscaled 2>/dev/null || true
+    fi
+fi
+
 update_status 60 "Installing Python dependencies..."
 echo "Installing Python dependencies..."
 
@@ -164,6 +187,9 @@ if [ ! -f "./venv/bin/uvicorn" ]; then
     echo "CRITICAL: uvicorn still missing. Trying emergency install..."
     ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
 fi
+
+# Ensure Tailscale is installed (moved up)
+# update_status 80 "Checking Tailscale..." (Logic moved up)
 
 update_status 85 "Running database migrations..."
 echo "Running database migrations..."
