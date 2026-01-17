@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tailscale UI Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: #e2e8f0; }
+        .success { color: #10b981; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        pre { background: #0f172a; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Tailscale UI Integration Test</h1>
+
+    <h2>1. Check if HTML files contain Tailscale code</h2>
+    <p class="info">Open browser console (F12) and check for errors</p>
+    <div id="html-check">Checking...</div>
+
+    <h2>2. Check if Vue app is loaded</h2>
+    <div id="vue-check">Checking...</div>
+
+    <h2>3. Check if Tailscale data exists in Vue</h2>
+    <div id="data-check">Checking...</div>
+
+    <h2>4. Test Tailscale API endpoint</h2>
+    <div id="api-check">Checking...</div>
+    <pre id="api-response"></pre>
+
+    <h2>5. Instructions</h2>
+    <div style="background: rgba(59, 130, 246, 0.1); padding: 15px; border-left: 3px solid #3b82f6; margin-top: 20px;">
+        <p><strong>If all checks fail:</strong></p>
+        <ol>
+            <li>Verify files are updated: <code>grep -c "Tailscale VPN" /path/to/nomad-pi/app/static/admin.html</code> (should be 2+)</li>
+            <li>Restart service: <code>sudo systemctl restart nomad-pi</code></li>
+            <li>Clear ALL browser data for this site (not just refresh)</li>
+            <li>Try in incognito mode</li>
+            <li>Check nomad-pi service logs: <code>sudo journalctl -u nomad-pi -n 50</code></li>
+        </ol>
+    </div>
+
+    <script>
+        // Test 1: Check HTML
+        fetch('/admin.html')
+            .then(r => r.text())
+            .then(html => {
+                const hasTailscale = html.includes('Tailscale VPN');
+                const el = document.getElementById('html-check');
+                if (hasTailscale) {
+                    el.innerHTML = '<span class="success">✓ admin.html contains Tailscale code</span>';
+                } else {
+                    el.innerHTML = '<span class="error">✗ admin.html does NOT contain Tailscale code - files not updated!</span>';
+                }
+            })
+            .catch(e => {
+                document.getElementById('html-check').innerHTML = `<span class="error">✗ Error: ${e.message}</span>`;
+            });
+
+        // Test 2: Check Vue
+        setTimeout(() => {
+            const el = document.getElementById('vue-check');
+            if (typeof Vue !== 'undefined') {
+                el.innerHTML = '<span class="success">✓ Vue.js is loaded</span>';
+            } else {
+                el.innerHTML = '<span class="error">✗ Vue.js not loaded</span>';
+            }
+        }, 1000);
+
+        // Test 3: Check Vue data (requires admin.js to be loaded)
+        fetch('/js/admin.js')
+            .then(r => r.text())
+            .then(js => {
+                const hasTailscaleData = js.includes('tailscale: {');
+                const hasMethods = js.includes('refreshTailscaleStatus');
+                const el = document.getElementById('data-check');
+
+                if (hasTailscaleData && hasMethods) {
+                    el.innerHTML = '<span class="success">✓ admin.js contains Tailscale data and methods</span>';
+                } else {
+                    el.innerHTML = `<span class="error">✗ admin.js missing Tailscale code (data:${hasTailscaleData}, methods:${hasMethods})</span>`;
+                }
+            })
+            .catch(e => {
+                document.getElementById('data-check').innerHTML = `<span class="error">✗ Error: ${e.message}</span>`;
+            });
+
+        // Test 4: Check API
+        fetch('/api/system/tailscale/status')
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                document.getElementById('api-check').innerHTML = '<span class="success">✓ Tailscale API endpoint is working</span>';
+                document.getElementById('api-response').textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(e => {
+                document.getElementById('api-check').innerHTML = `<span class="error">✗ Tailscale API not working: ${e.message}</span>`;
+                document.getElementById('api-response').textContent = 'API endpoint not available - backend may not be updated';
+            });
+
+        // Log to console for debugging
+        console.log('Tailscale UI Test Page Loaded');
+        console.log('Check the results above to diagnose the issue');
+    </script>
+</body>
+</html>
