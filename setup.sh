@@ -344,15 +344,16 @@ REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
+TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
 
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH
 EOL
 sudo chmod 0440 $SUDOERS_FILE
 
 # 7. Network Configuration (Home Wi-Fi + Hotspot Fallback)
-echo "[7/9] Configuring Network..."
+echo "[7/10] Configuring Network..."
 
 if command -v nmcli &> /dev/null; then
     echo "NetworkManager found."
@@ -456,7 +457,7 @@ else
 fi
 
 # 8. Samba Configuration (File Sharing)
-echo "[8/9] Configuring Samba..."
+echo "[8/10] Configuring Samba..."
 
 # Install Samba if not already installed (extra safety check)
 if ! dpkg -s samba >/dev/null 2>&1; then
@@ -515,7 +516,7 @@ sudo systemctl enable nmbd
 sudo systemctl restart nmbd
 
 # 9. MiniDLNA Configuration (Smart TV Streaming)
-echo "[9/9] Configuring MiniDLNA..."
+echo "[9/10] Configuring MiniDLNA..."
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 cat > "$MINIDLNA_TEMP" <<EOL
@@ -557,6 +558,40 @@ else
     fi
 fi
 rm -f "$MINIDLNA_TEMP"
+
+# 10. Tailscale VPN Configuration (Remote Access)
+echo "[10/10] Installing Tailscale VPN..."
+
+# Check if Tailscale is already installed
+if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale is already installed."
+    TAILSCALE_VERSION=$(tailscale version | head -n 1)
+    echo "Installed version: $TAILSCALE_VERSION"
+else
+    echo "Installing Tailscale..."
+    # Download and install Tailscale using the official install script
+    if curl -fsSL https://tailscale.com/install.sh | sh; then
+        echo "Tailscale installed successfully!"
+    else
+        echo "WARNING: Failed to install Tailscale. You can install it manually later."
+        echo "To install manually, run: curl -fsSL https://tailscale.com/install.sh | sh"
+    fi
+fi
+
+# Check if tailscaled service is running
+if systemctl is-active --quiet tailscaled 2>/dev/null; then
+    echo "Tailscale service is running."
+else
+    if command -v tailscale >/dev/null 2>&1; then
+        echo "Starting Tailscale service..."
+        sudo systemctl enable tailscaled 2>/dev/null || true
+        sudo systemctl start tailscaled 2>/dev/null || true
+    fi
+fi
+
+echo "Tailscale setup complete. You can configure it from the web admin panel under Settings."
+echo "To connect manually: sudo tailscale up"
+echo "To check status: sudo tailscale status"
 
 if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; then
     CFG=""

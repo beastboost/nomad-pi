@@ -1302,6 +1302,269 @@ def get_saved_wifi(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Tailscale VPN Management
+@router.get("/tailscale/status")
+def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
+    """Get Tailscale connection status"""
+    if platform.system() != "Linux":
+        return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
+
+    try:
+        # Check if Tailscale is installed
+        which_result = subprocess.run(["which", "tailscale"], capture_output=True)
+        if which_result.returncode != 0:
+            return {"installed": False, "connected": False, "message": "Tailscale not installed"}
+
+        # Check if tailscaled service is running
+        service_result = subprocess.run(
+            ["systemctl", "is-active", "tailscaled"],
+            capture_output=True,
+            text=True
+        )
+        service_running = service_result.stdout.strip() == "active"
+
+        if not service_running:
+            return {
+                "installed": True,
+                "connected": False,
+                "service_running": False,
+                "message": "Tailscale service not running"
+            }
+
+        # Get connection status
+        status_result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if status_result.returncode == 0:
+            status_data = json.loads(status_result.stdout)
+            backend_state = status_data.get("BackendState", "")
+
+            # Get simple status for quick checks
+            status_simple = subprocess.run(
+                ["sudo", "-n", "tailscale", "status"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            return {
+                "installed": True,
+                "connected": backend_state == "Running",
+                "service_running": True,
+                "backend_state": backend_state,
+                "self": status_data.get("Self", {}),
+                "peer_count": len(status_data.get("Peer", {})),
+                "status_output": status_simple.stdout
+            }
+        else:
+            return {
+                "installed": True,
+                "connected": False,
+                "service_running": True,
+                "message": "Unable to get status"
+            }
+
+    except subprocess.TimeoutExpired:
+        return {"installed": True, "connected": False, "error": "Status check timed out"}
+    except Exception as e:
+        return {"installed": True, "connected": False, "error": str(e)}
+
+@router.get("/tailscale/ip")
+def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
+    """Get Tailscale IP address"""
+    if platform.system() != "Linux":
+        return {"ip": None, "message": "Tailscale only available on Linux"}
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "ip", "-4"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            ip = result.stdout.strip()
+            return {"ip": ip if ip else None}
+        else:
+            return {"ip": None, "message": "Not connected to Tailscale"}
+    except Exception as e:
+        return {"ip": None, "error": str(e)}
+
+@router.post("/tailscale/up")
+def tailscale_up(user_id: int = Depends(get_current_user_id)):
+    """Connect to Tailscale network"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
+
+    try:
+        # Check if already connected
+        status_result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if status_result.returncode == 0:
+            status_data = json.loads(status_result.stdout)
+            if status_data.get("BackendState") == "Running":
+                return {"status": "success", "message": "Already connected to Tailscale"}
+
+        # Get auth key from database if available
+        auth_key = database.get_setting("tailscale_auth_key")
+
+        # Build tailscale up command
+        cmd = ["sudo", "-n", "tailscale", "up"]
+
+        # Add auth key if available
+        if auth_key:
+            cmd.extend(["--authkey", auth_key])
+
+        # Add recommended flags for server/always-on use
+        cmd.extend([
+            "--accept-routes",  # Accept subnet routes from exit nodes
+            "--ssh"  # Enable Tailscale SSH
+        ])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            return {
+                "status": "success",
+                "message": "Connected to Tailscale",
+                "output": result.stdout
+            }
+        else:
+            # Check if it's an auth issue
+            if "authenticate" in result.stderr.lower() or "login" in result.stderr.lower():
+                return {
+                    "status": "needs_auth",
+                    "message": "Please authenticate via the provided URL",
+                    "output": result.stderr
+                }
+            else:
+                raise HTTPException(status_code=500, detail=result.stderr or "Failed to connect")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Connection attempt timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/tailscale/down")
+def tailscale_down(user_id: int = Depends(get_current_user_id)):
+    """Disconnect from Tailscale network"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "down"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            return {"status": "success", "message": "Disconnected from Tailscale"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or "Failed to disconnect")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Disconnect attempt timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tailscale/peers")
+def get_tailscale_peers(user_id: int = Depends(get_current_user_id)):
+    """Get list of Tailscale peers"""
+    if platform.system() != "Linux":
+        return {"peers": [], "message": "Tailscale only available on Linux"}
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            status_data = json.loads(result.stdout)
+            peers_data = status_data.get("Peer", {})
+
+            peers = []
+            for peer_id, peer_info in peers_data.items():
+                peers.append({
+                    "id": peer_id,
+                    "hostname": peer_info.get("HostName", "Unknown"),
+                    "dns_name": peer_info.get("DNSName", ""),
+                    "tailscale_ips": peer_info.get("TailscaleIPs", []),
+                    "online": peer_info.get("Online", False),
+                    "exit_node": peer_info.get("ExitNode", False),
+                    "os": peer_info.get("OS", "")
+                })
+
+            return {"peers": peers, "count": len(peers)}
+        else:
+            return {"peers": [], "message": "Not connected to Tailscale"}
+
+    except Exception as e:
+        return {"peers": [], "error": str(e)}
+
+class TailscaleAuthKeyRequest(BaseModel):
+    auth_key: str
+
+@router.post("/tailscale/set-auth-key")
+def set_tailscale_auth_key(request: TailscaleAuthKeyRequest, user_id: int = Depends(get_current_user_id)):
+    """Store Tailscale auth key in database"""
+    try:
+        # Validate auth key format (starts with tskey-)
+        if not request.auth_key.startswith("tskey-"):
+            raise HTTPException(status_code=400, detail="Invalid auth key format. Should start with 'tskey-'")
+
+        database.set_setting("tailscale_auth_key", request.auth_key)
+        return {"status": "success", "message": "Auth key saved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tailscale/auth-key")
+def get_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
+    """Get stored Tailscale auth key (masked)"""
+    try:
+        auth_key = database.get_setting("tailscale_auth_key")
+        if auth_key:
+            # Mask the key, show only first 10 and last 4 characters
+            if len(auth_key) > 20:
+                masked = auth_key[:10] + "..." + auth_key[-4:]
+            else:
+                masked = "***"
+            return {"has_key": True, "masked_key": masked}
+        else:
+            return {"has_key": False}
+    except Exception as e:
+        return {"has_key": False, "error": str(e)}
+
+@router.delete("/tailscale/auth-key")
+def delete_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
+    """Delete stored Tailscale auth key"""
+    try:
+        database.set_setting("tailscale_auth_key", "")
+        return {"status": "success", "message": "Auth key deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/dlna/info")
 def get_dlna_info(user_id: int = Depends(get_current_user_id)):
     """Get DLNA server information"""

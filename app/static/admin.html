@@ -534,6 +534,108 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Tailscale VPN Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-shield-alt"></i>
+                                    <h3>Tailscale VPN</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div v-if="tailscale.loading" class="loading-state">
+                                        <div class="spinner-small"></div>
+                                        <p>Loading...</p>
+                                    </div>
+                                    <div v-else>
+                                        <!-- Status Display -->
+                                        <div class="status-row" style="margin-bottom: 1rem;">
+                                            <span class="status-label">Status:</span>
+                                            <span v-if="!tailscale.status.installed" class="badge badge-warning">
+                                                <i class="fas fa-exclamation-triangle"></i> Not Installed
+                                            </span>
+                                            <span v-else-if="tailscale.status.connected" class="badge badge-success">
+                                                <i class="fas fa-check-circle"></i> Connected
+                                            </span>
+                                            <span v-else class="badge badge-secondary">
+                                                <i class="fas fa-times-circle"></i> Disconnected
+                                            </span>
+                                        </div>
+
+                                        <div v-if="tailscale.status.connected && tailscale.ip" style="margin-bottom: 1rem;">
+                                            <div class="form-group">
+                                                <label>Tailscale IP</label>
+                                                <div class="input-with-button">
+                                                    <input type="text" :value="tailscale.ip" readonly style="font-family: monospace;">
+                                                    <button @click="copyToClipboard(tailscale.ip)" class="btn btn-secondary">
+                                                        <i class="fas fa-copy"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Auth Key Input (only show if not connected) -->
+                                        <div v-if="tailscale.status.installed && !tailscale.status.connected" class="form-group">
+                                            <label>Auth Key (optional)</label>
+                                            <div class="input-with-button">
+                                                <input type="password" v-model="tailscale.authKey" placeholder="tskey-auth-...">
+                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary">
+                                                    <i class="fas fa-save"></i>
+                                                </button>
+                                            </div>
+                                            <p class="help-text">Generate at <a href="https://login.tailscale.com/admin/settings/keys" target="_blank">Tailscale Admin</a></p>
+                                        </div>
+
+                                        <!-- Connection Controls -->
+                                        <div class="btn-group" style="margin-top: 1rem;">
+                                            <button v-if="tailscale.status.installed && !tailscale.status.connected"
+                                                    @click="connectTailscale"
+                                                    class="btn btn-success"
+                                                    :disabled="tailscale.connecting">
+                                                <i class="fas fa-plug"></i> {{ tailscale.connecting ? 'Connecting...' : 'Connect' }}
+                                            </button>
+                                            <button v-if="tailscale.status.installed && tailscale.status.connected"
+                                                    @click="disconnectTailscale"
+                                                    class="btn btn-warning"
+                                                    :disabled="tailscale.connecting">
+                                                <i class="fas fa-unlink"></i> Disconnect
+                                            </button>
+                                            <button @click="refreshTailscaleStatus" class="btn btn-secondary">
+                                                <i class="fas fa-sync"></i> Refresh
+                                            </button>
+                                            <button v-if="tailscale.status.connected"
+                                                    @click="viewTailscalePeers"
+                                                    class="btn btn-primary">
+                                                <i class="fas fa-network-wired"></i> View Peers
+                                            </button>
+                                        </div>
+
+                                        <!-- Peers Modal Info -->
+                                        <div v-if="tailscale.showPeers && tailscale.peers.length > 0" style="margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.1); border-radius: 8px;">
+                                            <h4 style="margin-bottom: 0.5rem;">Connected Devices ({{ tailscale.peers.length }})</h4>
+                                            <div v-for="peer in tailscale.peers" :key="peer.id" style="padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                                <div><strong>{{ peer.hostname }}</strong></div>
+                                                <div style="font-size: 0.875rem; opacity: 0.8;">
+                                                    {{ peer.tailscale_ips[0] || 'No IP' }}
+                                                    <span v-if="peer.online" class="badge badge-success" style="margin-left: 0.5rem;">Online</span>
+                                                    <span v-else class="badge badge-secondary" style="margin-left: 0.5rem;">Offline</span>
+                                                </div>
+                                            </div>
+                                            <button @click="tailscale.showPeers = false" class="btn btn-secondary btn-sm" style="margin-top: 0.5rem;">
+                                                <i class="fas fa-times"></i> Close
+                                            </button>
+                                        </div>
+
+                                        <!-- Not Installed Message -->
+                                        <div v-if="!tailscale.status.installed" style="margin-top: 1rem; padding: 1rem; background: rgba(251, 191, 36, 0.1); border-radius: 8px; border-left: 3px solid #fbbf24;">
+                                            <p style="margin: 0;"><strong>Tailscale is not installed.</strong></p>
+                                            <p style="margin: 0.5rem 0 0 0; font-size: 0.875rem;">Run the setup script or install manually:</p>
+                                            <code style="display: block; margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; font-size: 0.875rem;">
+                                                curl -fsSL https://tailscale.com/install.sh | sh
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </section>
 
