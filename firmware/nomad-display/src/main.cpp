@@ -33,7 +33,6 @@ char current_poster_url[256] = "";
 
 char wifi_ssid[64] = "";
 char wifi_pass[64] = "";
-char manual_server_ip[64] = "";
 String server_ip = "";
 int server_port = 8000;
 bool is_connected = false;
@@ -42,6 +41,9 @@ bool mdns_started = false;
 
 char discovered_server_ip[64] = "";
 int discovered_server_port = 8000;
+
+bool wifi_connecting = false;
+unsigned long wifi_connect_start_ms = 0;
 
 volatile bool ws_payload_ready = false;
 char* ws_payload_buf = nullptr;
@@ -80,8 +82,6 @@ bool np_is_paused = false;
 lv_obj_t * label_wifi_status;
 lv_obj_t * label_connection_info;
 lv_obj_t * btn_scan_wifi;
-lv_obj_t * ta_server_ip;
-lv_obj_t * btn_save_ip;
 lv_obj_t * list_wifi; 
 lv_obj_t * win_wifi;  
 lv_obj_t * kb;
@@ -99,6 +99,7 @@ void buildSettingsTab(lv_obj_t * parent);
 void showWifiScanWindow();
 void scanNetworks();
 void connectToWifi(const char* ssid, const char* pass);
+void handleWifiConnection();
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length);
 void updateDashboardUI(JsonArray sessions, JsonObject system);
 void stopSession(const char* session_id);
@@ -153,13 +154,11 @@ void loop() {
     processWsMessage();
 
     lv_timer_handler();
+
+    handleWifiConnection();
     
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
-    }
-
-    if (!is_connected && WiFi.status() == WL_CONNECTED) {
-        pollDashboardHttp();
     }
 
     if (!is_connected) {
@@ -233,19 +232,16 @@ void loadPreferences() {
     preferences.begin("nomad-display", true);
     String s = preferences.getString("ssid", "");
     String p = preferences.getString("pass", "");
-    String ip = preferences.getString("server_ip", "");
     preferences.end();
     
     strncpy(wifi_ssid, s.c_str(), 63);
     strncpy(wifi_pass, p.c_str(), 63);
-    strncpy(manual_server_ip, ip.c_str(), 63);
 }
 
 void savePreferences() {
     preferences.begin("nomad-display", false);
     preferences.putString("ssid", wifi_ssid);
     preferences.putString("pass", wifi_pass);
-    preferences.putString("server_ip", manual_server_ip);
     preferences.end();
 }
 
@@ -400,7 +396,7 @@ void buildSettingsTab(lv_obj_t * parent) {
     lv_obj_set_style_text_font(label_wifi_status, &lv_font_montserrat_14, 0);
     
     label_connection_info = lv_label_create(parent);
-    lv_label_set_text(label_connection_info, "Server: Pending...");
+    lv_label_set_text(label_connection_info, "Server: Auto-discovery");
     lv_obj_set_style_text_font(label_connection_info, &lv_font_montserrat_14, 0);
     
     // Scan Button
@@ -409,49 +405,6 @@ void buildSettingsTab(lv_obj_t * parent) {
     lv_obj_t * lbl_scan = lv_label_create(btn_scan_wifi);
     lv_label_set_text(lbl_scan, "Scan & Connect Wi-Fi");
     lv_obj_add_event_cb(btn_scan_wifi, [](lv_event_t* e){ showWifiScanWindow(); }, LV_EVENT_CLICKED, NULL);
-
-    // Manual IP Entry
-    lv_obj_t * lbl_ip = lv_label_create(parent);
-    lv_label_set_text(lbl_ip, "Manual Server IP (Optional):");
-    lv_obj_set_style_pad_top(lbl_ip, 10, 0);
-    
-    ta_server_ip = lv_textarea_create(parent);
-    lv_textarea_set_one_line(ta_server_ip, true);
-    lv_textarea_set_placeholder_text(ta_server_ip, "e.g. 192.168.1.100");
-    lv_textarea_set_text(ta_server_ip, manual_server_ip);
-    lv_obj_set_width(ta_server_ip, LV_PCT(100));
-    
-    btn_save_ip = lv_btn_create(parent);
-    lv_obj_set_width(btn_save_ip, LV_PCT(100));
-    lv_obj_t * lbl_save = lv_label_create(btn_save_ip);
-    lv_label_set_text(lbl_save, "Save IP & Reconnect");
-    
-    // Keyboard for IP
-    lv_obj_t * kb_ip = lv_keyboard_create(parent);
-    lv_keyboard_set_mode(kb_ip, LV_KEYBOARD_MODE_NUMBER);
-    lv_keyboard_set_textarea(kb_ip, ta_server_ip);
-    lv_obj_add_flag(kb_ip, LV_OBJ_FLAG_HIDDEN);
-    
-    lv_obj_add_event_cb(ta_server_ip, [](lv_event_t* e){
-        lv_obj_t * kb = (lv_obj_t*)lv_event_get_user_data(e);
-        lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
-    }, LV_EVENT_CLICKED, kb_ip);
-    
-    lv_obj_add_event_cb(kb_ip, [](lv_event_t* e){
-        lv_obj_add_flag(lv_event_get_target(e), LV_OBJ_FLAG_HIDDEN);
-    }, LV_EVENT_READY, NULL);
-    
-    lv_obj_add_event_cb(kb_ip, [](lv_event_t* e){
-        lv_obj_add_flag(lv_event_get_target(e), LV_OBJ_FLAG_HIDDEN);
-    }, LV_EVENT_CANCEL, NULL);
-
-    // Save IP Action
-    lv_obj_add_event_cb(btn_save_ip, [](lv_event_t* e){
-        const char * txt = lv_textarea_get_text(ta_server_ip);
-        strcpy(manual_server_ip, txt);
-        savePreferences();
-        tryConnectWebSocket();
-    }, LV_EVENT_CLICKED, NULL);
 }
 
 void showWifiScanWindow() {
@@ -541,26 +494,32 @@ void scanNetworks() {
 
 void connectToWifi(const char* ssid, const char* pass) {
     lv_label_set_text(label_wifi_status, "Connecting...");
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, pass);
-    
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 20) {
-        delay(500);
-        lv_timer_handler();
-        tries++;
-    }
+    wifi_connecting = true;
+    wifi_connect_start_ms = millis();
+}
 
-    if (WiFi.status() == WL_CONNECTED) {
+void handleWifiConnection() {
+    if (!wifi_connecting) return;
+
+    wl_status_t st = WiFi.status();
+    if (st == WL_CONNECTED) {
+        wifi_connecting = false;
         WiFi.setSleep(false);
         String ip = WiFi.localIP().toString();
-        lv_label_set_text_fmt(label_wifi_status, "Connected: %s\nIP: %s", ssid, ip.c_str());
+        lv_label_set_text_fmt(label_wifi_status, "Connected: %s\nIP: %s", wifi_ssid, ip.c_str());
         udp.begin(8001);
         if (win_wifi) {
             lv_obj_del(win_wifi);
             win_wifi = NULL;
         }
         tryConnectWebSocket();
-    } else {
+        return;
+    }
+
+    if (millis() - wifi_connect_start_ms > 15000) {
+        wifi_connecting = false;
         lv_label_set_text(label_wifi_status, "Connection Failed");
         if (win_wifi) {
             lv_obj_clean(list_wifi);
@@ -574,9 +533,7 @@ void tryConnectWebSocket() {
     if (WiFi.status() != WL_CONNECTED) return;
     
     // Determine Server IP
-    if (strlen(manual_server_ip) > 0) {
-        server_ip = String(manual_server_ip);
-    } else if (strcmp(wifi_ssid, "NomadPi") == 0) {
+    if (strcmp(wifi_ssid, "NomadPi") == 0) {
         server_ip = "10.42.0.1";
     } else if (strlen(discovered_server_ip) > 0) {
         server_ip = String(discovered_server_ip);
@@ -600,33 +557,13 @@ void tryConnectWebSocket() {
     }
     
     lv_label_set_text_fmt(label_connection_info, "Connecting to %s...", server_ip.c_str());
-    
-    // HTTP Ping Check
-    HTTPClient http;
-    // Use /api/system/status which is lightweight and guaranteed to exist (public)
-    String pingUrl = "http://" + server_ip + ":" + String(server_port) + "/api/system/status";
-    
-    // Add timeout to prevent blocking
-    http.setConnectTimeout(2000); 
-    http.begin(pingUrl);
-    int httpCode = http.GET();
-    http.end();
 
-    if (httpCode == 200) {
-        lv_label_set_text_fmt(label_connection_info, "Found Server! Connecting WS...");
-        
-        // Disconnect previous if any
-        webSocket.disconnect();
-        
-        webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
-        webSocket.onEvent(webSocketEvent);
-        webSocket.setReconnectInterval(5000);
-        webSocket.enableHeartbeat(15000, 5000, 2);
-        ws_started = true;
-    } else {
-        lv_label_set_text_fmt(label_connection_info, "HTTP Error: %d\nServer: %s", httpCode, server_ip.c_str());
-        is_connected = false; // Ensure we keep trying
-    }
+    webSocket.disconnect();
+    webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
+    webSocket.onEvent(webSocketEvent);
+    webSocket.setReconnectInterval(5000);
+    webSocket.enableHeartbeat(15000, 5000, 2);
+    ws_started = true;
 }
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
