@@ -1968,12 +1968,7 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
         try { activeControlSocket.close(); } catch {}
         activeControlSocket = null;
     }
-    
-    // Ensure session ID exists and is registered immediately
-    if (!activeDashboardSessionId) activeDashboardSessionId = createDashboardSessionId();
-    updateDashboardSession(video, path, 'playing', true);
-
-    try:
+    try {
         const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsUrl = `${wsProto}://${window.location.host}${API_BASE}/dashboard/control/ws?session_id=${encodeURIComponent(activeDashboardSessionId)}`;
         activeControlSocket = new WebSocket(wsUrl);

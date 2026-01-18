@@ -4,7 +4,7 @@ Provides WebSocket streaming and REST endpoints for live playback tracking
 Designed for external displays (ESP32, tablets, etc.)
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
 from typing import Dict, List, Optional
 import asyncio
 import json
@@ -12,10 +12,10 @@ import time
 import psutil
 import os
 import logging
+import hashlib
 from datetime import datetime
 from app.routers.auth import get_current_user_id
 from app.routers.media import cache_remote_poster, POSTER_CACHE_DIR, BASE_DIR
-import hashlib
 
 logger = logging.getLogger("nomad")
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 # Structure: {session_id: {user_id, path, title, current_time, duration, last_update, state, ...}}
 active_sessions: Dict[str, Dict] = {}
 control_connections: Dict[str, WebSocket] = {}
+_poster_cache_attempts: Dict[str, float] = {}
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -249,39 +250,55 @@ async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id:
 
         poster_url = data.get("poster_url")
         poster_thumb = data.get("poster_thumb")
-        
-        # Optimize poster caching: Don't block!
-        # If it's a remote URL, check if we have a cache hit immediately.
-        # If not, use the remote URL but schedule a cache in the background.
+
+        def _cached_poster_url(url: str) -> Optional[str]:
+            if not isinstance(url, str):
+                return None
+            if not (url.startswith("http://") or url.startswith("https://")):
+                return None
+            key = hashlib.sha256(url.encode("utf-8", errors="ignore")).hexdigest()
+            out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+            if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
+                rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
+                return f"/data/{rel}"
+            return None
+
+        def _queue_poster_cache(url: str):
+            if not isinstance(url, str):
+                return
+            if not (url.startswith("http://") or url.startswith("https://")):
+                return
+            now = time.time()
+            last = _poster_cache_attempts.get(url, 0.0)
+            if (now - last) < 60.0:
+                return
+            _poster_cache_attempts[url] = now
+            if len(_poster_cache_attempts) > 4096:
+                try:
+                    for k in sorted(_poster_cache_attempts.keys(), key=lambda kk: _poster_cache_attempts[kk])[:1024]:
+                        _poster_cache_attempts.pop(k, None)
+                except Exception:
+                    _poster_cache_attempts.clear()
+            background_tasks.add_task(cache_remote_poster, url)
+
         if isinstance(poster_url, str) and (poster_url.startswith("http://") or poster_url.startswith("https://")):
-            # Check cache synchronously (fast if using local lookup)
-            # We can use the logic from cache_remote_poster but non-blocking?
-            # For now, just schedule it if we don't have it.
-            # Ideally we want to know if it's cached to return the local path.
-            # Let's try to get it if it's already there.
-            
-            # Helper to check file existence without network
-            key = hashlib.sha256(poster_url.encode("utf-8", errors="ignore")).hexdigest()
-            cached_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
-            if os.path.isfile(cached_fs) and os.path.getsize(cached_fs) > 0:
-                rel = os.path.relpath(cached_fs, BASE_DIR).replace(os.sep, "/")
-                poster_url = f"/data/{rel}"
+            cached = _cached_poster_url(poster_url)
+            if cached:
+                poster_url = cached
             else:
-                # Not cached yet, use remote but schedule cache
-                background_tasks.add_task(cache_remote_poster, poster_url)
+                _queue_poster_cache(poster_url)
+                poster_url = None
 
         if not poster_thumb:
             poster_thumb = poster_url
-            
-        if isinstance(poster_thumb, str) and (poster_thumb.startswith("http://") or poster_thumb.startswith("https://")) and poster_thumb != poster_url:
-             # Same logic for thumb
-            key = hashlib.sha256(poster_thumb.encode("utf-8", errors="ignore")).hexdigest()
-            cached_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
-            if os.path.isfile(cached_fs) and os.path.getsize(cached_fs) > 0:
-                rel = os.path.relpath(cached_fs, BASE_DIR).replace(os.sep, "/")
-                poster_thumb = f"/data/{rel}"
+
+        if isinstance(poster_thumb, str) and (poster_thumb.startswith("http://") or poster_thumb.startswith("https://")):
+            cached = _cached_poster_url(poster_thumb)
+            if cached:
+                poster_thumb = cached
             else:
-                background_tasks.add_task(cache_remote_poster, poster_thumb)
+                _queue_poster_cache(poster_thumb)
+                poster_thumb = None
 
         # Update or create session
         active_sessions[session_id] = {
