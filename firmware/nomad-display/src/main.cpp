@@ -37,6 +37,13 @@ char manual_server_ip[64] = "";
 String server_ip = "";
 int server_port = 8000;
 bool is_connected = false;
+bool ws_started = false;
+
+volatile bool ws_payload_ready = false;
+char* ws_payload_buf = nullptr;
+size_t ws_payload_len = 0;
+unsigned long last_ws_process_ms = 0;
+unsigned long last_poster_fetch_ms = 0;
 
 // --- UI OBJECTS ---
 lv_obj_t * tv;
@@ -54,6 +61,16 @@ lv_obj_t * arc_ram;
 
 // Now Playing Widgets
 lv_obj_t * cont_now_playing_list;
+lv_obj_t * np_card;
+lv_obj_t * np_img;
+lv_obj_t * np_title;
+lv_obj_t * np_sub;
+lv_obj_t * np_bar;
+lv_obj_t * np_btn_stop;
+lv_obj_t * np_btn_pause;
+lv_obj_t * np_empty_label;
+char np_session_id[64] = "";
+bool np_is_paused = false;
 
 // Settings Widgets
 lv_obj_t * label_wifi_status;
@@ -85,6 +102,7 @@ void pauseSession(const char* session_id);
 void tryConnectWebSocket();
 void checkUDP();
 void downloadPoster(const char* url);
+void processWsMessage();
 
 // --- SETUP ---
 void setup() {
@@ -123,16 +141,19 @@ void setup() {
 
 // --- LOOP ---
 void loop() {
+    if (ws_started) {
+        webSocket.loop();
+    }
+
+    processWsMessage();
+
     lv_timer_handler();
     
-    // Check UDP Discovery
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
     }
 
-    if (is_connected) {
-        webSocket.loop();
-    } else {
+    if (!is_connected) {
         // Retry connection logic
         static unsigned long last_connect_attempt = 0;
         if (millis() - last_connect_attempt > 5000) {
@@ -290,9 +311,74 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
     
-    lv_obj_t * lbl = lv_label_create(cont_now_playing_list);
-    lv_label_set_text(lbl, "No active sessions");
-    lv_obj_center(lbl);
+    np_empty_label = lv_label_create(cont_now_playing_list);
+    lv_label_set_text(np_empty_label, "No active sessions");
+    lv_obj_center(np_empty_label);
+
+    np_card = lv_obj_create(cont_now_playing_list);
+    lv_obj_set_size(np_card, LV_PCT(100), 170);
+    lv_obj_set_style_bg_color(np_card, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_pad_all(np_card, 8, 0);
+    lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+
+    np_img = lv_img_create(np_card);
+    lv_img_set_src(np_img, &img_poster_dsc);
+    lv_obj_set_size(np_img, POSTER_W, POSTER_H);
+    lv_obj_align(np_img, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t * info = lv_obj_create(np_card);
+    lv_obj_set_style_bg_opa(info, 0, 0);
+    lv_obj_set_style_border_width(info, 0, 0);
+    lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(info, 6, 0);
+    lv_obj_set_pos(info, POSTER_W + 10, 10);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 40, 150);
+
+    np_title = lv_label_create(info);
+    lv_obj_set_width(np_title, LV_PCT(100));
+    lv_label_set_long_mode(np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_14, 0);
+    lv_label_set_text(np_title, "");
+
+    np_sub = lv_label_create(info);
+    lv_obj_set_width(np_sub, LV_PCT(100));
+    lv_obj_set_style_text_color(np_sub, lv_color_hex(0x94A3B8), 0);
+    lv_label_set_text(np_sub, "");
+
+    np_bar = lv_bar_create(info);
+    lv_obj_set_width(np_bar, LV_PCT(100));
+    lv_obj_set_height(np_bar, 10);
+    lv_bar_set_range(np_bar, 0, 100);
+    lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
+
+    lv_obj_t * ctrls = lv_obj_create(info);
+    lv_obj_set_style_bg_opa(ctrls, 0, 0);
+    lv_obj_set_style_border_width(ctrls, 0, 0);
+    lv_obj_set_style_pad_all(ctrls, 0, 0);
+    lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
+    lv_obj_set_size(ctrls, LV_PCT(100), 40);
+
+    np_btn_stop = lv_btn_create(ctrls);
+    lv_obj_set_size(np_btn_stop, 70, 30);
+    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
+    lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
+    lv_label_set_text(lbl_stop, "STOP");
+    lv_obj_center(lbl_stop);
+
+    np_btn_pause = lv_btn_create(ctrls);
+    lv_obj_set_size(np_btn_pause, 70, 30);
+    lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
+    lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
+    lv_label_set_text(lbl_pause, "PAUSE");
+    lv_obj_center(lbl_pause);
+
+    lv_obj_add_event_cb(np_btn_stop, [](lv_event_t* e){
+        if (strlen(np_session_id) > 0) stopSession(np_session_id);
+    }, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_add_event_cb(np_btn_pause, [](lv_event_t* e){
+        if (strlen(np_session_id) > 0) pauseSession(np_session_id);
+    }, LV_EVENT_CLICKED, NULL);
 }
 
 void buildSettingsTab(lv_obj_t * parent) {
@@ -456,8 +542,10 @@ void connectToWifi(const char* ssid, const char* pass) {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+        WiFi.setSleep(false);
         String ip = WiFi.localIP().toString();
         lv_label_set_text_fmt(label_wifi_status, "Connected: %s\nIP: %s", ssid, ip.c_str());
+        udp.begin(8001);
         if (win_wifi) {
             lv_obj_del(win_wifi);
             win_wifi = NULL;
@@ -509,15 +597,11 @@ void tryConnectWebSocket() {
         // Disconnect previous if any
         webSocket.disconnect();
         
-        // Use c_str() to ensure correct type
         webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
         webSocket.onEvent(webSocketEvent);
         webSocket.setReconnectInterval(5000);
-        webSocket.enableHeartbeat(2000, 3000, 2); // Ping every 2s, fail after 3s, 2 retries
-        
-        // We set is_connected to true ONLY after WS connects in the event handler
-        // But for now, we enable the loop to process it
-        is_connected = true; 
+        webSocket.enableHeartbeat(15000, 5000, 2);
+        ws_started = true;
     } else {
         lv_label_set_text_fmt(label_connection_info, "Server Error: HTTP %d\nIP: %s", httpCode, server_ip.c_str());
         is_connected = false; // Ensure we keep trying
@@ -527,33 +611,57 @@ void tryConnectWebSocket() {
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     switch(type) {
         case WStype_CONNECTED:
+            Serial.println("WS: connected");
             lv_label_set_text(label_status, "Nomad Pi: Online");
             lv_label_set_text_fmt(label_connection_info, "Connected to %s", server_ip.c_str());
             lv_obj_set_style_text_color(label_status, lv_color_hex(0x10B981), 0);
+            is_connected = true;
             break;
         case WStype_DISCONNECTED:
+            Serial.println("WS: disconnected");
             lv_label_set_text(label_status, "Nomad Pi: Disconnected");
             lv_label_set_text_fmt(label_connection_info, "WS Disconnected\nRetrying...");
             lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
-            // Don't set is_connected = false here, let WebSocketsClient handle reconnect
-            // But if we want to re-ping, we might need to?
-            // For now, let's rely on WebSocketsClient reconnect logic for WS issues
+            is_connected = false;
             break;
         case WStype_TEXT: {
-            // Use DynamicJsonDocument on heap to prevent stack overflow
-            // 4KB might be too large for stack
-            DynamicJsonDocument doc(4096);
-            DeserializationError error = deserializeJson(doc, payload);
-            
-            if (!error) {
-                updateDashboardUI(doc["sessions"], doc["system"]);
-            } else {
-                Serial.print("JSON Error: ");
-                Serial.println(error.c_str());
-            }
+            if (length == 0 || length > 20000) break;
+            char* new_buf = (char*)malloc(length + 1);
+            if (!new_buf) break;
+            memcpy(new_buf, payload, length);
+            new_buf[length] = '\0';
+
+            noInterrupts();
+            if (ws_payload_buf) free(ws_payload_buf);
+            ws_payload_buf = new_buf;
+            ws_payload_len = length;
+            ws_payload_ready = true;
+            interrupts();
             break;
         }
     }
+}
+
+void processWsMessage() {
+    if (!ws_payload_ready) return;
+    if (millis() - last_ws_process_ms < 250) return;
+
+    char* local_buf = nullptr;
+    noInterrupts();
+    local_buf = ws_payload_buf;
+    ws_payload_buf = nullptr;
+    ws_payload_ready = false;
+    interrupts();
+
+    if (!local_buf) return;
+    last_ws_process_ms = millis();
+
+    DynamicJsonDocument doc(8192);
+    DeserializationError error = deserializeJson(doc, local_buf);
+    free(local_buf);
+
+    if (error) return;
+    updateDashboardUI(doc["sessions"], doc["system"]);
 }
 
 void updateDashboardUI(JsonArray sessions, JsonObject system) {
@@ -586,140 +694,47 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     lv_label_set_text_fmt(label_stats, "Disk: %.1f%%  |  Users: %d\nDown: %.1f %s  |  Up: %.1f %s", 
         disk, active_users, net_down, unit_d, net_up, unit_u);
 
-    // Update Sessions
-    lv_obj_clean(cont_now_playing_list);
-    
     if (sessions.size() == 0) {
-        lv_obj_t * lbl = lv_label_create(cont_now_playing_list);
-        lv_label_set_text(lbl, "No media playing");
-        lv_obj_center(lbl);
-        // Clear poster cache if empty
+        lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
+        strcpy(np_session_id, "");
         strcpy(current_poster_url, "");
-    } else {
-        // Download poster for first session if changed
-        const char* first_poster_url = sessions[0]["poster_thumb"]; // Use thumb for speed
-        if (!first_poster_url) first_poster_url = sessions[0]["poster_url"];
+        return;
+    }
 
-        if (first_poster_url && strcmp(current_poster_url, first_poster_url) != 0) {
-             // If local path (starts with /), prepend server IP
-             String full_url;
-             if (first_poster_url[0] == '/') {
-                 full_url = "http://" + server_ip + ":" + String(server_port) + String(first_poster_url);
-             } else {
-                 full_url = String(first_poster_url);
-             }
-             downloadPoster(full_url.c_str());
-             strncpy(current_poster_url, first_poster_url, 255);
+    lv_obj_add_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+
+    JsonObject s = sessions[0];
+    const char* sid_src = s["session_id"] | "";
+    strncpy(np_session_id, sid_src, sizeof(np_session_id) - 1);
+    np_session_id[sizeof(np_session_id) - 1] = '\0';
+
+    lv_label_set_text(np_title, s["title"] | "Unknown");
+    const char* user = s["username"] | "User";
+    const char* type = s["media_type"] | "media";
+    lv_label_set_text_fmt(np_sub, "%s • %s", user, type);
+    lv_bar_set_value(np_bar, (int)(s["progress_percent"] | 0), LV_ANIM_OFF);
+
+    np_is_paused = strcmp((const char*)(s["state"] | ""), "paused") == 0;
+    lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
+    lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "PLAY" : "PAUSE");
+
+    const char* poster_url = s["poster_thumb"];
+    if (!poster_url) poster_url = s["poster_url"];
+    if (poster_url && strcmp(current_poster_url, poster_url) != 0 && (millis() - last_poster_fetch_ms > 15000)) {
+        last_poster_fetch_ms = millis();
+        String full_url;
+        if (poster_url[0] == '/') {
+            full_url = "http://" + server_ip + ":" + String(server_port) + String(poster_url);
+        } else {
+            full_url = String(poster_url);
         }
-
-        for (int i = 0; i < sessions.size(); i++) {
-            JsonObject s = sessions[i];
-            lv_obj_t * card = lv_obj_create(cont_now_playing_list);
-            lv_obj_set_size(card, LV_PCT(100), 140); // Taller for poster
-            lv_obj_set_style_bg_color(card, lv_color_hex(0x334155), 0);
-            lv_obj_set_style_pad_all(card, 5, 0);
-            
-            // Poster (Only for first item for now)
-            if (i == 0) {
-                lv_obj_t * img = lv_img_create(card);
-                lv_img_set_src(img, &img_poster_dsc);
-                lv_obj_set_size(img, POSTER_W, POSTER_H);
-                lv_obj_align(img, LV_ALIGN_LEFT_MID, 0, 0);
-            }
-
-            // Info Container
-            lv_obj_t * info = lv_obj_create(card);
-            lv_obj_set_size(info, LV_PCT(100), LV_PCT(100)); // Will be clipped by card padding? No, wait.
-            // Let's manually size it
-            lv_obj_set_width(info, i==0 ? (SCREEN_WIDTH - POSTER_W - 60) : LV_PCT(100));
-            lv_obj_set_height(info, LV_PCT(100));
-            lv_obj_align(info, i==0 ? LV_ALIGN_RIGHT_MID : LV_ALIGN_CENTER, 0, 0);
-            lv_obj_set_style_bg_opa(info, 0, 0);
-            lv_obj_set_style_border_width(info, 0, 0);
-            lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-            lv_obj_set_style_pad_row(info, 5, 0); // Add spacing between items
-            
-            // Title
-            lv_obj_t * title = lv_label_create(info);
-            lv_label_set_text(title, s["title"] | "Unknown");
-            lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-            lv_label_set_long_mode(title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-            lv_obj_set_width(title, LV_PCT(100));
-            
-            // User & Media Type
-            lv_obj_t * sub = lv_label_create(info);
-            const char* user = s["username"] | "User";
-            const char* type = s["media_type"] | "media";
-            lv_label_set_text_fmt(sub, "%s • %s", user, type);
-            lv_obj_set_style_text_color(sub, lv_color_hex(0x94A3B8), 0);
-
-            // Progress Bar
-            lv_obj_t * bar = lv_bar_create(info);
-            lv_obj_set_width(bar, LV_PCT(90));
-            lv_obj_set_height(bar, 8);
-            lv_bar_set_range(bar, 0, 100);
-            lv_bar_set_value(bar, (int)s["progress_percent"], LV_ANIM_OFF);
-            
-            // Controls Container
-            lv_obj_t * ctrls = lv_obj_create(info);
-            lv_obj_set_size(ctrls, LV_PCT(100), 40);
-            lv_obj_set_style_bg_opa(ctrls, 0, 0);
-            lv_obj_set_style_border_width(ctrls, 0, 0);
-            lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
-            lv_obj_set_style_pad_all(ctrls, 0, 0);
-            // lv_obj_set_style_margin_top(ctrls, 5, 0); // Handled by pad_row
-
-            // Stop Button
-            lv_obj_t * btn_stop = lv_btn_create(ctrls);
-            lv_obj_set_size(btn_stop, 60, 30);
-            lv_obj_set_style_bg_color(btn_stop, lv_color_hex(0xEF4444), 0);
-            lv_obj_t * lbl_stop = lv_label_create(btn_stop);
-            lv_label_set_text(lbl_stop, "STOP");
-            lv_obj_center(lbl_stop);
-            
-            // Pause/Resume Button
-            lv_obj_t * btn_pause = lv_btn_create(ctrls);
-            lv_obj_set_size(btn_pause, 60, 30);
-            bool is_paused = strcmp(s["state"], "paused") == 0;
-            lv_obj_set_style_bg_color(btn_pause, is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
-            lv_obj_t * lbl_pause = lv_label_create(btn_pause);
-            lv_label_set_text(lbl_pause, is_paused ? "PLAY" : "PAUSE");
-            lv_obj_center(lbl_pause);
-
-            // IDs for callbacks
-            const char* sid_src = s["session_id"];
-            char* sid = (char*)lv_mem_alloc(strlen(sid_src) + 1);
-            strcpy(sid, sid_src);
-            
-            // Attach ID to both buttons (create copies)
-            char* sid2 = (char*)lv_mem_alloc(strlen(sid_src) + 1);
-            strcpy(sid2, sid_src);
-
-            lv_obj_set_user_data(btn_stop, sid);
-            lv_obj_set_user_data(btn_pause, sid2);
-            
-            // Cleanup callbacks
-            lv_obj_add_event_cb(btn_stop, [](lv_event_t* e){
-                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
-                if(id) lv_mem_free(id);
-            }, LV_EVENT_DELETE, NULL);
-
-            lv_obj_add_event_cb(btn_pause, [](lv_event_t* e){
-                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
-                if(id) lv_mem_free(id);
-            }, LV_EVENT_DELETE, NULL);
-
-            // Action callbacks
-            lv_obj_add_event_cb(btn_stop, [](lv_event_t* e){
-                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
-                if(id) stopSession(id);
-            }, LV_EVENT_CLICKED, NULL);
-
-            lv_obj_add_event_cb(btn_pause, [](lv_event_t* e){
-                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
-                if(id) pauseSession(id);
-            }, LV_EVENT_CLICKED, NULL);
-        }
+        downloadPoster(full_url.c_str());
+        strncpy(current_poster_url, poster_url, 255);
+        current_poster_url[255] = '\0';
+        lv_img_set_src(np_img, &img_poster_dsc);
+        lv_obj_invalidate(np_img);
     }
 }
 
@@ -728,6 +743,8 @@ void downloadPoster(const char* url) {
     
     HTTPClient http;
     http.begin(url);
+    http.setConnectTimeout(1500);
+    http.setTimeout(1500);
     int httpCode = http.GET();
     
     if (httpCode == 200) {
@@ -780,6 +797,8 @@ void stopSession(const char* session_id) {
     String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/stop";
     
     http.begin(url);
+    http.setConnectTimeout(1500);
+    http.setTimeout(1500);
     int httpCode = http.POST("");
     http.end();
 }
@@ -788,22 +807,11 @@ void pauseSession(const char* session_id) {
     if (!is_connected) return;
     
     HTTPClient http;
-    // We toggle based on current state? The UI button knows the state.
-    // Ideally we should have separate endpoints or pass action.
-    // For now, let's assume the button callback handles the specific action?
-    // Wait, the callback just calls pauseSession.
-    // We need to know if we are pausing or resuming.
-    // Let's assume this function toggles? No, backend has pause/resume.
-    // Let's make this function generic or check the button label?
-    // Hard to check button label here easily without passing the object.
-    // Let's just try "pause" endpoint first. The user asked for pause.
-    // To support Resume, we'd need to pass the action.
-    
-    // Quick fix: Check the state from the active session list?
-    // We don't have easy access to the session list here (it's in the JSON doc inside updateDashboardUI).
-    // Let's just implement PAUSE for now.
-    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/pause";
+    String action = np_is_paused ? "resume" : "pause";
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/" + action;
     http.begin(url);
+    http.setConnectTimeout(1500);
+    http.setTimeout(1500);
     http.POST("");
     http.end();
 }
