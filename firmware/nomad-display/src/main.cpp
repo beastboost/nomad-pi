@@ -36,7 +36,10 @@ char wifi_pass[64] = "";
 String server_ip = "";
 int server_port = 8000;
 bool is_connected = false;
-bool ws_started = false;
+bool ws_configured = false;
+unsigned long last_ws_begin_ms = 0;
+char ws_host[64] = "";
+int ws_port = 8000;
 bool mdns_started = false;
 
 char discovered_server_ip[64] = "";
@@ -46,6 +49,7 @@ char last_server_ip[64] = "";
 bool wifi_connecting = false;
 unsigned long wifi_connect_start_ms = 0;
 unsigned long last_http_poll_ms = 0;
+bool discovery_dirty = false;
 
 volatile bool ws_payload_ready = false;
 static char ws_payload_buf[20001];
@@ -89,6 +93,11 @@ lv_obj_t * win_wifi;
 lv_obj_t * kb;
 lv_obj_t * ta_pass;
 
+volatile bool ui_conn_dirty = false;
+char ui_conn_line1[64] = "";
+char ui_conn_line2[64] = "";
+lv_color_t ui_status_color = lv_color_hex(0xEF4444);
+
 // --- PROTOTYPES ---
 void initDisplay();
 void initLVGL();
@@ -112,6 +121,7 @@ void downloadPoster(const char* url);
 void processWsMessage();
 void pollDashboardHttp();
 bool isIpAddress(const String& s);
+void applyConnectionUi();
 
 // --- SETUP ---
 void setup() {
@@ -150,13 +160,12 @@ void setup() {
 
 // --- LOOP ---
 void loop() {
-    if (ws_started) {
-        webSocket.loop();
-    }
+    if (ws_configured) webSocket.loop();
 
     processWsMessage();
 
     lv_timer_handler();
+    applyConnectionUi();
 
     handleWifiConnection();
     
@@ -168,14 +177,10 @@ void loop() {
         pollDashboardHttp();
     }
 
-    if (!is_connected) {
-        // Retry connection logic
-        static unsigned long last_connect_attempt = 0;
-        if (millis() - last_connect_attempt > 5000) {
-            last_connect_attempt = millis();
-            if (WiFi.status() == WL_CONNECTED) {
-                tryConnectWebSocket();
-            }
+    if (WiFi.status() == WL_CONNECTED) {
+        if ((!ws_configured || discovery_dirty) && (millis() - last_ws_begin_ms > 15000)) {
+            discovery_dirty = false;
+            tryConnectWebSocket();
         }
     }
     
@@ -565,6 +570,8 @@ void handleWifiConnection() {
 
 void tryConnectWebSocket() {
     if (WiFi.status() != WL_CONNECTED) return;
+
+    if (discovery_dirty) discovery_dirty = false;
     
     // Determine Server IP
     if (strcmp(wifi_ssid, "NomadPi") == 0) {
@@ -597,42 +604,74 @@ void tryConnectWebSocket() {
     }
     
     if (server_ip.length() == 0) {
-        lv_label_set_text(label_connection_info, "Server: Waiting for discovery...");
+        strncpy(ui_conn_line1, "Server: Waiting discovery", sizeof(ui_conn_line1) - 1);
+        ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+        ui_conn_line2[0] = '\0';
+        ui_conn_dirty = true;
         return;
     }
 
-    lv_label_set_text_fmt(label_connection_info, "Connecting to %s...", server_ip.c_str());
     Serial.print("Attempt WS to ");
     Serial.print(server_ip);
     Serial.print(":");
     Serial.println(server_port);
 
-    webSocket.disconnect();
-    webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
+    if (server_ip.length() < sizeof(ws_host)) {
+        if (strcmp(ws_host, server_ip.c_str()) == 0 && ws_port == server_port && ws_configured) {
+            return;
+        }
+        strncpy(ws_host, server_ip.c_str(), sizeof(ws_host) - 1);
+        ws_host[sizeof(ws_host) - 1] = '\0';
+        ws_port = server_port;
+    } else {
+        return;
+    }
+
+    strncpy(ui_conn_line1, "Connecting...", sizeof(ui_conn_line1) - 1);
+    ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+    snprintf(ui_conn_line2, sizeof(ui_conn_line2), "%s:%d", ws_host, ws_port);
+    ui_conn_dirty = true;
+
+    last_ws_begin_ms = millis();
+    if (ws_configured) {
+        webSocket.disconnect();
+        delay(10);
+    }
+    webSocket.begin(ws_host, ws_port, "/api/dashboard/ws");
     webSocket.onEvent(webSocketEvent);
-    webSocket.setReconnectInterval(5000);
-    webSocket.enableHeartbeat(15000, 5000, 2);
-    ws_started = true;
+    webSocket.setReconnectInterval(15000);
+    ws_configured = true;
 }
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     switch(type) {
         case WStype_CONNECTED:
             Serial.println("WS: connected");
-            lv_label_set_text(label_status, "Nomad Pi: Online");
-            lv_label_set_text_fmt(label_connection_info, "Connected to %s", server_ip.c_str());
-            lv_obj_set_style_text_color(label_status, lv_color_hex(0x10B981), 0);
+            strncpy(ui_conn_line1, "Nomad Pi: Online", sizeof(ui_conn_line1) - 1);
+            ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+            snprintf(ui_conn_line2, sizeof(ui_conn_line2), "%s:%d", ws_host, ws_port);
+            ui_status_color = lv_color_hex(0x10B981);
+            ui_conn_dirty = true;
             is_connected = true;
             break;
         case WStype_DISCONNECTED:
             Serial.println("WS: disconnected");
-            lv_label_set_text(label_status, "Nomad Pi: Disconnected");
-            lv_label_set_text_fmt(label_connection_info, "WS Disconnected\nRetrying...");
-            lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
+            strncpy(ui_conn_line1, "Nomad Pi: Disconnected", sizeof(ui_conn_line1) - 1);
+            ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+            strncpy(ui_conn_line2, "Retrying...", sizeof(ui_conn_line2) - 1);
+            ui_conn_line2[sizeof(ui_conn_line2) - 1] = '\0';
+            ui_status_color = lv_color_hex(0xEF4444);
+            ui_conn_dirty = true;
             is_connected = false;
             break;
         case WStype_ERROR:
             Serial.println("WS: error");
+            strncpy(ui_conn_line1, "Nomad Pi: WS Error", sizeof(ui_conn_line1) - 1);
+            ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+            strncpy(ui_conn_line2, "Retrying...", sizeof(ui_conn_line2) - 1);
+            ui_conn_line2[sizeof(ui_conn_line2) - 1] = '\0';
+            ui_status_color = lv_color_hex(0xEF4444);
+            ui_conn_dirty = true;
             is_connected = false;
             break;
         case WStype_TEXT: {
@@ -642,6 +681,24 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             ws_payload_len = length;
             ws_payload_ready = true;
             break;
+        }
+    }
+}
+
+void applyConnectionUi() {
+    if (!ui_conn_dirty) return;
+    ui_conn_dirty = false;
+
+    if (label_status) {
+        lv_label_set_text(label_status, ui_conn_line1);
+        lv_obj_set_style_text_color(label_status, ui_status_color, 0);
+    }
+
+    if (label_connection_info) {
+        if (ui_conn_line2[0] != '\0') {
+            lv_label_set_text_fmt(label_connection_info, "%s\n%s", ui_conn_line1, ui_conn_line2);
+        } else {
+            lv_label_set_text(label_connection_info, ui_conn_line1);
         }
     }
 }
@@ -807,6 +864,7 @@ void checkUDP() {
             String ip = udp.remoteIP().toString();
             
             if (ip != "0.0.0.0") {
+                bool changed = (strncmp(discovered_server_ip, ip.c_str(), sizeof(discovered_server_ip) - 1) != 0) || (discovered_server_port != port);
                 strncpy(discovered_server_ip, ip.c_str(), sizeof(discovered_server_ip) - 1);
                 discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
                 discovered_server_port = port;
@@ -817,6 +875,7 @@ void checkUDP() {
                 Serial.print(discovered_server_ip);
                 Serial.print(":");
                 Serial.println(discovered_server_port);
+                if (changed) discovery_dirty = true;
             }
         }
     }
