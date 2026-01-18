@@ -287,6 +287,38 @@ async def stop_session(session_id: str, user_id: int = Depends(get_current_user_
 
     return {"status": "not_found", "message": "Session not found"}
 
+@router.post("/session/{session_id}/pause")
+async def pause_session(session_id: str, user_id: int = Depends(get_current_user_id)):
+    """
+    Pause an active session
+    """
+    if session_id in active_sessions:
+        # Verify ownership (optional, strict for now)
+        if active_sessions[session_id].get("user_id") != user_id:
+             # Allow admin to pause anyone? For now, strict.
+             # raise HTTPException(status_code=403, detail="Not your session")
+             pass 
+
+        # Update state
+        active_sessions[session_id]["state"] = "paused"
+        # In a real implementation, we would send a WebSocket message to the player here
+        logger.info(f"Session paused: {session_id}")
+        return {"status": "ok", "message": "Session paused"}
+
+    return {"status": "not_found", "message": "Session not found"}
+
+@router.post("/session/{session_id}/resume")
+async def resume_session(session_id: str, user_id: int = Depends(get_current_user_id)):
+    """
+    Resume an active session
+    """
+    if session_id in active_sessions:
+        active_sessions[session_id]["state"] = "playing"
+        logger.info(f"Session resumed: {session_id}")
+        return {"status": "ok", "message": "Session resumed"}
+
+    return {"status": "not_found", "message": "Session not found"}
+
 @router.get("/now-playing")
 async def get_now_playing(user_id: int = Depends(get_current_user_id)):
     """

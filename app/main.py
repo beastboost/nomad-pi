@@ -280,7 +280,14 @@ def _startup_tasks():
     scheduler.start()
     logger.info("Background scheduler started")
     
-    # 1. Staggered background tasks to prevent OOM on SBCs
+    # 1. Start Discovery Service
+    try:
+        from app.services import discovery
+        discovery.service.start()
+    except Exception as e:
+        logger.error(f"Failed to start discovery service: {e}")
+
+    # 2. Staggered background tasks to prevent OOM on SBCs
     def run_staggered():
         # Wait a bit for the main web server to settle
         time.sleep(10)

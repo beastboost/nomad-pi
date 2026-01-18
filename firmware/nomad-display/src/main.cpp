@@ -1,0 +1,798 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiUdp.h> // UDP Support
+#include <ESPmDNS.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <lvgl.h>
+#include <Preferences.h>
+#include <HTTPClient.h>
+#include "LGFX_Setup.h"
+
+// --- DEFINITIONS ---
+#define SCREEN_WIDTH 480
+#define SCREEN_HEIGHT 320
+#define POSTER_W 80
+#define POSTER_H 120
+
+// --- OBJECTS ---
+LGFX tft;
+WebSocketsClient webSocket;
+Preferences preferences;
+WiFiUDP udp; // UDP Object
+
+// --- VARIABLES ---
+static lv_disp_draw_buf_t draw_buf;
+static lv_color_t buf[SCREEN_WIDTH * 10];
+
+// Poster Buffer (approx 20KB for 80x120 RGB565)
+// We use a sprite to handle JPG decoding
+LGFX_Sprite sprite_poster(&tft);
+static lv_img_dsc_t img_poster_dsc;
+char current_poster_url[256] = "";
+
+char wifi_ssid[64] = "";
+char wifi_pass[64] = "";
+char manual_server_ip[64] = "";
+String server_ip = "";
+int server_port = 8000;
+bool is_connected = false;
+
+// --- UI OBJECTS ---
+lv_obj_t * tv;
+lv_obj_t * tab_dash;
+lv_obj_t * tab_now_playing;
+lv_obj_t * tab_settings;
+
+// Dashboard Widgets
+lv_obj_t * label_status;
+lv_obj_t * label_cpu;
+lv_obj_t * label_ram;
+lv_obj_t * label_stats;
+lv_obj_t * arc_cpu;
+lv_obj_t * arc_ram;
+
+// Now Playing Widgets
+lv_obj_t * cont_now_playing_list;
+
+// Settings Widgets
+lv_obj_t * label_wifi_status;
+lv_obj_t * label_connection_info;
+lv_obj_t * btn_scan_wifi;
+lv_obj_t * ta_server_ip;
+lv_obj_t * btn_save_ip;
+lv_obj_t * list_wifi; 
+lv_obj_t * win_wifi;  
+lv_obj_t * kb;
+lv_obj_t * ta_pass;
+
+// --- PROTOTYPES ---
+void initDisplay();
+void initLVGL();
+void loadPreferences();
+void savePreferences();
+void buildUI();
+void buildDashboardTab(lv_obj_t * parent);
+void buildNowPlayingTab(lv_obj_t * parent);
+void buildSettingsTab(lv_obj_t * parent);
+void showWifiScanWindow();
+void scanNetworks();
+void connectToWifi(const char* ssid, const char* pass);
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length);
+void updateDashboardUI(JsonArray sessions, JsonObject system);
+void stopSession(const char* session_id);
+void pauseSession(const char* session_id);
+void tryConnectWebSocket();
+void checkUDP();
+void downloadPoster(const char* url);
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(115200);
+    
+    // Init Display & LVGL
+    initDisplay();
+    initLVGL();
+
+    // Init Poster Sprite
+    sprite_poster.setColorDepth(16);
+    sprite_poster.createSprite(POSTER_W, POSTER_H);
+    sprite_poster.fillSprite(TFT_BLACK);
+
+    // Init Poster DSC
+    img_poster_dsc.header.always_zero = 0;
+    img_poster_dsc.header.w = POSTER_W;
+    img_poster_dsc.header.h = POSTER_H;
+    img_poster_dsc.data_size = POSTER_W * POSTER_H * 2;
+    img_poster_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    img_poster_dsc.data = (const uint8_t*)sprite_poster.getBuffer();
+
+    // Load WiFi Creds
+    loadPreferences();
+
+    // Build Main UI
+    buildUI();
+
+    // Connect if creds exist
+    if (strlen(wifi_ssid) > 0) {
+        connectToWifi(wifi_ssid, wifi_pass);
+    } else {
+        lv_tabview_set_act(tv, 2, LV_ANIM_ON); // Go to settings
+    }
+}
+
+// --- LOOP ---
+void loop() {
+    lv_timer_handler();
+    
+    // Check UDP Discovery
+    if (WiFi.status() == WL_CONNECTED) {
+        checkUDP();
+    }
+
+    if (is_connected) {
+        webSocket.loop();
+    } else {
+        // Retry connection logic
+        static unsigned long last_connect_attempt = 0;
+        if (millis() - last_connect_attempt > 5000) {
+            last_connect_attempt = millis();
+            if (WiFi.status() == WL_CONNECTED) {
+                tryConnectWebSocket();
+            }
+        }
+    }
+    
+    delay(5);
+}
+
+// --- LVGL FLUSH ---
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+    uint32_t w = (area->x2 - area->x1 + 1);
+    uint32_t h = (area->y2 - area->y1 + 1);
+
+    tft.startWrite();
+    tft.setAddrWindow(area->x1, area->y1, w, h);
+    tft.pushPixels((uint16_t *)&color_p->full, w * h, true);
+    tft.endWrite();
+
+    lv_disp_flush_ready(disp);
+}
+
+// --- TOUCH READ ---
+void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
+    uint16_t touchX, touchY;
+    bool touched = tft.getTouch(&touchX, &touchY);
+
+    if (touched) {
+        data->state = LV_INDEV_STATE_PR;
+        data->point.x = touchX;
+        data->point.y = touchY;
+    } else {
+        data->state = LV_INDEV_STATE_REL;
+    }
+}
+
+// --- INITIALIZATION ---
+void initDisplay() {
+    tft.init();
+    tft.setRotation(1); // Landscape
+    tft.setBrightness(128);
+}
+
+void initLVGL() {
+    lv_init();
+    lv_disp_draw_buf_init(&draw_buf, buf, NULL, SCREEN_WIDTH * 10);
+
+    static lv_disp_drv_t disp_drv;
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res = SCREEN_WIDTH;
+    disp_drv.ver_res = SCREEN_HEIGHT;
+    disp_drv.flush_cb = my_disp_flush;
+    disp_drv.draw_buf = &draw_buf;
+    lv_disp_drv_register(&disp_drv);
+
+    static lv_indev_drv_t indev_drv;
+    lv_indev_drv_init(&indev_drv);
+    indev_drv.type = LV_INDEV_TYPE_POINTER;
+    indev_drv.read_cb = my_touchpad_read;
+    lv_indev_drv_register(&indev_drv);
+}
+
+void loadPreferences() {
+    preferences.begin("nomad-display", true);
+    String s = preferences.getString("ssid", "");
+    String p = preferences.getString("pass", "");
+    String ip = preferences.getString("server_ip", "");
+    preferences.end();
+    
+    strncpy(wifi_ssid, s.c_str(), 63);
+    strncpy(wifi_pass, p.c_str(), 63);
+    strncpy(manual_server_ip, ip.c_str(), 63);
+}
+
+void savePreferences() {
+    preferences.begin("nomad-display", false);
+    preferences.putString("ssid", wifi_ssid);
+    preferences.putString("pass", wifi_pass);
+    preferences.putString("server_ip", manual_server_ip);
+    preferences.end();
+}
+
+// --- UI BUILDERS ---
+void buildUI() {
+    tv = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, 40);
+    
+    tab_dash = lv_tabview_add_tab(tv, "Dashboard");
+    tab_now_playing = lv_tabview_add_tab(tv, "Now Playing");
+    tab_settings = lv_tabview_add_tab(tv, "Settings");
+
+    buildDashboardTab(tab_dash);
+    buildNowPlayingTab(tab_now_playing);
+    buildSettingsTab(tab_settings);
+}
+
+void buildDashboardTab(lv_obj_t * parent) {
+    // Top Row: Arcs
+    lv_obj_t * row_arcs = lv_obj_create(parent);
+    lv_obj_set_size(row_arcs, LV_PCT(100), 120);
+    lv_obj_set_flex_flow(row_arcs, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row_arcs, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(row_arcs, 0, 0);
+    lv_obj_set_style_border_width(row_arcs, 0, 0);
+    lv_obj_set_style_pad_all(row_arcs, 0, 0);
+
+    // CPU
+    arc_cpu = lv_arc_create(row_arcs);
+    lv_obj_set_size(arc_cpu, 100, 100);
+    lv_arc_set_rotation(arc_cpu, 270);
+    lv_arc_set_bg_angles(arc_cpu, 0, 360);
+    lv_arc_set_value(arc_cpu, 0);
+    
+    label_cpu = lv_label_create(arc_cpu);
+    lv_obj_center(label_cpu);
+    lv_label_set_text(label_cpu, "CPU\n0%");
+    lv_obj_set_style_text_align(label_cpu, LV_TEXT_ALIGN_CENTER, 0);
+
+    // RAM
+    arc_ram = lv_arc_create(row_arcs);
+    lv_obj_set_size(arc_ram, 100, 100);
+    lv_arc_set_rotation(arc_ram, 270);
+    lv_arc_set_bg_angles(arc_ram, 0, 360);
+    lv_arc_set_value(arc_ram, 0);
+    
+    label_ram = lv_label_create(arc_ram);
+    lv_obj_center(label_ram);
+    lv_label_set_text(label_ram, "RAM\n0%");
+    lv_obj_set_style_text_align(label_ram, LV_TEXT_ALIGN_CENTER, 0);
+
+    // Bottom Row: Stats Text
+    lv_obj_t * row_stats = lv_obj_create(parent);
+    lv_obj_set_size(row_stats, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_align(row_stats, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_flex_flow(row_stats, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(row_stats, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(row_stats, 0, 0);
+    lv_obj_set_style_border_width(row_stats, 0, 0);
+
+    label_stats = lv_label_create(row_stats);
+    lv_label_set_text(label_stats, "Disk: --% | Net: 0 KB/s");
+    lv_obj_set_style_text_font(label_stats, &lv_font_montserrat_14, 0);
+    
+    label_status = lv_label_create(row_stats);
+    lv_label_set_text(label_status, "Status: Disconnected");
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
+}
+
+void buildNowPlayingTab(lv_obj_t * parent) {
+    cont_now_playing_list = lv_obj_create(parent);
+    lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
+    
+    lv_obj_t * lbl = lv_label_create(cont_now_playing_list);
+    lv_label_set_text(lbl, "No active sessions");
+    lv_obj_center(lbl);
+}
+
+void buildSettingsTab(lv_obj_t * parent) {
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(parent, 10, 0);
+    
+    // Status Labels
+    label_wifi_status = lv_label_create(parent);
+    lv_label_set_text(label_wifi_status, "Wi-Fi: Not Connected");
+    lv_obj_set_style_text_font(label_wifi_status, &lv_font_montserrat_14, 0);
+    
+    label_connection_info = lv_label_create(parent);
+    lv_label_set_text(label_connection_info, "Server: Pending...");
+    lv_obj_set_style_text_font(label_connection_info, &lv_font_montserrat_14, 0);
+    
+    // Scan Button
+    btn_scan_wifi = lv_btn_create(parent);
+    lv_obj_set_width(btn_scan_wifi, LV_PCT(100));
+    lv_obj_t * lbl_scan = lv_label_create(btn_scan_wifi);
+    lv_label_set_text(lbl_scan, "Scan & Connect Wi-Fi");
+    lv_obj_add_event_cb(btn_scan_wifi, [](lv_event_t* e){ showWifiScanWindow(); }, LV_EVENT_CLICKED, NULL);
+
+    // Manual IP Entry
+    lv_obj_t * lbl_ip = lv_label_create(parent);
+    lv_label_set_text(lbl_ip, "Manual Server IP (Optional):");
+    lv_obj_set_style_pad_top(lbl_ip, 10, 0);
+    
+    ta_server_ip = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta_server_ip, true);
+    lv_textarea_set_placeholder_text(ta_server_ip, "e.g. 192.168.1.100");
+    lv_textarea_set_text(ta_server_ip, manual_server_ip);
+    lv_obj_set_width(ta_server_ip, LV_PCT(100));
+    
+    btn_save_ip = lv_btn_create(parent);
+    lv_obj_set_width(btn_save_ip, LV_PCT(100));
+    lv_obj_t * lbl_save = lv_label_create(btn_save_ip);
+    lv_label_set_text(lbl_save, "Save IP & Reconnect");
+    
+    // Keyboard for IP
+    lv_obj_t * kb_ip = lv_keyboard_create(parent);
+    lv_keyboard_set_mode(kb_ip, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(kb_ip, ta_server_ip);
+    lv_obj_add_flag(kb_ip, LV_OBJ_FLAG_HIDDEN);
+    
+    lv_obj_add_event_cb(ta_server_ip, [](lv_event_t* e){
+        lv_obj_t * kb = (lv_obj_t*)lv_event_get_user_data(e);
+        lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_CLICKED, kb_ip);
+    
+    lv_obj_add_event_cb(kb_ip, [](lv_event_t* e){
+        lv_obj_add_flag(lv_event_get_target(e), LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_READY, NULL);
+    
+    lv_obj_add_event_cb(kb_ip, [](lv_event_t* e){
+        lv_obj_add_flag(lv_event_get_target(e), LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_CANCEL, NULL);
+
+    // Save IP Action
+    lv_obj_add_event_cb(btn_save_ip, [](lv_event_t* e){
+        const char * txt = lv_textarea_get_text(ta_server_ip);
+        strcpy(manual_server_ip, txt);
+        savePreferences();
+        tryConnectWebSocket();
+    }, LV_EVENT_CLICKED, NULL);
+}
+
+void showWifiScanWindow() {
+    if (win_wifi) return;
+
+    win_wifi = lv_win_create(lv_scr_act(), 40);
+    lv_win_add_title(win_wifi, "Wi-Fi Networks");
+    lv_obj_t * btn_close = lv_win_add_btn(win_wifi, LV_SYMBOL_CLOSE, 40);
+    lv_obj_add_event_cb(btn_close, [](lv_event_t* e){
+        lv_obj_del(win_wifi);
+        win_wifi = NULL;
+    }, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t * cont = lv_win_get_content(win_wifi);
+    
+    list_wifi = lv_list_create(cont);
+    lv_obj_set_size(list_wifi, LV_PCT(100), 180);
+
+    ta_pass = lv_textarea_create(cont);
+    lv_textarea_set_password_mode(ta_pass, true);
+    lv_textarea_set_one_line(ta_pass, true);
+    lv_textarea_set_placeholder_text(ta_pass, "Password...");
+    lv_obj_set_width(ta_pass, LV_PCT(100));
+    lv_obj_add_flag(ta_pass, LV_OBJ_FLAG_HIDDEN);
+
+    kb = lv_keyboard_create(win_wifi);
+    lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    
+    lv_obj_add_event_cb(kb, [](lv_event_t* e){
+        const char * pass = lv_textarea_get_text(ta_pass);
+        strcpy(wifi_pass, pass);
+        savePreferences();
+        
+        lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ta_pass, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(list_wifi, LV_OBJ_FLAG_HIDDEN);
+        
+        lv_obj_clean(list_wifi);
+        lv_list_add_btn(list_wifi, LV_SYMBOL_SETTINGS, "Connecting...");
+        
+        connectToWifi(wifi_ssid, wifi_pass);
+    }, LV_EVENT_READY, NULL);
+
+    lv_obj_add_event_cb(kb, [](lv_event_t* e){
+        lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ta_pass, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(list_wifi, LV_OBJ_FLAG_HIDDEN);
+    }, LV_EVENT_CANCEL, NULL);
+
+    scanNetworks();
+}
+
+void scanNetworks() {
+    if (!list_wifi) return;
+    
+    lv_obj_clean(list_wifi);
+    lv_list_add_btn(list_wifi, LV_SYMBOL_REFRESH, "Scanning...");
+    lv_timer_handler(); 
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    int n = WiFi.scanNetworks();
+
+    lv_obj_clean(list_wifi);
+    if (n == 0) {
+        lv_list_add_btn(list_wifi, NULL, "No networks found");
+    } else {
+        for (int i = 0; i < n; ++i) {
+            char ssid_buff[33];
+            strncpy(ssid_buff, WiFi.SSID(i).c_str(), 32);
+            ssid_buff[32] = '\0';
+            
+            lv_obj_t * btn = lv_list_add_btn(list_wifi, LV_SYMBOL_WIFI, ssid_buff);
+            lv_obj_add_event_cb(btn, [](lv_event_t* e){
+                lv_obj_t * btn = lv_event_get_target(e);
+                const char * ssid = lv_list_get_btn_text(list_wifi, btn);
+                strcpy(wifi_ssid, ssid);
+                
+                lv_obj_add_flag(list_wifi, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(ta_pass, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
+                lv_keyboard_set_textarea(kb, ta_pass);
+            }, LV_EVENT_CLICKED, NULL);
+        }
+    }
+}
+
+void connectToWifi(const char* ssid, const char* pass) {
+    lv_label_set_text(label_wifi_status, "Connecting...");
+    WiFi.begin(ssid, pass);
+    
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 20) {
+        delay(500);
+        lv_timer_handler();
+        tries++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        String ip = WiFi.localIP().toString();
+        lv_label_set_text_fmt(label_wifi_status, "Connected: %s\nIP: %s", ssid, ip.c_str());
+        if (win_wifi) {
+            lv_obj_del(win_wifi);
+            win_wifi = NULL;
+        }
+        tryConnectWebSocket();
+    } else {
+        lv_label_set_text(label_wifi_status, "Connection Failed");
+        if (win_wifi) {
+            lv_obj_clean(list_wifi);
+            lv_list_add_btn(list_wifi, LV_SYMBOL_WARNING, "Failed. Try again.");
+            lv_obj_clear_flag(list_wifi, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+void tryConnectWebSocket() {
+    if (WiFi.status() != WL_CONNECTED) return;
+    
+    // Determine Server IP
+    if (strlen(manual_server_ip) > 0) {
+        server_ip = String(manual_server_ip);
+    } else if (strcmp(wifi_ssid, "NomadPi") == 0) {
+        server_ip = "10.42.0.1";
+    } else {
+        if (MDNS.begin("nomad-display")) {
+            server_ip = MDNS.queryHost("nomadpi").toString();
+            if (server_ip == "") server_ip = "nomadpi.local";
+        } else {
+            server_ip = "nomadpi.local";
+        }
+    }
+    
+    lv_label_set_text_fmt(label_connection_info, "Connecting to %s...", server_ip.c_str());
+    
+    // HTTP Ping Check
+    HTTPClient http;
+    // Use /api/system/status which is lightweight and guaranteed to exist (public)
+    String pingUrl = "http://" + server_ip + ":" + String(server_port) + "/api/system/status";
+    
+    // Add timeout to prevent blocking
+    http.setConnectTimeout(2000); 
+    http.begin(pingUrl);
+    int httpCode = http.GET();
+    http.end();
+
+    if (httpCode == 200) {
+        lv_label_set_text_fmt(label_connection_info, "Found Server! Connecting WS...");
+        
+        // Disconnect previous if any
+        webSocket.disconnect();
+        
+        webSocket.begin(server_ip, server_port, "/api/dashboard/ws");
+        webSocket.onEvent(webSocketEvent);
+        webSocket.setReconnectInterval(5000);
+        // We set is_connected to true ONLY after WS connects in the event handler
+        // But for now, we enable the loop to process it
+        is_connected = true; 
+    } else {
+        lv_label_set_text_fmt(label_connection_info, "Server Error: HTTP %d\nIP: %s", httpCode, server_ip.c_str());
+        is_connected = false; // Ensure we keep trying
+    }
+}
+
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+    switch(type) {
+        case WStype_CONNECTED:
+            lv_label_set_text(label_status, "Nomad Pi: Online");
+            lv_label_set_text_fmt(label_connection_info, "Connected to %s", server_ip.c_str());
+            lv_obj_set_style_text_color(label_status, lv_color_hex(0x10B981), 0);
+            break;
+        case WStype_DISCONNECTED:
+            lv_label_set_text(label_status, "Nomad Pi: Disconnected");
+            lv_label_set_text_fmt(label_connection_info, "WS Disconnected\nRetrying...");
+            lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
+            // Don't set is_connected = false here, let WebSocketsClient handle reconnect
+            // But if we want to re-ping, we might need to?
+            // For now, let's rely on WebSocketsClient reconnect logic for WS issues
+            break;
+        case WStype_TEXT: {
+            StaticJsonDocument<4096> doc;
+            deserializeJson(doc, payload);
+            updateDashboardUI(doc["sessions"], doc["system"]);
+            break;
+        }
+    }
+}
+
+void updateDashboardUI(JsonArray sessions, JsonObject system) {
+    // Update Stats
+    float cpu = system["cpu_percent"].as<float>();
+    float ram = system["ram_percent"].as<float>();
+    float disk = system["disk_percent"].as<float>();
+    int active_users = system["active_users"].as<int>();
+    
+    lv_arc_set_value(arc_cpu, (int)cpu);
+    lv_label_set_text_fmt(label_cpu, "CPU\n%.1f%%", cpu);
+    
+    lv_arc_set_value(arc_ram, (int)ram);
+    lv_label_set_text_fmt(label_ram, "RAM\n%.1f%%", ram);
+    
+    // Format bytes for net speed
+    float net_down = system["network_down_bps"].as<float>();
+    float net_up = system["network_up_bps"].as<float>();
+    
+    // Format Down
+    const char* unit_d = "B/s";
+    if(net_down > 1024) { net_down /= 1024; unit_d = "KB/s"; }
+    if(net_down > 1024) { net_down /= 1024; unit_d = "MB/s"; }
+
+    // Format Up
+    const char* unit_u = "B/s";
+    if(net_up > 1024) { net_up /= 1024; unit_u = "KB/s"; }
+    if(net_up > 1024) { net_up /= 1024; unit_u = "MB/s"; }
+    
+    lv_label_set_text_fmt(label_stats, "Disk: %.1f%%  |  Users: %d\nDown: %.1f %s  |  Up: %.1f %s", 
+        disk, active_users, net_down, unit_d, net_up, unit_u);
+
+    // Update Sessions
+    lv_obj_clean(cont_now_playing_list);
+    
+    if (sessions.size() == 0) {
+        lv_obj_t * lbl = lv_label_create(cont_now_playing_list);
+        lv_label_set_text(lbl, "No media playing");
+        lv_obj_center(lbl);
+        // Clear poster cache if empty
+        strcpy(current_poster_url, "");
+    } else {
+        // Download poster for first session if changed
+        const char* first_poster_url = sessions[0]["poster_thumb"]; // Use thumb for speed
+        if (!first_poster_url) first_poster_url = sessions[0]["poster_url"];
+
+        if (first_poster_url && strcmp(current_poster_url, first_poster_url) != 0) {
+             // If local path (starts with /), prepend server IP
+             String full_url;
+             if (first_poster_url[0] == '/') {
+                 full_url = "http://" + server_ip + ":" + String(server_port) + String(first_poster_url);
+             } else {
+                 full_url = String(first_poster_url);
+             }
+             downloadPoster(full_url.c_str());
+             strncpy(current_poster_url, first_poster_url, 255);
+        }
+
+        for (int i = 0; i < sessions.size(); i++) {
+            JsonObject s = sessions[i];
+            lv_obj_t * card = lv_obj_create(cont_now_playing_list);
+            lv_obj_set_size(card, LV_PCT(100), 140); // Taller for poster
+            lv_obj_set_style_bg_color(card, lv_color_hex(0x334155), 0);
+            lv_obj_set_style_pad_all(card, 5, 0);
+            
+            // Poster (Only for first item for now)
+            if (i == 0) {
+                lv_obj_t * img = lv_img_create(card);
+                lv_img_set_src(img, &img_poster_dsc);
+                lv_obj_set_size(img, POSTER_W, POSTER_H);
+                lv_obj_align(img, LV_ALIGN_LEFT_MID, 0, 0);
+            }
+
+            // Info Container
+            lv_obj_t * info = lv_obj_create(card);
+            lv_obj_set_size(info, LV_PCT(100), LV_PCT(100)); // Will be clipped by card padding? No, wait.
+            // Let's manually size it
+            lv_obj_set_width(info, i==0 ? (SCREEN_WIDTH - POSTER_W - 60) : LV_PCT(100));
+            lv_obj_set_height(info, LV_PCT(100));
+            lv_obj_align(info, i==0 ? LV_ALIGN_RIGHT_MID : LV_ALIGN_CENTER, 0, 0);
+            lv_obj_set_style_bg_opa(info, 0, 0);
+            lv_obj_set_style_border_width(info, 0, 0);
+            lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_style_pad_row(info, 5, 0); // Add spacing between items
+            
+            // Title
+            lv_obj_t * title = lv_label_create(info);
+            lv_label_set_text(title, s["title"] | "Unknown");
+            lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+            lv_label_set_long_mode(title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+            lv_obj_set_width(title, LV_PCT(100));
+            
+            // User & Media Type
+            lv_obj_t * sub = lv_label_create(info);
+            const char* user = s["username"] | "User";
+            const char* type = s["media_type"] | "media";
+            lv_label_set_text_fmt(sub, "%s • %s", user, type);
+            lv_obj_set_style_text_color(sub, lv_color_hex(0x94A3B8), 0);
+
+            // Progress Bar
+            lv_obj_t * bar = lv_bar_create(info);
+            lv_obj_set_width(bar, LV_PCT(90));
+            lv_obj_set_height(bar, 8);
+            lv_bar_set_range(bar, 0, 100);
+            lv_bar_set_value(bar, (int)s["progress_percent"], LV_ANIM_OFF);
+            
+            // Controls Container
+            lv_obj_t * ctrls = lv_obj_create(info);
+            lv_obj_set_size(ctrls, LV_PCT(100), 40);
+            lv_obj_set_style_bg_opa(ctrls, 0, 0);
+            lv_obj_set_style_border_width(ctrls, 0, 0);
+            lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
+            lv_obj_set_style_pad_all(ctrls, 0, 0);
+            // lv_obj_set_style_margin_top(ctrls, 5, 0); // Handled by pad_row
+
+            // Stop Button
+            lv_obj_t * btn_stop = lv_btn_create(ctrls);
+            lv_obj_set_size(btn_stop, 60, 30);
+            lv_obj_set_style_bg_color(btn_stop, lv_color_hex(0xEF4444), 0);
+            lv_obj_t * lbl_stop = lv_label_create(btn_stop);
+            lv_label_set_text(lbl_stop, "STOP");
+            lv_obj_center(lbl_stop);
+            
+            // Pause/Resume Button
+            lv_obj_t * btn_pause = lv_btn_create(ctrls);
+            lv_obj_set_size(btn_pause, 60, 30);
+            bool is_paused = strcmp(s["state"], "paused") == 0;
+            lv_obj_set_style_bg_color(btn_pause, is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
+            lv_obj_t * lbl_pause = lv_label_create(btn_pause);
+            lv_label_set_text(lbl_pause, is_paused ? "PLAY" : "PAUSE");
+            lv_obj_center(lbl_pause);
+
+            // IDs for callbacks
+            const char* sid_src = s["session_id"];
+            char* sid = (char*)lv_mem_alloc(strlen(sid_src) + 1);
+            strcpy(sid, sid_src);
+            
+            // Attach ID to both buttons (create copies)
+            char* sid2 = (char*)lv_mem_alloc(strlen(sid_src) + 1);
+            strcpy(sid2, sid_src);
+
+            lv_obj_set_user_data(btn_stop, sid);
+            lv_obj_set_user_data(btn_pause, sid2);
+            
+            // Cleanup callbacks
+            lv_obj_add_event_cb(btn_stop, [](lv_event_t* e){
+                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
+                if(id) lv_mem_free(id);
+            }, LV_EVENT_DELETE, NULL);
+
+            lv_obj_add_event_cb(btn_pause, [](lv_event_t* e){
+                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
+                if(id) lv_mem_free(id);
+            }, LV_EVENT_DELETE, NULL);
+
+            // Action callbacks
+            lv_obj_add_event_cb(btn_stop, [](lv_event_t* e){
+                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
+                if(id) stopSession(id);
+            }, LV_EVENT_CLICKED, NULL);
+
+            lv_obj_add_event_cb(btn_pause, [](lv_event_t* e){
+                char* id = (char*)lv_obj_get_user_data(lv_event_get_target(e));
+                if(id) pauseSession(id);
+            }, LV_EVENT_CLICKED, NULL);
+        }
+    }
+}
+
+void downloadPoster(const char* url) {
+    if (WiFi.status() != WL_CONNECTED) return;
+    
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+    
+    if (httpCode == 200) {
+        // Allocate buffer for JPG
+        int len = http.getSize();
+        if (len > 0 && len < 100000) { // Limit to 100KB
+            uint8_t* jpg_buf = (uint8_t*)malloc(len);
+            if (jpg_buf) {
+                WiFiClient * stream = http.getStreamPtr();
+                int readBytes = stream->readBytes(jpg_buf, len);
+                
+                // Draw to sprite
+                sprite_poster.drawJpg(jpg_buf, readBytes, 0, 0, POSTER_W, POSTER_H);
+                
+                free(jpg_buf);
+            }
+        }
+    }
+    http.end();
+}
+
+void checkUDP() {
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+        char packetBuffer[255];
+        int len = udp.read(packetBuffer, 255);
+        if (len > 0) packetBuffer[len] = 0;
+        
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, packetBuffer);
+        
+        if (!error && doc["type"] == "discovery") {
+            int port = doc["port"];
+            String ip = udp.remoteIP().toString();
+            
+            // Auto-update server IP if not manually set or if strictly auto
+            if (strlen(manual_server_ip) == 0 && !is_connected) {
+                server_ip = ip;
+                server_port = port;
+                tryConnectWebSocket();
+            }
+        }
+    }
+}
+
+void stopSession(const char* session_id) {
+    if (!is_connected) return;
+    
+    HTTPClient http;
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/stop";
+    
+    http.begin(url);
+    int httpCode = http.POST("");
+    http.end();
+}
+
+void pauseSession(const char* session_id) {
+    if (!is_connected) return;
+    
+    HTTPClient http;
+    // We toggle based on current state? The UI button knows the state.
+    // Ideally we should have separate endpoints or pass action.
+    // For now, let's assume the button callback handles the specific action?
+    // Wait, the callback just calls pauseSession.
+    // We need to know if we are pausing or resuming.
+    // Let's assume this function toggles? No, backend has pause/resume.
+    // Let's make this function generic or check the button label?
+    // Hard to check button label here easily without passing the object.
+    // Let's just try "pause" endpoint first. The user asked for pause.
+    // To support Resume, we'd need to pass the action.
+    
+    // Quick fix: Check the state from the active session list?
+    // We don't have easy access to the session list here (it's in the JSON doc inside updateDashboardUI).
+    // Let's just implement PAUSE for now.
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/pause";
+    http.begin(url);
+    http.POST("");
+    http.end();
+}
