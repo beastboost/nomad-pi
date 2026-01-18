@@ -38,6 +38,10 @@ String server_ip = "";
 int server_port = 8000;
 bool is_connected = false;
 bool ws_started = false;
+bool mdns_started = false;
+
+char discovered_server_ip[64] = "";
+int discovered_server_port = 8000;
 
 volatile bool ws_payload_ready = false;
 char* ws_payload_buf = nullptr;
@@ -574,10 +578,22 @@ void tryConnectWebSocket() {
         server_ip = String(manual_server_ip);
     } else if (strcmp(wifi_ssid, "NomadPi") == 0) {
         server_ip = "10.42.0.1";
+    } else if (strlen(discovered_server_ip) > 0) {
+        server_ip = String(discovered_server_ip);
+        server_port = discovered_server_port;
     } else {
-        if (MDNS.begin("nomad-display")) {
-            server_ip = MDNS.queryHost("nomadpi").toString();
-            if (server_ip == "") server_ip = "nomadpi.local";
+        if (!mdns_started) {
+            mdns_started = MDNS.begin("nomad-display");
+        }
+
+        if (mdns_started) {
+            IPAddress hostIp = MDNS.queryHost("nomadpi");
+            String resolved = hostIp.toString();
+            if (resolved == "0.0.0.0") {
+                server_ip = "nomadpi.local";
+            } else {
+                server_ip = resolved;
+            }
         } else {
             server_ip = "nomadpi.local";
         }
@@ -608,7 +624,7 @@ void tryConnectWebSocket() {
         webSocket.enableHeartbeat(15000, 5000, 2);
         ws_started = true;
     } else {
-        lv_label_set_text_fmt(label_connection_info, "Server Error: HTTP %d\nIP: %s", httpCode, server_ip.c_str());
+        lv_label_set_text_fmt(label_connection_info, "HTTP Error: %d\nServer: %s", httpCode, server_ip.c_str());
         is_connected = false; // Ensure we keep trying
     }
 }
@@ -694,6 +710,7 @@ void pollDashboardHttp() {
         return;
     }
 
+    lv_label_set_text_fmt(label_connection_info, "HTTP Poll Error: %d\nServer: %s", code, server_ip.c_str());
     http.end();
 }
 
@@ -813,11 +830,10 @@ void checkUDP() {
             int port = doc["port"];
             String ip = udp.remoteIP().toString();
             
-            // Auto-update server IP if not manually set or if strictly auto
-            if (strlen(manual_server_ip) == 0 && !is_connected) {
-                server_ip = ip;
-                server_port = port;
-                tryConnectWebSocket();
+            if (ip != "0.0.0.0") {
+                strncpy(discovered_server_ip, ip.c_str(), sizeof(discovered_server_ip) - 1);
+                discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
+                discovered_server_port = port;
             }
         }
     }
