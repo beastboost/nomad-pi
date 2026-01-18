@@ -66,6 +66,11 @@ lv_obj_t * tab_dash;
 lv_obj_t * tab_settings;
 
 // Dashboard Widgets
+lv_obj_t * panel_idle;
+lv_obj_t * panel_playing;
+lv_obj_t * label_clock_huge;
+lv_obj_t * label_date;
+lv_obj_t * label_status_pill;
 lv_obj_t * label_status;
 lv_obj_t * label_dash_server;
 lv_obj_t * label_dash_uptime;
