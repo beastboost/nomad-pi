@@ -63,7 +63,6 @@ unsigned long last_poster_fetch_ms = 0;
 // --- UI OBJECTS ---
 lv_obj_t * tv;
 lv_obj_t * tab_dash;
-lv_obj_t * tab_now_playing;
 lv_obj_t * tab_settings;
 
 // Dashboard Widgets
