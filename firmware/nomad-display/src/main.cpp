@@ -755,27 +755,52 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     int active_users = system["active_users"].as<int>();
     
     lv_arc_set_value(arc_cpu, (int)cpu);
-    lv_label_set_text_fmt(label_cpu, "CPU\n%.1f%%", cpu);
+    int cpu10 = (int)(cpu * 10.0f + 0.5f);
+    lv_label_set_text_fmt(label_cpu, "CPU\n%d.%d%%", cpu10 / 10, cpu10 % 10);
     
     lv_arc_set_value(arc_ram, (int)ram);
-    lv_label_set_text_fmt(label_ram, "RAM\n%.1f%%", ram);
+    int ram10 = (int)(ram * 10.0f + 0.5f);
+    lv_label_set_text_fmt(label_ram, "RAM\n%d.%d%%", ram10 / 10, ram10 % 10);
     
     // Format bytes for net speed
-    float net_down = system["network_down_bps"].as<float>();
-    float net_up = system["network_up_bps"].as<float>();
-    
-    // Format Down
-    const char* unit_d = "B/s";
-    if(net_down > 1024) { net_down /= 1024; unit_d = "KB/s"; }
-    if(net_down > 1024) { net_down /= 1024; unit_d = "MB/s"; }
+    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
+    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
 
-    // Format Up
+    int down10 = 0;
+    const char* unit_d = "B/s";
+    if (net_down_bps < 1024) {
+        down10 = (int)net_down_bps * 10;
+        unit_d = "B/s";
+    } else if (net_down_bps < (1024UL * 1024UL)) {
+        down10 = (int)((net_down_bps * 10UL) / 1024UL);
+        unit_d = "KB/s";
+    } else {
+        down10 = (int)((net_down_bps * 10UL) / (1024UL * 1024UL));
+        unit_d = "MB/s";
+    }
+
+    int up10 = 0;
     const char* unit_u = "B/s";
-    if(net_up > 1024) { net_up /= 1024; unit_u = "KB/s"; }
-    if(net_up > 1024) { net_up /= 1024; unit_u = "MB/s"; }
-    
-    lv_label_set_text_fmt(label_stats, "Disk: %.1f%%  |  Users: %d\nDown: %.1f %s  |  Up: %.1f %s", 
-        disk, active_users, net_down, unit_d, net_up, unit_u);
+    if (net_up_bps < 1024) {
+        up10 = (int)net_up_bps * 10;
+        unit_u = "B/s";
+    } else if (net_up_bps < (1024UL * 1024UL)) {
+        up10 = (int)((net_up_bps * 10UL) / 1024UL);
+        unit_u = "KB/s";
+    } else {
+        up10 = (int)((net_up_bps * 10UL) / (1024UL * 1024UL));
+        unit_u = "MB/s";
+    }
+
+    int disk10 = (int)(disk * 10.0f + 0.5f);
+    lv_label_set_text_fmt(
+        label_stats,
+        "Disk: %d.%d%%  |  Users: %d\nDown: %d.%d %s  |  Up: %d.%d %s",
+        disk10 / 10, disk10 % 10,
+        active_users,
+        down10 / 10, down10 % 10, unit_d,
+        up10 / 10, up10 % 10, unit_u
+    );
 
     if (sessions.size() == 0) {
         lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
