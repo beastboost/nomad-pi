@@ -448,7 +448,7 @@ void buildDashboardTab(lv_obj_t * parent) {
     lv_obj_t * ctrls = lv_obj_create(info);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
-    lv_obj_set_pad_all(ctrls, 0, 0);
+    lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(ctrls, 15, 0);
     lv_obj_set_size(ctrls, LV_PCT(100), 50);
