@@ -509,9 +509,12 @@ void tryConnectWebSocket() {
         // Disconnect previous if any
         webSocket.disconnect();
         
-        webSocket.begin(server_ip, server_port, "/api/dashboard/ws");
+        // Use c_str() to ensure correct type
+        webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
         webSocket.onEvent(webSocketEvent);
         webSocket.setReconnectInterval(5000);
+        webSocket.enableHeartbeat(2000, 3000, 2); // Ping every 2s, fail after 3s, 2 retries
+        
         // We set is_connected to true ONLY after WS connects in the event handler
         // But for now, we enable the loop to process it
         is_connected = true; 
@@ -537,9 +540,17 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             // For now, let's rely on WebSocketsClient reconnect logic for WS issues
             break;
         case WStype_TEXT: {
-            StaticJsonDocument<4096> doc;
-            deserializeJson(doc, payload);
-            updateDashboardUI(doc["sessions"], doc["system"]);
+            // Use DynamicJsonDocument on heap to prevent stack overflow
+            // 4KB might be too large for stack
+            DynamicJsonDocument doc(4096);
+            DeserializationError error = deserializeJson(doc, payload);
+            
+            if (!error) {
+                updateDashboardUI(doc["sessions"], doc["system"]);
+            } else {
+                Serial.print("JSON Error: ");
+                Serial.println(error.c_str());
+            }
             break;
         }
     }
