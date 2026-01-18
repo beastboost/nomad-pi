@@ -44,6 +44,7 @@ int discovered_server_port = 8000;
 
 bool wifi_connecting = false;
 unsigned long wifi_connect_start_ms = 0;
+unsigned long last_http_poll_ms = 0;
 
 volatile bool ws_payload_ready = false;
 char* ws_payload_buf = nullptr;
@@ -159,6 +160,10 @@ void loop() {
     
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
+    }
+
+    if (WiFi.status() == WL_CONNECTED && !is_connected) {
+        pollDashboardHttp();
     }
 
     if (!is_connected) {
@@ -508,6 +513,8 @@ void handleWifiConnection() {
         wifi_connecting = false;
         WiFi.setSleep(false);
         String ip = WiFi.localIP().toString();
+        Serial.print("WiFi connected. IP=");
+        Serial.println(ip);
         lv_label_set_text_fmt(label_wifi_status, "Connected: %s\nIP: %s", wifi_ssid, ip.c_str());
         udp.begin(8001);
         if (win_wifi) {
@@ -557,6 +564,10 @@ void tryConnectWebSocket() {
     }
     
     lv_label_set_text_fmt(label_connection_info, "Connecting to %s...", server_ip.c_str());
+    Serial.print("Attempt WS to ");
+    Serial.print(server_ip);
+    Serial.print(":");
+    Serial.println(server_port);
 
     webSocket.disconnect();
     webSocket.begin(server_ip.c_str(), server_port, "/api/dashboard/ws");
@@ -580,6 +591,10 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             lv_label_set_text(label_status, "Nomad Pi: Disconnected");
             lv_label_set_text_fmt(label_connection_info, "WS Disconnected\nRetrying...");
             lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
+            is_connected = false;
+            break;
+        case WStype_ERROR:
+            Serial.println("WS: error");
             is_connected = false;
             break;
         case WStype_TEXT: {
@@ -623,15 +638,14 @@ void processWsMessage() {
 }
 
 void pollDashboardHttp() {
-    static unsigned long last_http_poll_ms = 0;
-    if (millis() - last_http_poll_ms < 2000) return;
+    if (millis() - last_http_poll_ms < 10000) return;
     last_http_poll_ms = millis();
 
     HTTPClient http;
     String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/public";
     http.begin(url);
-    http.setConnectTimeout(1500);
-    http.setTimeout(1500);
+    http.setConnectTimeout(800);
+    http.setTimeout(800);
     int code = http.GET();
 
     if (code == 200) {
@@ -771,6 +785,10 @@ void checkUDP() {
                 strncpy(discovered_server_ip, ip.c_str(), sizeof(discovered_server_ip) - 1);
                 discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
                 discovered_server_port = port;
+                Serial.print("UDP discovery from ");
+                Serial.print(discovered_server_ip);
+                Serial.print(":");
+                Serial.println(discovered_server_port);
             }
         }
     }
