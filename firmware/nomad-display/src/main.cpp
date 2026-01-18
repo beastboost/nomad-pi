@@ -50,6 +50,8 @@ bool wifi_connecting = false;
 unsigned long wifi_connect_start_ms = 0;
 unsigned long last_http_poll_ms = 0;
 bool discovery_dirty = false;
+unsigned long last_http_success_ms = 0;
+bool theme_dark = true;
 
 volatile bool ws_payload_ready = false;
 static char ws_payload_buf[20001];
@@ -88,6 +90,7 @@ bool np_is_paused = false;
 lv_obj_t * label_wifi_status;
 lv_obj_t * label_connection_info;
 lv_obj_t * btn_scan_wifi;
+lv_obj_t * btn_theme;
 lv_obj_t * list_wifi; 
 lv_obj_t * win_wifi;  
 lv_obj_t * kb;
@@ -122,6 +125,7 @@ void processWsMessage();
 void pollDashboardHttp();
 bool isIpAddress(const String& s);
 void applyConnectionUi();
+void applyTheme();
 
 // --- SETUP ---
 void setup() {
@@ -245,6 +249,7 @@ void loadPreferences() {
     String s = preferences.getString("ssid", "");
     String p = preferences.getString("pass", "");
     String lastIp = preferences.getString("last_server_ip", "");
+    theme_dark = preferences.getBool("theme_dark", true);
     preferences.end();
     
     strncpy(wifi_ssid, s.c_str(), 63);
@@ -262,6 +267,7 @@ void savePreferences() {
     preferences.begin("nomad-display", false);
     preferences.putString("ssid", wifi_ssid);
     preferences.putString("pass", wifi_pass);
+    preferences.putBool("theme_dark", theme_dark);
     preferences.end();
 }
 
@@ -282,6 +288,27 @@ bool isIpAddress(const String& s) {
     return true;
 }
 
+void applyTheme() {
+    lv_color_t bg = theme_dark ? lv_color_hex(0x0B1220) : lv_color_hex(0xF5F7FB);
+    lv_color_t text = theme_dark ? lv_color_hex(0xE5E7EB) : lv_color_hex(0x0F172A);
+    lv_color_t card = theme_dark ? lv_color_hex(0x334155) : lv_color_hex(0xFFFFFF);
+    lv_color_t muted = theme_dark ? lv_color_hex(0x94A3B8) : lv_color_hex(0x475569);
+
+    lv_obj_set_style_bg_color(lv_scr_act(), bg, 0);
+    lv_obj_set_style_text_color(lv_scr_act(), text, 0);
+
+    if (tv) {
+        lv_obj_set_style_bg_color(tv, bg, 0);
+        lv_obj_set_style_text_color(tv, text, 0);
+    }
+
+    if (np_card) lv_obj_set_style_bg_color(np_card, card, 0);
+    if (np_sub) lv_obj_set_style_text_color(np_sub, muted, 0);
+
+    if (btn_scan_wifi) lv_obj_set_style_bg_color(btn_scan_wifi, theme_dark ? lv_color_hex(0x1F2937) : lv_color_hex(0xE2E8F0), 0);
+    if (btn_theme) lv_obj_set_style_bg_color(btn_theme, theme_dark ? lv_color_hex(0x1F2937) : lv_color_hex(0xE2E8F0), 0);
+}
+
 // --- UI BUILDERS ---
 void buildUI() {
     tv = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, 40);
@@ -293,6 +320,8 @@ void buildUI() {
     buildDashboardTab(tab_dash);
     buildNowPlayingTab(tab_now_playing);
     buildSettingsTab(tab_settings);
+
+    applyTheme();
 }
 
 void buildDashboardTab(lv_obj_t * parent) {
@@ -442,6 +471,20 @@ void buildSettingsTab(lv_obj_t * parent) {
     lv_obj_t * lbl_scan = lv_label_create(btn_scan_wifi);
     lv_label_set_text(lbl_scan, "Scan & Connect Wi-Fi");
     lv_obj_add_event_cb(btn_scan_wifi, [](lv_event_t* e){ showWifiScanWindow(); }, LV_EVENT_CLICKED, NULL);
+
+    btn_theme = lv_btn_create(parent);
+    lv_obj_set_width(btn_theme, LV_PCT(100));
+    lv_obj_t * lbl_theme = lv_label_create(btn_theme);
+    lv_label_set_text(lbl_theme, theme_dark ? "Theme: Dark" : "Theme: Light");
+    lv_obj_center(lbl_theme);
+    lv_obj_add_event_cb(btn_theme, [](lv_event_t* e){
+        theme_dark = !theme_dark;
+        savePreferences();
+        applyTheme();
+        lv_obj_t * btn = lv_event_get_target(e);
+        lv_obj_t * lbl = lv_obj_get_child(btn, 0);
+        if (lbl) lv_label_set_text(lbl, theme_dark ? "Theme: Dark" : "Theme: Light");
+    }, LV_EVENT_CLICKED, NULL);
 }
 
 void showWifiScanWindow() {
@@ -656,12 +699,14 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             break;
         case WStype_DISCONNECTED:
             Serial.println("WS: disconnected");
-            strncpy(ui_conn_line1, "Nomad Pi: Disconnected", sizeof(ui_conn_line1) - 1);
-            ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
-            strncpy(ui_conn_line2, "Retrying...", sizeof(ui_conn_line2) - 1);
-            ui_conn_line2[sizeof(ui_conn_line2) - 1] = '\0';
-            ui_status_color = lv_color_hex(0xEF4444);
-            ui_conn_dirty = true;
+            if (millis() - last_http_success_ms > 20000) {
+                strncpy(ui_conn_line1, "Nomad Pi: Disconnected", sizeof(ui_conn_line1) - 1);
+                ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+                strncpy(ui_conn_line2, "Retrying...", sizeof(ui_conn_line2) - 1);
+                ui_conn_line2[sizeof(ui_conn_line2) - 1] = '\0';
+                ui_status_color = lv_color_hex(0xEF4444);
+                ui_conn_dirty = true;
+            }
             is_connected = false;
             break;
         case WStype_ERROR:
@@ -737,13 +782,24 @@ void pollDashboardHttp() {
         DeserializationError error = deserializeJson(doc, *stream);
         http.end();
         if (!error) {
-            lv_label_set_text_fmt(label_connection_info, "HTTP fallback OK\n%s:%d", server_ip.c_str(), server_port);
+            last_http_success_ms = millis();
+            strncpy(ui_conn_line1, "Nomad Pi: Online", sizeof(ui_conn_line1) - 1);
+            ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+            snprintf(ui_conn_line2, sizeof(ui_conn_line2), "HTTP %s:%d", server_ip.c_str(), server_port);
+            ui_status_color = lv_color_hex(0x10B981);
+            ui_conn_dirty = true;
             updateDashboardUI(doc["sessions"], doc["system"]);
         }
         return;
     }
 
-    lv_label_set_text_fmt(label_connection_info, "HTTP Poll Error: %d\nServer: %s", code, server_ip.c_str());
+    if (millis() - last_http_success_ms > 20000) {
+        strncpy(ui_conn_line1, "Nomad Pi: Disconnected", sizeof(ui_conn_line1) - 1);
+        ui_conn_line1[sizeof(ui_conn_line1) - 1] = '\0';
+        snprintf(ui_conn_line2, sizeof(ui_conn_line2), "HTTP err %d", code);
+        ui_status_color = lv_color_hex(0xEF4444);
+        ui_conn_dirty = true;
+    }
     http.end();
 }
 

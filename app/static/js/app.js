@@ -93,8 +93,75 @@ const mediaState = { path: '/data' };
 let activeVideoProgressInterval = null;
 let activeVideoEl = null;
 let activeVideoPath = null;
+let activeDashboardSessionId = null;
+let activeDashboardMeta = null;
+let lastDashboardUpdateAt = 0;
 let playbackHeartbeatInstalled = false;
 const progressDebugSent = new Set();
+
+function createDashboardSessionId() {
+    try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    } catch {}
+    return `s_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function inferMediaTypeFromPath(path) {
+    const p = String(path || '');
+    if (p.includes('/movies/')) return 'movie';
+    if (p.includes('/shows/')) return 'show';
+    return 'video';
+}
+
+async function updateDashboardSession(mediaElement, filePath, state, force = false) {
+    if (!filePath) return;
+    const now = Date.now();
+    if (!force && (now - lastDashboardUpdateAt) < 5000) return;
+    lastDashboardUpdateAt = now;
+
+    if (!activeDashboardSessionId) activeDashboardSessionId = createDashboardSessionId();
+    if (!activeDashboardMeta) {
+        activeDashboardMeta = {
+            title: cleanTitle(String(filePath).split('/').pop() || 'Unknown'),
+            media_type: inferMediaTypeFromPath(filePath),
+            poster_url: null,
+            poster_thumb: null
+        };
+    }
+
+    const username = (currentProfile && typeof currentProfile.name === 'string' && currentProfile.name.trim()) ? currentProfile.name.trim() : 'Unknown';
+    const avatar_url = (currentProfile && typeof currentProfile.avatar === 'string' && currentProfile.avatar.trim()) ? currentProfile.avatar.trim() : null;
+
+    const current_time = mediaElement && Number.isFinite(mediaElement.currentTime) ? mediaElement.currentTime : 0;
+    const duration = mediaElement && Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.duration : 0;
+
+    const payload = {
+        session_id: activeDashboardSessionId,
+        path: filePath,
+        title: activeDashboardMeta.title,
+        media_type: activeDashboardMeta.media_type,
+        current_time,
+        duration,
+        state: state || (mediaElement && mediaElement.paused ? 'paused' : 'playing'),
+        poster_url: activeDashboardMeta.poster_url,
+        poster_thumb: activeDashboardMeta.poster_thumb,
+        username,
+        avatar_url
+    };
+
+    try {
+        const res = await fetch(`${API_BASE}/dashboard/session/update`, {
+            method: 'POST',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            keepalive: true,
+            body: JSON.stringify(payload)
+        });
+        if (res.status === 401) { logout(); }
+    } catch {}
+}
 
 function getPageState(category) {
     if (!mediaPageState[category]) {
@@ -1323,7 +1390,7 @@ function renderMediaList(category, files) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
                     });
                 }
 
@@ -1362,7 +1429,7 @@ function renderMediaList(category, files) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
                     });
                 }
             } else {
@@ -1673,6 +1740,21 @@ function closeViewer() {
         activeVideoProgressInterval = null;
     }
     try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
+    try { updateDashboardSession(activeVideoEl, activeVideoPath, 'stopped', true); } catch (e) {}
+    if (activeDashboardSessionId) {
+        const sid = activeDashboardSessionId;
+        activeDashboardSessionId = null;
+        activeDashboardMeta = null;
+        try {
+            fetch(`${API_BASE}/dashboard/session/${encodeURIComponent(sid)}/stop`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                keepalive: true
+            }).catch(() => {});
+        } catch {}
+    } else {
+        activeDashboardMeta = null;
+    }
     activeVideoEl = null;
     activeVideoPath = null;
     const modal = document.getElementById('viewer-modal');
@@ -1703,7 +1785,7 @@ async function openMovieDetails(file) {
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading || !file?.path) {
-        openVideoViewer(file?.path, cleanTitle(file?.name || 'Movie'), file?.progress?.current_time || 0);
+        openVideoViewer(file?.path, cleanTitle(file?.name || 'Movie'), file?.progress?.current_time || 0, { poster_url: file?.poster || null });
         return;
     }
 
@@ -1781,14 +1863,14 @@ async function openMovieDetails(file) {
     }
 
     document.getElementById('movie-play-btn')?.addEventListener('click', () => {
-        openVideoViewer(file.path, baseTitle, startSeconds);
+        openVideoViewer(file.path, baseTitle, startSeconds, { poster_url: file.poster || null });
     });
     document.getElementById('movie-play-from-start-btn')?.addEventListener('click', () => {
-        openVideoViewer(file.path, baseTitle, 0);
+        openVideoViewer(file.path, baseTitle, 0, { poster_url: file.poster || null });
     });
 }
 
-function openVideoViewer(path, title, startSeconds = 0) {
+function openVideoViewer(path, title, startSeconds = 0, opts = null) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -1807,6 +1889,13 @@ function openVideoViewer(path, title, startSeconds = 0) {
 
     // Sanitize title and filename
     const safeTitle = title ? escapeHtml(String(title)) : 'Video';
+    activeDashboardSessionId = createDashboardSessionId();
+    activeDashboardMeta = {
+        title: title ? String(title) : 'Video',
+        media_type: inferMediaTypeFromPath(path),
+        poster_url: opts && typeof opts.poster_url === 'string' ? opts.poster_url : null,
+        poster_thumb: opts && typeof opts.poster_thumb === 'string' ? opts.poster_thumb : null
+    };
     const extMatch = path.match(/\.([a-z0-9]+)$/i);
     const safeExt = extMatch ? extMatch[0] : '.mp4';
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
@@ -1840,17 +1929,19 @@ function openVideoViewer(path, title, startSeconds = 0) {
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
-    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} });
-    video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} });
+    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} try { updateDashboardSession(video, path, 'paused', true); } catch (e) {} });
+    video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} try { updateDashboardSession(video, path, video.paused ? 'paused' : 'playing', true); } catch (e) {} });
     video.addEventListener('play', () => {
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = setInterval(() => {
             try { updateProgress(video, path); } catch (e) {}
         }, 5000);
+        try { updateDashboardSession(video, path, 'playing', true); } catch (e) {}
     });
     video.addEventListener('ended', () => {
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
+        try { updateDashboardSession(video, path, 'stopped', true); } catch (e) {}
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
@@ -2533,6 +2624,7 @@ async function updateProgress(mediaElement, filePath, force = false, opts = null
     mediaElement.lastTime = mediaElement.currentTime;
 
     try {
+        try { await updateDashboardSession(mediaElement, filePath, mediaElement.paused ? 'paused' : 'playing', false); } catch (e) {}
         const duration = Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.duration : null;
         const payload = {
             file_path: filePath,
