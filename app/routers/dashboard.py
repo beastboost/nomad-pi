@@ -14,6 +14,8 @@ import os
 import logging
 from datetime import datetime
 from app.routers.auth import get_current_user_id
+from app.routers.media import cache_remote_poster, POSTER_CACHE_DIR, BASE_DIR
+import hashlib
 
 logger = logging.getLogger("nomad")
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -21,6 +23,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 # In-memory storage for active playback sessions
 # Structure: {session_id: {user_id, path, title, current_time, duration, last_update, state, ...}}
 active_sessions: Dict[str, Dict] = {}
+control_connections: Dict[str, WebSocket] = {}
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -219,7 +222,7 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 @router.post("/session/update")
-async def update_session(data: Dict, user_id: int = Depends(get_current_user_id)):
+async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     """
     Update or create an active playback session
 
@@ -244,6 +247,42 @@ async def update_session(data: Dict, user_id: int = Depends(get_current_user_id)
         if not session_id:
             return {"status": "error", "message": "session_id required"}
 
+        poster_url = data.get("poster_url")
+        poster_thumb = data.get("poster_thumb")
+        
+        # Optimize poster caching: Don't block!
+        # If it's a remote URL, check if we have a cache hit immediately.
+        # If not, use the remote URL but schedule a cache in the background.
+        if isinstance(poster_url, str) and (poster_url.startswith("http://") or poster_url.startswith("https://")):
+            # Check cache synchronously (fast if using local lookup)
+            # We can use the logic from cache_remote_poster but non-blocking?
+            # For now, just schedule it if we don't have it.
+            # Ideally we want to know if it's cached to return the local path.
+            # Let's try to get it if it's already there.
+            
+            # Helper to check file existence without network
+            key = hashlib.sha256(poster_url.encode("utf-8", errors="ignore")).hexdigest()
+            cached_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+            if os.path.isfile(cached_fs) and os.path.getsize(cached_fs) > 0:
+                rel = os.path.relpath(cached_fs, BASE_DIR).replace(os.sep, "/")
+                poster_url = f"/data/{rel}"
+            else:
+                # Not cached yet, use remote but schedule cache
+                background_tasks.add_task(cache_remote_poster, poster_url)
+
+        if not poster_thumb:
+            poster_thumb = poster_url
+            
+        if isinstance(poster_thumb, str) and (poster_thumb.startswith("http://") or poster_thumb.startswith("https://")) and poster_thumb != poster_url:
+             # Same logic for thumb
+            key = hashlib.sha256(poster_thumb.encode("utf-8", errors="ignore")).hexdigest()
+            cached_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+            if os.path.isfile(cached_fs) and os.path.getsize(cached_fs) > 0:
+                rel = os.path.relpath(cached_fs, BASE_DIR).replace(os.sep, "/")
+                poster_thumb = f"/data/{rel}"
+            else:
+                background_tasks.add_task(cache_remote_poster, poster_thumb)
+
         # Update or create session
         active_sessions[session_id] = {
             "user_id": user_id,
@@ -252,8 +291,8 @@ async def update_session(data: Dict, user_id: int = Depends(get_current_user_id)
             "path": data.get("path"),
             "title": data.get("title", "Unknown"),
             "media_type": data.get("media_type", "unknown"),
-            "poster_url": data.get("poster_url"),
-            "poster_thumb": data.get("poster_thumb"),
+            "poster_url": poster_url,
+            "poster_thumb": poster_thumb,
             "current_time": float(data.get("current_time", 0)),
             "duration": float(data.get("duration", 0)),
             "progress_percent": round((float(data.get("current_time", 0)) / float(data.get("duration", 1))) * 100, 1),
@@ -268,6 +307,45 @@ async def update_session(data: Dict, user_id: int = Depends(get_current_user_id)
     except Exception as e:
         logger.error(f"Error updating session: {e}")
         return {"status": "error", "message": str(e)}
+
+@router.websocket("/control/ws")
+async def websocket_control_endpoint(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    control_connections[session_id] = websocket
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        if control_connections.get(session_id) is websocket:
+            del control_connections[session_id]
+    except Exception:
+        if control_connections.get(session_id) is websocket:
+            del control_connections[session_id]
+
+@router.post("/session/{session_id}/command")
+async def command_session(session_id: str, data: Dict):
+    action = (data or {}).get("action")
+    if action not in ("pause", "resume", "stop"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    if session_id in active_sessions:
+        if action == "pause":
+            active_sessions[session_id]["state"] = "paused"
+        elif action == "resume":
+            active_sessions[session_id]["state"] = "playing"
+        elif action == "stop":
+            active_sessions[session_id]["state"] = "stopped"
+            active_sessions[session_id]["last_update"] = time.time() - 9999
+
+    ws = control_connections.get(session_id)
+    if ws:
+        try:
+            await ws.send_json({"action": action, "session_id": session_id})
+        except Exception:
+            if control_connections.get(session_id) is ws:
+                del control_connections[session_id]
+
+    return {"status": "ok"}
 
 @router.post("/session/{session_id}/stop")
 async def stop_session(session_id: str, user_id: int = Depends(get_current_user_id)):

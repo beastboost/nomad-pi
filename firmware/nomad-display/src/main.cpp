@@ -52,6 +52,7 @@ unsigned long last_http_poll_ms = 0;
 bool discovery_dirty = false;
 unsigned long last_http_success_ms = 0;
 bool theme_dark = true;
+int brightness = 128;
 
 volatile bool ws_payload_ready = false;
 static char ws_payload_buf[20001];
@@ -67,6 +68,9 @@ lv_obj_t * tab_settings;
 
 // Dashboard Widgets
 lv_obj_t * label_status;
+lv_obj_t * label_dash_server;
+lv_obj_t * label_dash_uptime;
+lv_obj_t * label_dash_users;
 lv_obj_t * label_cpu;
 lv_obj_t * label_ram;
 lv_obj_t * label_stats;
@@ -79,6 +83,7 @@ lv_obj_t * np_card;
 lv_obj_t * np_img;
 lv_obj_t * np_title;
 lv_obj_t * np_sub;
+lv_obj_t * np_meta;
 lv_obj_t * np_bar;
 lv_obj_t * np_btn_stop;
 lv_obj_t * np_btn_pause;
@@ -91,6 +96,8 @@ lv_obj_t * label_wifi_status;
 lv_obj_t * label_connection_info;
 lv_obj_t * btn_scan_wifi;
 lv_obj_t * btn_theme;
+lv_obj_t * slider_brightness;
+lv_obj_t * label_brightness;
 lv_obj_t * list_wifi; 
 lv_obj_t * win_wifi;  
 lv_obj_t * kb;
@@ -126,6 +133,7 @@ void pollDashboardHttp();
 bool isIpAddress(const String& s);
 void applyConnectionUi();
 void applyTheme();
+void formatClock(char* out, size_t out_len, uint32_t seconds);
 
 // --- SETUP ---
 void setup() {
@@ -182,9 +190,19 @@ void loop() {
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+        if (!is_connected && (millis() - last_http_success_ms < 30000)) {
+            if (ws_configured) {
+                webSocket.disconnect();
+                ws_configured = false;
+                ws_host[0] = '\0';
+            }
+        }
+
         if ((!ws_configured || discovery_dirty) && (millis() - last_ws_begin_ms > 15000)) {
             discovery_dirty = false;
-            tryConnectWebSocket();
+            if (millis() - last_http_success_ms >= 30000) {
+                tryConnectWebSocket();
+            }
         }
     }
     
@@ -222,7 +240,7 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
 void initDisplay() {
     tft.init();
     tft.setRotation(1); // Landscape
-    tft.setBrightness(128);
+    tft.setBrightness(brightness);
 }
 
 void initLVGL() {
@@ -250,6 +268,7 @@ void loadPreferences() {
     String p = preferences.getString("pass", "");
     String lastIp = preferences.getString("last_server_ip", "");
     theme_dark = preferences.getBool("theme_dark", true);
+    brightness = preferences.getInt("brightness", 128);
     preferences.end();
     
     strncpy(wifi_ssid, s.c_str(), 63);
@@ -268,6 +287,7 @@ void savePreferences() {
     preferences.putString("ssid", wifi_ssid);
     preferences.putString("pass", wifi_pass);
     preferences.putBool("theme_dark", theme_dark);
+    preferences.putInt("brightness", brightness);
     preferences.end();
 }
 
@@ -288,6 +308,18 @@ bool isIpAddress(const String& s) {
     return true;
 }
 
+void formatClock(char* out, size_t out_len, uint32_t seconds) {
+    if (!out || out_len == 0) return;
+    uint32_t h = seconds / 3600;
+    uint32_t m = (seconds % 3600) / 60;
+    uint32_t s = seconds % 60;
+    if (h > 0) {
+        snprintf(out, out_len, "%lu:%02lu:%02lu", (unsigned long)h, (unsigned long)m, (unsigned long)s);
+    } else {
+        snprintf(out, out_len, "%lu:%02lu", (unsigned long)m, (unsigned long)s);
+    }
+}
+
 void applyTheme() {
     lv_color_t bg = theme_dark ? lv_color_hex(0x0B1220) : lv_color_hex(0xF5F7FB);
     lv_color_t text = theme_dark ? lv_color_hex(0xE5E7EB) : lv_color_hex(0x0F172A);
@@ -303,145 +335,138 @@ void applyTheme() {
     }
 
     if (np_card) lv_obj_set_style_bg_color(np_card, card, 0);
+    if (np_title) lv_obj_set_style_text_color(np_title, text, 0);
     if (np_sub) lv_obj_set_style_text_color(np_sub, muted, 0);
+    if (np_meta) lv_obj_set_style_text_color(np_meta, muted, 0);
+    if (np_empty_label) lv_obj_set_style_text_color(np_empty_label, muted, 0);
+    if (label_cpu) lv_obj_set_style_text_color(label_cpu, text, 0);
+    if (label_ram) lv_obj_set_style_text_color(label_ram, text, 0);
+    if (label_stats) lv_obj_set_style_text_color(label_stats, muted, 0);
+    if (label_wifi_status) lv_obj_set_style_text_color(label_wifi_status, text, 0);
+    if (label_connection_info) lv_obj_set_style_text_color(label_connection_info, muted, 0);
+    if (label_dash_server) lv_obj_set_style_text_color(label_dash_server, muted, 0);
+    if (label_dash_uptime) lv_obj_set_style_text_color(label_dash_uptime, muted, 0);
+    if (label_dash_users) lv_obj_set_style_text_color(label_dash_users, muted, 0);
+    if (label_brightness) lv_obj_set_style_text_color(label_brightness, text, 0);
 
     if (btn_scan_wifi) lv_obj_set_style_bg_color(btn_scan_wifi, theme_dark ? lv_color_hex(0x1F2937) : lv_color_hex(0xE2E8F0), 0);
     if (btn_theme) lv_obj_set_style_bg_color(btn_theme, theme_dark ? lv_color_hex(0x1F2937) : lv_color_hex(0xE2E8F0), 0);
+    if (btn_scan_wifi) lv_obj_set_style_text_color(btn_scan_wifi, text, 0);
+    if (btn_theme) lv_obj_set_style_text_color(btn_theme, text, 0);
+    if (slider_brightness) lv_obj_set_style_bg_color(slider_brightness, theme_dark ? lv_color_hex(0x1F2937) : lv_color_hex(0xE2E8F0), 0);
 }
 
 // --- UI BUILDERS ---
 void buildUI() {
     tv = lv_tabview_create(lv_scr_act(), LV_DIR_TOP, 40);
     
-    tab_dash = lv_tabview_add_tab(tv, "Dashboard");
-    tab_now_playing = lv_tabview_add_tab(tv, "Now Playing");
+    tab_dash = lv_tabview_add_tab(tv, "Home");
     tab_settings = lv_tabview_add_tab(tv, "Settings");
 
     buildDashboardTab(tab_dash);
-    buildNowPlayingTab(tab_now_playing);
     buildSettingsTab(tab_settings);
 
     applyTheme();
 }
 
 void buildDashboardTab(lv_obj_t * parent) {
-    // Top Row: Arcs
-    lv_obj_t * row_arcs = lv_obj_create(parent);
-    lv_obj_set_size(row_arcs, LV_PCT(100), 120);
-    lv_obj_set_flex_flow(row_arcs, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row_arcs, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(row_arcs, 0, 0);
-    lv_obj_set_style_border_width(row_arcs, 0, 0);
-    lv_obj_set_style_pad_all(row_arcs, 0, 0);
-
-    // CPU
-    arc_cpu = lv_arc_create(row_arcs);
-    lv_obj_set_size(arc_cpu, 100, 100);
-    lv_arc_set_rotation(arc_cpu, 270);
-    lv_arc_set_bg_angles(arc_cpu, 0, 360);
-    lv_arc_set_value(arc_cpu, 0);
+    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(parent, 0, 0);
     
-    label_cpu = lv_label_create(arc_cpu);
-    lv_obj_center(label_cpu);
-    lv_label_set_text(label_cpu, "CPU\n0%");
-    lv_obj_set_style_text_align(label_cpu, LV_TEXT_ALIGN_CENTER, 0);
-
-    // RAM
-    arc_ram = lv_arc_create(row_arcs);
-    lv_obj_set_size(arc_ram, 100, 100);
-    lv_arc_set_rotation(arc_ram, 270);
-    lv_arc_set_bg_angles(arc_ram, 0, 360);
-    lv_arc_set_value(arc_ram, 0);
+    // --- IDLE PANEL ---
+    panel_idle = lv_obj_create(parent);
+    lv_obj_set_size(panel_idle, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(panel_idle, 0, 0);
+    lv_obj_set_style_border_width(panel_idle, 0, 0);
+    lv_obj_set_flex_flow(panel_idle, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panel_idle, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    label_ram = lv_label_create(arc_ram);
-    lv_obj_center(label_ram);
-    lv_label_set_text(label_ram, "RAM\n0%");
-    lv_obj_set_style_text_align(label_ram, LV_TEXT_ALIGN_CENTER, 0);
-
-    // Bottom Row: Stats Text
-    lv_obj_t * row_stats = lv_obj_create(parent);
-    lv_obj_set_size(row_stats, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_align(row_stats, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_flex_flow(row_stats, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(row_stats, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_opa(row_stats, 0, 0);
-    lv_obj_set_style_border_width(row_stats, 0, 0);
-
-    label_stats = lv_label_create(row_stats);
-    lv_label_set_text(label_stats, "Disk: --% | Net: 0 KB/s");
-    lv_obj_set_style_text_font(label_stats, &lv_font_montserrat_14, 0);
+    label_clock_huge = lv_label_create(panel_idle);
+    lv_obj_set_style_text_font(label_clock_huge, &lv_font_montserrat_48, 0);
+    lv_label_set_text(label_clock_huge, "00:00");
     
-    label_status = lv_label_create(row_stats);
-    lv_label_set_text(label_status, "Status: Disconnected");
-    lv_obj_set_style_text_color(label_status, lv_color_hex(0xEF4444), 0);
-}
+    label_date = lv_label_create(panel_idle);
+    lv_obj_set_style_text_font(label_date, &lv_font_montserrat_18, 0);
+    lv_label_set_text(label_date, "Nomad Media Server");
+    lv_obj_set_style_pad_bottom(label_date, 20, 0);
 
-void buildNowPlayingTab(lv_obj_t * parent) {
-    cont_now_playing_list = lv_obj_create(parent);
-    lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
-    
-    np_empty_label = lv_label_create(cont_now_playing_list);
-    lv_label_set_text(np_empty_label, "No active sessions");
-    lv_obj_center(np_empty_label);
+    label_status_pill = lv_label_create(panel_idle);
+    lv_obj_set_style_bg_color(label_status_pill, lv_color_hex(0x1F2937), 0);
+    lv_obj_set_style_bg_opa(label_status_pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(label_status_pill, 10, 0);
+    lv_obj_set_style_radius(label_status_pill, 20, 0);
+    lv_label_set_text(label_status_pill, "Ready to Cast");
 
-    np_card = lv_obj_create(cont_now_playing_list);
-    lv_obj_set_size(np_card, LV_PCT(100), 170);
-    lv_obj_set_style_bg_color(np_card, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_pad_all(np_card, 8, 0);
-    lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+    // --- PLAYING PANEL ---
+    panel_playing = lv_obj_create(parent);
+    lv_obj_set_size(panel_playing, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(panel_playing, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_radius(panel_playing, 0, 0);
+    lv_obj_set_style_border_width(panel_playing, 0, 0);
+    lv_obj_set_style_pad_all(panel_playing, 15, 0);
+    lv_obj_add_flag(panel_playing, LV_OBJ_FLAG_HIDDEN); // Hidden by default
 
-    np_img = lv_img_create(np_card);
+    // Poster (Left)
+    np_img = lv_img_create(panel_playing);
     lv_img_set_src(np_img, &img_poster_dsc);
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
-    lv_obj_align(np_img, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(np_img, LV_ALIGN_LEFT_MID, 0, -10);
 
-    lv_obj_t * info = lv_obj_create(np_card);
+    // Info (Right)
+    lv_obj_t * info = lv_obj_create(panel_playing);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(info, 6, 0);
-    lv_obj_set_pos(info, POSTER_W + 10, 10);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 40, 150);
+    lv_obj_set_style_pad_row(info, 5, 0);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 40, 200);
+    lv_obj_align(info, LV_ALIGN_LEFT_MID, POSTER_W + 15, -10);
 
     np_title = lv_label_create(info);
     lv_obj_set_width(np_title, LV_PCT(100));
     lv_label_set_long_mode(np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_14, 0);
-    lv_label_set_text(np_title, "");
+    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_24, 0); // Bigger font
+    lv_label_set_text(np_title, "Nothing Playing");
 
     np_sub = lv_label_create(info);
     lv_obj_set_width(np_sub, LV_PCT(100));
     lv_obj_set_style_text_color(np_sub, lv_color_hex(0x94A3B8), 0);
-    lv_label_set_text(np_sub, "");
+    lv_label_set_text(np_sub, "--");
+    
+    np_meta = lv_label_create(info);
+    lv_obj_set_width(np_meta, LV_PCT(100));
+    lv_label_set_text(np_meta, "00:00 / 00:00");
 
     np_bar = lv_bar_create(info);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 10);
+    lv_obj_set_height(np_bar, 8);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x475569), 0);
+    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x3B82F6), LV_PART_INDICATOR);
 
+    // Controls
     lv_obj_t * ctrls = lv_obj_create(info);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
-    lv_obj_set_style_pad_all(ctrls, 0, 0);
+    lv_obj_set_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(ctrls, LV_PCT(100), 40);
-
-    np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 70, 30);
-    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
-    lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
-    lv_label_set_text(lbl_stop, "STOP");
-    lv_obj_center(lbl_stop);
+    lv_obj_set_style_pad_column(ctrls, 15, 0);
+    lv_obj_set_size(ctrls, LV_PCT(100), 50);
+    lv_obj_set_style_pad_top(ctrls, 10, 0);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 70, 30);
+    lv_obj_set_size(np_btn_pause, 100, 40);
     lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "PAUSE");
     lv_obj_center(lbl_pause);
+
+    np_btn_stop = lv_btn_create(ctrls);
+    lv_obj_set_size(np_btn_stop, 100, 40);
+    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
+    lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
+    lv_label_set_text(lbl_stop, "STOP");
+    lv_obj_center(lbl_stop);
 
     lv_obj_add_event_cb(np_btn_stop, [](lv_event_t* e){
         if (strlen(np_session_id) > 0) stopSession(np_session_id);
@@ -452,9 +477,14 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     }, LV_EVENT_CLICKED, NULL);
 }
 
+void buildNowPlayingTab(lv_obj_t * parent) {
+    // Deprecated - merged into Dashboard
+}
+
 void buildSettingsTab(lv_obj_t * parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(parent, 10, 0);
+    lv_obj_set_style_pad_row(parent, 10, 0);
     
     // Status Labels
     label_wifi_status = lv_label_create(parent);
@@ -465,6 +495,30 @@ void buildSettingsTab(lv_obj_t * parent) {
     lv_label_set_text(label_connection_info, "Server: Auto-discovery");
     lv_obj_set_style_text_font(label_connection_info, &lv_font_montserrat_14, 0);
     
+    lv_obj_t * bright_wrap = lv_obj_create(parent);
+    lv_obj_set_width(bright_wrap, LV_PCT(100));
+    lv_obj_set_style_bg_opa(bright_wrap, 0, 0);
+    lv_obj_set_style_border_width(bright_wrap, 0, 0);
+    lv_obj_set_style_pad_all(bright_wrap, 0, 0);
+    lv_obj_set_flex_flow(bright_wrap, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(bright_wrap, 6, 0);
+
+    label_brightness = lv_label_create(bright_wrap);
+    lv_obj_set_width(label_brightness, LV_PCT(100));
+    lv_label_set_text_fmt(label_brightness, "Brightness: %d", brightness);
+
+    slider_brightness = lv_slider_create(bright_wrap);
+    lv_obj_set_width(slider_brightness, LV_PCT(100));
+    lv_slider_set_range(slider_brightness, 8, 255);
+    lv_slider_set_value(slider_brightness, brightness, LV_ANIM_OFF);
+    lv_obj_add_event_cb(slider_brightness, [](lv_event_t* e){
+        lv_obj_t * sld = lv_event_get_target(e);
+        brightness = (int)lv_slider_get_value(sld);
+        tft.setBrightness(brightness);
+        savePreferences();
+        if (label_brightness) lv_label_set_text_fmt(label_brightness, "Brightness: %d", brightness);
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
     // Scan Button
     btn_scan_wifi = lv_btn_create(parent);
     lv_obj_set_width(btn_scan_wifi, LV_PCT(100));
@@ -739,6 +793,14 @@ void applyConnectionUi() {
         lv_obj_set_style_text_color(label_status, ui_status_color, 0);
     }
 
+    if (label_dash_server) {
+        if (ui_conn_line2[0] != '\0') {
+            lv_label_set_text(label_dash_server, ui_conn_line2);
+        } else {
+            lv_label_set_text(label_dash_server, "Server: --");
+        }
+    }
+
     if (label_connection_info) {
         if (ui_conn_line2[0] != '\0') {
             lv_label_set_text_fmt(label_connection_info, "%s\n%s", ui_conn_line1, ui_conn_line2);
@@ -763,7 +825,7 @@ void processWsMessage() {
 }
 
 void pollDashboardHttp() {
-    if (millis() - last_http_poll_ms < 10000) return;
+    if (millis() - last_http_poll_ms < 5000) return;
     last_http_poll_ms = millis();
 
     if (server_ip.length() == 0) return;
@@ -804,101 +866,96 @@ void pollDashboardHttp() {
 }
 
 void updateDashboardUI(JsonArray sessions, JsonObject system) {
-    // Update Stats
-    float cpu = system["cpu_percent"].as<float>();
-    float ram = system["ram_percent"].as<float>();
-    float disk = system["disk_percent"].as<float>();
-    int active_users = system["active_users"].as<int>();
+    // 1. Determine State (Playing vs Idle)
+    bool is_playing = sessions.size() > 0;
     
-    lv_arc_set_value(arc_cpu, (int)cpu);
-    int cpu10 = (int)(cpu * 10.0f + 0.5f);
-    lv_label_set_text_fmt(label_cpu, "CPU\n%d.%d%%", cpu10 / 10, cpu10 % 10);
-    
-    lv_arc_set_value(arc_ram, (int)ram);
-    int ram10 = (int)(ram * 10.0f + 0.5f);
-    lv_label_set_text_fmt(label_ram, "RAM\n%d.%d%%", ram10 / 10, ram10 % 10);
-    
-    // Format bytes for net speed
-    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
-    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
-
-    int down10 = 0;
-    const char* unit_d = "B/s";
-    if (net_down_bps < 1024) {
-        down10 = (int)net_down_bps * 10;
-        unit_d = "B/s";
-    } else if (net_down_bps < (1024UL * 1024UL)) {
-        down10 = (int)((net_down_bps * 10UL) / 1024UL);
-        unit_d = "KB/s";
+    // 2. Update Toggle Visibility
+    if (is_playing) {
+        if (lv_obj_has_flag(panel_playing, LV_OBJ_FLAG_HIDDEN)) {
+             lv_obj_clear_flag(panel_playing, LV_OBJ_FLAG_HIDDEN);
+             lv_obj_add_flag(panel_idle, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
-        down10 = (int)((net_down_bps * 10UL) / (1024UL * 1024UL));
-        unit_d = "MB/s";
+        if (lv_obj_has_flag(panel_idle, LV_OBJ_FLAG_HIDDEN)) {
+             lv_obj_clear_flag(panel_idle, LV_OBJ_FLAG_HIDDEN);
+             lv_obj_add_flag(panel_playing, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
-    int up10 = 0;
-    const char* unit_u = "B/s";
-    if (net_up_bps < 1024) {
-        up10 = (int)net_up_bps * 10;
-        unit_u = "B/s";
-    } else if (net_up_bps < (1024UL * 1024UL)) {
-        up10 = (int)((net_up_bps * 10UL) / 1024UL);
-        unit_u = "KB/s";
-    } else {
-        up10 = (int)((net_up_bps * 10UL) / (1024UL * 1024UL));
-        unit_u = "MB/s";
-    }
-
-    int disk10 = (int)(disk * 10.0f + 0.5f);
-    lv_label_set_text_fmt(
-        label_stats,
-        "Disk: %d.%d%%  |  Users: %d\nDown: %d.%d %s  |  Up: %d.%d %s",
-        disk10 / 10, disk10 % 10,
-        active_users,
-        down10 / 10, down10 % 10, unit_d,
-        up10 / 10, up10 % 10, unit_u
-    );
-
-    if (sessions.size() == 0) {
-        lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
-        strcpy(np_session_id, "");
-        strcpy(current_poster_url, "");
+    // 3. Update Idle Panel
+    if (!is_playing) {
+        // Update Clock from Server Timestamp (local time approximation)
+        // We receive unix timestamp.
+        long long ts = system.containsKey("timestamp") ? system["timestamp"].as<long long>() : 0;
+        if (ts == 0 && sessions.size() == 0) {
+             // Fallback if system object is from stats only
+             // But updateDashboardUI is called with doc["sessions"] and doc["system"]
+             // doc["timestamp"] is at root usually?
+             // Actually in dashboard.py: { "sessions": ..., "system": ..., "timestamp": ... }
+             // We are passing doc["system"] which is inside.
+             // We need to pass the root timestamp if we want it.
+             // But we can just use uptime for now or "--:--"
+             lv_label_set_text(label_clock_huge, "Nomad");
+        } else {
+             // We don't have the timestamp passed in updateDashboardUI signature easily
+             // unless we change the signature.
+             // Let's just show "Nomad" or uptime.
+             lv_label_set_text(label_clock_huge, "Nomad");
+        }
+        
+        // Show server status
+        if (is_connected) {
+             lv_label_set_text(label_status_pill, "Ready to Cast");
+             lv_obj_set_style_text_color(label_status_pill, lv_color_hex(0x10B981), 0); // Green
+        } else {
+             lv_label_set_text(label_status_pill, "Connecting...");
+             lv_obj_set_style_text_color(label_status_pill, lv_color_hex(0xF59E0B), 0); // Orange
+        }
         return;
     }
 
-    lv_obj_add_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+    // 4. Update Playing Panel
+    JsonObject session = sessions[0];
+    const char* title = session["title"];
+    const char* state = session["state"];
+    const char* user = session["username"];
+    const char* poster = session["poster_thumb"]; // Use thumb for speed
+    const char* sid = session["session_id"];
+    
+    double current = session["current_time"];
+    double duration = session["duration"];
+    
+    strncpy(np_session_id, sid, sizeof(np_session_id)-1);
+    
+    lv_label_set_text(np_title, title ? title : "Unknown");
+    lv_label_set_text_fmt(np_sub, "User: %s", user ? user : "Unknown");
+    
+    char cur_fmt[16];
+    char dur_fmt[16];
+    formatClock(cur_fmt, sizeof(cur_fmt), (uint32_t)current);
+    formatClock(dur_fmt, sizeof(dur_fmt), (uint32_t)duration);
+    lv_label_set_text_fmt(np_meta, "%s / %s", cur_fmt, dur_fmt);
+    
+    if (duration > 0) {
+        int pct = (int)((current / duration) * 100.0);
+        if (pct > 100) pct = 100;
+        lv_bar_set_value(np_bar, pct, LV_ANIM_ON);
+    }
 
-    JsonObject s = sessions[0];
-    const char* sid_src = s["session_id"] | "";
-    strncpy(np_session_id, sid_src, sizeof(np_session_id) - 1);
-    np_session_id[sizeof(np_session_id) - 1] = '\0';
-
-    lv_label_set_text(np_title, s["title"] | "Unknown");
-    const char* user = s["username"] | "User";
-    const char* type = s["media_type"] | "media";
-    lv_label_set_text_fmt(np_sub, "%s • %s", user, type);
-    lv_bar_set_value(np_bar, (int)(s["progress_percent"] | 0), LV_ANIM_OFF);
-
-    np_is_paused = strcmp((const char*)(s["state"] | ""), "paused") == 0;
-    lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
-    lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "PLAY" : "PAUSE");
-
-    const char* poster_url = s["poster_thumb"];
-    if (!poster_url) poster_url = s["poster_url"];
-    if (poster_url && strcmp(current_poster_url, poster_url) != 0 && (millis() - last_poster_fetch_ms > 15000)) {
-        last_poster_fetch_ms = millis();
-        String full_url;
-        if (poster_url[0] == '/') {
-            full_url = "http://" + server_ip + ":" + String(server_port) + String(poster_url);
+    // Handle Poster
+    if (poster) {
+        char full_url[256];
+        if (strncmp(poster, "http", 4) == 0) {
+            strncpy(full_url, poster, sizeof(full_url)-1);
         } else {
-            full_url = String(poster_url);
+            snprintf(full_url, sizeof(full_url), "http://%s:%d%s", server_ip.c_str(), server_port, poster);
         }
-        downloadPoster(full_url.c_str());
-        strncpy(current_poster_url, poster_url, 255);
-        current_poster_url[255] = '\0';
-        lv_img_set_src(np_img, &img_poster_dsc);
-        lv_obj_invalidate(np_img);
+        
+        if (strcmp(full_url, current_poster_url) != 0) {
+             // New poster
+             strncpy(current_poster_url, full_url, sizeof(current_poster_url)-1);
+             downloadPoster(full_url);
+        }
     }
 }
 
@@ -914,7 +971,7 @@ void downloadPoster(const char* url) {
     if (httpCode == 200) {
         // Allocate buffer for JPG
         int len = http.getSize();
-        if (len > 0 && len < 100000) { // Limit to 100KB
+        if (len > 0 && len < 500000) {
             uint8_t* jpg_buf = (uint8_t*)malloc(len);
             if (jpg_buf) {
                 WiFiClient * stream = http.getStreamPtr();
@@ -963,27 +1020,33 @@ void checkUDP() {
 }
 
 void stopSession(const char* session_id) {
-    if (!is_connected) return;
+    if (WiFi.status() != WL_CONNECTED) return;
+    if (server_ip.length() == 0) return;
+    if (millis() - last_http_success_ms > 30000) return;
     
     HTTPClient http;
-    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/stop";
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/command";
     
     http.begin(url);
     http.setConnectTimeout(1500);
     http.setTimeout(1500);
-    int httpCode = http.POST("");
+    http.addHeader("Content-Type", "application/json");
+    http.POST("{\"action\":\"stop\"}");
     http.end();
 }
 
 void pauseSession(const char* session_id) {
-    if (!is_connected) return;
+    if (WiFi.status() != WL_CONNECTED) return;
+    if (server_ip.length() == 0) return;
+    if (millis() - last_http_success_ms > 30000) return;
     
     HTTPClient http;
     String action = np_is_paused ? "resume" : "pause";
-    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/" + action;
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/command";
     http.begin(url);
     http.setConnectTimeout(1500);
     http.setTimeout(1500);
-    http.POST("");
+    http.addHeader("Content-Type", "application/json");
+    http.POST(String("{\"action\":\"") + action + "\"}");
     http.end();
 }

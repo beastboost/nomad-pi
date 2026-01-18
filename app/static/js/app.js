@@ -96,6 +96,7 @@ let activeVideoPath = null;
 let activeDashboardSessionId = null;
 let activeDashboardMeta = null;
 let lastDashboardUpdateAt = 0;
+let activeControlSocket = null;
 let playbackHeartbeatInstalled = false;
 const progressDebugSent = new Set();
 
@@ -1739,6 +1740,10 @@ function closeViewer() {
         clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
     }
+    if (activeControlSocket) {
+        try { activeControlSocket.close(); } catch {}
+        activeControlSocket = null;
+    }
     try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
     try { updateDashboardSession(activeVideoEl, activeVideoPath, 'stopped', true); } catch (e) {}
     if (activeDashboardSessionId) {
@@ -1958,6 +1963,34 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
 
     activeVideoEl = video;
     activeVideoPath = path;
+
+    if (activeControlSocket) {
+        try { activeControlSocket.close(); } catch {}
+        activeControlSocket = null;
+    }
+    
+    // Ensure session ID exists and is registered immediately
+    if (!activeDashboardSessionId) activeDashboardSessionId = createDashboardSessionId();
+    updateDashboardSession(video, path, 'playing', true);
+
+    try:
+        const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${wsProto}://${window.location.host}${API_BASE}/dashboard/control/ws?session_id=${encodeURIComponent(activeDashboardSessionId)}`;
+        activeControlSocket = new WebSocket(wsUrl);
+        activeControlSocket.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (!msg || msg.session_id !== activeDashboardSessionId) return;
+                if (msg.action === 'pause') {
+                    try { video.pause(); } catch {}
+                } else if (msg.action === 'resume') {
+                    try { video.play(); } catch {}
+                } else if (msg.action === 'stop') {
+                    try { closeViewer(); } catch {}
+                }
+            } catch {}
+        };
+    } catch {}
     if (!playbackHeartbeatInstalled) {
         playbackHeartbeatInstalled = true;
         window.addEventListener('pagehide', () => {
