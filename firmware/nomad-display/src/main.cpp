@@ -41,6 +41,7 @@ bool mdns_started = false;
 
 char discovered_server_ip[64] = "";
 int discovered_server_port = 8000;
+char last_server_ip[64] = "";
 
 bool wifi_connecting = false;
 unsigned long wifi_connect_start_ms = 0;
@@ -110,6 +111,7 @@ void checkUDP();
 void downloadPoster(const char* url);
 void processWsMessage();
 void pollDashboardHttp();
+bool isIpAddress(const String& s);
 
 // --- SETUP ---
 void setup() {
@@ -237,10 +239,18 @@ void loadPreferences() {
     preferences.begin("nomad-display", true);
     String s = preferences.getString("ssid", "");
     String p = preferences.getString("pass", "");
+    String lastIp = preferences.getString("last_server_ip", "");
     preferences.end();
     
     strncpy(wifi_ssid, s.c_str(), 63);
     strncpy(wifi_pass, p.c_str(), 63);
+    strncpy(last_server_ip, lastIp.c_str(), 63);
+    last_server_ip[63] = '\0';
+
+    if (strlen(last_server_ip) > 0) {
+        strncpy(discovered_server_ip, last_server_ip, sizeof(discovered_server_ip) - 1);
+        discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
+    }
 }
 
 void savePreferences() {
@@ -248,6 +258,23 @@ void savePreferences() {
     preferences.putString("ssid", wifi_ssid);
     preferences.putString("pass", wifi_pass);
     preferences.end();
+}
+
+static void saveLastServerIp(const char* ip) {
+    Preferences p;
+    p.begin("nomad-display", false);
+    p.putString("last_server_ip", ip);
+    p.end();
+}
+
+bool isIpAddress(const String& s) {
+    if (s.length() < 7) return false;
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if ((c >= '0' && c <= '9') || c == '.') continue;
+        return false;
+    }
+    return true;
 }
 
 // --- UI BUILDERS ---
@@ -553,16 +580,27 @@ void tryConnectWebSocket() {
         if (mdns_started) {
             IPAddress hostIp = MDNS.queryHost("nomadpi");
             String resolved = hostIp.toString();
-            if (resolved == "0.0.0.0") {
-                server_ip = "nomadpi.local";
-            } else {
+            if (resolved != "0.0.0.0") {
+                strncpy(discovered_server_ip, resolved.c_str(), sizeof(discovered_server_ip) - 1);
+                discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
+                discovered_server_port = server_port;
+                strncpy(last_server_ip, discovered_server_ip, sizeof(last_server_ip) - 1);
+                last_server_ip[sizeof(last_server_ip) - 1] = '\0';
+                saveLastServerIp(discovered_server_ip);
                 server_ip = resolved;
+            } else {
+                server_ip = "";
             }
         } else {
-            server_ip = "nomadpi.local";
+            server_ip = "";
         }
     }
     
+    if (server_ip.length() == 0) {
+        lv_label_set_text(label_connection_info, "Server: Waiting for discovery...");
+        return;
+    }
+
     lv_label_set_text_fmt(label_connection_info, "Connecting to %s...", server_ip.c_str());
     Serial.print("Attempt WS to ");
     Serial.print(server_ip);
@@ -625,6 +663,9 @@ void processWsMessage() {
 void pollDashboardHttp() {
     if (millis() - last_http_poll_ms < 10000) return;
     last_http_poll_ms = millis();
+
+    if (server_ip.length() == 0) return;
+    if (!isIpAddress(server_ip) && server_ip != "10.42.0.1") return;
 
     HTTPClient http;
     String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/public";
@@ -769,6 +810,9 @@ void checkUDP() {
                 strncpy(discovered_server_ip, ip.c_str(), sizeof(discovered_server_ip) - 1);
                 discovered_server_ip[sizeof(discovered_server_ip) - 1] = '\0';
                 discovered_server_port = port;
+                strncpy(last_server_ip, discovered_server_ip, sizeof(last_server_ip) - 1);
+                last_server_ip[sizeof(last_server_ip) - 1] = '\0';
+                saveLastServerIp(discovered_server_ip);
                 Serial.print("UDP discovery from ");
                 Serial.print(discovered_server_ip);
                 Serial.print(":");
