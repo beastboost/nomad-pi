@@ -47,8 +47,8 @@ unsigned long wifi_connect_start_ms = 0;
 unsigned long last_http_poll_ms = 0;
 
 volatile bool ws_payload_ready = false;
-char* ws_payload_buf = nullptr;
-size_t ws_payload_len = 0;
+static char ws_payload_buf[20001];
+static size_t ws_payload_len = 0;
 unsigned long last_ws_process_ms = 0;
 unsigned long last_poster_fetch_ms = 0;
 
@@ -599,17 +599,10 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             break;
         case WStype_TEXT: {
             if (length == 0 || length > 20000) break;
-            char* new_buf = (char*)malloc(length + 1);
-            if (!new_buf) break;
-            memcpy(new_buf, payload, length);
-            new_buf[length] = '\0';
-
-            noInterrupts();
-            if (ws_payload_buf) free(ws_payload_buf);
-            ws_payload_buf = new_buf;
+            memcpy(ws_payload_buf, payload, length);
+            ws_payload_buf[length] = '\0';
             ws_payload_len = length;
             ws_payload_ready = true;
-            interrupts();
             break;
         }
     }
@@ -619,19 +612,11 @@ void processWsMessage() {
     if (!ws_payload_ready) return;
     if (millis() - last_ws_process_ms < 250) return;
 
-    char* local_buf = nullptr;
-    noInterrupts();
-    local_buf = ws_payload_buf;
-    ws_payload_buf = nullptr;
     ws_payload_ready = false;
-    interrupts();
-
-    if (!local_buf) return;
     last_ws_process_ms = millis();
 
     DynamicJsonDocument doc(8192);
-    DeserializationError error = deserializeJson(doc, local_buf);
-    free(local_buf);
+    DeserializationError error = deserializeJson(doc, ws_payload_buf, ws_payload_len);
 
     if (error) return;
     updateDashboardUI(doc["sessions"], doc["system"]);
@@ -649,11 +634,10 @@ void pollDashboardHttp() {
     int code = http.GET();
 
     if (code == 200) {
-        String body = http.getString();
-        http.end();
-
         DynamicJsonDocument doc(12288);
-        DeserializationError error = deserializeJson(doc, body);
+        WiFiClient* stream = http.getStreamPtr();
+        DeserializationError error = deserializeJson(doc, *stream);
+        http.end();
         if (!error) {
             lv_label_set_text_fmt(label_connection_info, "HTTP fallback OK\n%s:%d", server_ip.c_str(), server_port);
             updateDashboardUI(doc["sessions"], doc["system"]);
