@@ -103,6 +103,7 @@ void tryConnectWebSocket();
 void checkUDP();
 void downloadPoster(const char* url);
 void processWsMessage();
+void pollDashboardHttp();
 
 // --- SETUP ---
 void setup() {
@@ -151,6 +152,10 @@ void loop() {
     
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
+    }
+
+    if (!is_connected && WiFi.status() == WL_CONNECTED) {
+        pollDashboardHttp();
     }
 
     if (!is_connected) {
@@ -662,6 +667,34 @@ void processWsMessage() {
 
     if (error) return;
     updateDashboardUI(doc["sessions"], doc["system"]);
+}
+
+void pollDashboardHttp() {
+    static unsigned long last_http_poll_ms = 0;
+    if (millis() - last_http_poll_ms < 2000) return;
+    last_http_poll_ms = millis();
+
+    HTTPClient http;
+    String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/public";
+    http.begin(url);
+    http.setConnectTimeout(1500);
+    http.setTimeout(1500);
+    int code = http.GET();
+
+    if (code == 200) {
+        String body = http.getString();
+        http.end();
+
+        DynamicJsonDocument doc(12288);
+        DeserializationError error = deserializeJson(doc, body);
+        if (!error) {
+            lv_label_set_text_fmt(label_connection_info, "HTTP fallback OK\n%s:%d", server_ip.c_str(), server_port);
+            updateDashboardUI(doc["sessions"], doc["system"]);
+        }
+        return;
+    }
+
+    http.end();
 }
 
 void updateDashboardUI(JsonArray sessions, JsonObject system) {

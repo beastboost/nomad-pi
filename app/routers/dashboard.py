@@ -362,3 +362,33 @@ async def get_stats():
     Useful for public displays that only need system monitoring
     """
     return get_system_stats()
+
+@router.get("/public")
+async def get_public_dashboard_snapshot():
+    clean_stale_sessions()
+
+    sessions_list = []
+    for session_id, session in active_sessions.items():
+        sessions_list.append({
+            "session_id": session_id,
+            "user_id": session.get("user_id"),
+            "username": session.get("username", "Unknown"),
+            "avatar_url": session.get("avatar_url"),
+            "media_type": session.get("media_type", "unknown"),
+            "title": session.get("title", "Unknown"),
+            "poster_url": session.get("poster_url"),
+            "poster_thumb": session.get("poster_thumb"),
+            "progress_percent": session.get("progress_percent", 0),
+            "current_time": session.get("current_time", 0),
+            "duration": session.get("duration", 0),
+            "state": session.get("state", "unknown"),
+            "bitrate": session.get("bitrate", 0),
+            "last_update": session.get("last_update", 0),
+        })
+
+    return {
+        "sessions": sessions_list,
+        "system": get_system_stats(),
+        "timestamp": int(time.time()),
+        "source": "http",
+    }
