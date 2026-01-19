@@ -12,6 +12,7 @@ import json
 import time
 import psutil
 import os
+import subprocess
 import logging
 import hashlib
 from datetime import datetime
@@ -29,6 +30,131 @@ _poster_cache_attempts: Dict[str, float] = {}
 _public_poster_paths: Dict[str, Dict] = {}
 _PUBLIC_POSTER_TTL_S = 3600.0
 _PUBLIC_POSTER_MAX = 4096
+_POSTER_THUMB_W = 110
+_POSTER_THUMB_H = 160
+
+def _session_to_payload(session_id: str, session: Dict, now: float) -> Dict:
+    state = session.get("state", "unknown")
+    try:
+        cur = float(session.get("current_time", 0) or 0)
+    except Exception:
+        cur = 0.0
+    try:
+        dur = float(session.get("duration", 0) or 0)
+    except Exception:
+        dur = 0.0
+    try:
+        last = float(session.get("last_update", 0) or 0)
+    except Exception:
+        last = 0.0
+
+    if state == "playing" and last > 0 and now > last:
+        cur += (now - last)
+
+    if dur > 0:
+        if cur < 0:
+            cur = 0.0
+        if cur > dur:
+            cur = dur
+        progress_percent = round((cur / dur) * 100.0, 1)
+    else:
+        progress_percent = session.get("progress_percent", 0) or 0
+
+    return {
+        "session_id": session_id,
+        "user_id": session.get("user_id"),
+        "username": session.get("username", "Unknown"),
+        "avatar_url": session.get("avatar_url"),
+        "media_type": session.get("media_type", "unknown"),
+        "title": session.get("title", "Unknown"),
+        "poster_url": session.get("poster_url"),
+        "poster_thumb": session.get("poster_thumb"),
+        "progress_percent": progress_percent,
+        "current_time": cur,
+        "duration": dur,
+        "state": state,
+        "bitrate": session.get("bitrate", 0),
+        "last_update": session.get("last_update", 0),
+    }
+
+def _transcode_poster_thumb_jpg(input_fs: str, output_fs: str) -> bool:
+    if not isinstance(input_fs, str) or not input_fs:
+        return False
+    if not isinstance(output_fs, str) or not output_fs:
+        return False
+    if not os.path.isfile(input_fs):
+        return False
+
+    tmp_fs = output_fs + ".tmp"
+    try:
+        if os.path.exists(tmp_fs):
+            try:
+                os.remove(tmp_fs)
+            except Exception:
+                pass
+
+        vf = f"scale={_POSTER_THUMB_W}:{_POSTER_THUMB_H}:force_original_aspect_ratio=decrease,pad={_POSTER_THUMB_W}:{_POSTER_THUMB_H}:(ow-iw)/2:(oh-ih)/2:color=black"
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            input_fs,
+            "-vf",
+            vf,
+            "-frames:v",
+            "1",
+            "-q:v",
+            "4",
+            tmp_fs,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+        if result.returncode != 0:
+            try:
+                if os.path.exists(tmp_fs):
+                    os.remove(tmp_fs)
+            except Exception:
+                pass
+            return False
+
+        if not (os.path.isfile(tmp_fs) and os.path.getsize(tmp_fs) > 0):
+            try:
+                if os.path.exists(tmp_fs):
+                    os.remove(tmp_fs)
+            except Exception:
+                pass
+            return False
+
+        os.replace(tmp_fs, output_fs)
+        return True
+    except Exception:
+        try:
+            if os.path.exists(tmp_fs):
+                os.remove(tmp_fs)
+        except Exception:
+            pass
+        return False
+
+def _ensure_cached_poster_jpg(poster_id: str, fs_path: str) -> Optional[str]:
+    if not _is_hex_sha256(poster_id):
+        return None
+    if not isinstance(fs_path, str) or not fs_path:
+        return None
+    if not os.path.isfile(fs_path):
+        return None
+
+    out_fs = os.path.join(POSTER_CACHE_DIR, f"{poster_id}.jpg")
+    try:
+        if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
+            return out_fs
+    except Exception:
+        pass
+
+    if _transcode_poster_thumb_jpg(fs_path, out_fs):
+        return out_fs
+    return None
 
 def _is_hex_sha256(s: str) -> bool:
     if not isinstance(s, str) or len(s) != 64:
@@ -111,6 +237,11 @@ async def get_public_poster(poster_id: str):
 
     cached = os.path.join(POSTER_CACHE_DIR, f"{poster_id}.jpg")
     if os.path.isfile(cached) and os.path.getsize(cached) > 0:
+        try:
+            if os.path.getsize(cached) > 200_000:
+                _transcode_poster_thumb_jpg(cached, cached)
+        except Exception:
+            pass
         return FileResponse(cached, media_type="image/jpeg")
 
     now = time.time()
@@ -125,6 +256,10 @@ async def get_public_poster(poster_id: str):
     if not isinstance(fs_path, str) or not os.path.isfile(fs_path):
         _public_poster_paths.pop(poster_id, None)
         raise HTTPException(status_code=404, detail="Not found")
+
+    cached = _ensure_cached_poster_jpg(poster_id, fs_path)
+    if cached:
+        return FileResponse(cached, media_type="image/jpeg")
 
     ext = os.path.splitext(fs_path)[1].lower()
     media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
@@ -287,23 +422,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
             # Prepare dashboard data
             sessions_list = []
+            now = time.time()
             for session_id, session in active_sessions.items():
-                sessions_list.append({
-                    "session_id": session_id,
-                    "user_id": session.get("user_id"),
-                    "username": session.get("username", "Unknown"),
-                    "avatar_url": session.get("avatar_url"),
-                    "media_type": session.get("media_type", "unknown"),
-                    "title": session.get("title", "Unknown"),
-                    "poster_url": session.get("poster_url"),
-                    "poster_thumb": session.get("poster_thumb"),
-                    "progress_percent": session.get("progress_percent", 0),
-                    "current_time": session.get("current_time", 0),
-                    "duration": session.get("duration", 0),
-                    "state": session.get("state", "unknown"),
-                    "bitrate": session.get("bitrate", 0),
-                    "last_update": session.get("last_update", 0)
-                })
+                if isinstance(session, dict):
+                    sessions_list.append(_session_to_payload(session_id, session, now))
 
             # Get system stats
             system_stats = get_system_stats()
@@ -565,21 +687,10 @@ async def get_now_playing(user_id: int = Depends(get_current_user_id)):
     clean_stale_sessions()
 
     sessions_list = []
+    now = time.time()
     for session_id, session in active_sessions.items():
-        sessions_list.append({
-            "session_id": session_id,
-            "user_id": session.get("user_id"),
-            "username": session.get("username", "Unknown"),
-            "media_type": session.get("media_type", "unknown"),
-            "title": session.get("title", "Unknown"),
-            "poster_url": session.get("poster_url"),
-            "poster_thumb": session.get("poster_thumb"),
-            "progress_percent": session.get("progress_percent", 0),
-            "current_time": session.get("current_time", 0),
-            "duration": session.get("duration", 0),
-            "state": session.get("state", "unknown"),
-            "last_update": session.get("last_update", 0)
-        })
+        if isinstance(session, dict):
+            sessions_list.append(_session_to_payload(session_id, session, now))
 
     system_stats = get_system_stats()
 
@@ -603,23 +714,10 @@ async def get_public_dashboard_snapshot():
     clean_stale_sessions()
 
     sessions_list = []
+    now = time.time()
     for session_id, session in active_sessions.items():
-        sessions_list.append({
-            "session_id": session_id,
-            "user_id": session.get("user_id"),
-            "username": session.get("username", "Unknown"),
-            "avatar_url": session.get("avatar_url"),
-            "media_type": session.get("media_type", "unknown"),
-            "title": session.get("title", "Unknown"),
-            "poster_url": session.get("poster_url"),
-            "poster_thumb": session.get("poster_thumb"),
-            "progress_percent": session.get("progress_percent", 0),
-            "current_time": session.get("current_time", 0),
-            "duration": session.get("duration", 0),
-            "state": session.get("state", "unknown"),
-            "bitrate": session.get("bitrate", 0),
-            "last_update": session.get("last_update", 0),
-        })
+        if isinstance(session, dict):
+            sessions_list.append(_session_to_payload(session_id, session, now))
 
     return {
         "sessions": sessions_list,

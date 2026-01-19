@@ -2290,7 +2290,9 @@ function collectContinueEpisodes(showName = null) {
         const at = Date.parse(a.progress?.last_played || '') || 0;
         const bt = Date.parse(b.progress?.last_played || '') || 0;
         if (bt !== at) return bt - at;
-        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        const ak = `${a.showName || ''} ${a.name || ''}`.toLowerCase();
+        const bk = `${b.showName || ''} ${b.name || ''}`.toLowerCase();
+        return ak.localeCompare(bk);
     });
 
     return out;
@@ -2392,8 +2394,9 @@ function renderShows() {
                     div.style.cursor = 'pointer';
                     
                     const start = Number(item.progress?.current_time || 0);
+                    const displayTitle = `${item.showName} - ${item.name}`;
                     const posterHtml = item.poster 
-                        ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
+                        ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(displayTitle)}">`
                         : `<div class="poster-placeholder"></div>`;
 
                     let progressHtml = '';
@@ -2408,28 +2411,28 @@ function renderShows() {
                         <div class="poster-shell">
                             ${posterHtml}
                             <div class="media-info">
-                                <h3>${escapeHtml(item.name)}</h3>
+                                <h3>${escapeHtml(displayTitle)}</h3>
                                 <div class="media-details">${subtitle}</div>
                             </div>
                             <button class="poster-play">Resume</button>
                         </div>
                         <div class="card-meta">
                             <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${subtitle}</div>
-                            <div class="card-title">${escapeHtml(item.name)}</div>
+                            <div class="card-title">${escapeHtml(displayTitle)}</div>
                         </div>
                         ${progressHtml}
                     `;
 
                     div.addEventListener('click', (e) => {
                         if (e.target.closest('button')) return;
-                        openVideoViewer(item.path, item.name, start);
+                        openVideoViewer(item.path, displayTitle, start);
                     });
 
                     const playBtn = div.querySelector('.poster-play');
                     if (playBtn) {
                         playBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            openVideoViewer(item.path, item.name, start);
+                            openVideoViewer(item.path, displayTitle, start);
                         });
                     }
 
@@ -2481,17 +2484,19 @@ function renderShows() {
             const resume = div.querySelector('.poster-play');
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
+                const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, contEp.name, start);
+                    openVideoViewer(contEp.path, displayTitle, start);
                 });
             }
             const resumeInline = div.querySelector('.show-resume-inline');
             if (resumeInline && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
+                const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, contEp.name, start);
+                    openVideoViewer(contEp.path, displayTitle, start);
                 });
             }
             container.appendChild(div);
@@ -2549,17 +2554,19 @@ function renderShows() {
             const resume = div.querySelector('.poster-play');
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
+                const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, contEp.name, start);
+                    openVideoViewer(contEp.path, displayTitle, start);
                 });
             }
             const resumeInline = div.querySelector('.season-resume-inline');
             if (resumeInline && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
+                const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, contEp.name, start);
+                    openVideoViewer(contEp.path, displayTitle, start);
                 });
             }
             container.appendChild(div);
@@ -2597,6 +2604,7 @@ function renderShows() {
 
         const subtitle = `${escapeHtml(show.name)} • ${escapeHtml(season.name)}`;
         const playLabel = shouldContinue(ep.progress) ? 'Resume' : 'Play';
+    const displayTitle = `${show.name} - ${ep.name}`;
 
         div.innerHTML = `
             ${getDelBtn(ep.path)}
@@ -2604,13 +2612,13 @@ function renderShows() {
             <div class="poster-shell">
                 ${posterHtml}
                 <div class="media-info">
-                    <h3>${escapeHtml(ep.name)}</h3>
+                    <h3>${escapeHtml(displayTitle)}</h3>
                     <div class="media-details">${subtitle}</div>
                 </div>
                 <button class="poster-play">${playLabel}</button>
             </div>
             <div class="card-meta">
-                <div class="card-title">${escapeHtml(ep.name)}</div>
+                <div class="card-title">${escapeHtml(displayTitle)}</div>
                 <div class="card-subtitle">${subtitle}</div>
             </div>
             ${progressHtml}
@@ -2618,14 +2626,14 @@ function renderShows() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+            openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0);
         });
 
         const btn = div.querySelector('.poster-play');
         if (btn) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
+                openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0);
             });
         }
 

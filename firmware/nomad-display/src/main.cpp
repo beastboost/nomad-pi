@@ -540,6 +540,12 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_height(np_bar, 14);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1F2937), 0);
+    lv_obj_set_style_bg_opa(np_bar, 255, 0);
+    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(np_bar, 255, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(np_bar, 8, 0);
+    lv_obj_set_style_radius(np_bar, 8, LV_PART_INDICATOR);
 
     lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
@@ -1043,11 +1049,24 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     const char* user = s["username"] | "User";
     const char* type = s["media_type"] | "media";
     lv_label_set_text_fmt(np_sub, "%s • %s", user, type);
-    lv_bar_set_value(np_bar, (int)(s["progress_percent"] | 0), LV_ANIM_OFF);
 
     const char* state = s["state"] | "unknown";
-    uint32_t cur = (uint32_t)(s["current_time"] | 0);
-    uint32_t dur = (uint32_t)(s["duration"] | 0);
+    double cur_f = (double)(s["current_time"] | 0.0);
+    double dur_f = (double)(s["duration"] | 0.0);
+    if (cur_f < 0) cur_f = 0;
+    if (dur_f < 0) dur_f = 0;
+    uint32_t cur = (uint32_t)(cur_f);
+    uint32_t dur = (uint32_t)(dur_f);
+    if (dur > 0 && cur > dur) cur = dur;
+    if (np_bar) {
+        if (dur > 0) {
+            lv_bar_set_range(np_bar, 0, (int32_t)dur);
+            lv_bar_set_value(np_bar, (int32_t)cur, LV_ANIM_OFF);
+        } else {
+            lv_bar_set_range(np_bar, 0, 100);
+            lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
+        }
+    }
     if (np_meta) {
         char cur_s[16];
         char dur_s[16];
@@ -1092,13 +1111,19 @@ bool downloadPoster(const char* url) {
     if (WiFi.status() != WL_CONNECTED) return false;
     
     HTTPClient http;
+    const char* hdr_keys[] = { "Content-Type", "Content-Length" };
+    http.collectHeaders(hdr_keys, 2);
     http.begin(url);
-    http.setConnectTimeout(1500);
-    http.setTimeout(1500);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setUserAgent("NomadDisplay/1.0");
+    http.setConnectTimeout(4000);
+    http.setTimeout(8000);
     int httpCode = http.GET();
     
     if (httpCode == 200) {
         int len = http.getSize();
+        String ct = http.header("Content-Type");
+        if (ct.length() == 0) ct = "unknown";
         WiFiClient * stream = http.getStreamPtr();
         size_t cap = (len > 0) ? (size_t)len : 65536;
         if (cap > 500000) cap = 500000;
@@ -1138,13 +1163,36 @@ bool downloadPoster(const char* url) {
                 if (used >= cap) break;
             }
             if (used > 0) {
-                sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                bool ok = false;
+                sprite_poster.fillSprite(TFT_BLACK);
+                if (used >= 8 &&
+                    jpg_buf[0] == 0x89 && jpg_buf[1] == 0x50 && jpg_buf[2] == 0x4E && jpg_buf[3] == 0x47 &&
+                    jpg_buf[4] == 0x0D && jpg_buf[5] == 0x0A && jpg_buf[6] == 0x1A && jpg_buf[7] == 0x0A) {
+                    ok = sprite_poster.drawPng(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                } else if (used >= 2 && jpg_buf[0] == 0xFF && jpg_buf[1] == 0xD8) {
+                    ok = sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                } else {
+                    ok = sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                    if (!ok) ok = sprite_poster.drawPng(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                }
+
+                if (!ok) {
+                    uint8_t b0 = jpg_buf[0];
+                    uint8_t b1 = (used > 1) ? jpg_buf[1] : 0;
+                    uint8_t b2 = (used > 2) ? jpg_buf[2] : 0;
+                    uint8_t b3 = (used > 3) ? jpg_buf[3] : 0;
+                    Serial.printf("Poster decode failed ct=%s bytes=%u hdr=%02X %02X %02X %02X url=%s\n", ct.c_str(), (unsigned)used, b0, b1, b2, b3, url);
+                }
                 free(jpg_buf);
                 http.end();
-                return true;
+                return ok;
             }
             free(jpg_buf);
         }
+    } else {
+        String ct = http.header("Content-Type");
+        if (ct.length() == 0) ct = "unknown";
+        Serial.printf("Poster HTTP %d ct=%s url=%s\n", httpCode, ct.c_str(), url);
     }
     http.end();
     return false;
