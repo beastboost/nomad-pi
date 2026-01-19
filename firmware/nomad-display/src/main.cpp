@@ -12,8 +12,8 @@
 // --- DEFINITIONS ---
 #define SCREEN_WIDTH 480
 #define SCREEN_HEIGHT 320
-#define POSTER_W 80
-#define POSTER_H 120
+#define POSTER_W 110
+#define POSTER_H 160
 
 // --- OBJECTS ---
 LGFX tft;
@@ -127,7 +127,7 @@ void stopSession(const char* session_id);
 void pauseSession(const char* session_id);
 void tryConnectWebSocket();
 void checkUDP();
-void downloadPoster(const char* url);
+bool downloadPoster(const char* url);
 void processWsMessage();
 void pollDashboardHttp();
 bool isIpAddress(const String& s);
@@ -373,67 +373,73 @@ void buildUI() {
 
 void buildDashboardTab(lv_obj_t * parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(parent, 10, 0);
-    lv_obj_set_style_pad_row(parent, 10, 0);
+    lv_obj_set_style_pad_all(parent, 6, 0);
+    lv_obj_set_style_pad_row(parent, 6, 0);
 
-    lv_obj_t * header = lv_obj_create(parent);
-    lv_obj_set_width(header, LV_PCT(100));
-    lv_obj_set_style_radius(header, 14, 0);
-    lv_obj_set_style_bg_color(header, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_pad_all(header, 10, 0);
-    lv_obj_set_style_border_width(header, 0, 0);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t * top = lv_obj_create(parent);
+    lv_obj_set_width(top, LV_PCT(100));
+    lv_obj_set_style_bg_opa(top, 0, 0);
+    lv_obj_set_style_border_width(top, 0, 0);
+    lv_obj_set_style_pad_all(top, 0, 0);
+    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t * header_left = lv_obj_create(header);
-    lv_obj_set_style_bg_opa(header_left, 0, 0);
-    lv_obj_set_style_border_width(header_left, 0, 0);
-    lv_obj_set_style_pad_all(header_left, 0, 0);
-    lv_obj_set_flex_flow(header_left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(header_left, 2, 0);
-    lv_obj_set_width(header_left, LV_PCT(68));
+    lv_obj_t * top_left = lv_obj_create(top);
+    lv_obj_set_style_bg_opa(top_left, 0, 0);
+    lv_obj_set_style_border_width(top_left, 0, 0);
+    lv_obj_set_style_pad_all(top_left, 0, 0);
+    lv_obj_set_flex_flow(top_left, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(top_left, 2, 0);
+    lv_obj_set_width(top_left, LV_PCT(68));
 
-    label_status = lv_label_create(header_left);
+    label_status = lv_label_create(top_left);
     lv_obj_set_width(label_status, LV_PCT(100));
     lv_obj_set_style_text_font(label_status, &lv_font_montserrat_18, 0);
     lv_label_set_long_mode(label_status, LV_LABEL_LONG_DOT);
     lv_label_set_text(label_status, "Nomad Pi: Disconnected");
 
-    label_dash_server = lv_label_create(header_left);
+    label_dash_server = lv_label_create(top_left);
     lv_obj_set_width(label_dash_server, LV_PCT(100));
     lv_obj_set_style_text_font(label_dash_server, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(label_dash_server, LV_LABEL_LONG_DOT);
     lv_label_set_text(label_dash_server, "Server: --");
 
-    lv_obj_t * header_right = lv_obj_create(header);
-    lv_obj_set_style_bg_opa(header_right, 0, 0);
-    lv_obj_set_style_border_width(header_right, 0, 0);
-    lv_obj_set_style_pad_all(header_right, 0, 0);
-    lv_obj_set_flex_flow(header_right, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(header_right, 2, 0);
-    lv_obj_set_width(header_right, LV_PCT(30));
+    lv_obj_t * top_right = lv_obj_create(top);
+    lv_obj_set_style_bg_opa(top_right, 0, 0);
+    lv_obj_set_style_border_width(top_right, 0, 0);
+    lv_obj_set_style_pad_all(top_right, 0, 0);
+    lv_obj_set_flex_flow(top_right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(top_right, 2, 0);
+    lv_obj_set_width(top_right, LV_PCT(30));
 
-    label_dash_users = lv_label_create(header_right);
+    label_dash_users = lv_label_create(top_right);
     lv_obj_set_width(label_dash_users, LV_PCT(100));
     lv_obj_set_style_text_font(label_dash_users, &lv_font_montserrat_14, 0);
     lv_label_set_text(label_dash_users, "Users: --");
 
-    label_dash_uptime = lv_label_create(header_right);
+    label_dash_uptime = lv_label_create(top_right);
     lv_obj_set_width(label_dash_uptime, LV_PCT(100));
     lv_obj_set_style_text_font(label_dash_uptime, &lv_font_montserrat_14, 0);
     lv_label_set_text(label_dash_uptime, "Up: --:--");
 
-    lv_obj_t * metrics = lv_obj_create(parent);
-    lv_obj_set_width(metrics, LV_PCT(100));
-    lv_obj_set_style_radius(metrics, 14, 0);
-    lv_obj_set_style_bg_color(metrics, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_pad_all(metrics, 10, 0);
-    lv_obj_set_style_border_width(metrics, 0, 0);
-    lv_obj_set_flex_flow(metrics, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(metrics, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t * body = lv_obj_create(parent);
+    lv_obj_set_size(body, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_grow(body, 1);
+    lv_obj_set_style_bg_opa(body, 0, 0);
+    lv_obj_set_style_border_width(body, 0, 0);
+    lv_obj_set_style_pad_all(body, 0, 0);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(body, 8, 0);
 
-    // CPU
-    arc_cpu = lv_arc_create(metrics);
+    lv_obj_t * arcs = lv_obj_create(body);
+    lv_obj_set_width(arcs, 220);
+    lv_obj_set_style_bg_opa(arcs, 0, 0);
+    lv_obj_set_style_border_width(arcs, 0, 0);
+    lv_obj_set_style_pad_all(arcs, 0, 0);
+    lv_obj_set_flex_flow(arcs, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(arcs, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    arc_cpu = lv_arc_create(arcs);
     lv_obj_set_size(arc_cpu, 100, 100);
     lv_arc_set_rotation(arc_cpu, 270);
     lv_arc_set_bg_angles(arc_cpu, 0, 360);
@@ -444,8 +450,7 @@ void buildDashboardTab(lv_obj_t * parent) {
     lv_label_set_text(label_cpu, "CPU\n0%");
     lv_obj_set_style_text_align(label_cpu, LV_TEXT_ALIGN_CENTER, 0);
 
-    // RAM
-    arc_ram = lv_arc_create(metrics);
+    arc_ram = lv_arc_create(arcs);
     lv_obj_set_size(arc_ram, 100, 100);
     lv_arc_set_rotation(arc_ram, 270);
     lv_arc_set_bg_angles(arc_ram, 0, 360);
@@ -456,14 +461,16 @@ void buildDashboardTab(lv_obj_t * parent) {
     lv_label_set_text(label_ram, "RAM\n0%");
     lv_obj_set_style_text_align(label_ram, LV_TEXT_ALIGN_CENTER, 0);
 
-    lv_obj_t * stats_card = lv_obj_create(parent);
-    lv_obj_set_width(stats_card, LV_PCT(100));
-    lv_obj_set_style_radius(stats_card, 14, 0);
-    lv_obj_set_style_bg_color(stats_card, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_pad_all(stats_card, 10, 0);
-    lv_obj_set_style_border_width(stats_card, 0, 0);
+    lv_obj_t * stats = lv_obj_create(body);
+    lv_obj_set_flex_grow(stats, 1);
+    lv_obj_set_height(stats, LV_PCT(100));
+    lv_obj_set_style_bg_opa(stats, 0, 0);
+    lv_obj_set_style_border_width(stats, 0, 0);
+    lv_obj_set_style_pad_all(stats, 0, 0);
+    lv_obj_set_flex_flow(stats, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(stats, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    label_stats = lv_label_create(stats_card);
+    label_stats = lv_label_create(stats);
     lv_obj_set_width(label_stats, LV_PCT(100));
     lv_obj_set_style_text_font(label_stats, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(label_stats, LV_LABEL_LONG_WRAP);
@@ -482,25 +489,35 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_center(np_empty_label);
 
     np_card = lv_obj_create(cont_now_playing_list);
-    lv_obj_set_size(np_card, LV_PCT(100), 190);
-    lv_obj_set_style_bg_color(np_card, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_radius(np_card, 14, 0);
+    lv_obj_set_size(np_card, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_grow(np_card, 1);
+    lv_obj_set_style_bg_opa(np_card, 0, 0);
+    lv_obj_set_style_radius(np_card, 0, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
-    lv_obj_set_style_pad_all(np_card, 10, 0);
+    lv_obj_set_style_pad_all(np_card, 0, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(np_card, 10, 0);
 
-    np_img = lv_img_create(np_card);
+    lv_obj_t * top = lv_obj_create(np_card);
+    lv_obj_set_width(top, LV_PCT(100));
+    lv_obj_set_style_bg_opa(top, 0, 0);
+    lv_obj_set_style_border_width(top, 0, 0);
+    lv_obj_set_style_pad_all(top, 0, 0);
+    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(top, 12, 0);
+
+    np_img = lv_img_create(top);
     lv_img_set_src(np_img, &img_poster_dsc);
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
-    lv_obj_align(np_img, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(np_img, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t * info = lv_obj_create(np_card);
+    lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(info, 6, 0);
-    lv_obj_set_pos(info, POSTER_W + 12, 8);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 42, 170);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 44, POSTER_H);
 
     np_title = lv_label_create(info);
     lv_obj_set_width(np_title, LV_PCT(100));
@@ -518,28 +535,29 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_text_font(np_meta, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_meta, "");
 
-    np_bar = lv_bar_create(info);
+    np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 10);
+    lv_obj_set_height(np_bar, 14);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
 
-    lv_obj_t * ctrls = lv_obj_create(info);
+    lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
     lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
     lv_obj_set_size(ctrls, LV_PCT(100), 40);
+    lv_obj_set_style_pad_column(ctrls, 10, 0);
 
     np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 70, 30);
+    lv_obj_set_size(np_btn_stop, 100, 34);
     lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
     lv_label_set_text(lbl_stop, "STOP");
     lv_obj_center(lbl_stop);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 70, 30);
+    lv_obj_set_size(np_btn_pause, 120, 34);
     lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "PAUSE");
@@ -823,6 +841,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             ui_status_color = lv_color_hex(0x10B981);
             ui_conn_dirty = true;
             is_connected = true;
+            last_http_success_ms = millis();
             break;
         case WStype_DISCONNECTED:
             Serial.println("WS: disconnected");
@@ -894,6 +913,7 @@ void processWsMessage() {
     DeserializationError error = deserializeJson(doc, ws_payload_buf, ws_payload_len);
 
     if (error) return;
+    last_http_success_ms = millis();
     updateDashboardUI(doc["sessions"], doc["system"]);
 }
 
@@ -1046,24 +1066,30 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
 
     const char* poster_url = s["poster_thumb"];
     if (!poster_url) poster_url = s["poster_url"];
-    if (poster_url && strcmp(current_poster_url, poster_url) != 0 && (millis() - last_poster_fetch_ms > 15000)) {
-        last_poster_fetch_ms = millis();
-        String full_url;
-        if (poster_url[0] == '/') {
-            full_url = "http://" + server_ip + ":" + String(server_port) + String(poster_url);
-        } else {
-            full_url = String(poster_url);
+    if (poster_url) {
+        bool url_changed = (strcmp(current_poster_url, poster_url) != 0);
+        bool retry_due = (!url_changed) && (millis() - last_poster_fetch_ms > 30000);
+        bool time_ok = (millis() - last_poster_fetch_ms > 15000);
+        if (time_ok && (url_changed || retry_due)) {
+            last_poster_fetch_ms = millis();
+            String full_url;
+            if (poster_url[0] == '/') {
+                full_url = "http://" + server_ip + ":" + String(server_port) + String(poster_url);
+            } else {
+                full_url = String(poster_url);
+            }
+            if (downloadPoster(full_url.c_str())) {
+                strncpy(current_poster_url, poster_url, 255);
+                current_poster_url[255] = '\0';
+                lv_img_set_src(np_img, &img_poster_dsc);
+                lv_obj_invalidate(np_img);
+            }
         }
-        downloadPoster(full_url.c_str());
-        strncpy(current_poster_url, poster_url, 255);
-        current_poster_url[255] = '\0';
-        lv_img_set_src(np_img, &img_poster_dsc);
-        lv_obj_invalidate(np_img);
     }
 }
 
-void downloadPoster(const char* url) {
-    if (WiFi.status() != WL_CONNECTED) return;
+bool downloadPoster(const char* url) {
+    if (WiFi.status() != WL_CONNECTED) return false;
     
     HTTPClient http;
     http.begin(url);
@@ -1072,22 +1098,56 @@ void downloadPoster(const char* url) {
     int httpCode = http.GET();
     
     if (httpCode == 200) {
-        // Allocate buffer for JPG
         int len = http.getSize();
-        if (len > 0 && len < 500000) {
-            uint8_t* jpg_buf = (uint8_t*)malloc(len);
-            if (jpg_buf) {
-                WiFiClient * stream = http.getStreamPtr();
-                int readBytes = stream->readBytes(jpg_buf, len);
-                
-                // Draw to sprite
-                sprite_poster.drawJpg(jpg_buf, readBytes, 0, 0, POSTER_W, POSTER_H);
-                
-                free(jpg_buf);
+        WiFiClient * stream = http.getStreamPtr();
+        size_t cap = (len > 0) ? (size_t)len : 65536;
+        if (cap > 500000) cap = 500000;
+        uint8_t* jpg_buf = (uint8_t*)malloc(cap);
+        if (jpg_buf) {
+            size_t used = 0;
+            while (stream && http.connected()) {
+                int avail = stream->available();
+                if (avail <= 0) {
+                    delay(1);
+                    if (!http.connected()) break;
+                    continue;
+                }
+                size_t want = (size_t)avail;
+                if (want > (cap - used)) {
+                    size_t next_cap = cap;
+                    while (want > (next_cap - used) && next_cap < 500000) {
+                        size_t grow = next_cap / 2;
+                        if (grow < 16384) grow = 16384;
+                        next_cap += grow;
+                        if (next_cap > 500000) next_cap = 500000;
+                        if (next_cap == cap) break;
+                    }
+                    if (next_cap != cap) {
+                        uint8_t* next_buf = (uint8_t*)realloc(jpg_buf, next_cap);
+                        if (next_buf) {
+                            jpg_buf = next_buf;
+                            cap = next_cap;
+                        }
+                    }
+                    if (want > (cap - used)) want = cap - used;
+                }
+                if (want == 0) break;
+                int got = stream->readBytes(jpg_buf + used, want);
+                if (got <= 0) break;
+                used += (size_t)got;
+                if (used >= cap) break;
             }
+            if (used > 0) {
+                sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                free(jpg_buf);
+                http.end();
+                return true;
+            }
+            free(jpg_buf);
         }
     }
     http.end();
+    return false;
 }
 
 void checkUDP() {
@@ -1125,7 +1185,7 @@ void checkUDP() {
 void stopSession(const char* session_id) {
     if (WiFi.status() != WL_CONNECTED) return;
     if (server_ip.length() == 0) return;
-    if (millis() - last_http_success_ms > 30000) return;
+    if (!is_connected && (millis() - last_http_success_ms > 30000)) return;
     
     HTTPClient http;
     String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/session/" + String(session_id) + "/command";
@@ -1141,7 +1201,7 @@ void stopSession(const char* session_id) {
 void pauseSession(const char* session_id) {
     if (WiFi.status() != WL_CONNECTED) return;
     if (server_ip.length() == 0) return;
-    if (millis() - last_http_success_ms > 30000) return;
+    if (!is_connected && (millis() - last_http_success_ms > 30000)) return;
     
     HTTPClient http;
     String action = np_is_paused ? "resume" : "pause";

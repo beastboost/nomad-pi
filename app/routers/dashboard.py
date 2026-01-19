@@ -5,6 +5,7 @@ Designed for external displays (ESP32, tablets, etc.)
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from typing import Dict, List, Optional
 import asyncio
 import json
@@ -25,6 +26,109 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 active_sessions: Dict[str, Dict] = {}
 control_connections: Dict[str, WebSocket] = {}
 _poster_cache_attempts: Dict[str, float] = {}
+_public_poster_paths: Dict[str, Dict] = {}
+_PUBLIC_POSTER_TTL_S = 3600.0
+_PUBLIC_POSTER_MAX = 4096
+
+def _is_hex_sha256(s: str) -> bool:
+    if not isinstance(s, str) or len(s) != 64:
+        return False
+    try:
+        int(s, 16)
+        return True
+    except Exception:
+        return False
+
+def _prune_public_poster_paths(now: float):
+    try:
+        expired = [k for k, v in _public_poster_paths.items() if not isinstance(v, dict) or (now - float(v.get("ts", 0.0))) > _PUBLIC_POSTER_TTL_S]
+        for k in expired:
+            _public_poster_paths.pop(k, None)
+
+        if len(_public_poster_paths) <= _PUBLIC_POSTER_MAX:
+            return
+
+        items = sorted(
+            [(k, float(v.get("ts", 0.0))) for k, v in _public_poster_paths.items() if isinstance(v, dict)],
+            key=lambda kv: kv[1],
+        )
+        for k, _ in items[: max(1, len(_public_poster_paths) - _PUBLIC_POSTER_MAX)]:
+            _public_poster_paths.pop(k, None)
+    except Exception:
+        _public_poster_paths.clear()
+
+def _register_public_poster_fs(fs_path: str) -> Optional[str]:
+    try:
+        if not isinstance(fs_path, str) or not fs_path:
+            return None
+        if not os.path.isfile(fs_path):
+            return None
+        ext = os.path.splitext(fs_path)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png"):
+            return None
+        try:
+            if os.path.getsize(fs_path) <= 0 or os.path.getsize(fs_path) > 5_000_000:
+                return None
+        except Exception:
+            return None
+        key = hashlib.sha256(fs_path.encode("utf-8", errors="ignore")).hexdigest()
+        now = time.time()
+        _public_poster_paths[key] = {"fs": fs_path, "ts": now}
+        _prune_public_poster_paths(now)
+        return key
+    except Exception:
+        return None
+
+def _public_poster_url_for_data_path(web_path: str) -> Optional[str]:
+    if not isinstance(web_path, str) or not web_path.startswith("/data/"):
+        return None
+    try:
+        rel_web = web_path[len("/data/"):]
+        parts = [p for p in rel_web.split("/") if p]
+        if len(parts) >= 3 and parts[0] == "cache" and parts[1] == "posters":
+            fname = parts[-1]
+            base, ext = os.path.splitext(fname)
+            if ext.lower() == ".jpg" and _is_hex_sha256(base):
+                return f"/api/dashboard/poster/{base}"
+    except Exception:
+        pass
+
+    rel = web_path[len("/data/"):]
+    rel = rel.lstrip("/").replace("/", os.sep)
+    base_abs = os.path.abspath(BASE_DIR)
+    fs_path = os.path.abspath(os.path.join(base_abs, rel))
+    if not (fs_path == base_abs or fs_path.startswith(base_abs + os.sep)):
+        return None
+    poster_id = _register_public_poster_fs(fs_path)
+    if not poster_id:
+        return None
+    return f"/api/dashboard/poster/{poster_id}"
+
+@router.get("/poster/{poster_id}")
+async def get_public_poster(poster_id: str):
+    if not _is_hex_sha256(poster_id):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    cached = os.path.join(POSTER_CACHE_DIR, f"{poster_id}.jpg")
+    if os.path.isfile(cached) and os.path.getsize(cached) > 0:
+        return FileResponse(cached, media_type="image/jpeg")
+
+    now = time.time()
+    entry = _public_poster_paths.get(poster_id)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail="Not found")
+    if (now - float(entry.get("ts", 0.0))) > _PUBLIC_POSTER_TTL_S:
+        _public_poster_paths.pop(poster_id, None)
+        raise HTTPException(status_code=404, detail="Not found")
+
+    fs_path = entry.get("fs")
+    if not isinstance(fs_path, str) or not os.path.isfile(fs_path):
+        _public_poster_paths.pop(poster_id, None)
+        raise HTTPException(status_code=404, detail="Not found")
+
+    ext = os.path.splitext(fs_path)[1].lower()
+    media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
+    return FileResponse(fs_path, media_type=media_type)
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -259,8 +363,7 @@ async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id:
             key = hashlib.sha256(url.encode("utf-8", errors="ignore")).hexdigest()
             out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
             if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
-                rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
-                return f"/data/{rel}"
+                return f"/api/dashboard/poster/{key}"
             return None
 
         def _queue_poster_cache(url: str):
@@ -282,23 +385,29 @@ async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id:
             background_tasks.add_task(cache_remote_poster, url)
 
         if isinstance(poster_url, str) and (poster_url.startswith("http://") or poster_url.startswith("https://")):
-            cached = _cached_poster_url(poster_url)
-            if cached:
-                poster_url = cached
-            else:
+            key = hashlib.sha256(poster_url.encode("utf-8", errors="ignore")).hexdigest()
+            out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+            if not (os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0):
                 _queue_poster_cache(poster_url)
-                poster_url = None
+            poster_url = f"/api/dashboard/poster/{key}"
+        elif isinstance(poster_url, str) and poster_url.startswith("/data/"):
+            poster_url = _public_poster_url_for_data_path(poster_url) or poster_url
 
         if not poster_thumb:
             poster_thumb = poster_url
 
         if isinstance(poster_thumb, str) and (poster_thumb.startswith("http://") or poster_thumb.startswith("https://")):
-            cached = _cached_poster_url(poster_thumb)
-            if cached:
-                poster_thumb = cached
-            else:
+            key = hashlib.sha256(poster_thumb.encode("utf-8", errors="ignore")).hexdigest()
+            out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
+            if not (os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0):
                 _queue_poster_cache(poster_thumb)
-                poster_thumb = None
+            poster_thumb = f"/api/dashboard/poster/{key}"
+        elif isinstance(poster_thumb, str) and poster_thumb.startswith("/data/"):
+            poster_thumb = _public_poster_url_for_data_path(poster_thumb) or poster_thumb
+
+        prev = active_sessions.get(session_id) if isinstance(active_sessions.get(session_id), dict) else {}
+        prev_queue = prev.get("command_queue") if isinstance(prev.get("command_queue"), list) else []
+        prev_seq = prev.get("command_seq") if isinstance(prev.get("command_seq"), int) else 0
 
         # Update or create session
         active_sessions[session_id] = {
@@ -315,7 +424,9 @@ async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id:
             "progress_percent": round((float(data.get("current_time", 0)) / float(data.get("duration", 1))) * 100, 1),
             "state": data.get("state", "unknown"),
             "bitrate": data.get("bitrate", 0),
-            "last_update": time.time()
+            "last_update": time.time(),
+            "command_seq": prev_seq,
+            "command_queue": prev_queue[-100:],
         }
 
         logger.debug(f"Session updated: {session_id} - {data.get('title')} - {data.get('state')}")
@@ -326,7 +437,13 @@ async def update_session(data: Dict, background_tasks: BackgroundTasks, user_id:
         return {"status": "error", "message": str(e)}
 
 @router.websocket("/control/ws")
-async def websocket_control_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_control_endpoint(websocket: WebSocket):
+    session_id = websocket.query_params.get("session_id")
+    if not session_id:
+        try:
+            await websocket.close(code=1008)
+        finally:
+            return
     await websocket.accept()
     control_connections[session_id] = websocket
     try:
@@ -338,6 +455,20 @@ async def websocket_control_endpoint(websocket: WebSocket, session_id: str):
     except Exception:
         if control_connections.get(session_id) is websocket:
             del control_connections[session_id]
+
+@router.get("/session/{session_id}/commands")
+async def get_session_commands(session_id: str, after_seq: int = 0, user_id: int = Depends(get_current_user_id)):
+    session = active_sessions.get(session_id)
+    if not isinstance(session, dict):
+        return {"commands": [], "last_seq": after_seq}
+    if session.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not your session")
+    queue = session.get("command_queue") if isinstance(session.get("command_queue"), list) else []
+    cmds = [c for c in queue if isinstance(c, dict) and isinstance(c.get("seq"), int) and c["seq"] > after_seq]
+    last_seq = max([after_seq] + [c.get("seq", after_seq) for c in cmds])
+    session["command_queue"] = queue[-100:]
+    session["command_seq"] = session.get("command_seq") if isinstance(session.get("command_seq"), int) else last_seq
+    return {"commands": cmds, "last_seq": last_seq}
 
 @router.post("/session/{session_id}/command")
 async def command_session(session_id: str, data: Dict):
@@ -353,6 +484,15 @@ async def command_session(session_id: str, data: Dict):
         elif action == "stop":
             active_sessions[session_id]["state"] = "stopped"
             active_sessions[session_id]["last_update"] = time.time() - 9999
+
+        session = active_sessions.get(session_id)
+        if isinstance(session, dict):
+            seq = session.get("command_seq") if isinstance(session.get("command_seq"), int) else 0
+            seq += 1
+            session["command_seq"] = seq
+            queue = session.get("command_queue") if isinstance(session.get("command_queue"), list) else []
+            queue.append({"seq": seq, "action": action, "session_id": session_id, "ts": time.time()})
+            session["command_queue"] = queue[-100:]
 
     ws = control_connections.get(session_id)
     if ws:
