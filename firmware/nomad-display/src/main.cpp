@@ -7,6 +7,7 @@
 #include <lvgl.h>
 #include <Preferences.h>
 #include <HTTPClient.h>
+#include <TJpg_Decoder.h>
 #include "LGFX_Setup.h"
 
 // --- DEFINITIONS ---
@@ -135,6 +136,17 @@ void applyConnectionUi();
 void applyTheme();
 void formatClock(char* out, size_t out_len, uint32_t seconds);
 
+static bool posterJpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (!bitmap) return false;
+    if (x < 0 || y < 0) return true;
+    if (x >= POSTER_W || y >= POSTER_H) return false;
+    if ((x + (int)w) > POSTER_W || (y + (int)h) > POSTER_H) {
+        return true;
+    }
+    sprite_poster.pushImage(x, y, w, h, bitmap);
+    return true;
+}
+
 // --- SETUP ---
 void setup() {
     Serial.begin(115200);
@@ -147,6 +159,9 @@ void setup() {
     sprite_poster.setColorDepth(16);
     sprite_poster.createSprite(POSTER_W, POSTER_H);
     sprite_poster.fillSprite(TFT_BLACK);
+    TJpgDec.setCallback(posterJpgOutput);
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setSwapBytes(true);
 
     // Init Poster DSC
     img_poster_dsc.header.always_zero = 0;
@@ -1170,7 +1185,9 @@ bool downloadPoster(const char* url) {
                     jpg_buf[4] == 0x0D && jpg_buf[5] == 0x0A && jpg_buf[6] == 0x1A && jpg_buf[7] == 0x0A) {
                     ok = sprite_poster.drawPng(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
                 } else if (used >= 2 && jpg_buf[0] == 0xFF && jpg_buf[1] == 0xD8) {
-                    ok = sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
+                    JRESULT r = TJpgDec.drawJpg(0, 0, jpg_buf, (uint32_t)used);
+                    ok = (r == JDR_OK);
+                    if (!ok) ok = sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
                 } else {
                     ok = sprite_poster.drawJpg(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
                     if (!ok) ok = sprite_poster.drawPng(jpg_buf, used, 0, 0, POSTER_W, POSTER_H);
