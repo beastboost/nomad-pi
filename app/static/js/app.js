@@ -4022,6 +4022,37 @@ async function changePassword() {
     }
 }
 
+async function saveOmdbKey() {
+    const input = document.getElementById('omdb-api-key');
+    if (!input) return;
+
+    const key = String(input.value || '').trim();
+    if (!key) {
+        showToast('Enter an OMDb API key first', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/system/settings/omdb`, {
+            method: 'POST',
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ key })
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showToast(data.detail || 'Failed to save OMDb key', 'error');
+            return;
+        }
+        showToast('OMDb key saved', 'success');
+    } catch (e) {
+        showToast('Network error saving OMDb key', 'error');
+    }
+}
+
 async function rebuildLibrary() {
     try {
         const res = await fetch(`${API_BASE}/media/rebuild`, { 
@@ -4410,70 +4441,6 @@ async function unmountDrive(mountpoint) {
         }
     } catch (e) {
         alert('Error: ' + e);
-    }
-}
-
-async function changePassword() {
-    const current = document.getElementById('change-pwd-current').value;
-    const newPass = document.getElementById('change-pwd-new').value;
-    const confirm = document.getElementById('change-pwd-confirm').value;
-
-    if (!current || !newPass || !confirm) {
-        alert('Please fill in all password fields.');
-        return;
-    }
-
-    if (newPass !== confirm) {
-        alert('New passwords do not match.');
-        return;
-    }
-
-    if (newPass.length < 8) {
-        alert('New password must be at least 8 characters long.');
-        return;
-    }
-
-    if (!/[A-Z]/.test(newPass)) {
-        alert('New password must contain at least one uppercase letter.');
-        return;
-    }
-
-    if (!/[a-z]/.test(newPass)) {
-        alert('New password must contain at least one lowercase letter.');
-        return;
-    }
-
-    if (!/[0-9]/.test(newPass)) {
-        alert('New password must contain at least one digit.');
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/change-password`, {
-            method: 'POST',
-            headers: { 
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({
-                current_password: current,
-                new_password: newPass
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-            alert('Password updated successfully!');
-            // Clear fields
-            document.getElementById('change-pwd-current').value = '';
-            document.getElementById('change-pwd-new').value = '';
-            document.getElementById('change-pwd-confirm').value = '';
-        } else {
-            alert(data.detail || 'Failed to update password.');
-        }
-    } catch (e) {
-        console.error('Error updating password:', e);
-        alert('Error updating password. See console for details.');
     }
 }
 
