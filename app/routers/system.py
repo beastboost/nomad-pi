@@ -632,14 +632,45 @@ def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
     try:
         action = "on" if enable else "off"
         # Try nmcli first
-        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True)
+        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             return {"status": "success", "enabled": enable}
         
         # Fallback to rfkill
         action = "unblock" if enable else "block"
-        subprocess.run(["sudo", "rfkill", action, "wifi"], check=True)
+        fallback = subprocess.run(
+            ["sudo", "-n", "rfkill", action, "wifi"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if fallback.returncode != 0:
+            msg = (fallback.stderr or fallback.stdout or "rfkill failed").strip()
+            raise HTTPException(status_code=500, detail=msg)
         return {"status": "success", "enabled": enable}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/wifi/restart")
+def restart_wifi(user_id: int = Depends(get_current_user_id)):
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Wi-Fi restart only supported on Linux/Raspberry Pi")
+
+    try:
+        script = "nmcli connection down NomadPi >/dev/null 2>&1 || true; nmcli radio wifi off >/dev/null 2>&1 || true; sleep 2; nmcli radio wifi on >/dev/null 2>&1 || true"
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            cmd = ["bash", "-lc", script]
+        else:
+            probe = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, timeout=2)
+            if probe.returncode != 0:
+                raise HTTPException(status_code=500, detail=(probe.stderr or probe.stdout or "sudo not permitted").strip())
+            cmd = ["sudo", "-n", "bash", "-lc", script]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"status": "ok", "message": "Wi-Fi restart initiated"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -994,10 +1025,11 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         if enable:
             # Enable hotspot
             subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "up", "NomadPi"],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=20
             )
             return {
                 "status": "ok",
@@ -1010,15 +1042,23 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         else:
             # Disable hotspot and try to connect to saved WiFi
             subprocess.run(
-                ["sudo", "nmcli", "connection", "down", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
                 check=False,
-                capture_output=True
+                capture_output=True,
+                timeout=20
             )
             
             # Try to connect to home WiFi
             try:
+                home_ssid = os.environ.get("HOME_SSID", "").strip()
+                if not home_ssid:
+                    return {
+                        "status": "ok",
+                        "mode": "disconnected",
+                        "message": "Hotspot disabled. No WiFi configured."
+                    }
                 subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", os.environ.get("HOME_SSID", "")],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1058,7 +1098,7 @@ def scan_wifi(user_id: int = Depends(get_current_user_id)):
         def get_networks(use_sudo=True, force_rescan=True):
             cmd = []
             if use_sudo:
-                cmd = ["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
+                cmd = ["sudo", "-n", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             else:
                 cmd = ["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             
@@ -1137,16 +1177,30 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
     
     try:
         # First, try to delete any existing connection profile for this SSID to avoid conflicts
-        subprocess.run(["sudo", "nmcli", "connection", "delete", "id", request.ssid], capture_output=True, check=False)
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "delete", "id", request.ssid],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False
+        )
+
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False
+        )
         
         # Connect to WiFi using nmcli
         # We use 'nmcli device wifi connect' which creates a new profile if needed
         # Adding 'name' helps ensure the connection is identifiable
         result = subprocess.run(
-            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
+            ["sudo", "-n", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=45
         )
         
         if result.returncode == 0:
@@ -1162,22 +1216,22 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
                 logging.info("Attempting fallback manual connection creation...")
                 # 1. Add the connection manually
                 add_cmd = [
-                    "sudo", "nmcli", "con", "add", "type", "wifi", "ifname", "*", 
+                    "sudo", "-n", "nmcli", "con", "add", "type", "wifi", "ifname", "*",
                     "con-name", request.ssid, "ssid", request.ssid
                 ]
-                subprocess.run(add_cmd, capture_output=True, check=False)
+                subprocess.run(add_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 2. Set the password and security
                 modify_cmd = [
-                    "sudo", "nmcli", "con", "modify", request.ssid,
+                    "sudo", "-n", "nmcli", "con", "modify", request.ssid,
                     "wifi-sec.key-mgmt", "wpa-psk",
                     "wifi-sec.psk", request.password
                 ]
-                subprocess.run(modify_cmd, capture_output=True, check=False)
+                subprocess.run(modify_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 3. Try to bring it up
                 up_result = subprocess.run(
-                    ["sudo", "nmcli", "con", "up", "id", request.ssid],
+                    ["sudo", "-n", "nmcli", "con", "up", "id", request.ssid],
                     capture_output=True, text=True, timeout=20
                 )
                 
@@ -1189,6 +1243,8 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
             raise HTTPException(status_code=400, detail=err_msg)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Connection attempt timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1201,15 +1257,16 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
     try:
         # First, disable hotspot if active
         subprocess.run(
-            ["sudo", "nmcli", "connection", "down", "NomadPi"],
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
             check=False,
-            capture_output=True
+            capture_output=True,
+            timeout=15
         )
         
         # If SSID provided, try to connect to it
         if ssid:
             result = subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "id", ssid],
+                ["sudo", "-n", "nmcli", "connection", "up", "id", ssid],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -1226,7 +1283,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
             home_ssid = os.environ.get("HOME_SSID", "")
             if home_ssid:
                 result = subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", home_ssid],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1255,7 +1312,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
                     # Try first available WiFi connection
                     first_conn = connections[0]
                     subprocess.run(
-                        ["sudo", "nmcli", "connection", "up", "id", first_conn],
+                        ["sudo", "-n", "nmcli", "connection", "up", "id", first_conn],
                         check=True,
                         capture_output=True,
                         text=True,
@@ -1273,6 +1330,8 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
         raise HTTPException(status_code=408, detail="Connection timeout")
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect: {e.stderr if e.stderr else str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
