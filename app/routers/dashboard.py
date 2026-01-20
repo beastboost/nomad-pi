@@ -32,6 +32,21 @@ _PUBLIC_POSTER_TTL_S = 3600.0
 _PUBLIC_POSTER_MAX = 4096
 _POSTER_THUMB_W = 110
 _POSTER_THUMB_H = 160
+_POSTER_MAX_SERVE_BYTES = 450_000
+
+def _sniff_image_kind(fs_path: str) -> Optional[str]:
+    try:
+        with open(fs_path, "rb") as f:
+            b = f.read(16)
+        if len(b) >= 8 and b[:8] == b"\x89PNG\r\n\x1a\n":
+            return "png"
+        if len(b) >= 2 and b[0] == 0xFF and b[1] == 0xD8:
+            return "jpg"
+        if len(b) >= 12 and b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+            return "webp"
+        return None
+    except Exception:
+        return None
 
 def _session_to_payload(session_id: str, session: Dict, now: float) -> Dict:
     state = session.get("state", "unknown")
@@ -93,7 +108,7 @@ def _transcode_poster_thumb_jpg(input_fs: str, output_fs: str) -> bool:
             except Exception:
                 pass
 
-        vf = f"scale={_POSTER_THUMB_W}:{_POSTER_THUMB_H}:force_original_aspect_ratio=decrease,pad={_POSTER_THUMB_W}:{_POSTER_THUMB_H}:(ow-iw)/2:(oh-ih)/2:color=black"
+        vf = f"scale={_POSTER_THUMB_W}:{_POSTER_THUMB_H}:force_original_aspect_ratio=increase,crop={_POSTER_THUMB_W}:{_POSTER_THUMB_H}"
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -148,7 +163,8 @@ def _ensure_cached_poster_jpg(poster_id: str, fs_path: str) -> Optional[str]:
     out_fs = os.path.join(POSTER_CACHE_DIR, f"{poster_id}.jpg")
     try:
         if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
-            return out_fs
+            if _sniff_image_kind(out_fs) == "jpg" and os.path.getsize(out_fs) <= _POSTER_MAX_SERVE_BYTES:
+                return out_fs
     except Exception:
         pass
 
@@ -238,11 +254,28 @@ async def get_public_poster(poster_id: str):
     cached = os.path.join(POSTER_CACHE_DIR, f"{poster_id}.jpg")
     if os.path.isfile(cached) and os.path.getsize(cached) > 0:
         try:
-            if os.path.getsize(cached) > 200_000:
-                _transcode_poster_thumb_jpg(cached, cached)
+            size = int(os.path.getsize(cached) or 0)
+            kind = _sniff_image_kind(cached)
+
+            should_transcode = (
+                size <= 0
+                or size > _POSTER_MAX_SERVE_BYTES
+                or kind in ("png", "webp", None)
+                or size > 200_000
+            )
+
+            if should_transcode:
+                if _transcode_poster_thumb_jpg(cached, cached):
+                    return FileResponse(cached, media_type="image/jpeg")
+
+            size = int(os.path.getsize(cached) or 0)
+            kind = _sniff_image_kind(cached)
+            if kind == "jpg" and size > 0 and size <= _POSTER_MAX_SERVE_BYTES:
+                return FileResponse(cached, media_type="image/jpeg")
+            if kind == "png" and size > 0 and size <= _POSTER_MAX_SERVE_BYTES:
+                return FileResponse(cached, media_type="image/png")
         except Exception:
             pass
-        return FileResponse(cached, media_type="image/jpeg")
 
     now = time.time()
     entry = _public_poster_paths.get(poster_id)
@@ -263,7 +296,14 @@ async def get_public_poster(poster_id: str):
 
     ext = os.path.splitext(fs_path)[1].lower()
     media_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/png"
-    return FileResponse(fs_path, media_type=media_type)
+    try:
+        size = int(os.path.getsize(fs_path) or 0)
+    except Exception:
+        size = 0
+    kind = _sniff_image_kind(fs_path)
+    if size > 0 and size <= _POSTER_MAX_SERVE_BYTES and kind in ("jpg", "png"):
+        return FileResponse(fs_path, media_type=media_type)
+    raise HTTPException(status_code=404, detail="Not found")
 
 # WebSocket connection manager
 class ConnectionManager:

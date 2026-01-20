@@ -2,13 +2,14 @@ const CACHE_NAME = 'nomad-pi-v1.1.7-tailscale';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/admin.html',
+  '/manifest.json',
+  '/sw.js',
   '/css/style.css',
   '/css/admin.css',
   '/js/app.js',
   '/js/admin.js',
-  '/icons/icon-512.svg',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
+  '/icons/icon-512.svg'
 ];
 
 // Essential API calls to cache for offline view (stats, basic media info)
@@ -22,7 +23,9 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('Caching static assets');
-      return cache.addAll(STATIC_ASSETS);
+      return Promise.allSettled(
+        STATIC_ASSETS.map((asset) => cache.add(asset))
+      );
     })
   );
   self.skipWaiting();
