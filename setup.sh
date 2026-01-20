@@ -602,6 +602,18 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
     fi
 
     if [ -n "$CFG" ]; then
+        set_boot_cfg() {
+            local k="$1"
+            local v="$2"
+            local f="$3"
+
+            if sudo grep -Eq "^[#[:space:]]*${k}=" "$f"; then
+                sudo sed -i -E "s|^[#[:space:]]*${k}=.*|${k}=${v}|g" "$f"
+            else
+                echo "${k}=${v}" | sudo tee -a "$f" >/dev/null
+            fi
+        }
+
         MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
 
         ARM_FREQ=""
@@ -632,22 +644,16 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
 
             if [ -n "${NOMADPI_OVER_VOLTAGE:-}" ]; then
                 OVER_VOLTAGE="${NOMADPI_OVER_VOLTAGE}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
-                OVER_VOLTAGE="4"
             else
                 OVER_VOLTAGE="2"
             fi
 
             if [ -n "${NOMADPI_SDRAM_FREQ:-}" ]; then
                 SDRAM_FREQ="${NOMADPI_SDRAM_FREQ}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
-                SDRAM_FREQ="500"
             fi
 
             if [ -n "${NOMADPI_OVER_VOLTAGE_SDRAM:-}" ]; then
                 OVER_VOLTAGE_SDRAM="${NOMADPI_OVER_VOLTAGE_SDRAM}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
-                OVER_VOLTAGE_SDRAM="2"
             fi
 
             TEMP_LIMIT="${NOMADPI_TEMP_LIMIT:-80}"
@@ -675,27 +681,27 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
 
         if [ -n "$ARM_FREQ" ]; then
             echo "Overclock enabled for: ${MODEL:-Unknown Pi model}"
-            grep -q "^arm_freq=" "$CFG" || echo "arm_freq=$ARM_FREQ" | sudo tee -a "$CFG" >/dev/null
+            set_boot_cfg "arm_freq" "$ARM_FREQ" "$CFG"
             if [ -n "$GPU_FREQ" ]; then
-                grep -q "^gpu_freq=" "$CFG" || echo "gpu_freq=$GPU_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "gpu_freq" "$GPU_FREQ" "$CFG"
             fi
             if [ -n "$CORE_FREQ" ]; then
-                grep -q "^core_freq=" "$CFG" || echo "core_freq=$CORE_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "core_freq" "$CORE_FREQ" "$CFG"
             fi
             if [ -n "$OVER_VOLTAGE" ]; then
-                grep -q "^over_voltage=" "$CFG" || echo "over_voltage=$OVER_VOLTAGE" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "over_voltage" "$OVER_VOLTAGE" "$CFG"
             fi
             if [ -n "$GPU_MEM" ]; then
-                grep -q "^gpu_mem=" "$CFG" || echo "gpu_mem=$GPU_MEM" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "gpu_mem" "$GPU_MEM" "$CFG"
             fi
             if [ -n "$SDRAM_FREQ" ]; then
-                grep -q "^sdram_freq=" "$CFG" || echo "sdram_freq=$SDRAM_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "sdram_freq" "$SDRAM_FREQ" "$CFG"
             fi
             if [ -n "$OVER_VOLTAGE_SDRAM" ]; then
-                grep -q "^over_voltage_sdram=" "$CFG" || echo "over_voltage_sdram=$OVER_VOLTAGE_SDRAM" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "over_voltage_sdram" "$OVER_VOLTAGE_SDRAM" "$CFG"
             fi
             if [ -n "$TEMP_LIMIT" ]; then
-                grep -q "^temp_limit=" "$CFG" || echo "temp_limit=$TEMP_LIMIT" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "temp_limit" "$TEMP_LIMIT" "$CFG"
             fi
             echo "Overclock settings written to $CFG. Reboot required."
         else
