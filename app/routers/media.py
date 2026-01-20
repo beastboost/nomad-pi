@@ -90,6 +90,10 @@ _index_building = {}
 
 def get_scan_paths(category: str):
     paths = [os.path.join(BASE_DIR, category)]
+    if category in ["movies", "shows"]:
+        uploads_path = os.path.join(BASE_DIR, "uploads")
+        if os.path.exists(uploads_path):
+            paths.append(uploads_path)
     # Also check data/media/category
     media_cat_path = os.path.join(BASE_DIR, "media", category)
     if os.path.exists(media_cat_path):

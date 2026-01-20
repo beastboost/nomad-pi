@@ -650,10 +650,14 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
 
             if [ -n "${NOMADPI_SDRAM_FREQ:-}" ]; then
                 SDRAM_FREQ="${NOMADPI_SDRAM_FREQ}"
+            else
+                SDRAM_FREQ="500"
             fi
 
             if [ -n "${NOMADPI_OVER_VOLTAGE_SDRAM:-}" ]; then
                 OVER_VOLTAGE_SDRAM="${NOMADPI_OVER_VOLTAGE_SDRAM}"
+            else
+                OVER_VOLTAGE_SDRAM="2"
             fi
 
             TEMP_LIMIT="${NOMADPI_TEMP_LIMIT:-80}"

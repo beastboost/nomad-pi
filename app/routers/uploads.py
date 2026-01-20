@@ -37,8 +37,40 @@ CHUNK_SIZE = 16 * 1024 * 1024  # 16MB chunks (optimized for WiFi throughput)
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 BUFFER_SIZE = 64 * 1024  # 64KB buffer for file I/O
 ALLOWED_EXTENSIONS = {
-    "txt", "pdf", "png", "jpg", "jpeg", "gif", "mp3", "mp4", "mkv", "avi", "mov",
-    "doc", "docx", "xls", "xlsx", "zip", "csv", "json", "xml"
+    "txt",
+    "pdf",
+    "epub",
+    "mobi",
+    "cbz",
+    "cbr",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "mp3",
+    "flac",
+    "wav",
+    "m4a",
+    "mp4",
+    "mkv",
+    "avi",
+    "mov",
+    "webm",
+    "m4v",
+    "ts",
+    "wmv",
+    "flv",
+    "3gp",
+    "mpg",
+    "mpeg",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "zip",
+    "csv",
+    "json",
+    "xml",
 }
 
 # Ensure upload directory exists
@@ -81,6 +113,63 @@ class MultipleUploadResponse(BaseModel):
 # Global progress tracking with thread safety (in production, use Redis or similar)
 progress_tracker: Dict[str, UploadProgress] = {}
 progress_lock = threading.Lock()
+
+def _detect_category(requested_category: str, filename: str) -> str:
+    category = (requested_category or "files").strip().lower() or "files"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if category != "files":
+        return category
+
+    if ext in ["mp3", "flac", "wav", "m4a"]:
+        return "music"
+    if ext in ["jpg", "jpeg", "png", "gif"]:
+        return "gallery"
+    if ext in ["pdf", "epub", "mobi", "cbz", "cbr"]:
+        return "books"
+    if ext in ["mp4", "mkv", "avi", "mov", "webm", "m4v", "ts", "wmv", "flv", "3gp", "mpg", "mpeg"]:
+        try:
+            from app.routers import media as media_router
+
+            s, e = media_router.parse_season_episode(filename)
+            if s is not None or e is not None:
+                return "shows"
+            if media_router.parse_episode_only(filename) is not None:
+                return "shows"
+        except Exception:
+            pass
+        return "movies"
+
+    return "files"
+
+
+def _compute_destination(category: str, filename: str) -> Path:
+    cat = (category or "files").strip().lower() or "files"
+    safe_name = os.path.basename(filename)
+    base_dir = Path("data") / cat
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    if cat in ["movies", "shows"]:
+        from app.routers import media as media_router
+
+        dest_rel = media_router.auto_dest_rel(cat, safe_name, rename_files=True)
+        dest_abs = (base_dir / Path(dest_rel)).resolve()
+        dest_abs_str = media_router.pick_unique_dest(str(dest_abs))
+        return Path(dest_abs_str)
+
+    dest_abs = (base_dir / safe_name).resolve()
+    try:
+        from app.routers import media as media_router
+
+        dest_abs_str = media_router.pick_unique_dest(str(dest_abs))
+        return Path(dest_abs_str)
+    except Exception:
+        i = 2
+        base, ext = os.path.splitext(str(dest_abs))
+        while Path(dest_abs).exists() and i < 1000:
+            dest_abs = Path(f"{base} ({i}){ext}")
+            i += 1
+        return dest_abs
 
 
 async def validate_file(filename: str, file_size: int) -> tuple[bool, Optional[str]]:
@@ -275,9 +364,9 @@ async def upload_single_file(
     if not is_valid:
         logger.warning(f"File validation failed: {error_msg}")
         raise HTTPException(status_code=400, detail=error_msg)
-    
-    # Prepare destination
-    destination = UPLOAD_DIR / file_id / file.filename
+
+    resolved_category = _detect_category(category, file.filename or "")
+    destination = _compute_destination(resolved_category, file.filename or "")
     
     try:
         # Save file
@@ -289,27 +378,17 @@ async def upload_single_file(
         try:
             from app import database
             import os
-            
-            # Map common media extensions to categories if category is "files"
-            ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-            if category == "files":
-                if ext in ["mp3", "flac", "wav", "m4a"]:
-                    category = "music"
-                elif ext in ["mp4", "mkv", "avi", "mov", "webm"]:
-                    category = "movies"
-                elif ext in ["jpg", "jpeg", "png", "gif"]:
-                    category = "gallery"
-                elif ext in ["pdf", "epub", "cbz", "cbr"]:
-                    category = "books"
 
             rel_path = os.path.relpath(destination, "data").replace(os.sep, "/")
             web_path = f"/data/{rel_path}"
-            
+            cat_root = os.path.join("data", resolved_category)
+            folder = os.path.relpath(os.path.dirname(destination), cat_root).replace(os.sep, "/")
+
             database.upsert_library_index_item({
                 "path": web_path,
-                "category": category,
+                "category": resolved_category,
                 "name": file.filename,
-                "folder": "uploads/" + file_id,
+                "folder": folder if folder else ".",
                 "source": "local",
                 "poster": None,
                 "mtime": float(os.path.getmtime(destination)),
@@ -322,7 +401,8 @@ async def upload_single_file(
         try:
             from app.routers.media import trigger_dlna_rescan, trigger_auto_organize
             background_tasks.add_task(trigger_dlna_rescan)
-            background_tasks.add_task(trigger_auto_organize)
+            if resolved_category in ["shows", "movies"]:
+                background_tasks.add_task(trigger_auto_organize)
         except ImportError:
             logger.warning("Could not import triggers from media router")
             
@@ -364,6 +444,7 @@ async def upload_multiple_files(
     uploaded_files: List[UploadResponse] = []
     failed_count = 0
     total_size = 0
+    organize_after = False
     
     from app import database
     import os
@@ -378,8 +459,10 @@ async def upload_multiple_files(
             failed_count += 1
             continue
         
-        # Prepare destination
-        destination = UPLOAD_DIR / file_id / file.filename
+        resolved_category = _detect_category(category, file.filename or "")
+        if resolved_category in ["shows", "movies"]:
+            organize_after = True
+        destination = _compute_destination(resolved_category, file.filename or "")
         
         try:
             # Save file
@@ -388,27 +471,16 @@ async def upload_multiple_files(
             
             # Index the file
             try:
-                # Auto-category if still default
-                item_category = category
-                ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-                if item_category == "files":
-                    if ext in ["mp3", "flac", "wav", "m4a"]:
-                        item_category = "music"
-                    elif ext in ["mp4", "mkv", "avi", "mov", "webm"]:
-                        item_category = "movies"
-                    elif ext in ["jpg", "jpeg", "png", "gif"]:
-                        item_category = "gallery"
-                    elif ext in ["pdf", "epub", "cbz", "cbr"]:
-                        item_category = "books"
-
                 rel_path = os.path.relpath(destination, "data").replace(os.sep, "/")
                 web_path = f"/data/{rel_path}"
+                cat_root = os.path.join("data", resolved_category)
+                folder = os.path.relpath(os.path.dirname(destination), cat_root).replace(os.sep, "/")
                 
                 database.upsert_library_index_item({
                     "path": web_path,
-                    "category": item_category,
+                    "category": resolved_category,
                     "name": file.filename,
-                    "folder": "uploads/" + file_id,
+                    "folder": folder if folder else ".",
                     "source": "local",
                     "poster": None,
                     "mtime": float(os.path.getmtime(destination)),
@@ -438,7 +510,8 @@ async def upload_multiple_files(
         try:
             from app.routers.media import trigger_dlna_rescan, trigger_auto_organize
             background_tasks.add_task(trigger_dlna_rescan)
-            background_tasks.add_task(trigger_auto_organize)
+            if organize_after:
+                background_tasks.add_task(trigger_auto_organize)
         except ImportError:
             logger.warning("Could not import triggers from media router")
 

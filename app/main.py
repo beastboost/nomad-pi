@@ -375,6 +375,12 @@ async def protect_data(request: Request, call_next):
     p = request.url.path
     if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
         response.headers["Cache-Control"] = "no-store"
+    if p.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    ct = (response.headers.get("content-type") or "").strip().lower()
+    if ct == "application/json":
+        response.headers["content-type"] = "application/json; charset=utf-8"
     return response
 
 # Mount data for direct access (streaming)
