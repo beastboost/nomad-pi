@@ -22,8 +22,8 @@
         <div class="login-box">
             <div class="logo">Nomad Pi ✨</div>
             <p>Sign in to access your media</p>
-            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;">
-            <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
+            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;" aria-label="Username" title="Username">
+            <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)" aria-label="Password" title="Password">
             <button onclick="login()" class="primary">Enter</button>
             <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect username or password</p>
             <p id="setup-hint" style="color: var(--text-muted); font-size: 0.9em; margin-top: 10px; display:none;"></p>
@@ -168,8 +168,8 @@
             <section id="movies" class="hidden">
                 <h2>Movies</h2>
                 <div id="movies-filter-bar" class="filter-bar">
-                    <input id="movies-search" type="text" placeholder="Search movies..." style="flex: 1; min-width: 200px;">
-                    <select id="movies-sort" onchange="loadMovies(true)">
+                    <input id="movies-search" type="text" placeholder="Search movies..." style="flex: 1; min-width: 200px;" aria-label="Search movies" title="Search movies">
+                    <select id="movies-sort" onchange="loadMovies(true)" aria-label="Movies sort" title="Movies sort">
                         <option value="name">Sort: Name (A-Z)</option>
                         <option value="newest">Sort: Recently Added</option>
                         <option value="year_desc">Sort: Year (Newest)</option>
@@ -177,10 +177,10 @@
                         <option value="top_watched">Sort: Most Watched</option>
                         <option value="recently_played">Sort: Recently Played</option>
                     </select>
-                    <select id="movies-genre" onchange="loadMovies(true)">
+                    <select id="movies-genre" onchange="loadMovies(true)" aria-label="Movies genre filter" title="Movies genre filter">
                         <option value="">All Genres</option>
                     </select>
-                    <select id="movies-year" onchange="loadMovies(true)">
+                    <select id="movies-year" onchange="loadMovies(true)" aria-label="Movies year filter" title="Movies year filter">
                         <option value="">All Years</option>
                     </select>
                 </div>
@@ -190,17 +190,17 @@
             <section id="shows" class="hidden">
                 <h2>TV Shows</h2>
                 <div id="shows-filter-bar" class="filter-bar">
-                    <input id="shows-search" type="text" placeholder="Search shows..." style="flex: 1; min-width: 200px;">
-                    <select id="shows-sort" onchange="loadShows(true)">
+                    <input id="shows-search" type="text" placeholder="Search shows..." style="flex: 1; min-width: 200px;" aria-label="Search shows" title="Search shows">
+                    <select id="shows-sort" onchange="loadShows(true)" aria-label="Shows sort" title="Shows sort">
                         <option value="name">Sort: Name (A-Z)</option>
                         <option value="newest">Sort: Recently Added</option>
                         <option value="top_watched">Sort: Most Watched</option>
                         <option value="recently_played">Sort: Recently Played</option>
                     </select>
-                    <select id="shows-genre" onchange="loadShows(true)">
+                    <select id="shows-genre" onchange="loadShows(true)" aria-label="Shows genre filter" title="Shows genre filter">
                         <option value="">All Genres</option>
                     </select>
-                    <select id="shows-year" onchange="loadShows(true)">
+                    <select id="shows-year" onchange="loadShows(true)" aria-label="Shows year filter" title="Shows year filter">
                         <option value="">All Years</option>
                     </select>
                 </div>
@@ -211,25 +211,25 @@
 
             <section id="music" class="hidden">
                 <h2>Music</h2>
-                <input id="music-search" type="text" placeholder="Search music..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <input id="music-search" type="text" placeholder="Search music..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);" aria-label="Search music" title="Search music">
                 <div id="music-list" class="list-view"></div>
             </section>
 
             <section id="books" class="hidden">
                 <h2>Books</h2>
-                <input id="books-search" type="text" placeholder="Search books..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <input id="books-search" type="text" placeholder="Search books..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);" aria-label="Search books" title="Search books">
                 <div id="books-list" class="media-grid"></div>
             </section>
 
             <section id="gallery" class="hidden">
                 <h2>Gallery</h2>
-                <input id="gallery-search" type="text" placeholder="Search gallery..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <input id="gallery-search" type="text" placeholder="Search gallery..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);" aria-label="Search gallery" title="Search gallery">
                 <div id="gallery-list" class="gallery-grid"></div>
             </section>
 
             <section id="files" class="hidden">
                 <h2>Files</h2>
-                <input id="files-search" type="text" placeholder="Search files..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <input id="files-search" type="text" placeholder="Search files..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);" aria-label="Search files" title="Search files">
                 <div id="files-list" class="list-view"></div>
             </section>
 
@@ -269,9 +269,9 @@
                             </div>
 
                             <div id="ts-auth-section" style="margin-bottom:15px; display:none;">
-                                <label style="display:block; margin-bottom:5px; font-size:0.9rem;">Auth Key (if required):</label>
+                                <label for="ts-auth-key" style="display:block; margin-bottom:5px; font-size:0.9rem;">Auth Key (if required):</label>
                                 <div style="display:flex; gap:10px;">
-                                    <input type="password" id="ts-auth-key" placeholder="tskey-auth-..." style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                                    <input type="password" id="ts-auth-key" placeholder="tskey-auth-..." style="flex:1; padding:8px 12px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);" aria-label="Tailscale auth key" title="Tailscale auth key">
                                     <button onclick="saveTsKey()" class="secondary" style="padding:8px 15px;">Save</button>
                                 </div>
                             </div>
@@ -314,8 +314,8 @@
                             <p id="modal-ssid" class="modal-subtitle"></p>
                             
                             <div class="form-group">
-                                <label>Password</label>
-                                <input type="password" id="wifi-password-input" placeholder="Enter network password">
+                                <label for="wifi-password-input">Password</label>
+                                <input type="password" id="wifi-password-input" placeholder="Enter network password" aria-label="Wi-Fi password" title="Wi-Fi password">
                             </div>
                             
                             <div class="modal-footer">
@@ -344,7 +344,7 @@
                     <h3>Upload Files</h3>
                     <div class="upload-controls">
                         <label>Category:</label>
-                        <select id="upload-category">
+                        <select id="upload-category" aria-label="Upload category" title="Upload category">
                             <option value="movies">Movies</option>
                             <option value="shows">Shows</option>
                             <option value="music">Music</option>
@@ -389,12 +389,12 @@
                     <h4>Add New User</h4>
                     <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
                         <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" id="new-user-username" placeholder="Username">
+                            <label for="new-user-username">Username</label>
+                            <input type="text" id="new-user-username" placeholder="Username" aria-label="New user username" title="New user username">
                         </div>
                         <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" id="new-user-password" placeholder="Password">
+                            <label for="new-user-password">Password</label>
+                            <input type="password" id="new-user-password" placeholder="Password" aria-label="New user password" title="New user password">
                         </div>
                         <div class="form-group">
                             <label for="new-user-is-admin" style="display: block; margin-bottom: 5px;">Admin</label>
@@ -439,16 +439,16 @@
                     <h3>Your Profile</h3>
                     <div class="settings-form">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Display Name</label>
+                            <label for="profile-name" style="display: block; margin-bottom: 5px;">Display Name</label>
                             <input type="text" id="profile-name" placeholder="How you want to be called" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Avatar URL (optional)</label>
+                            <label for="profile-avatar" style="display: block; margin-bottom: 5px;">Avatar URL (optional)</label>
                             <input type="text" id="profile-avatar" placeholder="https://..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
                         </div>
                         <div style="margin-bottom: 15px;">
                             <label style="display: block; margin-bottom: 5px;">Parental Controls Level</label>
-                            <select id="profile-parental" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                            <select id="profile-parental" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);" aria-label="Parental controls" title="Parental controls">
                                 <option value="0">All Access</option>
                                 <option value="1">Level 1 (Kids)</option>
                                 <option value="2">Level 2 (Teens)</option>
@@ -483,7 +483,7 @@
                     <h3>Metadata Configuration</h3>
                     <div class="settings-form">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">OMDb API Key</label>
+                            <label for="omdb-api-key" style="display: block; margin-bottom: 5px;">OMDb API Key</label>
                             <div style="display: flex; gap: 10px;">
                                 <input type="text" id="omdb-api-key" placeholder="Enter OMDb API Key" style="flex: 1; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
                                 <button onclick="saveOmdbKey()" class="primary">Save Key</button>
@@ -526,12 +526,12 @@
             <button id="player-close" class="player-btn" title="Close Player">✕</button>
         </div>
         <div class="player-progress">
-            <input id="player-seek" type="range" min="0" max="100" value="0">
+            <input id="player-seek" type="range" min="0" max="100" value="0" aria-label="Seek" title="Seek">
             <div id="player-time" class="player-time">0:00 / 0:00</div>
         </div>
         <div class="player-volume">
             <span style="font-size: 0.8rem; margin-right: 5px;">🔊</span>
-            <input id="player-volume" type="range" min="0" max="1" step="0.01" value="1">
+            <input id="player-volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" title="Volume">
         </div>
         <audio id="global-audio" preload="auto"></audio>
     </div>

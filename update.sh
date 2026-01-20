@@ -114,10 +114,10 @@ echo "Installing/Updating system dependencies..."
 # We only run update if install fails to save time on Pi
 # Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
 # Note: 7zip replaces p7zip-full on Ubuntu 24.04+
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools; then
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl; then
     echo "Some packages missing, updating list and trying again..." >> update.log
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl
 fi
 
 # Ensure Tailscale is installed (for updates via UI)
@@ -205,6 +205,20 @@ fi
 # Fix MiniDLNA permissions and sudoers after update
 echo "Checking MiniDLNA configuration..." >> update.log
 
+MINIDLNA_CONF="/etc/minidlna.conf"
+DLNA_CONFIG_CHANGED=0
+if [ -f "$MINIDLNA_CONF" ]; then
+    if sudo grep -Eq '^root_container=' "$MINIDLNA_CONF"; then
+        if ! sudo grep -Eq '^root_container=B$' "$MINIDLNA_CONF"; then
+            sudo sed -i -E 's/^root_container=.*/root_container=B/' "$MINIDLNA_CONF"
+            DLNA_CONFIG_CHANGED=1
+        fi
+    else
+        echo "root_container=B" | sudo tee -a "$MINIDLNA_CONF" >/dev/null
+        DLNA_CONFIG_CHANGED=1
+    fi
+fi
+
 # Re-verify sudoers configuration (in case it was removed by system update)
 REAL_USER=${SUDO_USER:-$USER}
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
@@ -223,7 +237,7 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     # Write to temp file first and validate before installing
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then
@@ -240,6 +254,11 @@ if command -v minidlnad >/dev/null 2>&1; then
     echo "Fixing MiniDLNA cache permissions..." >> update.log
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
+
+    if [ "$DLNA_CONFIG_CHANGED" = "1" ]; then
+        sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
+        sudo minidlnad -R >/dev/null 2>&1 || true
+    fi
 
     # Restart MiniDLNA if it's running
     if systemctl is-active --quiet minidlna; then

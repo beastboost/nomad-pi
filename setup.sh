@@ -63,7 +63,7 @@ echo "=========================================="
 
 # 0. Check for Updates and Fix Git Remote
 if [ -d ".git" ]; then
-    echo "[0/9] Optimizing Git configuration..."
+    echo "[0/10] Optimizing Git configuration..."
     
     # Mark directory as safe for git (common issue on newer git versions)
     git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
@@ -120,8 +120,8 @@ if [ "$TOTAL_SWAP" -lt 1000 ]; then
 fi
 
 # 1. System Updates
-echo "[1/9] Checking system packages..."
-PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools"
+echo "[1/10] Checking system packages..."
+PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools curl"
 MISSING_PACKAGES=""
 
 for pkg in $PACKAGES; do
@@ -143,7 +143,7 @@ else
 fi
 
 # 2. Set Hostname (for http://nomadpi.local:8000)
-echo "[2/9] Configuring Hostname and mDNS..."
+echo "[2/10] Configuring Hostname and mDNS..."
 CURRENT_HOSTNAME=$(cat /etc/hostname | tr -d " \t\n\r")
 NEW_HOSTNAME="nomadpi"
 if [ "$CURRENT_HOSTNAME" != "$NEW_HOSTNAME" ]; then
@@ -158,7 +158,7 @@ sudo systemctl restart avahi-daemon
 echo "Hostname set to 'nomadpi'. You can access the server at http://nomadpi.local:8000"
 
 # 3. Python Environment
-echo "[3/9] Setting up Python environment..."
+echo "[3/10] Setting up Python environment..."
 
 # Check if venv exists but is broken (e.g. moved from /root)
 if [ -d "venv" ]; then
@@ -214,7 +214,7 @@ else
 fi
 
 # 4. Create Directories
-echo "[4/9] Ensuring data directories exist..."
+echo "[4/10] Ensuring data directories exist..."
 mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
 
 # Optimize chown/chmod - only run if needed, and skip data/ for the main pass
@@ -243,7 +243,7 @@ if id "minidlna" &>/dev/null; then
 fi
 
 # 5. Systemd Service Setup
-echo "[5/9] Setting up Systemd service..."
+echo "[5/10] Setting up Systemd service..."
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 # Use REAL_USER defined in step 4
@@ -334,7 +334,7 @@ for i in {1..10}; do
 done
 
 # 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
-echo "[6/9] Configuring permissions..."
+echo "[6/10] Configuring permissions..."
 
 # Detect paths for sudoers to be universal
 MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
@@ -347,10 +347,17 @@ MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
 TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
 
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
-sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH
+SUDOERS_TMP=$(mktemp)
+cat > "$SUDOERS_TMP" <<EOL
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
-sudo chmod 0440 $SUDOERS_FILE
+if sudo visudo -cf "$SUDOERS_TMP"; then
+    sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
+    sudo chmod 0440 "$SUDOERS_FILE"
+else
+    echo "ERROR: Generated sudoers file failed validation. Not installing."
+fi
+rm -f "$SUDOERS_TMP"
 
 # 7. Network Configuration (Home Wi-Fi + Hotspot Fallback)
 echo "[7/10] Configuring Network..."
@@ -529,7 +536,7 @@ db_dir=/var/cache/minidlna
 log_dir=/var/log
 friendly_name=$NEW_HOSTNAME
 inotify=yes
-root_container=V
+root_container=B
 presentation_url=http://$NEW_HOSTNAME.local:8000/
 EOL
 
@@ -586,6 +593,16 @@ else
         echo "Starting Tailscale service..."
         sudo systemctl enable tailscaled 2>/dev/null || true
         sudo systemctl start tailscaled 2>/dev/null || true
+    fi
+fi
+
+# Optional non-interactive Tailscale login (set TAILSCALE_AUTHKEY in /etc/nomadpi.env)
+if [ -f "/etc/nomadpi.env" ]; then
+    source "/etc/nomadpi.env" 2>/dev/null || true
+fi
+if [ -n "${TAILSCALE_AUTHKEY:-}" ] && command -v tailscale >/dev/null 2>&1; then
+    if ! sudo -n tailscale status >/dev/null 2>&1; then
+        sudo -n tailscale up --authkey "$TAILSCALE_AUTHKEY" --hostname "$NEW_HOSTNAME" >/dev/null 2>&1 || true
     fi
 fi
 

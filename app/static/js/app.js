@@ -71,6 +71,19 @@ function getCookie(name) {
     if (parts.length === 2) return parts.pop().split(';').shift();
     return null;
 }
+
+function getAuthTokenValue() {
+    return getCookie('auth_token') || localStorage.getItem('nomad_auth_token');
+}
+
+function addTokenToDataUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (!url.startsWith('/data/')) return url;
+    if (url.includes('token=')) return url;
+    const token = getAuthTokenValue();
+    if (!token) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+}
 let currentMedia = null;
 let currentProfile = null;
 let driveScanInterval = null;
@@ -242,6 +255,7 @@ function applyMovieMetaToCard(cardEl, file, data) {
     if (shell && !file.poster) {
         const posterUrl = data.poster || data.meta?.Poster;
         if (posterUrl && posterUrl !== 'N/A') {
+            file.poster = posterUrl;
             const existingImg = shell.querySelector('img.poster-img');
             if (!existingImg) {
                 const placeholder = shell.querySelector('.poster-placeholder');
@@ -249,7 +263,7 @@ function applyMovieMetaToCard(cardEl, file, data) {
                 img.className = 'poster-img';
                 img.loading = 'lazy';
                 img.alt = file?.name || 'Poster';
-                img.src = posterUrl;
+                img.src = addTokenToDataUrl(posterUrl);
                 if (placeholder) placeholder.replaceWith(img);
                 else shell.prepend(img);
             }
@@ -1297,7 +1311,7 @@ function renderMediaList(category, files) {
                 // Root level shows view (using data from query_shows)
                 div.className = 'media-item media-card';
                 const poster = file.poster 
-                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : `<div class="poster-placeholder"></div>`;
                 
                 const subtitle = `${file.episode_count || 0} episodes` + (file.year ? ` • ${file.year}` : '');
@@ -1340,7 +1354,7 @@ function renderMediaList(category, files) {
                 if (e.target.closest('button')) return;
                 if (isVideo) {
                     if (category === 'movies') openMovieDetails(file);
-                    else openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    else openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
                 } else {
                     openImageViewer(file.path, cleanTitle(file.name));
                 }
@@ -1363,8 +1377,8 @@ function renderMediaList(category, files) {
                 const subtitle = metaSubtitleParts.length ? escapeHtml(metaSubtitleParts.join(' • ')) : (file.folder && file.folder !== '.' ? escapeHtml(file.folder) : 'Movie');
                 const metaPoster = (!file.poster && (file.omdb?.poster || file.omdb?.meta?.Poster) && (file.omdb?.poster || file.omdb?.meta?.Poster) !== 'N/A') ? (file.omdb?.poster || file.omdb?.meta?.Poster) : null;
                 const poster = file.poster
-                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
-                    : (metaPoster ? `<img class="poster-img" src="${metaPoster}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
+                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    : (metaPoster ? `<img class="poster-img" src="${addTokenToDataUrl(metaPoster)}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
                 
                 const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
                 const playLabel = Number(file?.progress?.current_time || 0) > 10 ? 'Resume' : 'Play';
@@ -1663,13 +1677,11 @@ function playMusicAt(idx) {
     if (titleEl) titleEl.textContent = cleanTitle(track.name);
     if (playBtn) playBtn.textContent = '⏳';
     
-    const token = getCookie('auth_token');
+    const token = getAuthTokenValue();
     
     // Use the /api/media/stream endpoint for all playback to handle auth and external paths
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(track.path)}`;
-    if (token) {
-        streamUrl += '&token=' + token;
-    }
+    if (token) streamUrl += '&token=' + encodeURIComponent(token);
     
     console.log('Playing track:', track.name, 'Stream URL:', streamUrl);
 
@@ -1776,9 +1788,9 @@ function openImageViewer(path, title) {
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading) return;
 
-    const token = getCookie('auth_token');
+    const token = getAuthTokenValue();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
-    if (token) streamUrl += '&token=' + token;
+    if (token) streamUrl += '&token=' + encodeURIComponent(token);
 
     heading.textContent = title ? String(title) : 'Image';
     body.innerHTML = `<div class="image-viewer"><img src="${streamUrl}" style="max-width:100%; max-height:80vh; border-radius:8px;"></div>`;
@@ -1802,7 +1814,7 @@ async function openMovieDetails(file) {
             <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                 <div style="width: 180px; flex: 0 0 180px;">
                     <div style="width:100%; aspect-ratio:2/3; border-radius: 14px; overflow:hidden; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);">
-                        ${file.poster ? `<img src="${file.poster}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
+                        ${file.poster ? `<img src="${addTokenToDataUrl(file.poster)}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
                     </div>
                 </div>
                 <div style="flex: 1 1 260px; min-width: 240px;">
@@ -1819,9 +1831,9 @@ async function openMovieDetails(file) {
         </div>
     `;
 
-    const token = getCookie('auth_token');
+    const token = getAuthTokenValue();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(file.path)}`;
-    if (token) streamUrl += '&token=' + token;
+    if (token) streamUrl += '&token=' + encodeURIComponent(token);
     const fullUrl = window.location.origin + streamUrl;
     const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
 
@@ -1884,9 +1896,9 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
         return;
     }
 
-    const token = getCookie('auth_token');
+    const token = getAuthTokenValue();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
-    if (token) streamUrl += '&token=' + token;
+    if (token) streamUrl += '&token=' + encodeURIComponent(token);
 
     // Build the full URL for external players
     const fullUrl = window.location.origin + streamUrl;
@@ -1932,6 +1944,8 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
     video.controls = true;
     video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
+    const posterUrl = addTokenToDataUrl(activeDashboardMeta?.poster_url || '');
+    if (posterUrl) video.poster = posterUrl;
     video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
     video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} try { updateDashboardSession(video, path, 'paused', true); } catch (e) {} });
@@ -2396,7 +2410,7 @@ function renderShows() {
                     const start = Number(item.progress?.current_time || 0);
                     const displayTitle = `${item.showName} - ${item.name}`;
                     const posterHtml = item.poster 
-                        ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(displayTitle)}">`
+                        ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(displayTitle)}">`
                         : `<div class="poster-placeholder"></div>`;
 
                     let progressHtml = '';
@@ -2425,14 +2439,14 @@ function renderShows() {
 
                     div.addEventListener('click', (e) => {
                         if (e.target.closest('button')) return;
-                        openVideoViewer(item.path, displayTitle, start);
+                        openVideoViewer(item.path, displayTitle, start, { poster_url: item.poster || null });
                     });
 
                     const playBtn = div.querySelector('.poster-play');
                     if (playBtn) {
                         playBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            openVideoViewer(item.path, displayTitle, start);
+                            openVideoViewer(item.path, displayTitle, start, { poster_url: item.poster || null });
                         });
                     }
 
@@ -2448,7 +2462,7 @@ function renderShows() {
             div.className = 'media-item show-card';
             const contEp = collectContinueEpisodes(show.name)[0] || null;
             const poster = show.poster
-                ? `<img class="show-poster" src="${show.poster}" loading="lazy" alt="${escapeHtml(show.name)}">`
+                ? `<img class="show-poster" src="${addTokenToDataUrl(show.poster)}" loading="lazy" alt="${escapeHtml(show.name)}">`
                 : `<div class="show-poster" style="background: radial-gradient(circle at 30% 20%, rgba(229, 9, 20, 0.35), rgba(20, 20, 20, 0.95) 60%);"></div>`;
             
             const subtitle = contEp ? `Continue • ${escapeHtml(contEp.seasonName || '')}` : `${(show.seasons || []).length} season(s)`;
@@ -2487,7 +2501,7 @@ function renderShows() {
                 const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start);
+                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
                 });
             }
             const resumeInline = div.querySelector('.show-resume-inline');
@@ -2496,7 +2510,7 @@ function renderShows() {
                 const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start);
+                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
                 });
             }
             container.appendChild(div);
@@ -2518,7 +2532,7 @@ function renderShows() {
             div.style.cursor = 'pointer';
             
             const posterHtml = season.poster 
-                ? `<img class="poster-img" src="${season.poster}" loading="lazy" alt="${escapeHtml(season.name)}">`
+                ? `<img class="poster-img" src="${addTokenToDataUrl(season.poster)}" loading="lazy" alt="${escapeHtml(season.name)}">`
                 : `<div class="poster-placeholder"></div>`;
 
             const contEp = Array.isArray(season.episodes) ? season.episodes.find(ep => shouldContinue(ep?.progress)) : null;
@@ -2557,7 +2571,7 @@ function renderShows() {
                 const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start);
+                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
                 });
             }
             const resumeInline = div.querySelector('.season-resume-inline');
@@ -2566,7 +2580,7 @@ function renderShows() {
                 const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start);
+                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
                 });
             }
             container.appendChild(div);
@@ -2592,7 +2606,7 @@ function renderShows() {
             div.style.cursor = 'pointer';
         
         const posterHtml = ep.poster 
-            ? `<img class="poster-img" src="${ep.poster}" loading="lazy" alt="${escapeHtml(ep.name)}">`
+            ? `<img class="poster-img" src="${addTokenToDataUrl(ep.poster)}" loading="lazy" alt="${escapeHtml(ep.name)}">`
             : `<div class="poster-placeholder"></div>`;
 
         let progressHtml = '';
@@ -2626,14 +2640,14 @@ function renderShows() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0);
+            openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0, { poster_url: ep.poster || null });
         });
 
         const btn = div.querySelector('.poster-play');
         if (btn) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0);
+                openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0, { poster_url: ep.poster || null });
             });
         }
 
@@ -2821,7 +2835,7 @@ async function loadResume() {
                  const label = file.type ? escapeHtml(file.type) : 'Video';
                  
                  const posterHtml = file.poster 
-                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : `<div class="poster-placeholder"></div>`;
 
                  const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
@@ -2851,14 +2865,14 @@ async function loadResume() {
                  
                  div.addEventListener('click', (e) => {
                     if (e.target.closest('button')) return;
-                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
                  });
 
                  const btn = div.querySelector('.poster-play');
                  if (btn) {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
                     });
                  }
 
@@ -2914,7 +2928,7 @@ async function loadRecent() {
                 const title = item.category === 'movies' ? (item.omdb?.title || cleanTitle(item.name)) : item.name;
                 const subtitle = item.category === 'movies' ? 'Movie' : 'TV Show';
                 const poster = item.poster 
-                    ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(title)}">`
+                    ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(title)}">`
                     : `<div class="poster-placeholder"></div>`;
 
                 div.innerHTML = `
@@ -2933,7 +2947,7 @@ async function loadRecent() {
 
                 div.addEventListener('click', () => {
                     if (item.category === 'movies') {
-                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0);
+                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0, { poster_url: item.poster || null });
                     } else {
                         showSection('shows');
                         setShowsLevel('seasons', item.name);
@@ -4849,7 +4863,7 @@ function renderUpNext(items) {
         div.style.cursor = 'pointer';
 
         const posterHtml = item.poster
-            ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
+            ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(item.name)}">`
             : `<div class="poster-placeholder"></div>`;
 
         const subtitleParts = [item.show, item.season].filter(Boolean).map(v => escapeHtml(v));
@@ -4872,12 +4886,12 @@ function renderUpNext(items) {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(item.path, item.name, 0);
+            openVideoViewer(item.path, item.name, 0, { poster_url: item.poster || null });
         });
 
         div.querySelector('.poster-play')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            openVideoViewer(item.path, item.name, 0);
+            openVideoViewer(item.path, item.name, 0, { poster_url: item.poster || null });
         });
 
         container.appendChild(div);
