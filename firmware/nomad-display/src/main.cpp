@@ -32,6 +32,24 @@ LGFX_Sprite sprite_poster(&tft);
 static lv_img_dsc_t img_poster_dsc;
 char current_poster_url[256] = "";
 
+// History buffers for sparklines (keep last 60 samples)
+#define HISTORY_SIZE 60
+uint8_t cpu_history[HISTORY_SIZE] = {0};
+uint8_t ram_history[HISTORY_SIZE] = {0};
+uint16_t net_down_history[HISTORY_SIZE] = {0};  // KB/s
+uint16_t net_up_history[HISTORY_SIZE] = {0};    // KB/s
+uint8_t history_idx = 0;
+unsigned long last_history_update = 0;
+
+// Screensaver
+bool screensaver_active = false;
+unsigned long last_user_activity = 0;
+#define SCREENSAVER_TIMEOUT 300000  // 5 minutes
+
+// Multiple sessions
+int current_session_index = 0;
+int total_sessions = 0;
+
 char wifi_ssid[64] = "";
 char wifi_pass[64] = "";
 String server_ip = "";
@@ -77,6 +95,15 @@ lv_obj_t * label_ram;
 lv_obj_t * label_stats;
 lv_obj_t * arc_cpu;
 lv_obj_t * arc_ram;
+lv_obj_t * canvas_cpu_graph;
+lv_obj_t * canvas_ram_graph;
+lv_obj_t * canvas_net_graph;
+lv_draw_rect_dsc_t sparkline_dsc;
+
+// Screensaver widgets
+lv_obj_t * screensaver_cont;
+lv_obj_t * screensaver_clock;
+lv_obj_t * screensaver_date;
 
 // Now Playing Widgets
 lv_obj_t * cont_now_playing_list;
@@ -141,6 +168,16 @@ void applyConnectionUi();
 void applyTheme();
 void formatClock(char* out, size_t out_len, uint32_t seconds);
 void updateWifiSignal();
+void updateHistoryBuffers(float cpu, float ram, uint32_t net_down, uint32_t net_up);
+void drawSparkline(lv_obj_t* canvas, uint8_t* data, uint16_t len, lv_color_t color);
+void drawSparklineU16(lv_obj_t* canvas, uint16_t* data, uint16_t len, lv_color_t color, uint16_t max_val);
+void updateSparklines();
+void checkScreensaver();
+void activateScreensaver();
+void deactivateScreensaver();
+void updateScreensaverClock();
+void buildScreensaver();
+void resetUserActivity();
 
 static bool posterJpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
     if (!bitmap) return false;
@@ -183,6 +220,9 @@ void setup() {
     // Build Main UI
     buildUI();
 
+    // Initialize user activity timer
+    last_user_activity = millis();
+
     // Connect if creds exist
     if (strlen(wifi_ssid) > 0) {
         connectToWifi(wifi_ssid, wifi_pass);
@@ -200,6 +240,12 @@ void loop() {
     lv_timer_handler();
     applyConnectionUi();
     updateWifiSignal();
+    updateSparklines();
+    checkScreensaver();
+
+    if (screensaver_active) {
+        updateScreensaverClock();
+    }
 
     handleWifiConnection();
 
@@ -253,6 +299,7 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
         data->state = LV_INDEV_STATE_PR;
         data->point.x = touchX;
         data->point.y = touchY;
+        resetUserActivity();  // Reset screensaver timer on touch
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
@@ -340,6 +387,194 @@ void formatClock(char* out, size_t out_len, uint32_t seconds) {
     } else {
         snprintf(out, out_len, "%lu:%02lu", (unsigned long)m, (unsigned long)s);
     }
+}
+
+void updateHistoryBuffers(float cpu, float ram, uint32_t net_down, uint32_t net_up) {
+    if (millis() - last_history_update < 2000) return;  // Update every 2 seconds
+    last_history_update = millis();
+
+    cpu_history[history_idx] = (uint8_t)(cpu > 100 ? 100 : cpu);
+    ram_history[history_idx] = (uint8_t)(ram > 100 ? 100 : ram);
+    net_down_history[history_idx] = (uint16_t)(net_down / 1024);  // Convert to KB/s
+    net_up_history[history_idx] = (uint16_t)(net_up / 1024);      // Convert to KB/s
+
+    history_idx = (history_idx + 1) % HISTORY_SIZE;
+}
+
+void drawSparkline(lv_obj_t* canvas, uint8_t* data, uint16_t len, lv_color_t color) {
+    if (!canvas || !data || len == 0) return;
+
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x0B1220), LV_OPA_0);
+
+    lv_draw_line_dsc_t line_dsc;
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = color;
+    line_dsc.width = 1;
+    line_dsc.opa = LV_OPA_COVER;
+
+    uint16_t w = lv_obj_get_width(canvas);
+    uint16_t h = lv_obj_get_height(canvas);
+
+    for (uint16_t i = 1; i < len && i < w; i++) {
+        uint16_t idx1 = (history_idx + i - 1) % len;
+        uint16_t idx2 = (history_idx + i) % len;
+
+        int16_t y1 = h - (data[idx1] * h / 100);
+        int16_t y2 = h - (data[idx2] * h / 100);
+        int16_t x1 = i - 1;
+        int16_t x2 = i;
+
+        lv_point_t p[2] = {{x1, y1}, {x2, y2}};
+        lv_canvas_draw_line(canvas, p, 2, &line_dsc);
+    }
+}
+
+void drawSparklineU16(lv_obj_t* canvas, uint16_t* data, uint16_t len, lv_color_t color, uint16_t max_val) {
+    if (!canvas || !data || len == 0 || max_val == 0) return;
+
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x0B1220), LV_OPA_0);
+
+    lv_draw_line_dsc_t line_dsc;
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = color;
+    line_dsc.width = 1;
+    line_dsc.opa = LV_OPA_COVER;
+
+    uint16_t w = lv_obj_get_width(canvas);
+    uint16_t h = lv_obj_get_height(canvas);
+
+    for (uint16_t i = 1; i < len && i < w; i++) {
+        uint16_t idx1 = (history_idx + i - 1) % len;
+        uint16_t idx2 = (history_idx + i) % len;
+
+        uint16_t val1 = data[idx1] > max_val ? max_val : data[idx1];
+        uint16_t val2 = data[idx2] > max_val ? max_val : data[idx2];
+
+        int16_t y1 = h - (val1 * h / max_val);
+        int16_t y2 = h - (val2 * h / max_val);
+        int16_t x1 = i - 1;
+        int16_t x2 = i;
+
+        lv_point_t p[2] = {{x1, y1}, {x2, y2}};
+        lv_canvas_draw_line(canvas, p, 2, &line_dsc);
+    }
+}
+
+void updateSparklines() {
+    if (!canvas_cpu_graph || !canvas_ram_graph || !canvas_net_graph) return;
+
+    drawSparkline(canvas_cpu_graph, cpu_history, HISTORY_SIZE, lv_color_hex(0x3B82F6));
+    drawSparkline(canvas_ram_graph, ram_history, HISTORY_SIZE, lv_color_hex(0x8B5CF6));
+
+    // Find max for network scale
+    uint16_t max_net = 100;  // Minimum 100 KB/s scale
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (net_down_history[i] > max_net) max_net = net_down_history[i];
+        if (net_up_history[i] > max_net) max_net = net_up_history[i];
+    }
+    drawSparklineU16(canvas_net_graph, net_down_history, HISTORY_SIZE, lv_color_hex(0x10B981), max_net);
+}
+
+void resetUserActivity() {
+    last_user_activity = millis();
+    if (screensaver_active) {
+        deactivateScreensaver();
+    }
+}
+
+void checkScreensaver() {
+    if (screensaver_active) return;
+
+    if (millis() - last_user_activity > SCREENSAVER_TIMEOUT) {
+        activateScreensaver();
+    }
+}
+
+void activateScreensaver() {
+    if (screensaver_active) return;
+    screensaver_active = true;
+
+    Serial.println("Activating screensaver");
+
+    // Hide main UI
+    if (tv) lv_obj_add_flag(tv, LV_OBJ_FLAG_HIDDEN);
+
+    // Show screensaver
+    if (screensaver_cont) {
+        lv_obj_clear_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        buildScreensaver();
+    }
+
+    // Dim display
+    tft.setBrightness(brightness / 4);  // 25% brightness
+}
+
+void deactivateScreensaver() {
+    if (!screensaver_active) return;
+    screensaver_active = false;
+
+    Serial.println("Deactivating screensaver");
+
+    // Restore brightness
+    tft.setBrightness(brightness);
+
+    // Hide screensaver
+    if (screensaver_cont) lv_obj_add_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+
+    // Show main UI
+    if (tv) lv_obj_clear_flag(tv, LV_OBJ_FLAG_HIDDEN);
+}
+
+void updateScreensaverClock() {
+    static unsigned long last_clock_update = 0;
+    if (millis() - last_clock_update < 1000) return;  // Update every second
+    last_clock_update = millis();
+
+    if (!screensaver_active || !screensaver_clock || !screensaver_date) return;
+
+    time_t now = millis() / 1000;
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    char time_str[16];
+    char date_str[32];
+
+    // Format time (HH:MM:SS)
+    snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+    // Format date
+    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    snprintf(date_str, sizeof(date_str), "%s, %s %d",
+             days[timeinfo.tm_wday], months[timeinfo.tm_mon], timeinfo.tm_mday);
+
+    lv_label_set_text(screensaver_clock, time_str);
+    lv_label_set_text(screensaver_date, date_str);
+}
+
+void buildScreensaver() {
+    screensaver_cont = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(screensaver_cont, SCREEN_WIDTH, SCREEN_HEIGHT);
+    lv_obj_set_style_bg_color(screensaver_cont, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(screensaver_cont, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(screensaver_cont, 0, 0);
+    lv_obj_set_style_pad_all(screensaver_cont, 0, 0);
+    lv_obj_add_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+
+    // Clock
+    screensaver_clock = lv_label_create(screensaver_cont);
+    lv_obj_set_style_text_font(screensaver_clock, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(screensaver_clock, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(screensaver_clock, "00:00:00");
+    lv_obj_center(screensaver_clock);
+
+    // Date
+    screensaver_date = lv_label_create(screensaver_cont);
+    lv_obj_set_style_text_font(screensaver_date, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(screensaver_date, lv_color_hex(0x94A3B8), 0);
+    lv_label_set_text(screensaver_date, "");
+    lv_obj_align_to(screensaver_date, screensaver_clock, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
 }
 
 void applyTheme() {
@@ -501,6 +736,23 @@ void buildDashboardTab(lv_obj_t * parent) {
     lv_obj_set_style_text_font(label_stats, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(label_stats, LV_LABEL_LONG_WRAP);
     lv_label_set_text(label_stats, "Disk: --%  |  Users: --\nDown: --  |  Up: --");
+
+    // Add sparkline graphs
+    static lv_color_t cbuf_cpu[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+    static lv_color_t cbuf_ram[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+    static lv_color_t cbuf_net[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+
+    canvas_cpu_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_cpu_graph, cbuf_cpu, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_cpu_graph, 60, 40);
+
+    canvas_ram_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_ram_graph, cbuf_ram, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_ram_graph, 60, 40);
+
+    canvas_net_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_net_graph, cbuf_net, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_net_graph, 60, 40);
 }
 
 void buildNowPlayingTab(lv_obj_t * parent) {
@@ -1090,7 +1342,13 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     float disk = system["disk_percent"].as<float>();
     int active_users = system["active_users"].as<int>();
     uint32_t uptime_seconds = (uint32_t)(system["uptime_seconds"].as<double>());
-    
+    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
+    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
+
+    // Update history buffers for sparklines
+    updateHistoryBuffers(cpu, ram, net_down_bps, net_up_bps);
+    total_sessions = sessions.size();
+
     lv_arc_set_value(arc_cpu, (int)cpu);
     int cpu10 = (int)(cpu * 10.0f + 0.5f);
     lv_label_set_text_fmt(label_cpu, "CPU\n%d.%d%%", cpu10 / 10, cpu10 % 10);
@@ -1109,9 +1367,6 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     }
     
     // Format bytes for net speed
-    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
-    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
-
     int down10 = 0;
     const char* unit_d = "B/s";
     if (net_down_bps < 1024) {
