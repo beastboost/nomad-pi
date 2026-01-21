@@ -215,9 +215,18 @@ if ! command -v minidlnad >/dev/null 2>&1; then
     sudo apt-get install -y minidlna >> update.log 2>&1
 fi
 
-# Add minidlna user to group
+# Add minidlna user to group and fix permissions
 if id "minidlna" &>/dev/null; then
+    echo "Configuring minidlna permissions..." >> update.log
     sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
+
+    # CRITICAL: Make home directory traversable so minidlna can access subdirectories
+    chmod +x "$HOME" 2>/dev/null || true
+
+    # Make nomad-pi directory traversable
+    chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
+
+    # Ensure data directory and subdirectories are group readable/executable
     sudo chmod -R g+rX "$SCRIPT_DIR/data" 2>/dev/null || true
 fi
 
