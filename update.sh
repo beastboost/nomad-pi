@@ -205,8 +205,6 @@ fi
 # Ensure data directories exist
 echo "Ensuring media directories exist..." >> update.log
 mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
-chmod -R 755 data/
-chown -R $REAL_USER:$REAL_USER data/ 2>/dev/null || true
 
 # Install MiniDLNA if not present
 if ! command -v minidlnad >/dev/null 2>&1; then
@@ -218,16 +216,22 @@ fi
 # Add minidlna user to group and fix permissions
 if id "minidlna" &>/dev/null; then
     echo "Configuring minidlna permissions..." >> update.log
+
+    # Add minidlna to user's group so it can access files
     sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
 
-    # CRITICAL: Make home directory traversable so minidlna can access subdirectories
-    chmod +x "$HOME" 2>/dev/null || true
+    # Get the actual home directory path
+    USER_HOME=$(eval echo ~$REAL_USER)
 
-    # Make nomad-pi directory traversable
-    chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
+    # CRITICAL: Make home directory traversable (world-executable)
+    sudo chmod o+x "$USER_HOME" 2>/dev/null || true
 
-    # Ensure data directory and subdirectories are group readable/executable
-    sudo chmod -R g+rX "$SCRIPT_DIR/data" 2>/dev/null || true
+    # Make nomad-pi directory traversable and readable
+    sudo chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
+
+    # Set ownership and permissions on data directory
+    sudo chown -R $REAL_USER:$REAL_USER "$SCRIPT_DIR/data" 2>/dev/null || true
+    sudo chmod -R 755 "$SCRIPT_DIR/data" 2>/dev/null || true
 fi
 
 # Fix MiniDLNA permissions and configuration
