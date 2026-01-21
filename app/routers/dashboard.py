@@ -543,10 +543,13 @@ async def websocket_endpoint(websocket: WebSocket):
             system_stats = get_system_stats()
 
             # Broadcast update
+            offset = datetime.now().astimezone().utcoffset()
+            tz_offset_sec = int(offset.total_seconds()) if offset else 0
             message = {
                 "sessions": sessions_list,
                 "system": system_stats,
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
+                "tz_offset_sec": tz_offset_sec,
             }
 
             await websocket.send_json(message)
@@ -831,9 +834,13 @@ async def get_public_dashboard_snapshot():
         if isinstance(session, dict):
             sessions_list.append(_session_to_payload(session_id, session, now))
 
+    offset = datetime.now().astimezone().utcoffset()
+    tz_offset_sec = int(offset.total_seconds()) if offset else 0
+
     return {
         "sessions": sessions_list,
         "system": get_system_stats(),
         "timestamp": int(time.time()),
+        "tz_offset_sec": tz_offset_sec,
         "source": "http",
     }

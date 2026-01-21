@@ -9,6 +9,7 @@
 #include <HTTPClient.h>
 #include <TJpg_Decoder.h>
 #include <time.h>
+#include <sys/time.h>
 #include "LGFX_Setup.h"
 
 // --- DEFINITIONS ---
@@ -76,6 +77,8 @@ int brightness = 128;
 bool time_configured = false;
 bool time_valid = false;
 unsigned long last_time_check_ms = 0;
+int32_t tz_offset_sec = 0;
+bool tz_known = false;
 
 volatile bool ws_payload_ready = false;
 static char ws_payload_buf[20001];
@@ -553,7 +556,8 @@ void updateScreensaverClock() {
         return;
     }
     struct tm timeinfo;
-    localtime_r(&now, &timeinfo);
+    time_t show = now + (tz_known ? (time_t)tz_offset_sec : 0);
+    gmtime_r(&show, &timeinfo);
 
     char time_str[16];
     char date_str[32];
@@ -1314,6 +1318,21 @@ void processWsMessage() {
 
     if (error) return;
     last_http_success_ms = millis();
+    if (!time_valid) {
+        uint32_t ts = doc["timestamp"] | 0U;
+        if (ts > 1700000000U) {
+            timeval tv;
+            tv.tv_sec = (time_t)ts;
+            tv.tv_usec = 0;
+            settimeofday(&tv, nullptr);
+            time_valid = true;
+        }
+    }
+    if (!tz_known) {
+        int32_t off = doc["tz_offset_sec"] | 0;
+        tz_offset_sec = off;
+        tz_known = true;
+    }
     updateDashboardUI(doc["sessions"], doc["system"]);
 }
 
@@ -1343,6 +1362,19 @@ void pollDashboardHttp() {
             snprintf(ui_conn_line2, sizeof(ui_conn_line2), "HTTP %s:%d", server_ip.c_str(), server_port);
             ui_status_color = lv_color_hex(0x10B981);
             ui_conn_dirty = true;
+            if (!time_valid) {
+                uint32_t ts = doc["timestamp"] | 0U;
+                if (ts > 1700000000U) {
+                    timeval tv;
+                    tv.tv_sec = (time_t)ts;
+                    tv.tv_usec = 0;
+                    settimeofday(&tv, nullptr);
+                    time_valid = true;
+                }
+            }
+            int32_t off = doc["tz_offset_sec"] | 0;
+            tz_offset_sec = off;
+            tz_known = true;
             updateDashboardUI(doc["sessions"], doc["system"]);
         }
         return;

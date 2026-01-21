@@ -1690,16 +1690,27 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
         diagnostics["service_running"] = False
 
     # Read config to see what paths it's scanning
+    db_dir = "/var/cache/minidlna"
+    log_dir = "/var/log/minidlna"
     try:
         with open("/etc/minidlna.conf", "r") as f:
             config = f.read()
-            media_dirs = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("media_dir=")]
-            root_container = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("root_container=")]
+            lines = config.split("\n")
+            media_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("media_dir=")]
+            root_container = [line.split("=", 1)[1].strip() for line in lines if line.startswith("root_container=")]
+            parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+            parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+            if parsed_db_dirs and parsed_db_dirs[0]:
+                db_dir = parsed_db_dirs[0]
+            if parsed_log_dirs and parsed_log_dirs[0]:
+                log_dir = parsed_log_dirs[0]
             diagnostics["configured_paths"] = media_dirs
             diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
     except:
         diagnostics["configured_paths"] = ["ERROR: Could not read config"]
         diagnostics["root_container"] = "ERROR"
+    diagnostics["db_dir"] = db_dir
+    diagnostics["log_dir"] = log_dir
 
     # Count actual files in data directories
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1746,7 +1757,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
 
     # Check cache directory permissions
     try:
-        cache_st = os.stat("/var/cache/minidlna")
+        cache_st = os.stat(db_dir)
         diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
         diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
         diagnostics["cache_dir_exists"] = True
@@ -1789,10 +1800,12 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
 
     # Check database file
     try:
-        db_exists = os.path.exists("/var/cache/minidlna/files.db")
+        db_file = os.path.join(db_dir, "files.db")
+        db_exists = os.path.exists(db_file)
         diagnostics["database_exists"] = db_exists
+        diagnostics["database_path"] = db_file
         if db_exists:
-            db_size = os.path.getsize("/var/cache/minidlna/files.db")
+            db_size = os.path.getsize(db_file)
             diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
     except:
         diagnostics["database_exists"] = False
@@ -1807,15 +1820,32 @@ def restart_dlna(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
 
     try:
+        db_dir = "/var/cache/minidlna"
+        log_dir = "/var/log/minidlna"
+        try:
+            with open("/etc/minidlna.conf", "r") as f:
+                config = f.read()
+                lines = config.split("\n")
+                parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+                parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+                if parsed_db_dirs and parsed_db_dirs[0]:
+                    db_dir = parsed_db_dirs[0]
+                if parsed_log_dirs and parsed_log_dirs[0]:
+                    log_dir = parsed_log_dirs[0]
+        except Exception:
+            pass
+
         # Stop service
         subprocess.run(["sudo", "systemctl", "stop", "minidlna"], check=False)
 
         # Clear database
-        subprocess.run(["sudo", "rm", "-f", "/var/cache/minidlna/files.db"], check=False)
+        subprocess.run(["sudo", "rm", "-f", os.path.join(db_dir, "files.db")], check=False)
 
         # Recreate cache directory with proper permissions
-        subprocess.run(["sudo", "mkdir", "-p", "/var/cache/minidlna"], check=False)
-        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", "/var/cache/minidlna"], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", db_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", db_dir], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", log_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", log_dir], check=False)
 
         # Start service
         subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)

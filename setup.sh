@@ -7,26 +7,27 @@ set -e
 
 # Correctly identify the real user even if run with sudo
 REAL_USER=${SUDO_USER:-$USER}
+REAL_HOME=$(eval echo "~$REAL_USER" 2>/dev/null || echo "$HOME")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SCRIPT_DIR" == /boot* ]]; then
-    mkdir -p "$HOME/nomad-pi"
+    mkdir -p "$REAL_HOME/nomad-pi"
     if command -v rsync >/dev/null 2>&1; then
-        sudo rsync -a --delete "$SCRIPT_DIR/app/" "$HOME/nomad-pi/app/" || true
+        sudo rsync -a --delete "$SCRIPT_DIR/app/" "$REAL_HOME/nomad-pi/app/" || true
     else
-        sudo rm -rf "$HOME/nomad-pi/app" || true
-        sudo cp -r "$SCRIPT_DIR/app" "$HOME/nomad-pi/" || true
+        sudo rm -rf "$REAL_HOME/nomad-pi/app" || true
+        sudo cp -r "$SCRIPT_DIR/app" "$REAL_HOME/nomad-pi/" || true
     fi
-    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$HOME/nomad-pi/" || true
-    sudo chown -R "$REAL_USER:$REAL_USER" "$HOME/nomad-pi"
-    sudo chmod +x "$HOME/nomad-pi/setup.sh" "$HOME/nomad-pi/update.sh"
-    exec bash "$HOME/nomad-pi/setup.sh"
+    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$REAL_HOME/nomad-pi/" || true
+    sudo chown -R "$REAL_USER:$REAL_USER" "$REAL_HOME/nomad-pi"
+    sudo chmod +x "$REAL_HOME/nomad-pi/setup.sh" "$REAL_HOME/nomad-pi/update.sh"
+    exec bash "$REAL_HOME/nomad-pi/setup.sh"
 fi
 
 # Also move out of /root if we're there, as it causes permission issues for the user
 if [[ "$SCRIPT_DIR" == /root* ]]; then
-    echo "Detected installation in /root. Moving to $HOME/nomad-pi for better permissions..."
-    TARGET_DIR="$HOME/nomad-pi"
+    echo "Detected installation in /root. Moving to $REAL_HOME/nomad-pi for better permissions..."
+    TARGET_DIR="$REAL_HOME/nomad-pi"
     sudo mkdir -p "$TARGET_DIR"
     sudo cp -r "$SCRIPT_DIR/." "$TARGET_DIR/"
     sudo chown -R "$REAL_USER:$REAL_USER" "$TARGET_DIR"
@@ -55,7 +56,7 @@ if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf; then
 fi
 
 # Ensure home directory is traversable by services (minidlna, etc)
-chmod +x "$HOME"
+sudo chmod o+x "$REAL_HOME" 2>/dev/null || true
 
 echo "=========================================="
 echo "      Nomad Pi Installation Script        "
@@ -315,6 +316,7 @@ EOL
 
 echo "Enabling and starting service..."
 sudo systemctl daemon-reload
+sudo systemctl reset-failed nomad-pi 2>/dev/null || true
 
 # Only restart if configuration changed or service is not running
 if ! systemctl is-active --quiet nomad-pi; then
