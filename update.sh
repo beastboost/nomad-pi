@@ -296,9 +296,11 @@ REAL_USER=${SUDO_USER:-$USER}
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
+CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 
-if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
-    echo "Re-applying sudoers permissions for MiniDLNA..." >> update.log
+if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHOWN_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHMOD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Re-applying sudoers permissions..." >> update.log
     MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
     UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
     SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
@@ -309,7 +311,7 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     # Write to temp file first and validate before installing
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then

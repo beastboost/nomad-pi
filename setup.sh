@@ -393,11 +393,13 @@ SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
 TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
+CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
+CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 SUDOERS_TMP=$(mktemp)
 cat > "$SUDOERS_TMP" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
 if sudo visudo -cf "$SUDOERS_TMP"; then
     sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"

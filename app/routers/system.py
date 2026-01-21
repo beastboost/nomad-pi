@@ -527,6 +527,60 @@ def save_mount(device, mount_point):
     with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
         json.dump(mounts, f)
 
+def get_device_fstype(device: str) -> str:
+    for cmd in (
+        ["lsblk", "-no", "FSTYPE", device],
+        ["blkid", "-o", "value", "-s", "TYPE", device],
+    ):
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                fstype = (res.stdout or "").strip().splitlines()[0].strip()
+                if fstype:
+                    return fstype
+        except Exception:
+            continue
+    return ""
+
+def mount_with_permissions(device: str, target: str) -> None:
+    uid = os.getuid()
+    gid = os.getgid()
+    fstype = get_device_fstype(device).lower()
+
+    mount_bin = shutil.which("mount") or "/usr/bin/mount"
+    chown_bin = shutil.which("chown") or "/usr/bin/chown"
+    chmod_bin = shutil.which("chmod") or "/usr/bin/chmod"
+
+    attempts = []
+    if fstype in {"ntfs", "ntfs3"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs3", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid},umask=0002,big_writes", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype == "exfat":
+        attempts.append(["sudo", "-n", mount_bin, "-t", "exfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype in {"vfat", "fat", "msdos"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "vfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+
+    attempts.append(["sudo", "-n", mount_bin, device, target])
+
+    last_err = None
+    for cmd in attempts:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            last_err = None
+            break
+        except subprocess.CalledProcessError as e:
+            last_err = (e.stderr or e.stdout or str(e)).strip()
+
+    if last_err:
+        raise RuntimeError(last_err)
+
+    try:
+        subprocess.run(["sudo", "-n", chown_bin, f"{uid}:{gid}", target], check=False, capture_output=True, text=True)
+        subprocess.run(["sudo", "-n", chmod_bin, "0775", target], check=False, capture_output=True, text=True)
+    except Exception:
+        pass
+
 def remove_mount(target):
     if os.path.exists(PERSISTENT_MOUNTS_FILE):
         try:
@@ -540,6 +594,9 @@ def remove_mount(target):
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        if not device.startswith("/dev/"):
+            raise HTTPException(status_code=400, detail="Invalid device path")
+
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name:
@@ -549,8 +606,7 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         os.makedirs(target, exist_ok=True)
         
         try:
-            # Check if already mounted
-            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+            mount_with_permissions(device, target)
             save_mount(device, target)
             return {"status": "mounted", "device": device, "target": target}
         except Exception as e:
@@ -597,7 +653,7 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         target = os.path.join("data", "external", clean_name)
         os.makedirs(target, exist_ok=True)
         
-        subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+        mount_with_permissions(device, target)
         save_mount(device, target)
         
         return {"status": "formatted", "device": device, "target": target}

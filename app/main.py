@@ -266,7 +266,8 @@ def _startup_tasks():
                                 continue
                                 
                             os.makedirs(target, exist_ok=True)
-                            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+                            from app.routers.system import mount_with_permissions
+                            mount_with_permissions(device, target)
                             logger.info(f"Restored mount: {device} -> {target}")
                         except Exception as e:
                             logger.error(f"Failed to restore mount {device}: {e}")
