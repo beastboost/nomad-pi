@@ -66,25 +66,44 @@ echo "=========================================="
 if [ -d ".git" ]; then
     echo "[0/10] Optimizing Git configuration..."
     
-    # Mark directory as safe for git (common issue on newer git versions)
-    git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
+    GIT_PREFIX=()
+    if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+        GIT_PREFIX=(sudo -u "$REAL_USER")
+    fi
+
+    "${GIT_PREFIX[@]}" git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
 
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
-    git config --global --unset http.sslBackend 2>/dev/null || true
-    git config --global http.sslVerify true
-    git config --global http.version HTTP/1.1
-    git config --global http.postBuffer 52428800
+    "${GIT_PREFIX[@]}" git config --global --unset http.sslBackend 2>/dev/null || true
+    "${GIT_PREFIX[@]}" git config --global http.sslVerify true
+    "${GIT_PREFIX[@]}" git config --global http.version HTTP/1.1
+    "${GIT_PREFIX[@]}" git config --global http.postBuffer 52428800
     # Memory optimizations for Git on Pi Zero
-    git config --global pack.windowMemory "10m"
-    git config --global pack.packSizeLimit "20m"
-    git config --global core.packedGitLimit "20m"
-    git config --global core.packedGitWindowSize "10m"
+    "${GIT_PREFIX[@]}" git config --global pack.windowMemory "10m"
+    "${GIT_PREFIX[@]}" git config --global pack.packSizeLimit "20m"
+    "${GIT_PREFIX[@]}" git config --global core.packedGitLimit "20m"
+    "${GIT_PREFIX[@]}" git config --global core.packedGitWindowSize "10m"
     
-    git remote set-url origin https://github.com/beastboost/nomad-pi.git
-    git config credential.helper 'cache --timeout=2592000'
+    "${GIT_PREFIX[@]}" git remote set-url origin https://github.com/beastboost/nomad-pi.git
+    "${GIT_PREFIX[@]}" git config credential.helper 'cache --timeout=2592000'
     
     echo "Pulling latest changes from GitHub..."
-    git pull || echo "Warning: Could not pull latest changes. Continuing with current version."
+    AUTOSTASH_NAME=""
+    if ! "${GIT_PREFIX[@]}" git diff --quiet 2>/dev/null || ! "${GIT_PREFIX[@]}" git diff --cached --quiet 2>/dev/null; then
+        AUTOSTASH_NAME="setup-autostash-$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s)"
+        "${GIT_PREFIX[@]}" git stash push -u -m "$AUTOSTASH_NAME" >/dev/null 2>&1 || AUTOSTASH_NAME=""
+    fi
+
+    if ! "${GIT_PREFIX[@]}" git pull --rebase; then
+        echo "Warning: Could not pull latest changes. Continuing with current version."
+    fi
+
+    if [ -n "$AUTOSTASH_NAME" ]; then
+        if ! "${GIT_PREFIX[@]}" git stash pop >/dev/null 2>&1; then
+            echo "Warning: Local changes were stashed as '$AUTOSTASH_NAME' but could not be reapplied automatically."
+            echo "Run: git stash list && git stash pop"
+        fi
+    fi
 fi
 
 # 0.1 Proactive Swap Check (Crucial for Pi Zero 512MB RAM)
