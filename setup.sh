@@ -228,15 +228,19 @@ if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
         exit 1
     fi
     
-    # Final check for uvicorn
-    if [ ! -f "./venv/bin/uvicorn" ]; then
-        echo "CRITICAL: uvicorn still missing. Trying emergency install..."
+    if ! ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
+        echo "CRITICAL: uvicorn module missing. Trying emergency install..."
         ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
     fi
     
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
     echo "Dependencies are already up to date."
+    if ! ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
+        echo "Detected missing uvicorn module in venv. Repairing..."
+        ./venv/bin/pip install --upgrade pip
+        ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn fastapi
+    fi
 fi
 
 # 4. Create Directories
