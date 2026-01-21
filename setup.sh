@@ -186,6 +186,11 @@ echo "Hostname set to 'nomadpi'. You can access the server at http://nomadpi.loc
 # 3. Python Environment
 echo "[3/10] Setting up Python environment..."
 
+VENV_PREFIX=()
+if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+    VENV_PREFIX=(sudo -u "$REAL_USER")
+fi
+
 # Check if venv exists but is broken (e.g. moved from /root)
 if [ -d "venv" ]; then
     # Check if the python interpreter inside venv is accessible and in the right place
@@ -197,7 +202,11 @@ if [ -d "venv" ]; then
 fi
 
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    "${VENV_PREFIX[@]}" python3 -m venv venv
+fi
+
+if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+    sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/venv" 2>/dev/null || true
 fi
 
 echo "Checking Python dependencies..."
@@ -212,34 +221,34 @@ fi
 
 if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
     echo "Installing/Updating Python dependencies (this may take a while on Pi Zero)..."
-    ./venv/bin/pip install --upgrade pip
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --upgrade pip
     
     # Split installation into chunks to avoid massive memory spikes
     echo "Installing base dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
     
     echo "Installing security and utility dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
     
     echo "Installing remaining requirements..."
-    if ! ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt; then
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt; then
         echo "Error: Dependency installation failed even with 1GB swap."
         echo "The Pi Zero 2W may need a reboot or more swap space."
         exit 1
     fi
     
-    if ! ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
         echo "CRITICAL: uvicorn module missing. Trying emergency install..."
-        ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary uvicorn
     fi
     
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
     echo "Dependencies are already up to date."
-    if ! ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
         echo "Detected missing uvicorn module in venv. Repairing..."
-        ./venv/bin/pip install --upgrade pip
-        ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn fastapi
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --upgrade pip
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary uvicorn fastapi
     fi
 fi
 
