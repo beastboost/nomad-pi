@@ -527,17 +527,39 @@ echo "[9/10] Configuring MiniDLNA..."
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 cat > "$MINIDLNA_TEMP" <<EOL
+# Media directories with proper type labels
 media_dir=V,$CURRENT_DIR/data/movies
 media_dir=V,$CURRENT_DIR/data/shows
 media_dir=A,$CURRENT_DIR/data/music
 media_dir=P,$CURRENT_DIR/data/gallery
 media_dir=P,$CURRENT_DIR/data/books
+
+# Database and logging
 db_dir=/var/cache/minidlna
 log_dir=/var/log
+log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
+
+# Network settings
 friendly_name=$NEW_HOSTNAME
+network_interface=wlan0
+port=8200
+
+# File monitoring
 inotify=yes
-root_container=B
+notify_interval=600
+
+# Container settings - use "." for hierarchical folders
+root_container=.
+
+# Presentation
 presentation_url=http://$NEW_HOSTNAME.local:8000/
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+
+# Optimization
+max_connections=50
+strict_dlna=no
+enable_tivo=no
+wide_links=no
 EOL
 
 # Ensure the data directory is fully accessible to minidlna

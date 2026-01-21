@@ -85,22 +85,27 @@ lv_obj_t * np_img;
 lv_obj_t * np_title;
 lv_obj_t * np_sub;
 lv_obj_t * np_meta;
+lv_obj_t * np_quality;
+lv_obj_t * np_time_remain;
 lv_obj_t * np_bar;
 lv_obj_t * np_btn_stop;
 lv_obj_t * np_btn_pause;
 lv_obj_t * np_empty_label;
+lv_obj_t * np_loading_spinner;
 char np_session_id[64] = "";
 bool np_is_paused = false;
+bool np_poster_loading = false;
 
 // Settings Widgets
 lv_obj_t * label_wifi_status;
+lv_obj_t * label_wifi_signal;
 lv_obj_t * label_connection_info;
 lv_obj_t * btn_scan_wifi;
 lv_obj_t * btn_theme;
 lv_obj_t * slider_brightness;
 lv_obj_t * label_brightness;
-lv_obj_t * list_wifi; 
-lv_obj_t * win_wifi;  
+lv_obj_t * list_wifi;
+lv_obj_t * win_wifi;
 lv_obj_t * kb;
 lv_obj_t * ta_pass;
 
@@ -135,6 +140,7 @@ bool isIpAddress(const String& s);
 void applyConnectionUi();
 void applyTheme();
 void formatClock(char* out, size_t out_len, uint32_t seconds);
+void updateWifiSignal();
 
 static bool posterJpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
     if (!bitmap) return false;
@@ -193,9 +199,10 @@ void loop() {
 
     lv_timer_handler();
     applyConnectionUi();
+    updateWifiSignal();
 
     handleWifiConnection();
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
     }
@@ -547,6 +554,12 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
     lv_obj_align(np_img, LV_ALIGN_CENTER, 0, 0);
 
+    // Loading spinner (hidden by default)
+    np_loading_spinner = lv_spinner_create(poster_cont, 1000, 60);
+    lv_obj_set_size(np_loading_spinner, 50, 50);
+    lv_obj_center(np_loading_spinner);
+    lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
@@ -578,6 +591,18 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_width(np_meta, LV_PCT(100));
     lv_obj_set_style_text_font(np_meta, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_meta, "");
+
+    np_quality = lv_label_create(info);
+    lv_obj_set_width(np_quality, LV_PCT(100));
+    lv_obj_set_style_text_font(np_quality, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(np_quality, lv_color_hex(0x64748B), 0);
+    lv_label_set_text(np_quality, "");
+
+    np_time_remain = lv_label_create(info);
+    lv_obj_set_width(np_time_remain, LV_PCT(100));
+    lv_obj_set_style_text_font(np_time_remain, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(np_time_remain, lv_color_hex(0x10B981), 0);
+    lv_label_set_text(np_time_remain, "");
 
     np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
@@ -642,7 +667,12 @@ void buildSettingsTab(lv_obj_t * parent) {
     label_wifi_status = lv_label_create(parent);
     lv_label_set_text(label_wifi_status, "Wi-Fi: Not Connected");
     lv_obj_set_style_text_font(label_wifi_status, &lv_font_montserrat_14, 0);
-    
+
+    label_wifi_signal = lv_label_create(parent);
+    lv_label_set_text(label_wifi_signal, "Signal: --");
+    lv_obj_set_style_text_font(label_wifi_signal, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(label_wifi_signal, lv_color_hex(0x64748B), 0);
+
     label_connection_info = lv_label_create(parent);
     lv_label_set_text(label_connection_info, "Server: Auto-discovery");
     lv_obj_set_style_text_font(label_connection_info, &lv_font_montserrat_14, 0);
@@ -691,6 +721,40 @@ void buildSettingsTab(lv_obj_t * parent) {
         lv_obj_t * lbl = lv_obj_get_child(btn, 0);
         if (lbl) lv_label_set_text(lbl, theme_dark ? "Theme: Dark" : "Theme: Light");
     }, LV_EVENT_CLICKED, NULL);
+}
+
+void updateWifiSignal() {
+    static unsigned long last_signal_update = 0;
+    if (millis() - last_signal_update < 2000) return;  // Update every 2 seconds
+    last_signal_update = millis();
+
+    if (!label_wifi_signal) return;
+
+    if (WiFi.status() == WL_CONNECTED) {
+        int rssi = WiFi.RSSI();  // Get signal strength in dBm
+        const char* quality;
+        lv_color_t color;
+
+        if (rssi >= -50) {
+            quality = "Excellent";
+            color = lv_color_hex(0x10B981);  // Green
+        } else if (rssi >= -60) {
+            quality = "Good";
+            color = lv_color_hex(0x22C55E);  // Light green
+        } else if (rssi >= -70) {
+            quality = "Fair";
+            color = lv_color_hex(0xF59E0B);  // Orange
+        } else {
+            quality = "Poor";
+            color = lv_color_hex(0xEF4444);  // Red
+        }
+
+        lv_label_set_text_fmt(label_wifi_signal, "Signal: %d dBm (%s)", rssi, quality);
+        lv_obj_set_style_text_color(label_wifi_signal, color, 0);
+    } else {
+        lv_label_set_text(label_wifi_signal, "Signal: --");
+        lv_obj_set_style_text_color(label_wifi_signal, lv_color_hex(0x64748B), 0);
+    }
 }
 
 void showWifiScanWindow() {
@@ -1134,6 +1198,34 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
         }
     }
 
+    // Update quality/bitrate info
+    if (np_quality) {
+        uint32_t bitrate = s["bitrate"] | 0;
+        if (bitrate > 0) {
+            if (bitrate >= 1000000) {
+                int mbps10 = (int)((bitrate * 10UL) / 1000000UL);
+                lv_label_set_text_fmt(np_quality, "Quality: %d.%d Mbps", mbps10 / 10, mbps10 % 10);
+            } else if (bitrate >= 1000) {
+                int kbps = (int)(bitrate / 1000);
+                lv_label_set_text_fmt(np_quality, "Quality: %d Kbps", kbps);
+            } else {
+                lv_label_set_text(np_quality, "");
+            }
+        } else {
+            lv_label_set_text(np_quality, "");
+        }
+    }
+
+    // Update time remaining
+    if (np_time_remain && dur > 0 && cur < dur) {
+        uint32_t remain = dur - cur;
+        char remain_s[16];
+        formatClock(remain_s, sizeof(remain_s), remain);
+        lv_label_set_text_fmt(np_time_remain, "-%s remaining", remain_s);
+    } else if (np_time_remain) {
+        lv_label_set_text(np_time_remain, "");
+    }
+
     np_is_paused = strcmp((const char*)(s["state"] | ""), "paused") == 0;
     lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
     lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "PLAY" : "PAUSE");
@@ -1152,6 +1244,13 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
             } else {
                 full_url = String(poster_url);
             }
+
+            // Show loading spinner
+            if (np_loading_spinner && url_changed) {
+                lv_obj_clear_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+                np_poster_loading = true;
+            }
+
             if (downloadPoster(full_url.c_str())) {
                 strncpy(current_poster_url, poster_url, 255);
                 current_poster_url[255] = '\0';
@@ -1163,6 +1262,12 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
                 Serial.printf("Poster updated: %s\n", poster_url);
             } else {
                 Serial.printf("Poster download failed: %s\n", full_url.c_str());
+            }
+
+            // Hide loading spinner
+            if (np_loading_spinner) {
+                lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+                np_poster_loading = false;
             }
         }
     }

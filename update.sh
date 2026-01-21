@@ -208,13 +208,14 @@ echo "Checking MiniDLNA configuration..." >> update.log
 MINIDLNA_CONF="/etc/minidlna.conf"
 DLNA_CONFIG_CHANGED=0
 if [ -f "$MINIDLNA_CONF" ]; then
+    # Ensure hierarchical folder structure with root_container=.
     if sudo grep -Eq '^root_container=' "$MINIDLNA_CONF"; then
-        if ! sudo grep -Eq '^root_container=B$' "$MINIDLNA_CONF"; then
-            sudo sed -i -E 's/^root_container=.*/root_container=B/' "$MINIDLNA_CONF"
+        if ! sudo grep -Eq '^root_container=\.$' "$MINIDLNA_CONF"; then
+            sudo sed -i -E 's/^root_container=.*/root_container=./' "$MINIDLNA_CONF"
             DLNA_CONFIG_CHANGED=1
         fi
     else
-        echo "root_container=B" | sudo tee -a "$MINIDLNA_CONF" >/dev/null
+        echo "root_container=." | sudo tee -a "$MINIDLNA_CONF" >/dev/null
         DLNA_CONFIG_CHANGED=1
     fi
 fi
