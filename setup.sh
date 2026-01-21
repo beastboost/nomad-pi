@@ -227,26 +227,27 @@ if [ "$CURRENT_OWNER" != "$REAL_USER:$REAL_USER" ]; then
     sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
 fi
 
-# Only chmod/chown data directory if absolutely necessary
-if [ ! -w "$CURRENT_DIR/data" ]; then
-    echo "Updating data directory permissions..."
-    sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
-    sudo chmod 775 "$CURRENT_DIR/data"
-fi
+# Ensure data directory permissions are correct
+echo "Setting data directory permissions..."
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
+sudo chmod -R 755 "$CURRENT_DIR/data"
 
 # Ensure MiniDLNA user can access the media directories
 if id "minidlna" &>/dev/null; then
     echo "Adding minidlna user to $REAL_USER group..."
     sudo usermod -a -G "$REAL_USER" minidlna
 
-    # CRITICAL: Make home directory traversable so minidlna can access subdirectories
-    chmod +x "$HOME" 2>/dev/null || true
+    # Get the actual home directory path
+    USER_HOME=$(eval echo ~$REAL_USER)
 
-    # Make nomad-pi directory traversable
-    chmod 755 "$CURRENT_DIR" 2>/dev/null || true
+    # CRITICAL: Make home directory traversable (world-executable)
+    sudo chmod o+x "$USER_HOME" 2>/dev/null || true
 
-    # Ensure data subdirectories are readable and executable by the group
-    sudo chmod -R g+rX "$CURRENT_DIR/data"
+    # Make nomad-pi directory traversable and readable
+    sudo chmod 755 "$CURRENT_DIR" 2>/dev/null || true
+
+    # Ensure data subdirectories are readable and executable
+    sudo chmod -R 755 "$CURRENT_DIR/data" 2>/dev/null || true
 fi
 
 # 5. Systemd Service Setup
