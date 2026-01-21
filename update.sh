@@ -318,24 +318,16 @@ if command -v minidlnad >/dev/null 2>&1; then
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
 
-    if [ "$DLNA_CONFIG_CHANGED" = "1" ]; then
-        echo "Rebuilding MiniDLNA database..." >> update.log
-        sudo systemctl stop minidlna 2>/dev/null || true
-        sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
-        sudo systemctl enable minidlna >> update.log 2>&1
-        sudo systemctl start minidlna >> update.log 2>&1
-        sudo minidlnad -R >> update.log 2>&1 || true
-    else
-        # Just ensure it's running
-        if ! systemctl is-active --quiet minidlna; then
-            echo "Starting MiniDLNA..." >> update.log
-            sudo systemctl enable minidlna >> update.log 2>&1
-            sudo systemctl start minidlna >> update.log 2>&1
-        else
-            echo "Restarting MiniDLNA..." >> update.log
-            sudo systemctl restart minidlna >> update.log 2>&1 || echo "MiniDLNA restart failed (non-critical)" >> update.log
-        fi
-    fi
+    # Always rebuild DLNA database during updates to ensure fresh state
+    echo "Rebuilding MiniDLNA database..." >> update.log
+    sudo systemctl stop minidlna 2>/dev/null || true
+    sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
+    sudo systemctl enable minidlna >> update.log 2>&1
+    sudo systemctl start minidlna >> update.log 2>&1
+
+    # Wait a moment then force rescan
+    sleep 2
+    sudo minidlnad -R >> update.log 2>&1 || true
 fi
 
 update_status 90 "Update complete. Finalizing..."
