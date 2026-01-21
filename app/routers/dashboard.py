@@ -30,9 +30,9 @@ _poster_cache_attempts: Dict[str, float] = {}
 _public_poster_paths: Dict[str, Dict] = {}
 _PUBLIC_POSTER_TTL_S = 3600.0
 _PUBLIC_POSTER_MAX = 4096
-_POSTER_THUMB_W = 110
-_POSTER_THUMB_H = 160
-_POSTER_MAX_SERVE_BYTES = 450_000
+_POSTER_THUMB_W = 150
+_POSTER_THUMB_H = 225
+_POSTER_MAX_SERVE_BYTES = 650_000
 
 def _sniff_image_kind(fs_path: str) -> Optional[str]:
     try:

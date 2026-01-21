@@ -13,8 +13,8 @@
 // --- DEFINITIONS ---
 #define SCREEN_WIDTH 480
 #define SCREEN_HEIGHT 320
-#define POSTER_W 110
-#define POSTER_H 160
+#define POSTER_W 150
+#define POSTER_H 225
 
 // --- OBJECTS ---
 LGFX tft;
@@ -31,6 +31,24 @@ static lv_color_t buf[SCREEN_WIDTH * 10];
 LGFX_Sprite sprite_poster(&tft);
 static lv_img_dsc_t img_poster_dsc;
 char current_poster_url[256] = "";
+
+// History buffers for sparklines (keep last 60 samples)
+#define HISTORY_SIZE 60
+uint8_t cpu_history[HISTORY_SIZE] = {0};
+uint8_t ram_history[HISTORY_SIZE] = {0};
+uint16_t net_down_history[HISTORY_SIZE] = {0};  // KB/s
+uint16_t net_up_history[HISTORY_SIZE] = {0};    // KB/s
+uint8_t history_idx = 0;
+unsigned long last_history_update = 0;
+
+// Screensaver
+bool screensaver_active = false;
+unsigned long last_user_activity = 0;
+#define SCREENSAVER_TIMEOUT 300000  // 5 minutes
+
+// Multiple sessions
+int current_session_index = 0;
+int total_sessions = 0;
 
 char wifi_ssid[64] = "";
 char wifi_pass[64] = "";
@@ -77,6 +95,15 @@ lv_obj_t * label_ram;
 lv_obj_t * label_stats;
 lv_obj_t * arc_cpu;
 lv_obj_t * arc_ram;
+lv_obj_t * canvas_cpu_graph;
+lv_obj_t * canvas_ram_graph;
+lv_obj_t * canvas_net_graph;
+lv_draw_rect_dsc_t sparkline_dsc;
+
+// Screensaver widgets
+lv_obj_t * screensaver_cont;
+lv_obj_t * screensaver_clock;
+lv_obj_t * screensaver_date;
 
 // Now Playing Widgets
 lv_obj_t * cont_now_playing_list;
@@ -85,22 +112,27 @@ lv_obj_t * np_img;
 lv_obj_t * np_title;
 lv_obj_t * np_sub;
 lv_obj_t * np_meta;
+lv_obj_t * np_quality;
+lv_obj_t * np_time_remain;
 lv_obj_t * np_bar;
 lv_obj_t * np_btn_stop;
 lv_obj_t * np_btn_pause;
 lv_obj_t * np_empty_label;
+lv_obj_t * np_loading_spinner;
 char np_session_id[64] = "";
 bool np_is_paused = false;
+bool np_poster_loading = false;
 
 // Settings Widgets
 lv_obj_t * label_wifi_status;
+lv_obj_t * label_wifi_signal;
 lv_obj_t * label_connection_info;
 lv_obj_t * btn_scan_wifi;
 lv_obj_t * btn_theme;
 lv_obj_t * slider_brightness;
 lv_obj_t * label_brightness;
-lv_obj_t * list_wifi; 
-lv_obj_t * win_wifi;  
+lv_obj_t * list_wifi;
+lv_obj_t * win_wifi;
 lv_obj_t * kb;
 lv_obj_t * ta_pass;
 
@@ -135,6 +167,17 @@ bool isIpAddress(const String& s);
 void applyConnectionUi();
 void applyTheme();
 void formatClock(char* out, size_t out_len, uint32_t seconds);
+void updateWifiSignal();
+void updateHistoryBuffers(float cpu, float ram, uint32_t net_down, uint32_t net_up);
+void drawSparkline(lv_obj_t* canvas, uint8_t* data, uint16_t len, lv_color_t color);
+void drawSparklineU16(lv_obj_t* canvas, uint16_t* data, uint16_t len, lv_color_t color, uint16_t max_val);
+void updateSparklines();
+void checkScreensaver();
+void activateScreensaver();
+void deactivateScreensaver();
+void updateScreensaverClock();
+void buildScreensaver();
+void resetUserActivity();
 
 static bool posterJpgOutput(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
     if (!bitmap) return false;
@@ -177,6 +220,9 @@ void setup() {
     // Build Main UI
     buildUI();
 
+    // Initialize user activity timer
+    last_user_activity = millis();
+
     // Connect if creds exist
     if (strlen(wifi_ssid) > 0) {
         connectToWifi(wifi_ssid, wifi_pass);
@@ -193,9 +239,16 @@ void loop() {
 
     lv_timer_handler();
     applyConnectionUi();
+    updateWifiSignal();
+    updateSparklines();
+    checkScreensaver();
+
+    if (screensaver_active) {
+        updateScreensaverClock();
+    }
 
     handleWifiConnection();
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
     }
@@ -246,6 +299,7 @@ void my_touchpad_read(lv_indev_drv_t * indev_driver, lv_indev_data_t * data) {
         data->state = LV_INDEV_STATE_PR;
         data->point.x = touchX;
         data->point.y = touchY;
+        resetUserActivity();  // Reset screensaver timer on touch
     } else {
         data->state = LV_INDEV_STATE_REL;
     }
@@ -335,11 +389,200 @@ void formatClock(char* out, size_t out_len, uint32_t seconds) {
     }
 }
 
+void updateHistoryBuffers(float cpu, float ram, uint32_t net_down, uint32_t net_up) {
+    if (millis() - last_history_update < 2000) return;  // Update every 2 seconds
+    last_history_update = millis();
+
+    cpu_history[history_idx] = (uint8_t)(cpu > 100 ? 100 : cpu);
+    ram_history[history_idx] = (uint8_t)(ram > 100 ? 100 : ram);
+    net_down_history[history_idx] = (uint16_t)(net_down / 1024);  // Convert to KB/s
+    net_up_history[history_idx] = (uint16_t)(net_up / 1024);      // Convert to KB/s
+
+    history_idx = (history_idx + 1) % HISTORY_SIZE;
+}
+
+void drawSparkline(lv_obj_t* canvas, uint8_t* data, uint16_t len, lv_color_t color) {
+    if (!canvas || !data || len == 0) return;
+
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x0B1220), LV_OPA_0);
+
+    lv_draw_line_dsc_t line_dsc;
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = color;
+    line_dsc.width = 1;
+    line_dsc.opa = LV_OPA_COVER;
+
+    uint16_t w = lv_obj_get_width(canvas);
+    uint16_t h = lv_obj_get_height(canvas);
+
+    for (uint16_t i = 1; i < len && i < w; i++) {
+        uint16_t idx1 = (history_idx + i - 1) % len;
+        uint16_t idx2 = (history_idx + i) % len;
+
+        int16_t y1 = h - (data[idx1] * h / 100);
+        int16_t y2 = h - (data[idx2] * h / 100);
+        int16_t x1 = i - 1;
+        int16_t x2 = i;
+
+        lv_point_t p[2] = {{x1, y1}, {x2, y2}};
+        lv_canvas_draw_line(canvas, p, 2, &line_dsc);
+    }
+}
+
+void drawSparklineU16(lv_obj_t* canvas, uint16_t* data, uint16_t len, lv_color_t color, uint16_t max_val) {
+    if (!canvas || !data || len == 0 || max_val == 0) return;
+
+    lv_canvas_fill_bg(canvas, lv_color_hex(0x0B1220), LV_OPA_0);
+
+    lv_draw_line_dsc_t line_dsc;
+    lv_draw_line_dsc_init(&line_dsc);
+    line_dsc.color = color;
+    line_dsc.width = 1;
+    line_dsc.opa = LV_OPA_COVER;
+
+    uint16_t w = lv_obj_get_width(canvas);
+    uint16_t h = lv_obj_get_height(canvas);
+
+    for (uint16_t i = 1; i < len && i < w; i++) {
+        uint16_t idx1 = (history_idx + i - 1) % len;
+        uint16_t idx2 = (history_idx + i) % len;
+
+        uint16_t val1 = data[idx1] > max_val ? max_val : data[idx1];
+        uint16_t val2 = data[idx2] > max_val ? max_val : data[idx2];
+
+        int16_t y1 = h - (val1 * h / max_val);
+        int16_t y2 = h - (val2 * h / max_val);
+        int16_t x1 = i - 1;
+        int16_t x2 = i;
+
+        lv_point_t p[2] = {{x1, y1}, {x2, y2}};
+        lv_canvas_draw_line(canvas, p, 2, &line_dsc);
+    }
+}
+
+void updateSparklines() {
+    if (!canvas_cpu_graph || !canvas_ram_graph || !canvas_net_graph) return;
+
+    drawSparkline(canvas_cpu_graph, cpu_history, HISTORY_SIZE, lv_color_hex(0x3B82F6));
+    drawSparkline(canvas_ram_graph, ram_history, HISTORY_SIZE, lv_color_hex(0x8B5CF6));
+
+    // Find max for network scale
+    uint16_t max_net = 100;  // Minimum 100 KB/s scale
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (net_down_history[i] > max_net) max_net = net_down_history[i];
+        if (net_up_history[i] > max_net) max_net = net_up_history[i];
+    }
+    drawSparklineU16(canvas_net_graph, net_down_history, HISTORY_SIZE, lv_color_hex(0x10B981), max_net);
+}
+
+void resetUserActivity() {
+    last_user_activity = millis();
+    if (screensaver_active) {
+        deactivateScreensaver();
+    }
+}
+
+void checkScreensaver() {
+    if (screensaver_active) return;
+
+    if (millis() - last_user_activity > SCREENSAVER_TIMEOUT) {
+        activateScreensaver();
+    }
+}
+
+void activateScreensaver() {
+    if (screensaver_active) return;
+    screensaver_active = true;
+
+    Serial.println("Activating screensaver");
+
+    // Hide main UI
+    if (tv) lv_obj_add_flag(tv, LV_OBJ_FLAG_HIDDEN);
+
+    // Show screensaver
+    if (screensaver_cont) {
+        lv_obj_clear_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        buildScreensaver();
+    }
+
+    // Dim display
+    tft.setBrightness(brightness / 4);  // 25% brightness
+}
+
+void deactivateScreensaver() {
+    if (!screensaver_active) return;
+    screensaver_active = false;
+
+    Serial.println("Deactivating screensaver");
+
+    // Restore brightness
+    tft.setBrightness(brightness);
+
+    // Hide screensaver
+    if (screensaver_cont) lv_obj_add_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+
+    // Show main UI
+    if (tv) lv_obj_clear_flag(tv, LV_OBJ_FLAG_HIDDEN);
+}
+
+void updateScreensaverClock() {
+    static unsigned long last_clock_update = 0;
+    if (millis() - last_clock_update < 1000) return;  // Update every second
+    last_clock_update = millis();
+
+    if (!screensaver_active || !screensaver_clock || !screensaver_date) return;
+
+    time_t now = millis() / 1000;
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+
+    char time_str[16];
+    char date_str[32];
+
+    // Format time (HH:MM:SS)
+    snprintf(time_str, sizeof(time_str), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+    // Format date
+    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    snprintf(date_str, sizeof(date_str), "%s, %s %d",
+             days[timeinfo.tm_wday], months[timeinfo.tm_mon], timeinfo.tm_mday);
+
+    lv_label_set_text(screensaver_clock, time_str);
+    lv_label_set_text(screensaver_date, date_str);
+}
+
+void buildScreensaver() {
+    screensaver_cont = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(screensaver_cont, SCREEN_WIDTH, SCREEN_HEIGHT);
+    lv_obj_set_style_bg_color(screensaver_cont, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(screensaver_cont, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(screensaver_cont, 0, 0);
+    lv_obj_set_style_pad_all(screensaver_cont, 0, 0);
+    lv_obj_add_flag(screensaver_cont, LV_OBJ_FLAG_HIDDEN);
+
+    // Clock
+    screensaver_clock = lv_label_create(screensaver_cont);
+    lv_obj_set_style_text_font(screensaver_clock, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_color(screensaver_clock, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(screensaver_clock, "00:00:00");
+    lv_obj_center(screensaver_clock);
+
+    // Date
+    screensaver_date = lv_label_create(screensaver_cont);
+    lv_obj_set_style_text_font(screensaver_date, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(screensaver_date, lv_color_hex(0x94A3B8), 0);
+    lv_label_set_text(screensaver_date, "");
+    lv_obj_align_to(screensaver_date, screensaver_clock, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+}
+
 void applyTheme() {
     lv_color_t bg = theme_dark ? lv_color_hex(0x0B1220) : lv_color_hex(0xF5F7FB);
     lv_color_t text = theme_dark ? lv_color_hex(0xE5E7EB) : lv_color_hex(0x0F172A);
-    lv_color_t card = theme_dark ? lv_color_hex(0x334155) : lv_color_hex(0xFFFFFF);
+    lv_color_t card = theme_dark ? lv_color_hex(0x1E293B) : lv_color_hex(0xFFFFFF);
     lv_color_t muted = theme_dark ? lv_color_hex(0x94A3B8) : lv_color_hex(0x475569);
+    lv_color_t shadow = theme_dark ? lv_color_hex(0x000000) : lv_color_hex(0x64748B);
 
     lv_obj_set_style_bg_color(lv_scr_act(), bg, 0);
     lv_obj_set_style_text_color(lv_scr_act(), text, 0);
@@ -349,7 +592,10 @@ void applyTheme() {
         lv_obj_set_style_text_color(tv, text, 0);
     }
 
-    if (np_card) lv_obj_set_style_bg_color(np_card, card, 0);
+    if (np_card) {
+        lv_obj_set_style_bg_color(np_card, card, 0);
+        lv_obj_set_style_shadow_color(np_card, shadow, 0);
+    }
     if (np_title) lv_obj_set_style_text_color(np_title, text, 0);
     if (np_sub) lv_obj_set_style_text_color(np_sub, muted, 0);
     if (np_meta) lv_obj_set_style_text_color(np_meta, muted, 0);
@@ -490,29 +736,51 @@ void buildDashboardTab(lv_obj_t * parent) {
     lv_obj_set_style_text_font(label_stats, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(label_stats, LV_LABEL_LONG_WRAP);
     lv_label_set_text(label_stats, "Disk: --%  |  Users: --\nDown: --  |  Up: --");
+
+    // Add sparkline graphs
+    static lv_color_t cbuf_cpu[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+    static lv_color_t cbuf_ram[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+    static lv_color_t cbuf_net[LV_CANVAS_BUF_SIZE_TRUE_COLOR(60, 40)];
+
+    canvas_cpu_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_cpu_graph, cbuf_cpu, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_cpu_graph, 60, 40);
+
+    canvas_ram_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_ram_graph, cbuf_ram, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_ram_graph, 60, 40);
+
+    canvas_net_graph = lv_canvas_create(stats);
+    lv_canvas_set_buffer(canvas_net_graph, cbuf_net, 60, 40, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_set_size(canvas_net_graph, 60, 40);
 }
 
 void buildNowPlayingTab(lv_obj_t * parent) {
     cont_now_playing_list = lv_obj_create(parent);
     lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
-    lv_obj_set_style_pad_row(cont_now_playing_list, 10, 0);
-    
+    lv_obj_set_style_pad_all(cont_now_playing_list, 12, 0);
+    lv_obj_set_style_pad_row(cont_now_playing_list, 12, 0);
+
     np_empty_label = lv_label_create(cont_now_playing_list);
     lv_label_set_text(np_empty_label, "No active sessions");
+    lv_obj_set_style_text_font(np_empty_label, &lv_font_montserrat_18, 0);
     lv_obj_center(np_empty_label);
 
     np_card = lv_obj_create(cont_now_playing_list);
     lv_obj_set_size(np_card, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_grow(np_card, 1);
-    lv_obj_set_style_bg_opa(np_card, 0, 0);
-    lv_obj_set_style_radius(np_card, 0, 0);
+    lv_obj_set_style_bg_opa(np_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(np_card, 16, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
-    lv_obj_set_style_pad_all(np_card, 0, 0);
+    lv_obj_set_style_pad_all(np_card, 16, 0);
+    lv_obj_set_style_shadow_width(np_card, 12, 0);
+    lv_obj_set_style_shadow_opa(np_card, LV_OPA_20, 0);
+    lv_obj_set_style_shadow_ofs_y(np_card, 4, 0);
+    lv_obj_set_style_shadow_spread(np_card, 2, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(np_card, 10, 0);
+    lv_obj_set_style_pad_row(np_card, 12, 0);
 
     lv_obj_t * top = lv_obj_create(np_card);
     lv_obj_set_width(top, LV_PCT(100));
@@ -520,68 +788,117 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_border_width(top, 0, 0);
     lv_obj_set_style_pad_all(top, 0, 0);
     lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(top, 12, 0);
+    lv_obj_set_style_pad_column(top, 16, 0);
 
-    np_img = lv_img_create(top);
+    // Poster container with rounded corners and border
+    lv_obj_t * poster_cont = lv_obj_create(top);
+    lv_obj_set_size(poster_cont, POSTER_W, POSTER_H);
+    lv_obj_set_style_bg_opa(poster_cont, 0, 0);
+    lv_obj_set_style_border_width(poster_cont, 2, 0);
+    lv_obj_set_style_border_color(poster_cont, lv_color_hex(0x475569), 0);
+    lv_obj_set_style_border_opa(poster_cont, LV_OPA_40, 0);
+    lv_obj_set_style_radius(poster_cont, 12, 0);
+    lv_obj_set_style_pad_all(poster_cont, 0, 0);
+    lv_obj_set_style_clip_corner(poster_cont, true, 0);
+
+    np_img = lv_img_create(poster_cont);
     lv_img_set_src(np_img, &img_poster_dsc);
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
-    lv_obj_align(np_img, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(np_img, LV_ALIGN_CENTER, 0, 0);
+
+    // Loading spinner (hidden by default)
+    np_loading_spinner = lv_spinner_create(poster_cont, 1000, 60);
+    lv_obj_set_size(np_loading_spinner, 50, 50);
+    lv_obj_center(np_loading_spinner);
+    lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(info, 6, 0);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 44, POSTER_H);
+    lv_obj_set_style_pad_all(info, 0, 0);
+    lv_obj_set_style_pad_row(info, 8, 0);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 60, POSTER_H);
+    lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     np_title = lv_label_create(info);
     lv_obj_set_width(np_title, LV_PCT(100));
     lv_label_set_long_mode(np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_20, 0);
     lv_label_set_text(np_title, "");
 
     np_sub = lv_label_create(info);
     lv_obj_set_width(np_sub, LV_PCT(100));
     lv_obj_set_style_text_color(np_sub, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_font(np_sub, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_sub, "");
+
+    // Add spacer
+    lv_obj_t * spacer = lv_obj_create(info);
+    lv_obj_set_flex_grow(spacer, 1);
+    lv_obj_set_style_bg_opa(spacer, 0, 0);
+    lv_obj_set_style_border_width(spacer, 0, 0);
 
     np_meta = lv_label_create(info);
     lv_obj_set_width(np_meta, LV_PCT(100));
     lv_obj_set_style_text_font(np_meta, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_meta, "");
 
+    np_quality = lv_label_create(info);
+    lv_obj_set_width(np_quality, LV_PCT(100));
+    lv_obj_set_style_text_font(np_quality, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(np_quality, lv_color_hex(0x64748B), 0);
+    lv_label_set_text(np_quality, "");
+
+    np_time_remain = lv_label_create(info);
+    lv_obj_set_width(np_time_remain, LV_PCT(100));
+    lv_obj_set_style_text_font(np_time_remain, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(np_time_remain, lv_color_hex(0x10B981), 0);
+    lv_label_set_text(np_time_remain, "");
+
     np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 14);
+    lv_obj_set_height(np_bar, 8);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1F2937), 0);
     lv_obj_set_style_bg_opa(np_bar, 255, 0);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(np_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(np_bar, 8, 0);
-    lv_obj_set_style_radius(np_bar, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(np_bar, 4, 0);
+    lv_obj_set_style_radius(np_bar, 4, LV_PART_INDICATOR);
 
     lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
     lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(ctrls, LV_PCT(100), 40);
-    lv_obj_set_style_pad_column(ctrls, 10, 0);
+    lv_obj_set_flex_align(ctrls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_size(ctrls, LV_PCT(100), 50);
+    lv_obj_set_style_pad_column(ctrls, 12, 0);
 
     np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 100, 34);
+    lv_obj_set_size(np_btn_stop, 120, 44);
     lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
+    lv_obj_set_style_radius(np_btn_stop, 10, 0);
+    lv_obj_set_style_shadow_width(np_btn_stop, 8, 0);
+    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_ofs_y(np_btn_stop, 2, 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
     lv_label_set_text(lbl_stop, "STOP");
+    lv_obj_set_style_text_font(lbl_stop, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_stop);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 120, 34);
+    lv_obj_set_size(np_btn_pause, 140, 44);
     lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
+    lv_obj_set_style_radius(np_btn_pause, 10, 0);
+    lv_obj_set_style_shadow_width(np_btn_pause, 8, 0);
+    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_ofs_y(np_btn_pause, 2, 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "PAUSE");
+    lv_obj_set_style_text_font(lbl_pause, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_pause);
 
     lv_obj_add_event_cb(np_btn_stop, [](lv_event_t* e){
@@ -602,7 +919,12 @@ void buildSettingsTab(lv_obj_t * parent) {
     label_wifi_status = lv_label_create(parent);
     lv_label_set_text(label_wifi_status, "Wi-Fi: Not Connected");
     lv_obj_set_style_text_font(label_wifi_status, &lv_font_montserrat_14, 0);
-    
+
+    label_wifi_signal = lv_label_create(parent);
+    lv_label_set_text(label_wifi_signal, "Signal: --");
+    lv_obj_set_style_text_font(label_wifi_signal, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(label_wifi_signal, lv_color_hex(0x64748B), 0);
+
     label_connection_info = lv_label_create(parent);
     lv_label_set_text(label_connection_info, "Server: Auto-discovery");
     lv_obj_set_style_text_font(label_connection_info, &lv_font_montserrat_14, 0);
@@ -651,6 +973,40 @@ void buildSettingsTab(lv_obj_t * parent) {
         lv_obj_t * lbl = lv_obj_get_child(btn, 0);
         if (lbl) lv_label_set_text(lbl, theme_dark ? "Theme: Dark" : "Theme: Light");
     }, LV_EVENT_CLICKED, NULL);
+}
+
+void updateWifiSignal() {
+    static unsigned long last_signal_update = 0;
+    if (millis() - last_signal_update < 2000) return;  // Update every 2 seconds
+    last_signal_update = millis();
+
+    if (!label_wifi_signal) return;
+
+    if (WiFi.status() == WL_CONNECTED) {
+        int rssi = WiFi.RSSI();  // Get signal strength in dBm
+        const char* quality;
+        lv_color_t color;
+
+        if (rssi >= -50) {
+            quality = "Excellent";
+            color = lv_color_hex(0x10B981);  // Green
+        } else if (rssi >= -60) {
+            quality = "Good";
+            color = lv_color_hex(0x22C55E);  // Light green
+        } else if (rssi >= -70) {
+            quality = "Fair";
+            color = lv_color_hex(0xF59E0B);  // Orange
+        } else {
+            quality = "Poor";
+            color = lv_color_hex(0xEF4444);  // Red
+        }
+
+        lv_label_set_text_fmt(label_wifi_signal, "Signal: %d dBm (%s)", rssi, quality);
+        lv_obj_set_style_text_color(label_wifi_signal, color, 0);
+    } else {
+        lv_label_set_text(label_wifi_signal, "Signal: --");
+        lv_obj_set_style_text_color(label_wifi_signal, lv_color_hex(0x64748B), 0);
+    }
 }
 
 void showWifiScanWindow() {
@@ -986,7 +1342,13 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     float disk = system["disk_percent"].as<float>();
     int active_users = system["active_users"].as<int>();
     uint32_t uptime_seconds = (uint32_t)(system["uptime_seconds"].as<double>());
-    
+    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
+    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
+
+    // Update history buffers for sparklines
+    updateHistoryBuffers(cpu, ram, net_down_bps, net_up_bps);
+    total_sessions = sessions.size();
+
     lv_arc_set_value(arc_cpu, (int)cpu);
     int cpu10 = (int)(cpu * 10.0f + 0.5f);
     lv_label_set_text_fmt(label_cpu, "CPU\n%d.%d%%", cpu10 / 10, cpu10 % 10);
@@ -1005,9 +1367,6 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     }
     
     // Format bytes for net speed
-    uint32_t net_down_bps = (uint32_t)(system["network_down_bps"].as<double>());
-    uint32_t net_up_bps = (uint32_t)(system["network_up_bps"].as<double>());
-
     int down10 = 0;
     const char* unit_d = "B/s";
     if (net_down_bps < 1024) {
@@ -1094,6 +1453,34 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
         }
     }
 
+    // Update quality/bitrate info
+    if (np_quality) {
+        uint32_t bitrate = s["bitrate"] | 0;
+        if (bitrate > 0) {
+            if (bitrate >= 1000000) {
+                int mbps10 = (int)((bitrate * 10UL) / 1000000UL);
+                lv_label_set_text_fmt(np_quality, "Quality: %d.%d Mbps", mbps10 / 10, mbps10 % 10);
+            } else if (bitrate >= 1000) {
+                int kbps = (int)(bitrate / 1000);
+                lv_label_set_text_fmt(np_quality, "Quality: %d Kbps", kbps);
+            } else {
+                lv_label_set_text(np_quality, "");
+            }
+        } else {
+            lv_label_set_text(np_quality, "");
+        }
+    }
+
+    // Update time remaining
+    if (np_time_remain && dur > 0 && cur < dur) {
+        uint32_t remain = dur - cur;
+        char remain_s[16];
+        formatClock(remain_s, sizeof(remain_s), remain);
+        lv_label_set_text_fmt(np_time_remain, "-%s remaining", remain_s);
+    } else if (np_time_remain) {
+        lv_label_set_text(np_time_remain, "");
+    }
+
     np_is_paused = strcmp((const char*)(s["state"] | ""), "paused") == 0;
     lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
     lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "PLAY" : "PAUSE");
@@ -1112,11 +1499,30 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
             } else {
                 full_url = String(poster_url);
             }
+
+            // Show loading spinner
+            if (np_loading_spinner && url_changed) {
+                lv_obj_clear_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+                np_poster_loading = true;
+            }
+
             if (downloadPoster(full_url.c_str())) {
                 strncpy(current_poster_url, poster_url, 255);
                 current_poster_url[255] = '\0';
+                // Update image descriptor data pointer to current sprite buffer
+                img_poster_dsc.data = (const uint8_t*)sprite_poster.getBuffer();
+                img_poster_dsc.data_size = POSTER_W * POSTER_H * 2;
                 lv_img_set_src(np_img, &img_poster_dsc);
                 lv_obj_invalidate(np_img);
+                Serial.printf("Poster updated: %s\n", poster_url);
+            } else {
+                Serial.printf("Poster download failed: %s\n", full_url.c_str());
+            }
+
+            // Hide loading spinner
+            if (np_loading_spinner) {
+                lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+                np_poster_loading = false;
             }
         }
     }
