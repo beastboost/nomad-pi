@@ -237,18 +237,18 @@ if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
         exit 1
     fi
     
-    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
-        echo "CRITICAL: uvicorn module missing. Trying emergency install..."
-        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary uvicorn
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn, passlib" >/dev/null 2>&1; then
+        echo "CRITICAL: core Python modules missing. Re-installing requirements..."
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt
     fi
     
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
     echo "Dependencies are already up to date."
-    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn" >/dev/null 2>&1; then
-        echo "Detected missing uvicorn module in venv. Repairing..."
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn, passlib" >/dev/null 2>&1; then
+        echo "Detected missing core Python modules in venv. Repairing..."
         "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --upgrade pip
-        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary uvicorn fastapi
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt
     fi
 fi
 
