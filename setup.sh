@@ -71,6 +71,12 @@ if [ -d ".git" ]; then
         GIT_PREFIX=(sudo -u "$REAL_USER")
     fi
 
+    if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+        if [ -d "$SCRIPT_DIR/.git" ]; then
+            sudo chown -R "$REAL_USER:$REAL_USER" "$SCRIPT_DIR/.git" 2>/dev/null || true
+        fi
+    fi
+
     "${GIT_PREFIX[@]}" git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
 
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
