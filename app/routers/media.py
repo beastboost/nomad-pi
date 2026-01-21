@@ -244,6 +244,10 @@ def natural_sort_key(s):
 def guess_title_year(name: str):
     # Remove extension
     s = os.path.splitext(os.path.basename(name or ""))[0]
+
+    s = re.sub(r"^(?i)\s*(www[\W_]*uindex[\W_]*org[\W_]*)(?=\S)", "", s).strip()
+    s = re.sub(r"^(?i)\s*(www[\W_]*)(?=\S)", "", s).strip()
+    s = re.sub(r"^(?i)\s*(uindex[\W_]*org[\W_]*)(?=\S)", "", s).strip()
     
     # 1. Truncate at common show markers if it looks like a TV show episode
     show_m = re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b", s)
