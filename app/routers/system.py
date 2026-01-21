@@ -1675,15 +1675,28 @@ def get_dlna_info(user_id: int = Depends(get_current_user_id)):
 
 @router.post("/dlna/restart")
 def restart_dlna(user_id: int = Depends(get_current_user_id)):
-    """Restart DLNA server"""
+    """Restart DLNA server and rebuild database"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
-    
+
     try:
-        subprocess.run(["sudo", "systemctl", "restart", "minidlna"], check=True)
-        # Force rescan
+        # Stop service
+        subprocess.run(["sudo", "systemctl", "stop", "minidlna"], check=False)
+
+        # Clear database
+        subprocess.run(["sudo", "rm", "-f", "/var/cache/minidlna/files.db"], check=False)
+
+        # Recreate cache directory with proper permissions
+        subprocess.run(["sudo", "mkdir", "-p", "/var/cache/minidlna"], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", "/var/cache/minidlna"], check=False)
+
+        # Start service
+        subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)
+
+        # Force full rescan
         subprocess.run(["sudo", "minidlnad", "-R"], check=False)
-        return {"status": "ok", "message": "DLNA server restarted and rescanning media"}
+
+        return {"status": "ok", "message": "DLNA database cleared and rebuilding. Wait 2-3 minutes then check your TV."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
