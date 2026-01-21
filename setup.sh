@@ -238,6 +238,13 @@ fi
 if id "minidlna" &>/dev/null; then
     echo "Adding minidlna user to $REAL_USER group..."
     sudo usermod -a -G "$REAL_USER" minidlna
+
+    # CRITICAL: Make home directory traversable so minidlna can access subdirectories
+    chmod +x "$HOME" 2>/dev/null || true
+
+    # Make nomad-pi directory traversable
+    chmod 755 "$CURRENT_DIR" 2>/dev/null || true
+
     # Ensure data subdirectories are readable and executable by the group
     sudo chmod -R g+rX "$CURRENT_DIR/data"
 fi

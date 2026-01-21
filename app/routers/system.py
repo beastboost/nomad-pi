@@ -1706,25 +1706,52 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
     movies_dir = os.path.join(base_dir, "data", "movies")
     shows_dir = os.path.join(base_dir, "data", "shows")
 
+    # Check if directories exist
+    diagnostics["movies_dir_exists"] = os.path.exists(movies_dir)
+    diagnostics["shows_dir_exists"] = os.path.exists(shows_dir)
+    diagnostics["movies_dir_path"] = movies_dir
+    diagnostics["shows_dir_path"] = shows_dir
+
+    # Check permissions
+    try:
+        import stat
+        if os.path.exists(movies_dir):
+            st = os.stat(movies_dir)
+            diagnostics["movies_dir_perms"] = oct(st.st_mode)[-3:]
+            diagnostics["movies_dir_owner"] = f"{st.st_uid}:{st.st_gid}"
+    except:
+        pass
+
     try:
         movies = glob.glob(os.path.join(movies_dir, "**", "*.mp4"), recursive=True)
         movies += glob.glob(os.path.join(movies_dir, "**", "*.mkv"), recursive=True)
         movies += glob.glob(os.path.join(movies_dir, "**", "*.avi"), recursive=True)
         diagnostics["movie_files_found"] = len(movies)
-        diagnostics["movie_samples"] = [os.path.basename(m) for m in movies[:5]]
-    except:
+        diagnostics["movie_samples"] = [os.path.relpath(m, movies_dir) for m in movies[:5]]
+    except Exception as e:
         diagnostics["movie_files_found"] = 0
         diagnostics["movie_samples"] = []
+        diagnostics["movie_scan_error"] = str(e)
 
     try:
         shows = glob.glob(os.path.join(shows_dir, "**", "*.mp4"), recursive=True)
         shows += glob.glob(os.path.join(shows_dir, "**", "*.mkv"), recursive=True)
         shows += glob.glob(os.path.join(shows_dir, "**", "*.avi"), recursive=True)
         diagnostics["show_files_found"] = len(shows)
-        diagnostics["show_samples"] = [os.path.basename(s) for s in shows[:5]]
-    except:
+        diagnostics["show_samples"] = [os.path.relpath(s, shows_dir) for s in shows[:5]]
+    except Exception as e:
         diagnostics["show_files_found"] = 0
         diagnostics["show_samples"] = []
+        diagnostics["show_scan_error"] = str(e)
+
+    # Check cache directory permissions
+    try:
+        cache_st = os.stat("/var/cache/minidlna")
+        diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
+        diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
+        diagnostics["cache_dir_exists"] = True
+    except:
+        diagnostics["cache_dir_exists"] = False
 
     # Read recent log entries
     try:
