@@ -2644,6 +2644,10 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
 
     if not dry_run:
         _cleanup_empty_folders(show_bases)
+        # Trigger DLNA rescan after organizing shows
+        if moved > 0:
+            logger.info(f"Organized {moved} episodes, triggering DLNA rescan")
+            trigger_dlna_rescan()
 
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
@@ -2895,6 +2899,10 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
 
     if not dry_run:
         _cleanup_empty_folders(movie_bases)
+        # Trigger DLNA rescan after organizing movies
+        if moved > 0:
+            logger.info(f"Organized {moved} movies, triggering DLNA rescan")
+            trigger_dlna_rescan()
 
     return {"status": "ok", "dry_run": bool(dry_run), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "planned": planned[: min(len(planned), 1000)]}
 

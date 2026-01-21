@@ -558,9 +558,9 @@ friendly_name=$NEW_HOSTNAME
 network_interface=wlan0
 port=8200
 
-# File monitoring
+# File monitoring - scan every 60 seconds for changes
 inotify=yes
-notify_interval=600
+notify_interval=60
 
 # Container settings - use "." for hierarchical folders
 root_container=.
