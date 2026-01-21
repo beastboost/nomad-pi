@@ -1673,6 +1673,80 @@ def get_dlna_info(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"enabled": False, "message": str(e)}
 
+@router.get("/dlna/status")
+def get_dlna_status(user_id: int = Depends(get_current_user_id)):
+    """Get DLNA diagnostic information"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="DLNA only available on Linux")
+
+    import glob
+    diagnostics = {}
+
+    # Check if service is running
+    try:
+        result = subprocess.run(["systemctl", "is-active", "minidlna"], capture_output=True, text=True)
+        diagnostics["service_running"] = result.stdout.strip() == "active"
+    except:
+        diagnostics["service_running"] = False
+
+    # Read config to see what paths it's scanning
+    try:
+        with open("/etc/minidlna.conf", "r") as f:
+            config = f.read()
+            media_dirs = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("media_dir=")]
+            root_container = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("root_container=")]
+            diagnostics["configured_paths"] = media_dirs
+            diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
+    except:
+        diagnostics["configured_paths"] = ["ERROR: Could not read config"]
+        diagnostics["root_container"] = "ERROR"
+
+    # Count actual files in data directories
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    movies_dir = os.path.join(base_dir, "data", "movies")
+    shows_dir = os.path.join(base_dir, "data", "shows")
+
+    try:
+        movies = glob.glob(os.path.join(movies_dir, "**", "*.mp4"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.mkv"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.avi"), recursive=True)
+        diagnostics["movie_files_found"] = len(movies)
+        diagnostics["movie_samples"] = [os.path.basename(m) for m in movies[:5]]
+    except:
+        diagnostics["movie_files_found"] = 0
+        diagnostics["movie_samples"] = []
+
+    try:
+        shows = glob.glob(os.path.join(shows_dir, "**", "*.mp4"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.mkv"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.avi"), recursive=True)
+        diagnostics["show_files_found"] = len(shows)
+        diagnostics["show_samples"] = [os.path.basename(s) for s in shows[:5]]
+    except:
+        diagnostics["show_files_found"] = 0
+        diagnostics["show_samples"] = []
+
+    # Read recent log entries
+    try:
+        result = subprocess.run(["sudo", "tail", "-20", "/var/log/minidlna/minidlna.log"],
+                              capture_output=True, text=True, timeout=5)
+        diagnostics["recent_logs"] = result.stdout.split("\n")[-10:] if result.stdout else ["No logs"]
+    except:
+        diagnostics["recent_logs"] = ["Could not read logs"]
+
+    # Check database file
+    try:
+        db_exists = os.path.exists("/var/cache/minidlna/files.db")
+        diagnostics["database_exists"] = db_exists
+        if db_exists:
+            db_size = os.path.getsize("/var/cache/minidlna/files.db")
+            diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
+    except:
+        diagnostics["database_exists"] = False
+        diagnostics["database_size_mb"] = 0
+
+    return diagnostics
+
 @router.post("/dlna/restart")
 def restart_dlna(user_id: int = Depends(get_current_user_id)):
     """Restart DLNA server and rebuild database"""

@@ -255,8 +255,12 @@
                     </div>
 
                     <h4 style="margin-top:20px; margin-bottom:10px;">DLNA Media Server</h4>
-                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                         <button onclick="restartDLNA()" class="warning">Restart DLNA & Rebuild Database</button>
+                        <button onclick="loadDLNADiagnostics()" class="secondary">Show Diagnostics</button>
+                    </div>
+                    <div id="dlna-diagnostics" style="display:none; background:rgba(0,0,0,0.3); padding:15px; border-radius:8px; margin-bottom:20px;">
+                        <div id="dlna-diagnostics-content">Loading...</div>
                     </div>
 
                     <h4 style="margin-top:20px; margin-bottom:10px;">Tailscale VPN</h4>
