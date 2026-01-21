@@ -2919,13 +2919,11 @@ def trigger_dlna_rescan():
     """Trigger a MiniDLNA rescan if on Linux"""
     if platform.system() == "Linux":
         try:
-            # We try to use dynamic paths for better SBC compatibility
-            minidlnad = _get_bin_path("minidlnad", "/usr/sbin/minidlnad")
+            # Restart the service which triggers automatic rescan
+            # Note: Do NOT use minidlnad -R as it fails when service is already running
             systemctl = _get_bin_path("systemctl", "/usr/bin/systemctl")
-            
-            subprocess.run(["sudo", minidlnad, "-R"], check=False)
             subprocess.run(["sudo", systemctl, "restart", "minidlna"], check=False)
-            logger.info("Triggered MiniDLNA rescan")
+            logger.info("Triggered MiniDLNA rescan via service restart")
         except Exception as e:
             logger.error(f"Failed to trigger MiniDLNA rescan: {e}")
 
