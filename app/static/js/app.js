@@ -3098,6 +3098,84 @@ async function scanWifi() {
     }
 }
 
+async function loadDLNADiagnostics() {
+    const container = document.getElementById('dlna-diagnostics');
+    const content = document.getElementById('dlna-diagnostics-content');
+
+    if (!container || !content) return;
+
+    container.style.display = 'block';
+    content.innerHTML = 'Loading diagnostics...';
+
+    try {
+        const res = await fetch(`${API_BASE}/system/dlna/status`, {
+            headers: getAuthHeaders()
+        });
+
+        if (res.status === 401) {
+            logout();
+            return;
+        }
+
+        if (!res.ok) {
+            content.innerHTML = '<div style="color:var(--danger-color);">Failed to load diagnostics</div>';
+            return;
+        }
+
+        const data = await res.json();
+
+        const serviceStatus = data.service_running
+            ? '<span style="color:#4ade80;">Running ✓</span>'
+            : '<span style="color:#f87171;">Not Running ✗</span>';
+
+        const rootContainer = data.root_container === '.'
+            ? '<span style="color:#4ade80;">. (Hierarchical) ✓</span>'
+            : `<span style="color:#f87171;">${data.root_container} (Should be ".") ✗</span>`;
+
+        let html = `
+            <div style="font-family:monospace; font-size:0.9em;">
+                <div style="margin-bottom:15px;">
+                    <strong>Service Status:</strong> ${serviceStatus}<br>
+                    <strong>Root Container:</strong> ${rootContainer}<br>
+                    <strong>Database Exists:</strong> ${data.database_exists ? 'Yes (' + data.database_size_mb + ' MB)' : 'No'}<br>
+                    <strong>Movies Found:</strong> ${data.movie_files_found}<br>
+                    <strong>TV Episodes Found:</strong> ${data.show_files_found}
+                </div>
+
+                <div style="margin-bottom:15px;">
+                    <strong>Configured Media Paths:</strong><br>
+                    ${data.configured_paths.map(p => `<div style="padding-left:20px; color:var(--text-muted);">${p}</div>`).join('')}
+                </div>
+        `;
+
+        if (data.movie_samples && data.movie_samples.length > 0) {
+            html += `
+                <div style="margin-bottom:15px;">
+                    <strong>Sample Movies (first 5):</strong><br>
+                    ${data.movie_samples.map(m => `<div style="padding-left:20px; color:var(--text-muted);">${m}</div>`).join('')}
+                </div>
+            `;
+        }
+
+        if (data.recent_logs && data.recent_logs.length > 0) {
+            html += `
+                <div>
+                    <strong>Recent Log Entries:</strong><br>
+                    <div style="padding:10px; background:rgba(0,0,0,0.5); border-radius:4px; max-height:200px; overflow-y:auto;">
+                        ${data.recent_logs.filter(l => l.trim()).map(l => `<div style="font-size:0.85em; color:var(--text-muted);">${l}</div>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        html += '</div>';
+        content.innerHTML = html;
+
+    } catch (e) {
+        content.innerHTML = `<div style="color:var(--danger-color);">Error: ${e.message}</div>`;
+    }
+}
+
 async function restartDLNA() {
     if (!confirm('Restart DLNA and rebuild the media database? This will rescan all your movies, shows, and music. It may take a few minutes.')) {
         return;
@@ -3120,6 +3198,8 @@ async function restartDLNA() {
 
         if (res.ok) {
             showToast('DLNA server restarted! Database is rebuilding. Check your TV in 1-2 minutes.', 'success', { duration: 8000 });
+            // Reload diagnostics after a few seconds
+            setTimeout(() => loadDLNADiagnostics(), 3000);
         } else {
             showToast(`Error: ${data.detail || 'Failed to restart DLNA'}`, 'error');
         }
