@@ -239,26 +239,25 @@ echo "Checking MiniDLNA configuration..." >> update.log
 
 MINIDLNA_CONF="/etc/minidlna.conf"
 DLNA_CONFIG_CHANGED=0
+CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
+
+sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+sudo chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
 
 # Create full MiniDLNA config if it doesn't exist or is incomplete
-if [ ! -f "$MINIDLNA_CONF" ] || ! grep -q "^media_dir=V,$SCRIPT_DIR/data/movies" "$MINIDLNA_CONF"; then
+if [ ! -f "$MINIDLNA_CONF" ] || ! grep -q "^media_dir=$SCRIPT_DIR/data" "$MINIDLNA_CONF"; then
     echo "Creating MiniDLNA configuration..." >> update.log
     sudo tee "$MINIDLNA_CONF" > /dev/null <<EOL
-# Media directories with proper type labels
-media_dir=V,$SCRIPT_DIR/data/movies
-media_dir=V,$SCRIPT_DIR/data/shows
-media_dir=A,$SCRIPT_DIR/data/music
-media_dir=P,$SCRIPT_DIR/data/gallery
-media_dir=P,$SCRIPT_DIR/data/books
+# Scan the entire data directory (includes external drives under data/external)
+media_dir=$SCRIPT_DIR/data
 
 # Database and logging
 db_dir=/var/cache/minidlna
-log_dir=/var/log
+log_dir=/var/log/minidlna
 log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
 
 # Network settings
-friendly_name=nomadpi
-network_interface=wlan0
+friendly_name=$CURRENT_HOSTNAME
 port=8200
 
 # File monitoring - scan every 60 seconds for changes
@@ -269,14 +268,14 @@ notify_interval=60
 root_container=.
 
 # Presentation
-presentation_url=http://nomadpi.local:8000/
+presentation_url=http://$CURRENT_HOSTNAME.local:8000/
 album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
 
 # Optimization
 max_connections=50
 strict_dlna=no
 enable_tivo=no
-wide_links=no
+wide_links=yes
 EOL
     DLNA_CONFIG_CHANGED=1
 else

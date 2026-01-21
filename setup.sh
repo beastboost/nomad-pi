@@ -542,28 +542,23 @@ fi
 
 # Set up MiniDLNA cache and log directories with proper permissions
 echo "Setting up MiniDLNA cache directories..."
-sudo mkdir -p /var/cache/minidlna /var/log
+sudo mkdir -p /var/cache/minidlna /var/log/minidlna
 sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
 sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
 
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 cat > "$MINIDLNA_TEMP" <<EOL
-# Media directories with proper type labels
-media_dir=V,$CURRENT_DIR/data/movies
-media_dir=V,$CURRENT_DIR/data/shows
-media_dir=A,$CURRENT_DIR/data/music
-media_dir=P,$CURRENT_DIR/data/gallery
-media_dir=P,$CURRENT_DIR/data/books
+# Scan the entire data directory (includes external drives under data/external)
+media_dir=$CURRENT_DIR/data
 
 # Database and logging
 db_dir=/var/cache/minidlna
-log_dir=/var/log
+log_dir=/var/log/minidlna
 log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
 
 # Network settings
 friendly_name=$NEW_HOSTNAME
-network_interface=wlan0
 port=8200
 
 # File monitoring - scan every 60 seconds for changes
@@ -581,7 +576,7 @@ album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt
 max_connections=50
 strict_dlna=no
 enable_tivo=no
-wide_links=no
+wide_links=yes
 EOL
 
 # Ensure the data directory is fully accessible to minidlna

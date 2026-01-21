@@ -1702,7 +1702,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
         diagnostics["root_container"] = "ERROR"
 
     # Count actual files in data directories
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     movies_dir = os.path.join(base_dir, "data", "movies")
     shows_dir = os.path.join(base_dir, "data", "shows")
 

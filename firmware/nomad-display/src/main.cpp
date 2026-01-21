@@ -8,13 +8,14 @@
 #include <Preferences.h>
 #include <HTTPClient.h>
 #include <TJpg_Decoder.h>
+#include <time.h>
 #include "LGFX_Setup.h"
 
 // --- DEFINITIONS ---
 #define SCREEN_WIDTH 480
 #define SCREEN_HEIGHT 320
-#define POSTER_W 150
-#define POSTER_H 225
+#define POSTER_W 120
+#define POSTER_H 180
 
 // --- OBJECTS ---
 LGFX tft;
@@ -72,6 +73,9 @@ bool discovery_dirty = false;
 unsigned long last_http_success_ms = 0;
 bool theme_dark = true;
 int brightness = 128;
+bool time_configured = false;
+bool time_valid = false;
+unsigned long last_time_check_ms = 0;
 
 volatile bool ws_payload_ready = false;
 static char ws_payload_buf[20001];
@@ -251,6 +255,15 @@ void loop() {
 
     if (WiFi.status() == WL_CONNECTED) {
         checkUDP();
+        if (time_configured && !time_valid) {
+            if (last_time_check_ms == 0 || (millis() - last_time_check_ms) > 1000) {
+                last_time_check_ms = millis();
+                time_t now = time(nullptr);
+                if (now > 1700000000) {
+                    time_valid = true;
+                }
+            }
+        }
     }
 
     if (WiFi.status() == WL_CONNECTED && !is_connected) {
@@ -533,7 +546,12 @@ void updateScreensaverClock() {
 
     if (!screensaver_active || !screensaver_clock || !screensaver_date) return;
 
-    time_t now = millis() / 1000;
+    time_t now = time(nullptr);
+    if (now < 1700000000) {
+        lv_label_set_text(screensaver_clock, "--:--:--");
+        lv_label_set_text(screensaver_date, "");
+        return;
+    }
     struct tm timeinfo;
     localtime_r(&now, &timeinfo);
 
@@ -768,8 +786,7 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_center(np_empty_label);
 
     np_card = lv_obj_create(cont_now_playing_list);
-    lv_obj_set_size(np_card, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_grow(np_card, 1);
+    lv_obj_set_size(np_card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(np_card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(np_card, 16, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
@@ -1117,6 +1134,12 @@ void handleWifiConnection() {
         if (win_wifi) {
             lv_obj_del(win_wifi);
             win_wifi = NULL;
+        }
+        if (!time_configured) {
+            configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+            time_configured = true;
+            time_valid = false;
+            last_time_check_ms = 0;
         }
         tryConnectWebSocket();
         return;

@@ -117,6 +117,7 @@ namespace NomadTransferTool
         private string _serverPassword = "";
         private string _authToken = "";
         private string _authStatus = "Not logged in";
+        private readonly System.Threading.SemaphoreSlim _authSemaphore = new System.Threading.SemaphoreSlim(1, 1);
 
         public string ServerUsername { get => _serverUsername; set { _serverUsername = value; OnPropertyChanged(); } }
         public string AuthStatus { get => _authStatus; set { _authStatus = value; OnPropertyChanged(); } }
@@ -417,22 +418,34 @@ namespace NomadTransferTool
 
         private async Task<bool> EnsureAuthenticated(bool showUserErrors = false)
         {
+            await _authSemaphore.WaitAsync();
             try
             {
-                if (!string.IsNullOrWhiteSpace(_authToken))
+                string tokenToCheck = _authToken?.Trim() ?? "";
+                if (!string.IsNullOrWhiteSpace(tokenToCheck))
                 {
                     using var req = new HttpRequestMessage(HttpMethod.Get, $"{API_BASE}/auth/check");
-                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenToCheck);
                     var checkRes = await client.SendAsync(req);
                     if (checkRes.IsSuccessStatusCode)
                     {
                         var content = await checkRes.Content.ReadAsStringAsync();
                         var data = JsonConvert.DeserializeObject<dynamic>(content);
-                        if (data != null && data.authenticated == true)
+                        bool isAuthenticated = false;
+                        try { isAuthenticated = (bool?)data?.authenticated == true; } catch { isAuthenticated = false; }
+                        if (isAuthenticated)
                         {
+                            _authToken = tokenToCheck;
+                            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
                             AuthStatus = $"Logged in as {ServerUsername}";
                             return true;
                         }
+
+                        ClearAuth();
+                    }
+                    else if (checkRes.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        ClearAuth();
                     }
                 }
 
@@ -465,7 +478,8 @@ namespace NomadTransferTool
                 }
 
                 var data2 = JsonConvert.DeserializeObject<dynamic>(resBody);
-                string token = data2?.token;
+                string? token = null;
+                try { token = (string?)data2?.token; } catch { token = null; }
                 if (string.IsNullOrWhiteSpace(token))
                 {
                     AuthStatus = "Login failed";
@@ -487,6 +501,64 @@ namespace NomadTransferTool
                 if (showUserErrors) System.Windows.MessageBox.Show($"Login error: {ex.Message}", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
             }
+            finally
+            {
+                _authSemaphore.Release();
+            }
+        }
+
+        private void ClearAuth()
+        {
+            _authToken = "";
+            client.DefaultRequestHeaders.Authorization = null;
+            AuthStatus = "Not logged in";
+        }
+
+        private async Task<HttpResponseMessage?> GetWithAuthRetry(string url, bool showUserErrors)
+        {
+            if (!await EnsureAuthenticated(showUserErrors)) return null;
+            var res = await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Get, url), null);
+            if (res.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                ClearAuth();
+                if (!await EnsureAuthenticated(showUserErrors)) return res;
+                res = await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Get, url), null);
+            }
+            return res;
+        }
+
+        private async Task<HttpResponseMessage?> PostWithAuthRetry(string url, HttpContent? content, bool showUserErrors)
+        {
+            if (!await EnsureAuthenticated(showUserErrors)) return null;
+            var res = await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Post, url), content);
+            if (res.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                ClearAuth();
+                if (!await EnsureAuthenticated(showUserErrors)) return res;
+                res = await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Post, url), content);
+            }
+            return res;
+        }
+
+        private static async Task<HttpContent?> CloneHttpContent(HttpContent? content)
+        {
+            if (content == null) return null;
+            var bytes = await content.ReadAsByteArrayAsync();
+            var clone = new ByteArrayContent(bytes);
+            foreach (var header in content.Headers)
+            {
+                clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            return clone;
+        }
+
+        private async Task<HttpResponseMessage> SendAuthedAsync(HttpRequestMessage request, HttpContent? content)
+        {
+            request.Headers.Authorization = string.IsNullOrWhiteSpace(_authToken)
+                ? null
+                : new AuthenticationHeaderValue("Bearer", _authToken);
+            request.Content = await CloneHttpContent(content);
+            return await client.SendAsync(request);
         }
 
         public bool IsTransferring { get => _isTransferring; set { _isTransferring = value; OnPropertyChanged(); } }
@@ -930,7 +1002,6 @@ namespace NomadTransferTool
             try
             {
                 AddLog("Sending restart command...");
-                if (!await EnsureAuthenticated(true)) return;
                 // Note: We use the standardized control endpoint. 
                 // We'll add a 'reboot' action or specific 'service_restart' if needed, 
                 // but usually reboot is what's wanted for a clean state.
@@ -939,7 +1010,8 @@ namespace NomadTransferTool
                 
                 // Use the standardized body-based control endpoint
                 var content = new StringContent(JsonConvert.SerializeObject(new { action = "restart" }), Encoding.UTF8, "application/json");
-                var res = await client.PostAsync($"{API_BASE}/system/control", content);
+                var res = await PostWithAuthRetry($"{API_BASE}/system/control", content, true);
+                if (res == null) return;
                 if (res.IsSuccessStatusCode)
                 {
                     AddLog("Restart command accepted. Application is restarting...");
@@ -962,8 +1034,8 @@ namespace NomadTransferTool
             try
             {
                 AddLog("Fetching remote logs...");
-                if (!await EnsureAuthenticated(true)) return;
-                var res = await client.GetAsync($"{API_BASE}/system/logs?lines=50");
+                var res = await GetWithAuthRetry($"{API_BASE}/system/logs?lines=50", true);
+                if (res == null) return;
                 if (res.IsSuccessStatusCode)
                 {
                     var content = await res.Content.ReadAsStringAsync();
@@ -1062,19 +1134,35 @@ namespace NomadTransferTool
             var newDrives = new List<DriveInfoModel>();
 
             // 1. Add Local USB Drives
+            string systemDrive = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
             foreach (var drive in DriveInfo.GetDrives())
             {
-                if (drive.DriveType == DriveType.Removable && drive.IsReady)
+                bool isReady;
+                try { isReady = drive.IsReady; } catch { continue; }
+                if (!isReady) continue;
+
+                if (drive.DriveType != DriveType.Removable && drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Unknown) continue;
+                if (!string.IsNullOrEmpty(systemDrive) && string.Equals(drive.Name, systemDrive, StringComparison.OrdinalIgnoreCase)) continue;
+
+                string volumeLabel = "";
+                try { volumeLabel = drive.VolumeLabel; } catch { }
+
+                long totalSize = 0;
+                long freeSpace = 0;
+                try { totalSize = drive.TotalSize; } catch { }
+                try { freeSpace = drive.AvailableFreeSpace; } catch { }
+
+                string defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : "Drive";
+                if (string.IsNullOrWhiteSpace(volumeLabel)) defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : drive.Name.TrimEnd('\\');
+
+                newDrives.Add(new DriveInfoModel
                 {
-                    newDrives.Add(new DriveInfoModel
-                    {
-                        Name = drive.Name,
-                        Label = string.IsNullOrEmpty(drive.VolumeLabel) ? "USB Drive" : drive.VolumeLabel,
-                        TotalSize = drive.TotalSize,
-                        AvailableFreeSpace = drive.AvailableFreeSpace,
-                        IsMounted = Directory.Exists(Path.Combine(mediaServerDataPath, drive.Name.Replace(":\\", "")))
-                    });
-                }
+                    Name = drive.Name,
+                    Label = string.IsNullOrEmpty(volumeLabel) ? defaultLabel : volumeLabel,
+                    TotalSize = totalSize,
+                    AvailableFreeSpace = freeSpace,
+                    IsMounted = true
+                });
             }
 
             // 2. Add Samba Share if enabled and path is valid
@@ -1150,12 +1238,15 @@ namespace NomadTransferTool
             */
         }
 
-        private void PrepareDrive_Click(object sender, RoutedEventArgs e)
+        private async void PrepareDrive_Click(object sender, RoutedEventArgs e)
         {
             if (DriveList.SelectedItem is DriveInfoModel drive)
             {
                 try
                 {
+                    var (ready, err) = await EnsurePathReady(drive.Name);
+                    if (!ready) throw new Exception(err);
+
                     string[] folders = Categories.All;
                     foreach (var f in folders)
                     {
@@ -1683,7 +1774,7 @@ namespace NomadTransferTool
                     string posterDest = Path.Combine(posterBase, posterName + ".jpg");
 
                     bool posterExists = await Task.Run(() => File.Exists(posterDest));
-                    if (posterExists) await Task.Run(() => File.Delete(posterDest));
+                    if (posterExists) return;
 
                     await CreateDirectoryIfNotExists(posterBase);
                     await DownloadPoster(meta.Poster, posterDest);
@@ -1692,6 +1783,147 @@ namespace NomadTransferTool
             catch (Exception ex)
             {
                 AddLog($"Poster download failed: {ex.Message}");
+            }
+        }
+
+        private async Task<bool> CopyExistingPosterFiles(MediaItem item, string sourcePath, string finalDest, System.Threading.CancellationToken token)
+        {
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                string? sourceDir = Path.GetDirectoryName(sourcePath);
+                string? destDir = Path.GetDirectoryName(finalDest);
+                if (string.IsNullOrEmpty(sourceDir) || string.IsNullOrEmpty(destDir)) return false;
+
+                string srcBase = Path.GetFileNameWithoutExtension(sourcePath);
+                string destBase = Path.GetFileNameWithoutExtension(finalDest);
+                bool copiedAny = false;
+
+                async Task<bool> copyIfExists(string src, string dest)
+                {
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        bool exists = await Task.Run(() => File.Exists(src), token);
+                        if (!exists) return false;
+
+                        bool destExists = await Task.Run(() => File.Exists(dest), token);
+                        if (destExists) return false;
+
+                        await Task.Run(() =>
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                            File.Copy(src, dest, overwrite: false);
+                        }, token);
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+
+                if (item.Category == Categories.Movies)
+                {
+                    var baseCandidates = new[]
+                    {
+                        Path.Combine(sourceDir, srcBase + ".jpg"),
+                        Path.Combine(sourceDir, srcBase + ".jpeg"),
+                        Path.Combine(sourceDir, srcBase + ".png"),
+                    };
+
+                    foreach (var src in baseCandidates)
+                    {
+                        string ext = Path.GetExtension(src).ToLowerInvariant();
+                        string destExt = ext == ".png" ? ".png" : ".jpg";
+                        string dest = Path.Combine(destDir, destBase + destExt);
+
+                        if (await copyIfExists(src, dest))
+                        {
+                            copiedAny = true;
+                            break;
+                        }
+                    }
+
+                    var folderCandidates = new[]
+                    {
+                        ("poster.jpg", "poster.jpg"),
+                        ("poster.jpeg", "poster.jpeg"),
+                        ("poster.png", "poster.png"),
+                        ("folder.jpg", "folder.jpg"),
+                        ("folder.png", "folder.png"),
+                        ("cover.jpg", "cover.jpg"),
+                        ("cover.png", "cover.png"),
+                    };
+                    foreach (var (name, destName) in folderCandidates)
+                    {
+                        if (await copyIfExists(Path.Combine(sourceDir, name), Path.Combine(destDir, destName)))
+                        {
+                            copiedAny = true;
+                        }
+                    }
+                }
+                else if (item.Category == Categories.Shows)
+                {
+                    var baseCandidates = new[]
+                    {
+                        Path.Combine(sourceDir, srcBase + ".jpg"),
+                        Path.Combine(sourceDir, srcBase + ".jpeg"),
+                        Path.Combine(sourceDir, srcBase + ".png"),
+                    };
+                    foreach (var src in baseCandidates)
+                    {
+                        string ext = Path.GetExtension(src).ToLowerInvariant();
+                        string destExt = ext == ".png" ? ".png" : ".jpg";
+                        string dest = Path.Combine(destDir, destBase + destExt);
+                        if (await copyIfExists(src, dest))
+                        {
+                            copiedAny = true;
+                            break;
+                        }
+                    }
+
+                    var folderCandidates = new[]
+                    {
+                        "poster.jpg",
+                        "poster.jpeg",
+                        "poster.png",
+                        "folder.jpg",
+                        "folder.png",
+                        "cover.jpg",
+                        "cover.png",
+                    };
+                    foreach (var name in folderCandidates)
+                    {
+                        if (await copyIfExists(Path.Combine(sourceDir, name), Path.Combine(destDir, name)))
+                        {
+                            copiedAny = true;
+                        }
+                    }
+
+                    try
+                    {
+                        var srcParent = Directory.GetParent(sourceDir)?.FullName;
+                        var destParent = Directory.GetParent(destDir)?.FullName;
+                        if (!string.IsNullOrEmpty(srcParent) && !string.IsNullOrEmpty(destParent))
+                        {
+                            foreach (var name in folderCandidates)
+                            {
+                                if (await copyIfExists(Path.Combine(srcParent, name), Path.Combine(destParent, name)))
+                                {
+                                    copiedAny = true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                return copiedAny;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -1886,51 +2118,8 @@ namespace NomadTransferTool
                                         }
                                     }
 
-                                    // Handle Poster if available
-                                    if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == Categories.Movies || item.Category == Categories.Shows))
-                                    {
-                                        try {
-                                            var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
-                                            if (meta != null && ShouldApplyOmdbMetadata(item.Title, meta, item.Category) && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
-                                            {
-                                                string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                                string posterBase;
-                                                string posterName;
-
-                                                if (item.Category == Categories.Shows)
-                                                {
-                                                    if (!string.IsNullOrEmpty(item.Season))
-                                                    {
-                                                        // Season-specific poster goes in Season folder
-                                                        posterBase = Path.GetDirectoryName(finalDest)!;
-                                                        posterName = "poster";
-                                                    }
-                                                    else
-                                                    {
-                                                        // Show-level poster goes in Show folder
-                                                        posterBase = Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
-                                                        posterName = "poster";
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    // Movie poster matches file name in same folder
-                                                    posterBase = Path.GetDirectoryName(finalDest)!;
-                                                    posterName = Path.GetFileNameWithoutExtension(finalDest);
-                                                }
-
-                                                string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-                                                 
-                                                 bool posterExists = await Task.Run(() => File.Exists(posterDest));
-                                                 if (posterExists) await Task.Run(() => File.Delete(posterDest));
-                                                 
-                                                 bool baseExists = await Task.Run(() => Directory.Exists(posterBase));
-                                                 if (!baseExists) await Task.Run(() => Directory.CreateDirectory(posterBase));
-                                                 
-                                                 await DownloadPoster(meta.Poster, posterDest);
-                                            }
-                                        } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
-                                    }
+                                    _ = await CopyExistingPosterFiles(item, item.SourcePath, finalDest, token);
+                                    await HandlePosterDownload(item, finalDest, effectiveTargetPath);
 
                                     if (finalDest != null)
                                     {
@@ -2018,51 +2207,8 @@ namespace NomadTransferTool
                                 }
                             }
 
-                            // Handle Poster if available
-                             if (!string.IsNullOrEmpty(OMDB_API_KEY) && (item.Category == "movies" || item.Category == "shows"))
-                             {
-                                 try {
-                                     var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
-                                     if (meta != null && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
-                                     {
-                                         string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                                         string posterBase;
-                                         string posterName;
-
-                                         if (item.Category == "shows")
-                                         {
-                                             if (!string.IsNullOrEmpty(item.Season))
-                                             {
-                                                 // Season-specific poster goes in Season folder
-                                                 posterBase = Path.GetDirectoryName(finalDest)!;
-                                                 posterName = "poster";
-                                             }
-                                             else
-                                             {
-                                                 // Show-level poster goes in Show folder
-                                                 posterBase = Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
-                                                 posterName = "poster";
-                                             }
-                                         }
-                                         else
-                                         {
-                                             // Movie poster matches file name in same folder
-                                             posterBase = Path.GetDirectoryName(finalDest)!;
-                                             posterName = Path.GetFileNameWithoutExtension(finalDest);
-                                         }
-
-                                         string posterDest = Path.Combine(posterBase, posterName + ".jpg");
-
-                                         bool posterExists = await Task.Run(() => File.Exists(posterDest));
-                                         if (posterExists) await Task.Run(() => File.Delete(posterDest));
-
-                                         bool baseExists = await Task.Run(() => Directory.Exists(posterBase));
-                                         if (!baseExists) await Task.Run(() => Directory.CreateDirectory(posterBase));
-
-                                         await DownloadPoster(meta.Poster, posterDest);
-                                     }
-                                 } catch (Exception ex) { AddLog($"Poster download failed: {ex.Message}"); }
-                             }
+                            _ = await CopyExistingPosterFiles(item, item.SourcePath, finalDest, token);
+                            await HandlePosterDownload(item, finalDest, effectiveTargetPath);
 
                             if (finalDest != null)
                             {
@@ -2138,7 +2284,8 @@ namespace NomadTransferTool
                             AddLog("Server library scan requires login. Open Nomad Login and sign in.");
                             return;
                         }
-                        var response = await client.PostAsync($"{API_BASE}/media/scan", null);
+                        var response = await PostWithAuthRetry($"{API_BASE}/media/scan", null, false);
+                        if (response == null) return;
                         if (response.IsSuccessStatusCode) AddLog("Server library scan started.");
                         else AddLog($"Server library scan trigger failed: {response.StatusCode}");
                     } catch (Exception ex) {
