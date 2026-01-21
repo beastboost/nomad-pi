@@ -599,10 +599,7 @@ if ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
     sudo rm -f /var/cache/minidlna/files.db
     sudo systemctl enable minidlna
     sudo systemctl start minidlna
-
-    # Force media rescan
-    echo "Forcing media rescan..."
-    sudo minidlnad -R 2>/dev/null || true
+    # MiniDLNA will automatically scan on startup when database is missing
 else
     echo "MiniDLNA configuration unchanged. Skipping rebuild."
     # Ensure it's running though

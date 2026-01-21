@@ -333,10 +333,7 @@ if command -v minidlnad >/dev/null 2>&1; then
     sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
     sudo systemctl enable minidlna >> update.log 2>&1
     sudo systemctl start minidlna >> update.log 2>&1
-
-    # Wait a moment then force rescan
-    sleep 2
-    sudo minidlnad -R >> update.log 2>&1 || true
+    # MiniDLNA will automatically scan on startup when database is missing
 fi
 
 update_status 90 "Update complete. Finalizing..."

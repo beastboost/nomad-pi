@@ -1820,8 +1820,7 @@ def restart_dlna(user_id: int = Depends(get_current_user_id)):
         # Start service
         subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)
 
-        # Force full rescan
-        subprocess.run(["sudo", "minidlnad", "-R"], check=False)
+        # MiniDLNA will automatically scan on startup when database is missing
 
         return {"status": "ok", "message": "DLNA database cleared and rebuilding. Wait 2-3 minutes then check your TV."}
     except Exception as e:
