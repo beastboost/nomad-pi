@@ -13,8 +13,8 @@
 // --- DEFINITIONS ---
 #define SCREEN_WIDTH 480
 #define SCREEN_HEIGHT 320
-#define POSTER_W 110
-#define POSTER_H 160
+#define POSTER_W 150
+#define POSTER_H 225
 
 // --- OBJECTS ---
 LGFX tft;
@@ -338,8 +338,9 @@ void formatClock(char* out, size_t out_len, uint32_t seconds) {
 void applyTheme() {
     lv_color_t bg = theme_dark ? lv_color_hex(0x0B1220) : lv_color_hex(0xF5F7FB);
     lv_color_t text = theme_dark ? lv_color_hex(0xE5E7EB) : lv_color_hex(0x0F172A);
-    lv_color_t card = theme_dark ? lv_color_hex(0x334155) : lv_color_hex(0xFFFFFF);
+    lv_color_t card = theme_dark ? lv_color_hex(0x1E293B) : lv_color_hex(0xFFFFFF);
     lv_color_t muted = theme_dark ? lv_color_hex(0x94A3B8) : lv_color_hex(0x475569);
+    lv_color_t shadow = theme_dark ? lv_color_hex(0x000000) : lv_color_hex(0x64748B);
 
     lv_obj_set_style_bg_color(lv_scr_act(), bg, 0);
     lv_obj_set_style_text_color(lv_scr_act(), text, 0);
@@ -349,7 +350,10 @@ void applyTheme() {
         lv_obj_set_style_text_color(tv, text, 0);
     }
 
-    if (np_card) lv_obj_set_style_bg_color(np_card, card, 0);
+    if (np_card) {
+        lv_obj_set_style_bg_color(np_card, card, 0);
+        lv_obj_set_style_shadow_color(np_card, shadow, 0);
+    }
     if (np_title) lv_obj_set_style_text_color(np_title, text, 0);
     if (np_sub) lv_obj_set_style_text_color(np_sub, muted, 0);
     if (np_meta) lv_obj_set_style_text_color(np_meta, muted, 0);
@@ -496,23 +500,28 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     cont_now_playing_list = lv_obj_create(parent);
     lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
-    lv_obj_set_style_pad_row(cont_now_playing_list, 10, 0);
-    
+    lv_obj_set_style_pad_all(cont_now_playing_list, 12, 0);
+    lv_obj_set_style_pad_row(cont_now_playing_list, 12, 0);
+
     np_empty_label = lv_label_create(cont_now_playing_list);
     lv_label_set_text(np_empty_label, "No active sessions");
+    lv_obj_set_style_text_font(np_empty_label, &lv_font_montserrat_18, 0);
     lv_obj_center(np_empty_label);
 
     np_card = lv_obj_create(cont_now_playing_list);
     lv_obj_set_size(np_card, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_grow(np_card, 1);
-    lv_obj_set_style_bg_opa(np_card, 0, 0);
-    lv_obj_set_style_radius(np_card, 0, 0);
+    lv_obj_set_style_bg_opa(np_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(np_card, 16, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
-    lv_obj_set_style_pad_all(np_card, 0, 0);
+    lv_obj_set_style_pad_all(np_card, 16, 0);
+    lv_obj_set_style_shadow_width(np_card, 12, 0);
+    lv_obj_set_style_shadow_opa(np_card, LV_OPA_20, 0);
+    lv_obj_set_style_shadow_ofs_y(np_card, 4, 0);
+    lv_obj_set_style_shadow_spread(np_card, 2, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(np_card, 10, 0);
+    lv_obj_set_style_pad_row(np_card, 12, 0);
 
     lv_obj_t * top = lv_obj_create(np_card);
     lv_obj_set_width(top, LV_PCT(100));
@@ -520,30 +529,50 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_border_width(top, 0, 0);
     lv_obj_set_style_pad_all(top, 0, 0);
     lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(top, 12, 0);
+    lv_obj_set_style_pad_column(top, 16, 0);
 
-    np_img = lv_img_create(top);
+    // Poster container with rounded corners and border
+    lv_obj_t * poster_cont = lv_obj_create(top);
+    lv_obj_set_size(poster_cont, POSTER_W, POSTER_H);
+    lv_obj_set_style_bg_opa(poster_cont, 0, 0);
+    lv_obj_set_style_border_width(poster_cont, 2, 0);
+    lv_obj_set_style_border_color(poster_cont, lv_color_hex(0x475569), 0);
+    lv_obj_set_style_border_opa(poster_cont, LV_OPA_40, 0);
+    lv_obj_set_style_radius(poster_cont, 12, 0);
+    lv_obj_set_style_pad_all(poster_cont, 0, 0);
+    lv_obj_set_style_clip_corner(poster_cont, true, 0);
+
+    np_img = lv_img_create(poster_cont);
     lv_img_set_src(np_img, &img_poster_dsc);
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
-    lv_obj_align(np_img, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(np_img, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(info, 6, 0);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 44, POSTER_H);
+    lv_obj_set_style_pad_all(info, 0, 0);
+    lv_obj_set_style_pad_row(info, 8, 0);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 60, POSTER_H);
+    lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     np_title = lv_label_create(info);
     lv_obj_set_width(np_title, LV_PCT(100));
     lv_label_set_long_mode(np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(np_title, &lv_font_montserrat_20, 0);
     lv_label_set_text(np_title, "");
 
     np_sub = lv_label_create(info);
     lv_obj_set_width(np_sub, LV_PCT(100));
     lv_obj_set_style_text_color(np_sub, lv_color_hex(0x94A3B8), 0);
+    lv_obj_set_style_text_font(np_sub, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_sub, "");
+
+    // Add spacer
+    lv_obj_t * spacer = lv_obj_create(info);
+    lv_obj_set_flex_grow(spacer, 1);
+    lv_obj_set_style_bg_opa(spacer, 0, 0);
+    lv_obj_set_style_border_width(spacer, 0, 0);
 
     np_meta = lv_label_create(info);
     lv_obj_set_width(np_meta, LV_PCT(100));
@@ -552,36 +581,47 @@ void buildNowPlayingTab(lv_obj_t * parent) {
 
     np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 14);
+    lv_obj_set_height(np_bar, 8);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1F2937), 0);
     lv_obj_set_style_bg_opa(np_bar, 255, 0);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(np_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(np_bar, 8, 0);
-    lv_obj_set_style_radius(np_bar, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(np_bar, 4, 0);
+    lv_obj_set_style_radius(np_bar, 4, LV_PART_INDICATOR);
 
     lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
     lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
-    lv_obj_set_size(ctrls, LV_PCT(100), 40);
-    lv_obj_set_style_pad_column(ctrls, 10, 0);
+    lv_obj_set_flex_align(ctrls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_size(ctrls, LV_PCT(100), 50);
+    lv_obj_set_style_pad_column(ctrls, 12, 0);
 
     np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 100, 34);
+    lv_obj_set_size(np_btn_stop, 120, 44);
     lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
+    lv_obj_set_style_radius(np_btn_stop, 10, 0);
+    lv_obj_set_style_shadow_width(np_btn_stop, 8, 0);
+    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_ofs_y(np_btn_stop, 2, 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
     lv_label_set_text(lbl_stop, "STOP");
+    lv_obj_set_style_text_font(lbl_stop, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_stop);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 120, 34);
+    lv_obj_set_size(np_btn_pause, 140, 44);
     lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
+    lv_obj_set_style_radius(np_btn_pause, 10, 0);
+    lv_obj_set_style_shadow_width(np_btn_pause, 8, 0);
+    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_ofs_y(np_btn_pause, 2, 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "PAUSE");
+    lv_obj_set_style_text_font(lbl_pause, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_pause);
 
     lv_obj_add_event_cb(np_btn_stop, [](lv_event_t* e){
@@ -1115,8 +1155,14 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
             if (downloadPoster(full_url.c_str())) {
                 strncpy(current_poster_url, poster_url, 255);
                 current_poster_url[255] = '\0';
+                // Update image descriptor data pointer to current sprite buffer
+                img_poster_dsc.data = (const uint8_t*)sprite_poster.getBuffer();
+                img_poster_dsc.data_size = POSTER_W * POSTER_H * 2;
                 lv_img_set_src(np_img, &img_poster_dsc);
                 lv_obj_invalidate(np_img);
+                Serial.printf("Poster updated: %s\n", poster_url);
+            } else {
+                Serial.printf("Poster download failed: %s\n", full_url.c_str());
             }
         }
     }
