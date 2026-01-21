@@ -2661,6 +2661,16 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
     skipped = 0
     errors = 0
 
+    # Ensure base directories exist
+    for base in movie_bases:
+        if not os.path.exists(base):
+            try:
+                os.makedirs(base, exist_ok=True)
+                logger.info(f"Created movie directory: {base}")
+            except (OSError, PermissionError) as e:
+                logger.error(f"Cannot create base directory {base}: {e}")
+                continue
+
     for base in movie_bases:
         if not os.path.isdir(base):
             continue
@@ -2778,17 +2788,21 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
                 # CHECK FOR DUPLICATES: Check if this movie already exists in the library
                 # We check the final destination folder name in the base movies directory
                 exists_in_library = False
-                for existing_folder in os.listdir(base):
-                    existing_path = os.path.join(base, existing_folder)
-                    if os.path.isdir(existing_path):
-                        # If a folder with this title and year already exists, skip it
-                        if existing_folder.lower() == folder.lower():
-                            # Check if it contains a video file
-                            has_video = any(os.path.splitext(f)[1].lower() in [".mp4", ".mkv", ".avi", ".mov", ".webm"] 
-                                          for f in os.listdir(existing_path))
-                            if has_video:
-                                exists_in_library = True
-                                break
+                try:
+                    if os.path.isdir(base):
+                        for existing_folder in os.listdir(base):
+                            existing_path = os.path.join(base, existing_folder)
+                            if os.path.isdir(existing_path):
+                                # If a folder with this title and year already exists, skip it
+                                if existing_folder.lower() == folder.lower():
+                                    # Check if it contains a video file
+                                    has_video = any(os.path.splitext(f)[1].lower() in [".mp4", ".mkv", ".avi", ".mov", ".webm"]
+                                                  for f in os.listdir(existing_path))
+                                    if has_video:
+                                        exists_in_library = True
+                                        break
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"Could not check for duplicates in {base}: {e}")
                 
                 if exists_in_library and os.path.abspath(src_fs) != os.path.abspath(dest_fs):
                     logger.info(f"Skipping duplicate movie: {title} already exists in library")
@@ -2816,7 +2830,12 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
                     # Already in correct location, but we still want to ensure metadata and posters
                     dest_fs = src_fs
                 else:
-                    os.makedirs(dest_dir, exist_ok=True)
+                    try:
+                        os.makedirs(dest_dir, exist_ok=True)
+                    except (OSError, PermissionError) as e:
+                        logger.error(f"Cannot create directory {dest_dir}: {e}")
+                        errors += 1
+                        continue
                     dest_fs = _pick_unique_dest(dest_fs)
                     try:
                         shutil.move(src_fs, dest_fs)
