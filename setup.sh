@@ -215,7 +215,7 @@ fi
 
 # 4. Create Directories
 echo "[4/10] Ensuring data directories exist..."
-mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
+mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
 
 # Optimize chown/chmod - only run if needed, and skip data/ for the main pass
 echo "Verifying file permissions..."
@@ -524,6 +524,20 @@ sudo systemctl restart nmbd
 
 # 9. MiniDLNA Configuration (Smart TV Streaming)
 echo "[9/10] Configuring MiniDLNA..."
+
+# Ensure MiniDLNA is installed
+if ! command -v minidlnad >/dev/null 2>&1; then
+    echo "Installing MiniDLNA..."
+    sudo apt-get update
+    sudo apt-get install -y minidlna
+fi
+
+# Set up MiniDLNA cache and log directories with proper permissions
+echo "Setting up MiniDLNA cache directories..."
+sudo mkdir -p /var/cache/minidlna /var/log
+sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
+sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
+
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 cat > "$MINIDLNA_TEMP" <<EOL
@@ -571,18 +585,22 @@ sudo chmod -R 755 "$CURRENT_DIR/data"
 if ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
     echo "Updating MiniDLNA configuration..."
     sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
-    
-    # Only rebuild database if config actually changed
-    echo "Clean start MiniDLNA (rebuilding database)..."
-    sudo systemctl stop minidlna
+
+    # Rebuild database and force rescan
+    echo "Rebuilding MiniDLNA database..."
+    sudo systemctl stop minidlna 2>/dev/null || true
     sudo rm -f /var/cache/minidlna/files.db
     sudo systemctl enable minidlna
     sudo systemctl start minidlna
-    sudo minidlnad -R
+
+    # Force media rescan
+    echo "Forcing media rescan..."
+    sudo minidlnad -R 2>/dev/null || true
 else
     echo "MiniDLNA configuration unchanged. Skipping rebuild."
     # Ensure it's running though
     if ! systemctl is-active --quiet minidlna; then
+        sudo systemctl enable minidlna
         sudo systemctl start minidlna
     fi
 fi

@@ -202,13 +202,72 @@ else
 fi
 
 
-# Fix MiniDLNA permissions and sudoers after update
+# Ensure data directories exist
+echo "Ensuring media directories exist..." >> update.log
+mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
+chmod -R 755 data/
+chown -R $REAL_USER:$REAL_USER data/ 2>/dev/null || true
+
+# Install MiniDLNA if not present
+if ! command -v minidlnad >/dev/null 2>&1; then
+    echo "Installing MiniDLNA..." >> update.log
+    sudo apt-get update >> update.log 2>&1
+    sudo apt-get install -y minidlna >> update.log 2>&1
+fi
+
+# Add minidlna user to group
+if id "minidlna" &>/dev/null; then
+    sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
+    sudo chmod -R g+rX "$SCRIPT_DIR/data" 2>/dev/null || true
+fi
+
+# Fix MiniDLNA permissions and configuration
 echo "Checking MiniDLNA configuration..." >> update.log
 
 MINIDLNA_CONF="/etc/minidlna.conf"
 DLNA_CONFIG_CHANGED=0
-if [ -f "$MINIDLNA_CONF" ]; then
-    # Ensure hierarchical folder structure with root_container=.
+
+# Create full MiniDLNA config if it doesn't exist or is incomplete
+if [ ! -f "$MINIDLNA_CONF" ] || ! grep -q "^media_dir=V,$SCRIPT_DIR/data/movies" "$MINIDLNA_CONF"; then
+    echo "Creating MiniDLNA configuration..." >> update.log
+    sudo tee "$MINIDLNA_CONF" > /dev/null <<EOL
+# Media directories with proper type labels
+media_dir=V,$SCRIPT_DIR/data/movies
+media_dir=V,$SCRIPT_DIR/data/shows
+media_dir=A,$SCRIPT_DIR/data/music
+media_dir=P,$SCRIPT_DIR/data/gallery
+media_dir=P,$SCRIPT_DIR/data/books
+
+# Database and logging
+db_dir=/var/cache/minidlna
+log_dir=/var/log
+log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
+
+# Network settings
+friendly_name=nomadpi
+network_interface=wlan0
+port=8200
+
+# File monitoring
+inotify=yes
+notify_interval=600
+
+# Container settings - use "." for hierarchical folders
+root_container=.
+
+# Presentation
+presentation_url=http://nomadpi.local:8000/
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+
+# Optimization
+max_connections=50
+strict_dlna=no
+enable_tivo=no
+wide_links=no
+EOL
+    DLNA_CONFIG_CHANGED=1
+else
+    # Just ensure root_container is set correctly
     if sudo grep -Eq '^root_container=' "$MINIDLNA_CONF"; then
         if ! sudo grep -Eq '^root_container=\.$' "$MINIDLNA_CONF"; then
             sudo sed -i -E 's/^root_container=.*/root_container=./' "$MINIDLNA_CONF"
@@ -252,19 +311,30 @@ EOL
 fi
 
 if command -v minidlnad >/dev/null 2>&1; then
-    echo "Fixing MiniDLNA cache permissions..." >> update.log
+    echo "Configuring MiniDLNA service..." >> update.log
+
+    # Setup cache directories
+    sudo mkdir -p /var/cache/minidlna /var/log 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
 
     if [ "$DLNA_CONFIG_CHANGED" = "1" ]; then
+        echo "Rebuilding MiniDLNA database..." >> update.log
+        sudo systemctl stop minidlna 2>/dev/null || true
         sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
-        sudo minidlnad -R >/dev/null 2>&1 || true
-    fi
-
-    # Restart MiniDLNA if it's running
-    if systemctl is-active --quiet minidlna; then
-        echo "Restarting MiniDLNA..." >> update.log
-        sudo systemctl restart minidlna >> update.log 2>&1 || echo "MiniDLNA restart failed (non-critical)" >> update.log
+        sudo systemctl enable minidlna >> update.log 2>&1
+        sudo systemctl start minidlna >> update.log 2>&1
+        sudo minidlnad -R >> update.log 2>&1 || true
+    else
+        # Just ensure it's running
+        if ! systemctl is-active --quiet minidlna; then
+            echo "Starting MiniDLNA..." >> update.log
+            sudo systemctl enable minidlna >> update.log 2>&1
+            sudo systemctl start minidlna >> update.log 2>&1
+        else
+            echo "Restarting MiniDLNA..." >> update.log
+            sudo systemctl restart minidlna >> update.log 2>&1 || echo "MiniDLNA restart failed (non-critical)" >> update.log
+        fi
     fi
 fi
 
