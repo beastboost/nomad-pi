@@ -3098,6 +3098,36 @@ async function scanWifi() {
     }
 }
 
+async function restartDLNA() {
+    if (!confirm('Restart DLNA and rebuild the media database? This will rescan all your movies, shows, and music. It may take a few minutes.')) {
+        return;
+    }
+
+    showToast('Restarting DLNA server...', 'info');
+
+    try {
+        const res = await fetch(`${API_BASE}/system/dlna/restart`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+
+        if (res.status === 401) {
+            logout();
+            return;
+        }
+
+        const data = await res.json();
+
+        if (res.ok) {
+            showToast('DLNA server restarted! Database is rebuilding. Check your TV in 1-2 minutes.', 'success', { duration: 8000 });
+        } else {
+            showToast(`Error: ${data.detail || 'Failed to restart DLNA'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
 function openWifiModal(ssid) {
     const modal = document.getElementById('wifi-modal');
     const ssidLabel = document.getElementById('modal-ssid');
