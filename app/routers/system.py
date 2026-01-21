@@ -1753,13 +1753,39 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
     except:
         diagnostics["cache_dir_exists"] = False
 
-    # Read recent log entries
-    try:
-        result = subprocess.run(["sudo", "tail", "-20", "/var/log/minidlna/minidlna.log"],
-                              capture_output=True, text=True, timeout=5)
-        diagnostics["recent_logs"] = result.stdout.split("\n")[-10:] if result.stdout else ["No logs"]
-    except:
-        diagnostics["recent_logs"] = ["Could not read logs"]
+    # Read recent log entries - try multiple locations
+    logs_found = False
+    log_locations = [
+        "/var/log/minidlna.log",
+        "/var/log/minidlna/minidlna.log",
+    ]
+
+    for log_path in log_locations:
+        try:
+            result = subprocess.run(["sudo", "tail", "-30", log_path],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = log_path
+                logs_found = True
+                break
+        except:
+            pass
+
+    if not logs_found:
+        # Try systemd journal
+        try:
+            result = subprocess.run(["sudo", "journalctl", "-u", "minidlna", "-n", "20", "--no-pager"],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = "systemd journal"
+            else:
+                diagnostics["recent_logs"] = ["No logs found in any location"]
+                diagnostics["log_file_location"] = "none"
+        except:
+            diagnostics["recent_logs"] = ["Could not read logs"]
+            diagnostics["log_file_location"] = "error"
 
     # Check database file
     try:
