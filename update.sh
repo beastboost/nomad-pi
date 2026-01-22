@@ -114,10 +114,10 @@ echo "Installing/Updating system dependencies..."
 # We only run update if install fails to save time on Pi
 # Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
 # Note: 7zip replaces p7zip-full on Ubuntu 24.04+
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl; then
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
     echo "Some packages missing, updating list and trying again..." >> update.log
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
 fi
 
 # Ensure Tailscale is installed (for updates via UI)

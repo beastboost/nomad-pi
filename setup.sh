@@ -147,7 +147,7 @@ fi
 
 # 1. System Updates
 echo "[1/10] Checking system packages..."
-PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools curl"
+PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools curl ffmpeg"
 MISSING_PACKAGES=""
 
 for pkg in $PACKAGES; do

@@ -276,6 +276,14 @@ def _startup_tasks():
     except Exception as e:
         logger.error(f"Error during mount restoration: {e}")
 
+    try:
+        import platform
+
+        if platform.system() == "Linux":
+            media.refresh_external_links()
+    except Exception as e:
+        logger.warning(f"Failed to refresh external drive links: {e}")
+
     # Start scheduler
     scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
     scheduler.start()

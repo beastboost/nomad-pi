@@ -142,6 +142,10 @@ namespace NomadTransferTool
         private System.Threading.CancellationTokenSource? _processingCts;
         private HashSet<string> _connectedSambaPaths = new HashSet<string>();
         private readonly object _sambaConnectionLock = new object();
+        private ObservableCollection<FileManagerItem> _fileManagerItems = new ObservableCollection<FileManagerItem>();
+        private string _fileManagerPath = "";
+        private string _fileManagerStatus = "";
+        private string _fileManagerRoot = "";
 
         // Samba Properties
         private bool _useSamba;
@@ -572,6 +576,9 @@ namespace NomadTransferTool
         public ObservableCollection<string> ProcessingLogs { get => _processingLogs; set { _processingLogs = value; OnPropertyChanged(); } }
         public ObservableCollection<MediaItem> ReviewQueue { get => _reviewQueue; set { _reviewQueue = value; OnPropertyChanged(); } }
         public ObservableCollection<EncodingPreset> EncodingPresets { get => _encodingPresets; set { _encodingPresets = value; OnPropertyChanged(); } }
+        public ObservableCollection<FileManagerItem> FileManagerItems { get => _fileManagerItems; set { _fileManagerItems = value; OnPropertyChanged(); } }
+        public string FileManagerPath { get => _fileManagerPath; set { _fileManagerPath = value; OnPropertyChanged(); } }
+        public string FileManagerStatus { get => _fileManagerStatus; set { _fileManagerStatus = value; OnPropertyChanged(); } }
         public EncodingPreset? SelectedGlobalPreset 
         { 
             get => _selectedGlobalPreset; 
@@ -1346,10 +1353,281 @@ namespace NomadTransferTool
             });
         }
 
-        private void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void DriveList_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateDuplicateStatus();
             UpdateSpaceRequirement();
+
+            if (DriveList.SelectedItem is DriveInfoModel drive)
+            {
+                _fileManagerRoot = drive.Name;
+                FileManagerPath = drive.Name;
+                await LoadFileManagerDirectory(FileManagerPath);
+            }
+        }
+
+        private async void FileManagerRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async void FileManagerOpen_Click(object sender, RoutedEventArgs e)
+        {
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async void FileManagerRoot_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_fileManagerRoot)) return;
+            FileManagerPath = _fileManagerRoot;
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async void FileManagerUp_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(FileManagerPath)) return;
+            string p = FileManagerPath.TrimEnd('\\', '/');
+            string? parent = null;
+            try { parent = Path.GetDirectoryName(p); } catch { parent = null; }
+            if (string.IsNullOrEmpty(parent))
+            {
+                if (!string.IsNullOrEmpty(_fileManagerRoot))
+                {
+                    FileManagerPath = _fileManagerRoot;
+                    await LoadFileManagerDirectory(FileManagerPath);
+                }
+                return;
+            }
+            FileManagerPath = parent;
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async void FileManagerList_DoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (FileManagerList.SelectedItem is not FileManagerItem item) return;
+            if (!item.IsDirectory) return;
+            FileManagerPath = item.FullPath;
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async Task LoadFileManagerDirectory(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                FileManagerStatus = "No path selected";
+                return;
+            }
+
+            var (ready, err) = await EnsurePathReady(path);
+            if (!ready)
+            {
+                FileManagerStatus = err;
+                return;
+            }
+
+            bool exists = await Task.Run(() => Directory.Exists(path));
+            if (!exists)
+            {
+                FileManagerStatus = "Folder not found";
+                return;
+            }
+
+            List<FileManagerItem> items;
+            try
+            {
+                items = await Task.Run(() =>
+                {
+                    var list = new List<FileManagerItem>();
+                    foreach (var entry in Directory.EnumerateFileSystemEntries(path))
+                    {
+                        try
+                        {
+                            var name = Path.GetFileName(entry);
+                            if (string.IsNullOrEmpty(name)) continue;
+                            bool isDir = Directory.Exists(entry);
+                            long size = 0;
+                            DateTime modified = DateTime.MinValue;
+                            if (isDir)
+                            {
+                                try { modified = Directory.GetLastWriteTime(entry); } catch { modified = DateTime.MinValue; }
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    var fi = new FileInfo(entry);
+                                    size = fi.Length;
+                                    modified = fi.LastWriteTime;
+                                }
+                                catch
+                                {
+                                    size = 0;
+                                    modified = DateTime.MinValue;
+                                }
+                            }
+
+                            list.Add(new FileManagerItem
+                            {
+                                Name = name,
+                                FullPath = entry,
+                                IsDirectory = isDir,
+                                SizeBytes = size,
+                                Modified = modified
+                            });
+                        }
+                        catch { }
+                    }
+
+                    return list
+                        .OrderByDescending(x => x.IsDirectory)
+                        .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                });
+            }
+            catch (Exception ex)
+            {
+                FileManagerStatus = $"Failed to list folder: {ex.Message}";
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                FileManagerItems.Clear();
+                foreach (var i in items) FileManagerItems.Add(i);
+                FileManagerStatus = $"{items.Count} items";
+            });
+        }
+
+        private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = FileManagerList.SelectedItems.Cast<FileManagerItem>().ToList();
+            if (selected.Count == 0)
+            {
+                System.Windows.MessageBox.Show("Select files/folders first (Ctrl/Shift for multi-select).");
+                return;
+            }
+
+            var confirm = System.Windows.MessageBox.Show($"Delete {selected.Count} selected item(s)?", "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            int deleted = 0;
+            int failed = 0;
+            foreach (var item in selected)
+            {
+                try
+                {
+                    if (item.IsDirectory)
+                    {
+                        await Task.Run(() => Directory.Delete(item.FullPath, recursive: true));
+                    }
+                    else
+                    {
+                        await Task.Run(() => File.Delete(item.FullPath));
+                    }
+                    deleted++;
+                }
+                catch
+                {
+                    failed++;
+                }
+            }
+
+            AddLog($"File manager delete: {deleted} deleted, {failed} failed.");
+            await LoadFileManagerDirectory(FileManagerPath);
+        }
+
+        private async void RenameSelected_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = FileManagerList.SelectedItems.Cast<FileManagerItem>().ToList();
+            if (selected.Count == 0)
+            {
+                System.Windows.MessageBox.Show("Select files/folders first (Ctrl/Shift for multi-select).");
+                return;
+            }
+
+            if (selected.Count == 1)
+            {
+                var item = selected[0];
+                var newName = PromptForText("Rename", item.Name);
+                if (string.IsNullOrWhiteSpace(newName) || newName == item.Name) return;
+
+                string? parent;
+                try { parent = Path.GetDirectoryName(item.FullPath); } catch { parent = null; }
+                if (string.IsNullOrEmpty(parent)) return;
+
+                string dest = Path.Combine(parent, newName);
+                dest = EnsureUniquePath(dest, item.IsDirectory);
+
+                try
+                {
+                    if (item.IsDirectory)
+                        await Task.Run(() => Directory.Move(item.FullPath, dest));
+                    else
+                        await Task.Run(() => File.Move(item.FullPath, dest));
+
+                    AddLog($"Renamed: {item.Name} -> {Path.GetFileName(dest)}");
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show($"Rename failed: {ex.Message}");
+                }
+
+                await LoadFileManagerDirectory(FileManagerPath);
+                return;
+            }
+
+            var confirm = System.Windows.MessageBox.Show($"Clean names for {selected.Count} selected item(s)?", "Batch Rename", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            int renamed = 0;
+            int skipped = 0;
+            int failed = 0;
+
+            foreach (var item in selected.OrderByDescending(x => x.IsDirectory).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    string? parent;
+                    try { parent = Path.GetDirectoryName(item.FullPath); } catch { parent = null; }
+                    if (string.IsNullOrEmpty(parent)) { skipped++; continue; }
+
+                    string newName;
+                    if (item.IsDirectory)
+                    {
+                        newName = CleanTitleForPath(item.Name);
+                    }
+                    else
+                    {
+                        string ext = Path.GetExtension(item.Name);
+                        string baseName = Path.GetFileNameWithoutExtension(item.Name);
+                        newName = CleanTitleForPath(baseName);
+                        if (!string.IsNullOrEmpty(ext)) newName += ext;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName, item.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    string dest = Path.Combine(parent, newName);
+                    dest = EnsureUniquePath(dest, item.IsDirectory);
+
+                    if (item.IsDirectory)
+                        await Task.Run(() => Directory.Move(item.FullPath, dest));
+                    else
+                        await Task.Run(() => File.Move(item.FullPath, dest));
+
+                    renamed++;
+                }
+                catch
+                {
+                    failed++;
+                }
+            }
+
+            AddLog($"File manager rename: {renamed} renamed, {skipped} skipped, {failed} failed.");
+            await LoadFileManagerDirectory(FileManagerPath);
         }
 
         private void UpdateDuplicateStatus()
@@ -1367,21 +1645,8 @@ namespace NomadTransferTool
         {
             try
             {
-                string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
-                string extension = Path.GetExtension(item.SourcePath);
-                if (HandbrakeCheck.IsChecked == true && IsVideoFile(item.SourcePath)) extension = ".mp4";
-
-                string dest;
-                if (item.Category == Categories.Shows)
-                {
-                    dest = Path.Combine(targetDrive, item.Category, safeTitle, $"Season {item.Season.PadLeft(2, '0')}", $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}" + extension);
-                }
-                else
-                {
-                    string name = safeTitle;
-                    if (!string.IsNullOrEmpty(item.Year)) name += $" ({item.Year})";
-                    dest = Path.Combine(targetDrive, item.Category, name + extension);
-                }
+                bool willTranscode = HandbrakeCheck.IsChecked == true && IsVideoFile(item.SourcePath) && IsHandbrakeAvailable && IsTranscodingEnabled;
+                string dest = GetDestinationPath(item, targetDrive, willTranscode);
                 item.IsDuplicate = File.Exists(dest);
             }
             catch { /* Ignore errors during status check */ }
@@ -1450,12 +1715,12 @@ namespace NomadTransferTool
                             if (item.Category == Categories.Shows || Regex.IsMatch(fileName, @"[sS]\d+[eE]\d+"))
                             {
                                 item.Category = Categories.Shows;
-                                var tvMatch = Regex.Match(fileName, @"[sS](?<sCount>\d+)[eE](?<eCount>\d+)", RegexOptions.IgnoreCase);
-                                if (tvMatch.Success)
+                                if (TryParseSeasonEpisode(fileName, out var season, out var episode, out var idx))
                                 {
-                                    item.Season = tvMatch.Groups["sCount"].Value.TrimStart('0');
-                                    item.Episode = tvMatch.Groups["eCount"].Value.TrimStart('0');
-                                    item.Title = fileName.Substring(0, tvMatch.Index).Trim(' ', '.', '-', '_');
+                                    item.Season = season;
+                                    item.Episode = episode;
+                                    if (idx > 0 && idx <= fileName.Length)
+                                        item.Title = CleanTitleForPath(fileName.Substring(0, idx).Trim(' ', '.', '-', '_'));
                                 }
                             }
 
@@ -1654,17 +1919,169 @@ namespace NomadTransferTool
 
             foreach (var item in selectedItems)
             {
-                string clean = item.Title;
-                // Replace dots, underscores, dashes with spaces
-                clean = Regex.Replace(clean, @"[\._\-]", " ");
-                // Remove common release tags
-                clean = Regex.Replace(clean, @"\b(1080p|720p|4k|2160p|bluray|web-dl|x264|h264|x265|hevc|aac|dts|remux|multi|subs|dual|extended|unrated|director.*cut)\b.*", "", RegexOptions.IgnoreCase).Trim();
-                // Remove year if present at the end
-                clean = Regex.Replace(clean, @"\s+\(?(19|20)\d{2}\)?$", "");
-                // Clean up double spaces
-                item.Title = Regex.Replace(clean, @"\s+", " ").Trim();
+                var fileNameNoExt = "";
+                try { fileNameNoExt = Path.GetFileNameWithoutExtension(item.SourcePath) ?? ""; } catch { fileNameNoExt = ""; }
+
+                var inferredTitle = string.IsNullOrWhiteSpace(item.Title) ? fileNameNoExt : item.Title;
+
+                if ((item.Category == Categories.Shows || item.Category == Categories.Movies) && string.IsNullOrEmpty(item.Year))
+                {
+                    var y = NormalizeYear(fileNameNoExt);
+                    if (string.IsNullOrEmpty(y)) y = NormalizeYear(inferredTitle);
+                    if (!string.IsNullOrEmpty(y)) item.Year = y;
+                }
+
+                if (item.Category == Categories.Shows && (string.IsNullOrEmpty(item.Season) || string.IsNullOrEmpty(item.Episode)))
+                {
+                    if (TryParseSeasonEpisode(fileNameNoExt, out var s, out var ep, out var idx) ||
+                        TryParseSeasonEpisode(inferredTitle, out s, out ep, out idx))
+                    {
+                        item.Season = s;
+                        item.Episode = ep;
+                        if (idx > 0 && idx <= inferredTitle.Length)
+                            inferredTitle = inferredTitle.Substring(0, idx).Trim(' ', '.', '-', '_');
+                    }
+                }
+
+                item.Title = CleanTitleForPath(inferredTitle);
             }
             AddLog($"Cleaned titles for {selectedItems.Count} items.");
+        }
+
+        private static string CleanTitleForPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "";
+
+            string clean = value;
+            clean = Regex.Replace(clean, @"[\._\-]", " ");
+            clean = Regex.Replace(clean, @"(?i)\b(?:www\.)?(?:uindex|unidex)\.(?:org|com|net)\b", " ");
+            clean = Regex.Replace(clean, @"(?i)\b(?:www\s*)?(?:uindex|unidex)\s*(?:org|com|net)\b", " ");
+            clean = Regex.Replace(clean, @"(?i)^\s*(?:www\s*)?(?:uindex|unidex)\s*(?:org|com|net)\s*", "");
+            clean = Regex.Replace(clean, @"\b(1080p|720p|4k|2160p|bluray|web-dl|webdl|webrip|x264|h264|x265|hevc|aac|dts|remux|multi|subs|dual|extended|unrated|director.*cut)\b", " ", RegexOptions.IgnoreCase);
+            clean = Regex.Replace(clean, @"\s+", " ").Trim();
+
+            foreach (var ch in Path.GetInvalidFileNameChars())
+            {
+                clean = clean.Replace(ch, ' ');
+            }
+            clean = Regex.Replace(clean, @"\s+", " ").Trim();
+            clean = clean.TrimEnd('.', ' ');
+            return clean;
+        }
+
+        private static bool TryParseSeasonEpisode(string fileNameNoExt, out string season, out string episode, out int matchIndex)
+        {
+            season = "";
+            episode = "";
+            matchIndex = 0;
+            if (string.IsNullOrWhiteSpace(fileNameNoExt)) return false;
+
+            var patterns = new[]
+            {
+                @"(?i)\bS(?<s>\d{1,2})\s*E(?<e>\d{1,3})\b",
+                @"(?i)\b(?<s>\d{1,2})x(?<e>\d{1,3})\b",
+                @"(?i)\bseason\W*(?<s>\d{1,2})\W*(?:episode|ep)\W*(?<e>\d{1,3})\b",
+            };
+
+            foreach (var pat in patterns)
+            {
+                var m = Regex.Match(fileNameNoExt, pat);
+                if (!m.Success) continue;
+
+                var s = m.Groups["s"].Value;
+                var e = m.Groups["e"].Value;
+
+                if (int.TryParse(s, out var sNum)) season = sNum.ToString();
+                else season = s.TrimStart('0');
+                if (int.TryParse(e, out var eNum)) episode = eNum.ToString();
+                else episode = e.TrimStart('0');
+
+                if (string.IsNullOrEmpty(season) || string.IsNullOrEmpty(episode)) continue;
+                matchIndex = m.Index;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string EnsureUniquePath(string desiredPath, bool isDirectory)
+        {
+            if (string.IsNullOrEmpty(desiredPath)) return desiredPath;
+
+            bool exists;
+            try
+            {
+                exists = isDirectory ? Directory.Exists(desiredPath) : File.Exists(desiredPath);
+            }
+            catch
+            {
+                exists = true;
+            }
+            if (!exists) return desiredPath;
+
+            string? parent;
+            try { parent = Path.GetDirectoryName(desiredPath); } catch { parent = null; }
+            if (string.IsNullOrEmpty(parent)) return desiredPath;
+
+            string name = isDirectory ? Path.GetFileName(desiredPath) : Path.GetFileNameWithoutExtension(desiredPath);
+            string ext = isDirectory ? "" : Path.GetExtension(desiredPath);
+            if (string.IsNullOrEmpty(name)) name = "Item";
+
+            for (int i = 1; i < 1000; i++)
+            {
+                string candidate = Path.Combine(parent, $"{name} ({i}){ext}");
+                try
+                {
+                    bool candidateExists = isDirectory ? Directory.Exists(candidate) : File.Exists(candidate);
+                    if (!candidateExists) return candidate;
+                }
+                catch { }
+            }
+            return desiredPath;
+        }
+
+        private static string? PromptForText(string title, string initialValue)
+        {
+            var win = new Window
+            {
+                Title = title,
+                Width = 420,
+                Height = 160,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = System.Windows.Media.Brushes.White,
+                Foreground = System.Windows.Media.Brushes.Black
+            };
+
+            var root = new Grid { Margin = new Thickness(12) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var label = new TextBlock { Text = "New name", Margin = new Thickness(0, 0, 0, 6) };
+            Grid.SetRow(label, 0);
+            root.Children.Add(label);
+
+            var box = new TextBox { Text = initialValue, Margin = new Thickness(0, 0, 0, 10) };
+            Grid.SetRow(box, 1);
+            root.Children.Add(box);
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var ok = new Button { Content = "OK", Width = 80, Margin = new Thickness(0, 0, 8, 0) };
+            var cancel = new Button { Content = "Cancel", Width = 80 };
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            Grid.SetRow(buttons, 2);
+            root.Children.Add(buttons);
+
+            string? result = null;
+            ok.Click += (_, __) => { result = box.Text; win.DialogResult = true; };
+            cancel.Click += (_, __) => { win.DialogResult = false; };
+            win.Content = root;
+            win.Loaded += (_, __) => { box.Focus(); box.SelectAll(); };
+            win.ShowDialog();
+
+            return result;
         }
 
         private async Task<(bool success, string error)> EnsurePathReady(string path)
@@ -1699,29 +2116,63 @@ namespace NomadTransferTool
 
         private string GetDestinationPath(MediaItem item, string targetRoot, bool willTranscode)
         {
-            string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+            string safeTitle = CleanTitleForPath(item.Title);
+            if (string.IsNullOrWhiteSpace(safeTitle)) safeTitle = "Untitled";
+
             string categoryDir = Path.Combine(targetRoot, item.Category);
             string finalName = safeTitle;
 
             if (item.Category == Categories.Shows)
             {
                 string showDir = Path.Combine(categoryDir, safeTitle);
-                string seasonDir = Path.Combine(showDir, $"Season {item.Season.PadLeft(2, '0')}");
-                if (string.IsNullOrEmpty(item.Season)) seasonDir = showDir;
+                string seasonValue = NormalizeNumericString(item.Season, 2);
+                string episodeValue = NormalizeNumericString(item.Episode, 2);
+
+                string seasonDir = Path.Combine(showDir, $"Season {seasonValue}");
+                if (string.IsNullOrEmpty(seasonValue)) seasonDir = showDir;
 
                 categoryDir = seasonDir;
-                finalName = $"{safeTitle} - S{item.Season.PadLeft(2, '0')}E{item.Episode.PadLeft(2, '0')}";
-                if (string.IsNullOrEmpty(item.Season)) finalName = item.Title;
+                if (!string.IsNullOrEmpty(seasonValue) && !string.IsNullOrEmpty(episodeValue))
+                    finalName = $"{safeTitle} - S{seasonValue}E{episodeValue}";
+                else
+                    finalName = safeTitle;
             }
-            else if (!string.IsNullOrEmpty(item.Year))
+            else if (item.Category == Categories.Movies)
             {
-                finalName += $" ({item.Year})";
+                var year = NormalizeYear(item.Year);
+                if (!string.IsNullOrEmpty(year))
+                {
+                    string movieFolder = $"{safeTitle} ({year})";
+                    categoryDir = Path.Combine(categoryDir, movieFolder);
+                    finalName = $"{safeTitle} ({year})";
+                }
+                else
+                {
+                    categoryDir = Path.Combine(categoryDir, safeTitle);
+                    finalName = safeTitle;
+                }
             }
 
             string extension = Path.GetExtension(item.SourcePath);
             if (willTranscode) extension = ".mp4";
 
             return Path.Combine(categoryDir, finalName + extension);
+        }
+
+        private static string NormalizeNumericString(string? value, int width)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "";
+            var m = Regex.Match(value, @"\d+");
+            if (!m.Success) return "";
+            if (int.TryParse(m.Value, out var num)) return num.ToString().PadLeft(width, '0');
+            return m.Value.PadLeft(width, '0');
+        }
+
+        private static string NormalizeYear(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "";
+            var m = Regex.Match(value, @"\b(19|20)\d{2}\b");
+            return m.Success ? m.Value : "";
         }
 
         private async Task CreateDirectoryIfNotExists(string path)
@@ -1745,7 +2196,8 @@ namespace NomadTransferTool
                 var meta = await FetchOMDBMetadata(item.Title, item.Category, item.Season);
                 if (meta != null && ShouldApplyOmdbMetadata(item.Title, meta, item.Category) && !string.IsNullOrEmpty(meta.Poster) && meta.Poster != "N/A")
                 {
-                    string safeTitleDir = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                    string safeTitleDir = CleanTitleForPath(item.Title);
+                    if (string.IsNullOrWhiteSpace(safeTitleDir)) safeTitleDir = "Untitled";
                     string posterBase;
                     string posterName;
 
@@ -2041,14 +2493,15 @@ namespace NomadTransferTool
                 foreach (var item in items!)
                 {
                     token.ThrowIfCancellationRequested();
-                    string safeTitle = string.Join("_", item.Title.Split(Path.GetInvalidFileNameChars()));
+                    string safeTitle = CleanTitleForPath(item.Title);
+                    if (string.IsNullOrWhiteSpace(safeTitle)) safeTitle = "Untitled";
                     string? tempFile = null;
 
                     try
                     {
                         string renamingInfo = item.Category;
                         if (!string.IsNullOrEmpty(item.Year)) renamingInfo += $" ({item.Year})";
-                        AddLog($"Renaming/Sorting {item.Title} -> {renamingInfo} via OMDb data");
+                        AddLog($"Sorting: {item.Title} → {renamingInfo}");
                         
                         item.IsProcessing = true;
                         item.StatusMessage = "Starting...";
@@ -2682,6 +3135,28 @@ namespace NomadTransferTool
             [JsonProperty("browser_download_url")]
             public string BrowserDownloadUrl { get; set; } = "";
         }
+    }
+
+    public class FileManagerItem
+    {
+        public string Name { get; set; } = "";
+        public string FullPath { get; set; } = "";
+        public bool IsDirectory { get; set; }
+        public long SizeBytes { get; set; }
+        public DateTime Modified { get; set; }
+
+        public string Type => IsDirectory ? "Folder" : "File";
+
+        public string SizeDisplay
+        {
+            get
+            {
+                if (IsDirectory) return "";
+                return $"{SizeBytes / 1024 / 1024} MB";
+            }
+        }
+
+        public string ModifiedDisplay => Modified == DateTime.MinValue ? "" : Modified.ToString("yyyy-MM-dd");
     }
 
     public class DriveInfoModel

@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+from typing import List
 from datetime import datetime
 from app import database
 from app.routers.auth import get_current_user_id
@@ -591,6 +592,58 @@ def remove_mount(target):
                 json.dump(mounts, f)
         except: pass
 
+def ensure_media_folders(root: str) -> List[str]:
+    created = []
+    if not isinstance(root, str) or not root:
+        return created
+    for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
+        try:
+            p = os.path.join(root, folder)
+            if not os.path.exists(p):
+                os.makedirs(p, exist_ok=True)
+                created.append(folder)
+        except Exception:
+            continue
+    return created
+
+def ensure_external_category_symlinks(external_root: str, label: str) -> None:
+    if platform.system() != "Linux":
+        return
+    if not isinstance(external_root, str) or not external_root:
+        return
+    if not isinstance(label, str) or not label:
+        return
+
+    data_root = os.path.abspath("data")
+    for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+        src = os.path.join(external_root, cat)
+        if not os.path.isdir(src):
+            continue
+        dst_parent = os.path.join(data_root, cat)
+        try:
+            os.makedirs(dst_parent, exist_ok=True)
+        except Exception:
+            continue
+        dst = os.path.join(dst_parent, f"External_{label}")
+        try:
+            if os.path.islink(dst):
+                if os.path.exists(dst):
+                    continue
+                os.unlink(dst)
+            if os.path.exists(dst):
+                continue
+            os.symlink(src, dst)
+        except Exception:
+            continue
+
+def restart_minidlna_best_effort() -> None:
+    if platform.system() != "Linux":
+        return
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "restart", "minidlna"], check=False, capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
+
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
@@ -608,7 +661,10 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         try:
             mount_with_permissions(device, target)
             save_mount(device, target)
-            return {"status": "mounted", "device": device, "target": target}
+            created = ensure_media_folders(target)
+            ensure_external_category_symlinks(target, clean_name)
+            restart_minidlna_best_effort()
+            return {"status": "mounted", "device": device, "target": target, "created_folders": created}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
@@ -655,8 +711,10 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         
         mount_with_permissions(device, target)
         save_mount(device, target)
-        
-        return {"status": "formatted", "device": device, "target": target}
+        created = ensure_media_folders(target)
+        ensure_external_category_symlinks(target, clean_name)
+        restart_minidlna_best_effort()
+        return {"status": "formatted", "device": device, "target": target, "created_folders": created}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Format failed: {str(e)}")

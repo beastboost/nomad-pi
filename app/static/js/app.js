@@ -103,6 +103,9 @@ let movieMetaActive = 0;
 const MOVIE_META_CONCURRENCY = 2;
 const mediaPageState = {};
 const mediaState = { path: '/data' };
+const batchSelectEnabled = {};
+const batchSelectSelected = {};
+const fileBrowserSelect = { enabled: false, selected: new Set() };
 let activeVideoProgressInterval = null;
 let activeVideoEl = null;
 let activeVideoPath = null;
@@ -112,6 +115,168 @@ let lastDashboardUpdateAt = 0;
 let activeControlSocket = null;
 let playbackHeartbeatInstalled = false;
 const progressDebugSent = new Set();
+
+function isBatchSelectEnabled(category) {
+    return Boolean(batchSelectEnabled[category]);
+}
+
+function getBatchSelectedSet(category) {
+    if (!batchSelectSelected[category]) batchSelectSelected[category] = new Set();
+    return batchSelectSelected[category];
+}
+
+function clearBatchSelection(category) {
+    const set = getBatchSelectedSet(category);
+    set.clear();
+    updateBatchToolbar(category);
+    const container = document.getElementById(`${category}-list`);
+    if (!container) return;
+    for (const el of container.querySelectorAll('[data-path]')) {
+        el.classList.remove('batch-selected');
+        const cb = el.querySelector('input.batch-checkbox');
+        if (cb) cb.checked = false;
+    }
+}
+
+function toggleBatchSelectItem(category, path) {
+    if (!path) return;
+    const set = getBatchSelectedSet(category);
+    if (set.has(path)) set.delete(path);
+    else set.add(path);
+    updateBatchToolbar(category);
+    const container = document.getElementById(`${category}-list`);
+    if (!container) return;
+    for (const el of container.querySelectorAll('[data-path]')) {
+        if (el.dataset.path === path) {
+            const selected = set.has(path);
+            el.classList.toggle('batch-selected', selected);
+            const cb = el.querySelector('input.batch-checkbox');
+            if (cb) cb.checked = selected;
+            break;
+        }
+    }
+}
+
+function updateBatchToolbar(category) {
+    const toolbar = document.getElementById(`${category}-batch-toolbar`);
+    if (!toolbar) return;
+    const toggleBtn = document.getElementById(`${category}-select-toggle`);
+    const countEl = document.getElementById(`${category}-select-count`);
+    const delBtn = document.getElementById(`${category}-delete-selected`);
+    const clearBtn = document.getElementById(`${category}-clear-selected`);
+    const selectAllBtn = document.getElementById(`${category}-select-all-visible`);
+
+    const enabled = isBatchSelectEnabled(category);
+    const count = getBatchSelectedSet(category).size;
+    if (toggleBtn) toggleBtn.textContent = enabled ? 'Done' : 'Select';
+    if (countEl) countEl.textContent = enabled ? `${count} selected` : '';
+    if (delBtn) delBtn.disabled = !enabled || count === 0;
+    if (clearBtn) clearBtn.disabled = !enabled || count === 0;
+    if (selectAllBtn) selectAllBtn.disabled = !enabled;
+}
+
+function ensureBatchToolbar(category) {
+    if (!category || category === 'files') return;
+    const section = document.getElementById(category);
+    if (!section) return;
+    if (document.getElementById(`${category}-batch-toolbar`)) return;
+
+    const toolbar = document.createElement('div');
+    toolbar.id = `${category}-batch-toolbar`;
+    toolbar.style.display = 'flex';
+    toolbar.style.gap = '8px';
+    toolbar.style.flexWrap = 'wrap';
+    toolbar.style.alignItems = 'center';
+    toolbar.style.margin = '10px 0';
+
+    toolbar.innerHTML = `
+        <button id="${category}-select-toggle" class="secondary">Select</button>
+        <button id="${category}-select-all-visible" class="secondary">Select visible</button>
+        <button id="${category}-clear-selected" class="secondary" disabled>Clear</button>
+        <button id="${category}-delete-selected" class="danger" disabled>Delete selected</button>
+        <span id="${category}-select-count" style="color:var(--text-muted);font-size:0.9em;"></span>
+    `;
+
+    const filterBar = document.getElementById(`${category}-filter-bar`);
+    if (filterBar && filterBar.parentNode) {
+        filterBar.parentNode.insertBefore(toolbar, filterBar.nextSibling);
+    } else {
+        const h2 = section.querySelector('h2');
+        if (h2 && h2.parentNode) h2.parentNode.insertBefore(toolbar, h2.nextSibling);
+        else section.insertBefore(toolbar, section.firstChild);
+    }
+
+    const toggleBtn = document.getElementById(`${category}-select-toggle`);
+    const delBtn = document.getElementById(`${category}-delete-selected`);
+    const clearBtn = document.getElementById(`${category}-clear-selected`);
+    const selectAllBtn = document.getElementById(`${category}-select-all-visible`);
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            batchSelectEnabled[category] = !isBatchSelectEnabled(category);
+            if (!isBatchSelectEnabled(category)) clearBatchSelection(category);
+            updateBatchToolbar(category);
+            renderMediaFromCache(category);
+        });
+    }
+    if (clearBtn) clearBtn.addEventListener('click', () => clearBatchSelection(category));
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            if (!isBatchSelectEnabled(category)) return;
+            const container = document.getElementById(`${category}-list`);
+            if (!container) return;
+            const set = getBatchSelectedSet(category);
+            for (const el of container.querySelectorAll('[data-path]')) {
+                const p = el.dataset.path;
+                if (p) set.add(p);
+                el.classList.add('batch-selected');
+                const cb = el.querySelector('input.batch-checkbox');
+                if (cb) cb.checked = true;
+            }
+            updateBatchToolbar(category);
+        });
+    }
+    if (delBtn) delBtn.addEventListener('click', () => deleteSelectedItems(category));
+
+    updateBatchToolbar(category);
+}
+
+async function deleteBatchPaths(paths) {
+    const res = await fetch(`${API_BASE}/media/delete/batch`, {
+        method: 'POST',
+        headers: {
+            ...getAuthHeaders(),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ paths })
+    });
+    if (res.status === 401) { logout(); return null; }
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.detail || 'Batch delete failed');
+    return data;
+}
+
+async function deleteSelectedItems(category) {
+    const set = getBatchSelectedSet(category);
+    const paths = Array.from(set.values());
+    if (!paths.length) return;
+    if (!confirm(`Delete ${paths.length} selected item(s)? This cannot be undone.`)) return;
+    try {
+        await deleteBatchPaths(paths);
+        clearBatchSelection(category);
+        delete mediaCache['movies'];
+        delete mediaCache['music'];
+        delete mediaCache['books'];
+        delete mediaCache['gallery'];
+        delete mediaCache['files'];
+        showsLibraryCache = null;
+        const active = document.querySelector('main > section.active')?.id;
+        if (active === 'shows') loadShowsLibrary();
+        else if (active) loadMedia(active);
+    } catch (e) {
+        alert(e.message);
+    }
+}
 
 function createDashboardSessionId() {
     try {
@@ -879,6 +1044,64 @@ async function loadFileBrowser(path) {
         const data = await res.json();
         
         container.innerHTML = '';
+
+        const toolbar = document.createElement('div');
+        toolbar.style.display = 'flex';
+        toolbar.style.gap = '10px';
+        toolbar.style.alignItems = 'center';
+        toolbar.style.padding = '10px';
+
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.textContent = 'Select All';
+        selectAllBtn.onclick = () => {
+            const boxes = container.querySelectorAll('input.file-batch-checkbox');
+            const allChecked = Array.from(boxes).every(b => b.checked);
+            boxes.forEach(b => { b.checked = !allChecked; });
+        };
+
+        const deleteSelectedBtn = document.createElement('button');
+        deleteSelectedBtn.textContent = 'Delete Selected';
+        deleteSelectedBtn.className = 'warning';
+        deleteSelectedBtn.onclick = async () => {
+            const boxes = container.querySelectorAll('input.file-batch-checkbox:checked');
+            const paths = Array.from(boxes)
+                .map(b => b.dataset.webPath)
+                .filter(p => typeof p === 'string' && p.startsWith('/data/'));
+
+            if (!paths.length) {
+                showToast('No /data items selected', 'warning');
+                return;
+            }
+            if (!confirm(`Delete ${paths.length} selected item(s)? This cannot be undone.`)) return;
+
+            try {
+                const delRes = await fetch(`${API_BASE}/media/delete/batch`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths })
+                });
+                if (delRes.status === 401) { logout(); return; }
+                const delData = await delRes.json().catch(() => null);
+                if (!delRes.ok) {
+                    const msg = delData?.detail || delData?.message || 'Delete failed';
+                    showToast(msg, 'error');
+                    return;
+                }
+                const failed = Array.isArray(delData?.failed) ? delData.failed : [];
+                if (failed.length) {
+                    showToast(`Deleted with ${failed.length} failure(s)`, 'warning');
+                } else {
+                    showToast('Deleted', 'success');
+                }
+                loadFileBrowser(path);
+            } catch (e) {
+                showToast(`Delete failed: ${e.message}`, 'error');
+            }
+        };
+
+        toolbar.appendChild(selectAllBtn);
+        toolbar.appendChild(deleteSelectedBtn);
+        container.appendChild(toolbar);
         
         // Add "Back" and "Drives" buttons
         const isWindows = path.includes(':');
@@ -939,6 +1162,7 @@ async function loadFileBrowser(path) {
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
+                div.style.position = 'relative';
                 const itemPath = item.path.replaceAll('\\', '\\\\');
 
                 if (item.is_dir) {
@@ -966,6 +1190,18 @@ async function loadFileBrowser(path) {
                         </div>
                     `;
                 }
+
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'file-batch-checkbox';
+                cb.dataset.webPath = item.path;
+                cb.style.position = 'absolute';
+                cb.style.top = '10px';
+                cb.style.left = '10px';
+                cb.style.zIndex = '10';
+                cb.addEventListener('click', (e) => { e.stopPropagation(); });
+                div.appendChild(cb);
+
                 container.appendChild(div);
             });
         }
