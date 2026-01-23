@@ -238,12 +238,11 @@ fi
 echo "Checking MiniDLNA configuration..." >> update.log
 
 MINIDLNA_CONF="/etc/minidlna.conf"
+MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 DLNA_CONFIG_CHANGED=0
 
-# Create full MiniDLNA config if it doesn't exist or is incomplete
-if [ ! -f "$MINIDLNA_CONF" ] || ! grep -q "^media_dir=V,$SCRIPT_DIR/data/movies" "$MINIDLNA_CONF"; then
-    echo "Creating MiniDLNA configuration..." >> update.log
-    sudo tee "$MINIDLNA_CONF" > /dev/null <<EOL
+# Build the complete config in a temp file
+cat > "$MINIDLNA_TEMP" <<EOL
 # Media directories with proper type labels
 media_dir=V,$SCRIPT_DIR/data/movies
 media_dir=V,$SCRIPT_DIR/data/shows
@@ -281,19 +280,16 @@ strict_dlna=no
 enable_tivo=no
 wide_links=no
 EOL
+
+# Only update if config changed (use diff like setup.sh does)
+if [ ! -f "$MINIDLNA_CONF" ] || ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
+    echo "Updating MiniDLNA configuration..." >> update.log
+    sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
     DLNA_CONFIG_CHANGED=1
 else
-    # Just ensure root_container is set correctly
-    if sudo grep -Eq '^root_container=' "$MINIDLNA_CONF"; then
-        if ! sudo grep -Eq '^root_container=\.$' "$MINIDLNA_CONF"; then
-            sudo sed -i -E 's/^root_container=.*/root_container=./' "$MINIDLNA_CONF"
-            DLNA_CONFIG_CHANGED=1
-        fi
-    else
-        echo "root_container=." | sudo tee -a "$MINIDLNA_CONF" >/dev/null
-        DLNA_CONFIG_CHANGED=1
-    fi
+    echo "MiniDLNA configuration unchanged." >> update.log
 fi
+rm -f "$MINIDLNA_TEMP"
 
 # Re-verify sudoers configuration (in case it was removed by system update)
 REAL_USER=${SUDO_USER:-$USER}
