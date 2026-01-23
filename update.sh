@@ -286,6 +286,10 @@ max_connections=50
 strict_dlna=no
 enable_tivo=no
 wide_links=yes
+
+# Exclusions - skip junk folders from Windows/Mac/Linux systems
+# This prevents log spam from scanning recycle bins, system folders, etc.
+exclude=\$RECYCLE.BIN,\$Recycle.Bin,Recycled,System Volume Information,.Trashes,.Trash-*,.TemporaryItems,.Spotlight-V100,.fseventsd,lost+found,.AppleDouble,.DS_Store,Thumbs.db
 EOL
 
 # Only update if config changed (use diff like setup.sh does)
