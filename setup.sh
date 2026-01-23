@@ -605,9 +605,6 @@ cat > "$MINIDLNA_TEMP" <<EOL
 # Scan the entire data directory (includes external drives under data/external)
 media_dir=$CURRENT_DIR/data
 
-# External drives (mounted USB/external media)
-media_dir=$CURRENT_DIR/data/external
-
 # Database and logging
 db_dir=/var/cache/minidlna
 log_dir=/var/log/minidlna
@@ -633,6 +630,10 @@ max_connections=50
 strict_dlna=no
 enable_tivo=no
 wide_links=yes
+
+# Exclusions - skip junk folders from Windows/Mac/Linux systems
+# This prevents log spam from scanning recycle bins, system folders, etc.
+exclude=\$RECYCLE.BIN,\$Recycle.Bin,Recycled,System Volume Information,.Trashes,.Trash-*,.TemporaryItems,.Spotlight-V100,.fseventsd,lost+found,.AppleDouble,.DS_Store,Thumbs.db
 EOL
 
 # Ensure the data directory is fully accessible to minidlna
