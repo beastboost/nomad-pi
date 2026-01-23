@@ -223,8 +223,9 @@ if id "minidlna" &>/dev/null; then
     # Get the actual home directory path
     USER_HOME=$(eval echo ~$REAL_USER)
 
-    # CRITICAL: Make home directory traversable (world-executable)
-    sudo chmod o+x "$USER_HOME" 2>/dev/null || true
+    # CRITICAL: Home directory must have group read+execute for minidlna user to traverse
+    # Use 755 (rwxr-xr-x) to allow group and others to read and traverse
+    sudo chmod 755 "$USER_HOME" 2>/dev/null || true
 
     # Make nomad-pi directory traversable and readable
     sudo chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
@@ -244,6 +245,16 @@ CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
 
 sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
 sudo chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+
+# Fix inotify max_user_watches limit for MiniDLNA file monitoring
+# MiniDLNA needs to watch for file changes, increase the limit from default 8192 to 524288
+if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
+    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
+    # Make it persistent across reboots
+    if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf 2>/dev/null; then
+        echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
+    fi
+fi
 
 # Build the complete config in a temp file
 cat > "$MINIDLNA_TEMP" <<EOL
