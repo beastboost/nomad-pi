@@ -251,6 +251,9 @@ media_dir=A,$SCRIPT_DIR/data/music
 media_dir=P,$SCRIPT_DIR/data/gallery
 media_dir=P,$SCRIPT_DIR/data/books
 
+# External drives (mounted USB/external media)
+media_dir=$SCRIPT_DIR/data/external
+
 # Database and logging
 db_dir=/var/cache/minidlna
 log_dir=/var/log

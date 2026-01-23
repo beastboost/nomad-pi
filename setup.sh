@@ -556,6 +556,9 @@ media_dir=A,$CURRENT_DIR/data/music
 media_dir=P,$CURRENT_DIR/data/gallery
 media_dir=P,$CURRENT_DIR/data/books
 
+# External drives (mounted USB/external media)
+media_dir=$CURRENT_DIR/data/external
+
 # Database and logging
 db_dir=/var/cache/minidlna
 log_dir=/var/log
