@@ -30,8 +30,8 @@ _poster_cache_attempts: Dict[str, float] = {}
 _public_poster_paths: Dict[str, Dict] = {}
 _PUBLIC_POSTER_TTL_S = 3600.0
 _PUBLIC_POSTER_MAX = 4096
-_POSTER_THUMB_W = 150
-_POSTER_THUMB_H = 225
+_POSTER_THUMB_W = 120
+_POSTER_THUMB_H = 180
 _POSTER_MAX_SERVE_BYTES = 650_000
 
 def _sniff_image_kind(fs_path: str) -> Optional[str]:
@@ -47,6 +47,74 @@ def _sniff_image_kind(fs_path: str) -> Optional[str]:
         return None
     except Exception:
         return None
+
+def _sniff_image_dims(fs_path: str) -> Optional[tuple[int, int]]:
+    kind = _sniff_image_kind(fs_path)
+    if kind == "png":
+        try:
+            with open(fs_path, "rb") as f:
+                sig = f.read(8)
+                if sig != b"\x89PNG\r\n\x1a\n":
+                    return None
+                ln = f.read(4)
+                if len(ln) != 4:
+                    return None
+                _ = f.read(4)
+                ihdr = f.read(13)
+                if len(ihdr) != 13:
+                    return None
+                w = int.from_bytes(ihdr[0:4], "big")
+                h = int.from_bytes(ihdr[4:8], "big")
+                if w > 0 and h > 0:
+                    return (w, h)
+        except Exception:
+            return None
+        return None
+
+    if kind == "jpg":
+        try:
+            with open(fs_path, "rb") as f:
+                if f.read(2) != b"\xFF\xD8":
+                    return None
+                while True:
+                    b = f.read(1)
+                    if not b:
+                        return None
+                    while b != b"\xFF":
+                        b = f.read(1)
+                        if not b:
+                            return None
+                    while True:
+                        m = f.read(1)
+                        if not m:
+                            return None
+                        if m != b"\xFF":
+                            break
+                    marker = m[0]
+                    if marker in (0xD8, 0xD9):
+                        continue
+                    if marker == 0xDA:
+                        return None
+                    seglen_b = f.read(2)
+                    if len(seglen_b) != 2:
+                        return None
+                    seglen = int.from_bytes(seglen_b, "big")
+                    if seglen < 2:
+                        return None
+                    if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                        data = f.read(seglen - 2)
+                        if len(data) < 7:
+                            return None
+                        h = int.from_bytes(data[1:3], "big")
+                        w = int.from_bytes(data[3:5], "big")
+                        if w > 0 and h > 0:
+                            return (w, h)
+                        return None
+                    f.seek(seglen - 2, 1)
+        except Exception:
+            return None
+
+    return None
 
 def _session_to_payload(session_id: str, session: Dict, now: float) -> Dict:
     state = session.get("state", "unknown")
@@ -164,7 +232,9 @@ def _ensure_cached_poster_jpg(poster_id: str, fs_path: str) -> Optional[str]:
     try:
         if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
             if _sniff_image_kind(out_fs) == "jpg" and os.path.getsize(out_fs) <= _POSTER_MAX_SERVE_BYTES:
-                return out_fs
+                dims = _sniff_image_dims(out_fs)
+                if dims == (_POSTER_THUMB_W, _POSTER_THUMB_H):
+                    return out_fs
     except Exception:
         pass
 
@@ -256,12 +326,14 @@ async def get_public_poster(poster_id: str):
         try:
             size = int(os.path.getsize(cached) or 0)
             kind = _sniff_image_kind(cached)
+            dims = _sniff_image_dims(cached)
 
             should_transcode = (
                 size <= 0
                 or size > _POSTER_MAX_SERVE_BYTES
                 or kind in ("png", "webp", None)
                 or size > 200_000
+                or dims != (_POSTER_THUMB_W, _POSTER_THUMB_H)
             )
 
             if should_transcode:
@@ -471,10 +543,13 @@ async def websocket_endpoint(websocket: WebSocket):
             system_stats = get_system_stats()
 
             # Broadcast update
+            offset = datetime.now().astimezone().utcoffset()
+            tz_offset_sec = int(offset.total_seconds()) if offset else 0
             message = {
                 "sessions": sessions_list,
                 "system": system_stats,
-                "timestamp": int(time.time())
+                "timestamp": int(time.time()),
+                "tz_offset_sec": tz_offset_sec,
             }
 
             await websocket.send_json(message)
@@ -759,9 +834,13 @@ async def get_public_dashboard_snapshot():
         if isinstance(session, dict):
             sessions_list.append(_session_to_payload(session_id, session, now))
 
+    offset = datetime.now().astimezone().utcoffset()
+    tz_offset_sec = int(offset.total_seconds()) if offset else 0
+
     return {
         "sessions": sessions_list,
         "system": get_system_stats(),
         "timestamp": int(time.time()),
+        "tz_offset_sec": tz_offset_sec,
         "source": "http",
     }

@@ -266,7 +266,8 @@ def _startup_tasks():
                                 continue
                                 
                             os.makedirs(target, exist_ok=True)
-                            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+                            from app.routers.system import mount_with_permissions
+                            mount_with_permissions(device, target)
                             logger.info(f"Restored mount: {device} -> {target}")
                         except Exception as e:
                             logger.error(f"Failed to restore mount {device}: {e}")
@@ -274,6 +275,14 @@ def _startup_tasks():
                     logger.error(f"Failed to load persistent mounts: {e}")
     except Exception as e:
         logger.error(f"Error during mount restoration: {e}")
+
+    try:
+        import platform
+
+        if platform.system() == "Linux":
+            media.refresh_external_links()
+    except Exception as e:
+        logger.warning(f"Failed to refresh external drive links: {e}")
 
     # Start scheduler
     scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs

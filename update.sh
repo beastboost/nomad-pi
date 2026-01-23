@@ -114,10 +114,10 @@ echo "Installing/Updating system dependencies..."
 # We only run update if install fails to save time on Pi
 # Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
 # Note: 7zip replaces p7zip-full on Ubuntu 24.04+
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl; then
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
     echo "Some packages missing, updating list and trying again..." >> update.log
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
 fi
 
 # Ensure Tailscale is installed (for updates via UI)
@@ -240,27 +240,23 @@ echo "Checking MiniDLNA configuration..." >> update.log
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 DLNA_CONFIG_CHANGED=0
+CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
+
+sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+sudo chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
 
 # Build the complete config in a temp file
 cat > "$MINIDLNA_TEMP" <<EOL
-# Media directories with proper type labels
-media_dir=V,$SCRIPT_DIR/data/movies
-media_dir=V,$SCRIPT_DIR/data/shows
-media_dir=A,$SCRIPT_DIR/data/music
-media_dir=P,$SCRIPT_DIR/data/gallery
-media_dir=P,$SCRIPT_DIR/data/books
-
-# External drives (mounted USB/external media)
-media_dir=$SCRIPT_DIR/data/external
+# Scan the entire data directory (includes external drives under data/external)
+media_dir=$SCRIPT_DIR/data
 
 # Database and logging
 db_dir=/var/cache/minidlna
-log_dir=/var/log
+log_dir=/var/log/minidlna
 log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
 
 # Network settings
-friendly_name=nomadpi
-network_interface=wlan0
+friendly_name=$CURRENT_HOSTNAME
 port=8200
 
 # File monitoring - scan every 60 seconds for changes
@@ -271,14 +267,14 @@ notify_interval=60
 root_container=.
 
 # Presentation
-presentation_url=http://nomadpi.local:8000/
+presentation_url=http://$CURRENT_HOSTNAME.local:8000/
 album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
 
 # Optimization
 max_connections=50
 strict_dlna=no
 enable_tivo=no
-wide_links=no
+wide_links=yes
 EOL
 
 # Only update if config changed (use diff like setup.sh does)
@@ -296,9 +292,11 @@ REAL_USER=${SUDO_USER:-$USER}
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
+CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 
-if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
-    echo "Re-applying sudoers permissions for MiniDLNA..." >> update.log
+if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHOWN_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHMOD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Re-applying sudoers permissions..." >> update.log
     MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
     UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
     SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
@@ -309,7 +307,7 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     # Write to temp file first and validate before installing
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then

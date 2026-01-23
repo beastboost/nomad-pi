@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+from typing import List
 from datetime import datetime
 from app import database
 from app.routers.auth import get_current_user_id
@@ -527,6 +528,60 @@ def save_mount(device, mount_point):
     with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
         json.dump(mounts, f)
 
+def get_device_fstype(device: str) -> str:
+    for cmd in (
+        ["lsblk", "-no", "FSTYPE", device],
+        ["blkid", "-o", "value", "-s", "TYPE", device],
+    ):
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                fstype = (res.stdout or "").strip().splitlines()[0].strip()
+                if fstype:
+                    return fstype
+        except Exception:
+            continue
+    return ""
+
+def mount_with_permissions(device: str, target: str) -> None:
+    uid = os.getuid()
+    gid = os.getgid()
+    fstype = get_device_fstype(device).lower()
+
+    mount_bin = shutil.which("mount") or "/usr/bin/mount"
+    chown_bin = shutil.which("chown") or "/usr/bin/chown"
+    chmod_bin = shutil.which("chmod") or "/usr/bin/chmod"
+
+    attempts = []
+    if fstype in {"ntfs", "ntfs3"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs3", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid},umask=0002,big_writes", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype == "exfat":
+        attempts.append(["sudo", "-n", mount_bin, "-t", "exfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype in {"vfat", "fat", "msdos"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "vfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+
+    attempts.append(["sudo", "-n", mount_bin, device, target])
+
+    last_err = None
+    for cmd in attempts:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            last_err = None
+            break
+        except subprocess.CalledProcessError as e:
+            last_err = (e.stderr or e.stdout or str(e)).strip()
+
+    if last_err:
+        raise RuntimeError(last_err)
+
+    try:
+        subprocess.run(["sudo", "-n", chown_bin, f"{uid}:{gid}", target], check=False, capture_output=True, text=True)
+        subprocess.run(["sudo", "-n", chmod_bin, "0775", target], check=False, capture_output=True, text=True)
+    except Exception:
+        pass
+
 def remove_mount(target):
     if os.path.exists(PERSISTENT_MOUNTS_FILE):
         try:
@@ -537,9 +592,64 @@ def remove_mount(target):
                 json.dump(mounts, f)
         except: pass
 
+def ensure_media_folders(root: str) -> List[str]:
+    created = []
+    if not isinstance(root, str) or not root:
+        return created
+    for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
+        try:
+            p = os.path.join(root, folder)
+            if not os.path.exists(p):
+                os.makedirs(p, exist_ok=True)
+                created.append(folder)
+        except Exception:
+            continue
+    return created
+
+def ensure_external_category_symlinks(external_root: str, label: str) -> None:
+    if platform.system() != "Linux":
+        return
+    if not isinstance(external_root, str) or not external_root:
+        return
+    if not isinstance(label, str) or not label:
+        return
+
+    data_root = os.path.abspath("data")
+    for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+        src = os.path.join(external_root, cat)
+        if not os.path.isdir(src):
+            continue
+        dst_parent = os.path.join(data_root, cat)
+        try:
+            os.makedirs(dst_parent, exist_ok=True)
+        except Exception:
+            continue
+        dst = os.path.join(dst_parent, f"External_{label}")
+        try:
+            if os.path.islink(dst):
+                if os.path.exists(dst):
+                    continue
+                os.unlink(dst)
+            if os.path.exists(dst):
+                continue
+            os.symlink(src, dst)
+        except Exception:
+            continue
+
+def restart_minidlna_best_effort() -> None:
+    if platform.system() != "Linux":
+        return
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "restart", "minidlna"], check=False, capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
+
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        if not device.startswith("/dev/"):
+            raise HTTPException(status_code=400, detail="Invalid device path")
+
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name:
@@ -549,10 +659,12 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         os.makedirs(target, exist_ok=True)
         
         try:
-            # Check if already mounted
-            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+            mount_with_permissions(device, target)
             save_mount(device, target)
-            return {"status": "mounted", "device": device, "target": target}
+            created = ensure_media_folders(target)
+            ensure_external_category_symlinks(target, clean_name)
+            restart_minidlna_best_effort()
+            return {"status": "mounted", "device": device, "target": target, "created_folders": created}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
@@ -597,10 +709,12 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         target = os.path.join("data", "external", clean_name)
         os.makedirs(target, exist_ok=True)
         
-        subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+        mount_with_permissions(device, target)
         save_mount(device, target)
-        
-        return {"status": "formatted", "device": device, "target": target}
+        created = ensure_media_folders(target)
+        ensure_external_category_symlinks(target, clean_name)
+        restart_minidlna_best_effort()
+        return {"status": "formatted", "device": device, "target": target, "created_folders": created}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Format failed: {str(e)}")
@@ -1690,19 +1804,30 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
         diagnostics["service_running"] = False
 
     # Read config to see what paths it's scanning
+    db_dir = "/var/cache/minidlna"
+    log_dir = "/var/log/minidlna"
     try:
         with open("/etc/minidlna.conf", "r") as f:
             config = f.read()
-            media_dirs = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("media_dir=")]
-            root_container = [line.split("=", 1)[1].strip() for line in config.split("\n") if line.startswith("root_container=")]
+            lines = config.split("\n")
+            media_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("media_dir=")]
+            root_container = [line.split("=", 1)[1].strip() for line in lines if line.startswith("root_container=")]
+            parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+            parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+            if parsed_db_dirs and parsed_db_dirs[0]:
+                db_dir = parsed_db_dirs[0]
+            if parsed_log_dirs and parsed_log_dirs[0]:
+                log_dir = parsed_log_dirs[0]
             diagnostics["configured_paths"] = media_dirs
             diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
     except:
         diagnostics["configured_paths"] = ["ERROR: Could not read config"]
         diagnostics["root_container"] = "ERROR"
+    diagnostics["db_dir"] = db_dir
+    diagnostics["log_dir"] = log_dir
 
     # Count actual files in data directories
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     movies_dir = os.path.join(base_dir, "data", "movies")
     shows_dir = os.path.join(base_dir, "data", "shows")
 
@@ -1746,7 +1871,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
 
     # Check cache directory permissions
     try:
-        cache_st = os.stat("/var/cache/minidlna")
+        cache_st = os.stat(db_dir)
         diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
         diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
         diagnostics["cache_dir_exists"] = True
@@ -1789,10 +1914,12 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
 
     # Check database file
     try:
-        db_exists = os.path.exists("/var/cache/minidlna/files.db")
+        db_file = os.path.join(db_dir, "files.db")
+        db_exists = os.path.exists(db_file)
         diagnostics["database_exists"] = db_exists
+        diagnostics["database_path"] = db_file
         if db_exists:
-            db_size = os.path.getsize("/var/cache/minidlna/files.db")
+            db_size = os.path.getsize(db_file)
             diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
     except:
         diagnostics["database_exists"] = False
@@ -1807,15 +1934,32 @@ def restart_dlna(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
 
     try:
+        db_dir = "/var/cache/minidlna"
+        log_dir = "/var/log/minidlna"
+        try:
+            with open("/etc/minidlna.conf", "r") as f:
+                config = f.read()
+                lines = config.split("\n")
+                parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+                parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+                if parsed_db_dirs and parsed_db_dirs[0]:
+                    db_dir = parsed_db_dirs[0]
+                if parsed_log_dirs and parsed_log_dirs[0]:
+                    log_dir = parsed_log_dirs[0]
+        except Exception:
+            pass
+
         # Stop service
         subprocess.run(["sudo", "systemctl", "stop", "minidlna"], check=False)
 
         # Clear database
-        subprocess.run(["sudo", "rm", "-f", "/var/cache/minidlna/files.db"], check=False)
+        subprocess.run(["sudo", "rm", "-f", os.path.join(db_dir, "files.db")], check=False)
 
         # Recreate cache directory with proper permissions
-        subprocess.run(["sudo", "mkdir", "-p", "/var/cache/minidlna"], check=False)
-        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", "/var/cache/minidlna"], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", db_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", db_dir], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", log_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", log_dir], check=False)
 
         # Start service
         subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)
