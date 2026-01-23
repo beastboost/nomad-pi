@@ -594,6 +594,9 @@ cat > "$MINIDLNA_TEMP" <<EOL
 # Scan the entire data directory (includes external drives under data/external)
 media_dir=$CURRENT_DIR/data
 
+# External drives (mounted USB/external media)
+media_dir=$CURRENT_DIR/data/external
+
 # Database and logging
 db_dir=/var/cache/minidlna
 log_dir=/var/log/minidlna
