@@ -49,6 +49,9 @@
                 <button onclick="event.stopPropagation(); showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
                 <button onclick="event.stopPropagation(); showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
                 <span id="header-stats" class="header-stats"></span>
+                <button onclick="event.stopPropagation(); toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
                 <button onclick="event.stopPropagation(); logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
             </nav>
         </header>

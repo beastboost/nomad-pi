@@ -71,6 +71,52 @@ function getCookie(name) {
     if (parts.length === 2) return parts.pop().split(';').shift();
     return null;
 }
+
+// Theme Management
+function initTheme() {
+    const savedTheme = localStorage.getItem('nomadpi_theme') || 'default';
+    applyTheme(savedTheme, false);
+}
+
+function toggleTheme() {
+    const currentTheme = localStorage.getItem('nomadpi_theme') || 'default';
+    const themes = ['default', 'light-theme', 'dark-theme'];
+    const currentIndex = themes.indexOf(currentTheme);
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
+
+    applyTheme(nextTheme, true);
+    localStorage.setItem('nomadpi_theme', nextTheme);
+}
+
+function applyTheme(theme, animate = false) {
+    const body = document.body;
+    const icon = document.getElementById('theme-icon');
+
+    if (animate) {
+        body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+        setTimeout(() => { body.style.transition = ''; }, 300);
+    }
+
+    // Remove all theme classes
+    body.classList.remove('light-theme', 'dark-theme');
+
+    // Apply new theme
+    if (theme !== 'default') {
+        body.classList.add(theme);
+    }
+
+    // Update icon
+    if (icon) {
+        if (theme === 'light-theme') {
+            icon.className = 'fas fa-sun';
+        } else if (theme === 'dark-theme') {
+            icon.className = 'fas fa-moon';
+        } else {
+            icon.className = 'fas fa-adjust';
+        }
+    }
+}
+
 let currentMedia = null;
 let currentProfile = null;
 let driveScanInterval = null;
@@ -3109,6 +3155,7 @@ function cancelUpload() {
 // Debounce function moved to utilities section (line ~503)
 
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme(); // Initialize theme before anything else
     checkAuth(); // Check auth on load
 
     const setupHintEl = document.getElementById('setup-hint');

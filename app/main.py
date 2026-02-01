@@ -228,6 +228,28 @@ DATA_DIRS = ["data/movies", "data/shows", "data/music", "data/books", "data/file
 for d in DATA_DIRS:
     os.makedirs(d, exist_ok=True)
 
+# Captive Portal Detection Routes
+# These routes handle auto-detection for Android/iOS devices
+from fastapi.responses import RedirectResponse, HTMLResponse
+
+@app.get("/generate_204")
+@app.get("/gen_204")
+async def android_captive_portal():
+    """Android captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
+@app.get("/hotspot-detect.html")
+@app.get("/library/test/success.html")
+async def ios_captive_portal():
+    """iOS captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
+@app.get("/connecttest.txt")
+@app.get("/redirect")
+async def windows_captive_portal():
+    """Windows captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
 # Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Public system endpoints
