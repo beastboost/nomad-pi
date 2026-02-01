@@ -624,25 +624,13 @@
                     </Grid>
                 </Border>
 
-                <!-- Processing Progress (Bottom) -->
-                <Border Grid.Row="2" Style="{StaticResource CardBorder}" Margin="0,15,0,0" 
-                        Visibility="{Binding IsTransferring, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel>
-                        <TextBlock Text="Processing Batch..." FontWeight="Bold" Margin="0,0,0,10"/>
-                        <TextBlock Text="{Binding CurrentStatus}" FontSize="12" Margin="0,0,0,5"/>
-                        <ProgressBar Value="{Binding CurrentFileProgress}" Height="10" Margin="0,0,0,2"/>
-                        <TextBlock Text="{Binding FileProgress}" FontSize="10" HorizontalAlignment="Right" Margin="0,0,0,10"/>
-                        
-                        <TextBlock Text="Overall Progress" FontSize="12" Margin="0,0,0,5"/>
-                        <ProgressBar Value="{Binding TotalProgress}" Height="15" Foreground="{StaticResource PrimaryColor}"/>
-                    </StackPanel>
-                </Border>
             </Grid>
 
             <!-- Column 3: Processing Options & Queue -->
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="1.2*"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
@@ -672,7 +660,64 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Style="{StaticResource CardBorder}">
+                <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="File Manager" Style="{StaticResource HeaderBlock}"/>
+                            <Button Grid.Column="1" Content="Refresh" Click="FileManagerRefresh_Click" Padding="8,2" FontSize="11"/>
+                        </Grid>
+
+                        <Grid Grid.Row="1" Margin="0,8,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Content="Up" Click="FileManagerUp_Click" Padding="8,2" FontSize="11" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding FileManagerPath, UpdateSourceTrigger=PropertyChanged}" Background="#252525" Foreground="White" BorderBrush="{StaticResource BorderColor}" Padding="6,4"/>
+                            <Button Grid.Column="2" Content="Open" Click="FileManagerOpen_Click" Padding="8,2" FontSize="11" Margin="8,0,0,0"/>
+                            <Button Grid.Column="3" Content="Root" Click="FileManagerRoot_Click" Padding="8,2" FontSize="11" Margin="8,0,0,0"/>
+                        </Grid>
+
+                        <ListView Grid.Row="2" x:Name="FileManagerList" ItemsSource="{Binding FileManagerItems}" Background="Transparent" BorderThickness="0" SelectionMode="Extended" MouseDoubleClick="FileManagerList_DoubleClick">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="170"/>
+                                    <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Type}" Width="60"/>
+                                    <GridViewColumn Header="Size" DisplayMemberBinding="{Binding SizeDisplay}" Width="70"/>
+                                    <GridViewColumn Header="Modified" DisplayMemberBinding="{Binding ModifiedDisplay}" Width="110"/>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+
+                        <Grid Grid.Row="3" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding FileManagerStatus}" FontSize="11" Foreground="{StaticResource MutedTextColor}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            <Button Grid.Column="1" Content="Rename Selected" Click="RenameSelected_Click" Background="{StaticResource SecondaryColor}" Padding="10,4" FontSize="11" Margin="8,0,0,0"
+                                    IsEnabled="{Binding IsTransferring, Converter={StaticResource InverseBooleanConverter}}"/>
+                            <Button Grid.Column="2" Content="Delete Selected" Click="DeleteSelected_Click" Background="{StaticResource DangerColor}" Padding="10,4" FontSize="11" Margin="8,0,0,0"
+                                    IsEnabled="{Binding IsTransferring, Converter={StaticResource InverseBooleanConverter}}"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource CardBorder}">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>

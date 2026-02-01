@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+from typing import List
 from datetime import datetime
 from app import database
 from app.routers.auth import get_current_user_id
@@ -552,6 +553,60 @@ def save_mount(device, mount_point):
     with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
         json.dump(mounts, f)
 
+def get_device_fstype(device: str) -> str:
+    for cmd in (
+        ["lsblk", "-no", "FSTYPE", device],
+        ["blkid", "-o", "value", "-s", "TYPE", device],
+    ):
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                fstype = (res.stdout or "").strip().splitlines()[0].strip()
+                if fstype:
+                    return fstype
+        except Exception:
+            continue
+    return ""
+
+def mount_with_permissions(device: str, target: str) -> None:
+    uid = os.getuid()
+    gid = os.getgid()
+    fstype = get_device_fstype(device).lower()
+
+    mount_bin = shutil.which("mount") or "/usr/bin/mount"
+    chown_bin = shutil.which("chown") or "/usr/bin/chown"
+    chmod_bin = shutil.which("chmod") or "/usr/bin/chmod"
+
+    attempts = []
+    if fstype in {"ntfs", "ntfs3"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs3", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid},umask=0002,big_writes", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype == "exfat":
+        attempts.append(["sudo", "-n", mount_bin, "-t", "exfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype in {"vfat", "fat", "msdos"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "vfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+
+    attempts.append(["sudo", "-n", mount_bin, device, target])
+
+    last_err = None
+    for cmd in attempts:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            last_err = None
+            break
+        except subprocess.CalledProcessError as e:
+            last_err = (e.stderr or e.stdout or str(e)).strip()
+
+    if last_err:
+        raise RuntimeError(last_err)
+
+    try:
+        subprocess.run(["sudo", "-n", chown_bin, f"{uid}:{gid}", target], check=False, capture_output=True, text=True)
+        subprocess.run(["sudo", "-n", chmod_bin, "0775", target], check=False, capture_output=True, text=True)
+    except Exception:
+        pass
+
 def remove_mount(target):
     if os.path.exists(PERSISTENT_MOUNTS_FILE):
         try:
@@ -562,9 +617,64 @@ def remove_mount(target):
                 json.dump(mounts, f)
         except: pass
 
+def ensure_media_folders(root: str) -> List[str]:
+    created = []
+    if not isinstance(root, str) or not root:
+        return created
+    for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
+        try:
+            p = os.path.join(root, folder)
+            if not os.path.exists(p):
+                os.makedirs(p, exist_ok=True)
+                created.append(folder)
+        except Exception:
+            continue
+    return created
+
+def ensure_external_category_symlinks(external_root: str, label: str) -> None:
+    if platform.system() != "Linux":
+        return
+    if not isinstance(external_root, str) or not external_root:
+        return
+    if not isinstance(label, str) or not label:
+        return
+
+    data_root = os.path.abspath("data")
+    for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+        src = os.path.join(external_root, cat)
+        if not os.path.isdir(src):
+            continue
+        dst_parent = os.path.join(data_root, cat)
+        try:
+            os.makedirs(dst_parent, exist_ok=True)
+        except Exception:
+            continue
+        dst = os.path.join(dst_parent, f"External_{label}")
+        try:
+            if os.path.islink(dst):
+                if os.path.exists(dst):
+                    continue
+                os.unlink(dst)
+            if os.path.exists(dst):
+                continue
+            os.symlink(src, dst)
+        except Exception:
+            continue
+
+def restart_minidlna_best_effort() -> None:
+    if platform.system() != "Linux":
+        return
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "restart", "minidlna"], check=False, capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
+
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        if not device.startswith("/dev/"):
+            raise HTTPException(status_code=400, detail="Invalid device path")
+
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name:
@@ -574,10 +684,12 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         os.makedirs(target, exist_ok=True)
         
         try:
-            # Check if already mounted
-            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+            mount_with_permissions(device, target)
             save_mount(device, target)
-            return {"status": "mounted", "device": device, "target": target}
+            created = ensure_media_folders(target)
+            ensure_external_category_symlinks(target, clean_name)
+            restart_minidlna_best_effort()
+            return {"status": "mounted", "device": device, "target": target, "created_folders": created}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
@@ -622,10 +734,12 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         target = os.path.join("data", "external", clean_name)
         os.makedirs(target, exist_ok=True)
         
-        subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+        mount_with_permissions(device, target)
         save_mount(device, target)
-        
-        return {"status": "formatted", "device": device, "target": target}
+        created = ensure_media_folders(target)
+        ensure_external_category_symlinks(target, clean_name)
+        restart_minidlna_best_effort()
+        return {"status": "formatted", "device": device, "target": target, "created_folders": created}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Format failed: {str(e)}")
@@ -657,14 +771,45 @@ def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
     try:
         action = "on" if enable else "off"
         # Try nmcli first
-        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True)
+        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             return {"status": "success", "enabled": enable}
         
         # Fallback to rfkill
         action = "unblock" if enable else "block"
-        subprocess.run(["sudo", "rfkill", action, "wifi"], check=True)
+        fallback = subprocess.run(
+            ["sudo", "-n", "rfkill", action, "wifi"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if fallback.returncode != 0:
+            msg = (fallback.stderr or fallback.stdout or "rfkill failed").strip()
+            raise HTTPException(status_code=500, detail=msg)
         return {"status": "success", "enabled": enable}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/wifi/restart")
+def restart_wifi(user_id: int = Depends(get_current_user_id)):
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Wi-Fi restart only supported on Linux/Raspberry Pi")
+
+    try:
+        script = "nmcli connection down NomadPi >/dev/null 2>&1 || true; nmcli radio wifi off >/dev/null 2>&1 || true; sleep 2; nmcli radio wifi on >/dev/null 2>&1 || true"
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            cmd = ["bash", "-lc", script]
+        else:
+            probe = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, timeout=2)
+            if probe.returncode != 0:
+                raise HTTPException(status_code=500, detail=(probe.stderr or probe.stdout or "sudo not permitted").strip())
+            cmd = ["sudo", "-n", "bash", "-lc", script]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"status": "ok", "message": "Wi-Fi restart initiated"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1019,10 +1164,11 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         if enable:
             # Enable hotspot
             subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "up", "NomadPi"],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=20
             )
             return {
                 "status": "ok",
@@ -1035,15 +1181,23 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         else:
             # Disable hotspot and try to connect to saved WiFi
             subprocess.run(
-                ["sudo", "nmcli", "connection", "down", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
                 check=False,
-                capture_output=True
+                capture_output=True,
+                timeout=20
             )
             
             # Try to connect to home WiFi
             try:
+                home_ssid = os.environ.get("HOME_SSID", "").strip()
+                if not home_ssid:
+                    return {
+                        "status": "ok",
+                        "mode": "disconnected",
+                        "message": "Hotspot disabled. No WiFi configured."
+                    }
                 subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", os.environ.get("HOME_SSID", "")],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1083,7 +1237,7 @@ def scan_wifi(user_id: int = Depends(get_current_user_id)):
         def get_networks(use_sudo=True, force_rescan=True):
             cmd = []
             if use_sudo:
-                cmd = ["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
+                cmd = ["sudo", "-n", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             else:
                 cmd = ["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             
@@ -1162,16 +1316,30 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
     
     try:
         # First, try to delete any existing connection profile for this SSID to avoid conflicts
-        subprocess.run(["sudo", "nmcli", "connection", "delete", "id", request.ssid], capture_output=True, check=False)
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "delete", "id", request.ssid],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False
+        )
+
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False
+        )
         
         # Connect to WiFi using nmcli
         # We use 'nmcli device wifi connect' which creates a new profile if needed
         # Adding 'name' helps ensure the connection is identifiable
         result = subprocess.run(
-            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
+            ["sudo", "-n", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=45
         )
         
         if result.returncode == 0:
@@ -1187,22 +1355,22 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
                 logging.info("Attempting fallback manual connection creation...")
                 # 1. Add the connection manually
                 add_cmd = [
-                    "sudo", "nmcli", "con", "add", "type", "wifi", "ifname", "*", 
+                    "sudo", "-n", "nmcli", "con", "add", "type", "wifi", "ifname", "*",
                     "con-name", request.ssid, "ssid", request.ssid
                 ]
-                subprocess.run(add_cmd, capture_output=True, check=False)
+                subprocess.run(add_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 2. Set the password and security
                 modify_cmd = [
-                    "sudo", "nmcli", "con", "modify", request.ssid,
+                    "sudo", "-n", "nmcli", "con", "modify", request.ssid,
                     "wifi-sec.key-mgmt", "wpa-psk",
                     "wifi-sec.psk", request.password
                 ]
-                subprocess.run(modify_cmd, capture_output=True, check=False)
+                subprocess.run(modify_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 3. Try to bring it up
                 up_result = subprocess.run(
-                    ["sudo", "nmcli", "con", "up", "id", request.ssid],
+                    ["sudo", "-n", "nmcli", "con", "up", "id", request.ssid],
                     capture_output=True, text=True, timeout=20
                 )
                 
@@ -1214,6 +1382,8 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
             raise HTTPException(status_code=400, detail=err_msg)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Connection attempt timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1226,15 +1396,16 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
     try:
         # First, disable hotspot if active
         subprocess.run(
-            ["sudo", "nmcli", "connection", "down", "NomadPi"],
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
             check=False,
-            capture_output=True
+            capture_output=True,
+            timeout=15
         )
         
         # If SSID provided, try to connect to it
         if ssid:
             result = subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "id", ssid],
+                ["sudo", "-n", "nmcli", "connection", "up", "id", ssid],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -1251,7 +1422,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
             home_ssid = os.environ.get("HOME_SSID", "")
             if home_ssid:
                 result = subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", home_ssid],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1280,7 +1451,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
                     # Try first available WiFi connection
                     first_conn = connections[0]
                     subprocess.run(
-                        ["sudo", "nmcli", "connection", "up", "id", first_conn],
+                        ["sudo", "-n", "nmcli", "connection", "up", "id", first_conn],
                         check=True,
                         capture_output=True,
                         text=True,
@@ -1298,6 +1469,8 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
         raise HTTPException(status_code=408, detail="Connection timeout")
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect: {e.stderr if e.stderr else str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1324,6 +1497,278 @@ def get_saved_wifi(user_id: int = Depends(get_current_user_id)):
             "connections": connections,
             "count": len(connections)
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Tailscale VPN Management
+@router.get("/tailscale/status")
+def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
+    """Get Tailscale connection status"""
+    if platform.system() != "Linux":
+        return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
+
+    try:
+        # Check if Tailscale is installed (check multiple paths)
+        paths_to_check = ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]
+        tailscale_path = shutil.which("tailscale")
+        
+        if not tailscale_path:
+            # Fallback check
+            for path in paths_to_check:
+                if os.path.exists(path):
+                    tailscale_path = path
+                    break
+        
+        if not tailscale_path:
+            return {"installed": False, "connected": False, "message": "Tailscale not found in PATH"}
+
+        # Check if tailscaled service is running
+        service_result = subprocess.run(
+            ["systemctl", "is-active", "tailscaled"],
+            capture_output=True,
+            text=True
+        )
+        service_running = service_result.stdout.strip() == "active"
+
+        if not service_running:
+            return {
+                "installed": True,
+                "connected": False,
+                "service_running": False,
+                "message": "Tailscale service not running"
+            }
+
+        # Get connection status
+        status_result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if status_result.returncode == 0:
+            status_data = json.loads(status_result.stdout)
+            backend_state = status_data.get("BackendState", "")
+
+            # Get simple status for quick checks
+            status_simple = subprocess.run(
+                ["sudo", "-n", "tailscale", "status"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            return {
+                "installed": True,
+                "connected": backend_state == "Running",
+                "service_running": True,
+                "backend_state": backend_state,
+                "self": status_data.get("Self", {}),
+                "peer_count": len(status_data.get("Peer", {})),
+                "status_output": status_simple.stdout
+            }
+        else:
+            return {
+                "installed": True,
+                "connected": False,
+                "service_running": True,
+                "message": "Unable to get status"
+            }
+
+    except subprocess.TimeoutExpired:
+        return {"installed": True, "connected": False, "error": "Status check timed out"}
+    except Exception as e:
+        return {"installed": True, "connected": False, "error": str(e)}
+
+@router.get("/tailscale/ip")
+def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
+    """Get Tailscale IP address"""
+    if platform.system() != "Linux":
+        return {"ip": None, "message": "Tailscale only available on Linux"}
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "ip", "-4"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            ip = result.stdout.strip()
+            return {"ip": ip if ip else None}
+        else:
+            return {"ip": None, "message": "Not connected to Tailscale"}
+    except Exception as e:
+        return {"ip": None, "error": str(e)}
+
+@router.post("/tailscale/up")
+def tailscale_up(user_id: int = Depends(get_current_user_id)):
+    """Connect to Tailscale network"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
+
+    try:
+        # Check if already connected
+        status_result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if status_result.returncode == 0:
+            status_data = json.loads(status_result.stdout)
+            if status_data.get("BackendState") == "Running":
+                return {"status": "success", "message": "Already connected to Tailscale"}
+
+        # Get auth key from database if available
+        auth_key = database.get_setting("tailscale_auth_key")
+
+        # Build tailscale up command
+        cmd = ["sudo", "-n", "tailscale", "up"]
+
+        # Add auth key if available
+        if auth_key:
+            cmd.extend(["--authkey", auth_key])
+
+        # Add recommended flags for server/always-on use
+        cmd.extend([
+            "--accept-routes",  # Accept subnet routes from exit nodes
+            "--ssh"  # Enable Tailscale SSH
+        ])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            return {
+                "status": "success",
+                "message": "Connected to Tailscale",
+                "output": result.stdout
+            }
+        else:
+            # Check if it's an auth issue
+            if "authenticate" in result.stderr.lower() or "login" in result.stderr.lower():
+                return {
+                    "status": "needs_auth",
+                    "message": "Please authenticate via the provided URL",
+                    "output": result.stderr
+                }
+            else:
+                raise HTTPException(status_code=500, detail=result.stderr or "Failed to connect")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Connection attempt timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/tailscale/down")
+def tailscale_down(user_id: int = Depends(get_current_user_id)):
+    """Disconnect from Tailscale network"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "down"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode == 0:
+            return {"status": "success", "message": "Disconnected from Tailscale"}
+        else:
+            raise HTTPException(status_code=500, detail=result.stderr or "Failed to disconnect")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Disconnect attempt timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tailscale/peers")
+def get_tailscale_peers(user_id: int = Depends(get_current_user_id)):
+    """Get list of Tailscale peers"""
+    if platform.system() != "Linux":
+        return {"peers": [], "message": "Tailscale only available on Linux"}
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tailscale", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode == 0:
+            status_data = json.loads(result.stdout)
+            peers_data = status_data.get("Peer", {})
+
+            peers = []
+            for peer_id, peer_info in peers_data.items():
+                peers.append({
+                    "id": peer_id,
+                    "hostname": peer_info.get("HostName", "Unknown"),
+                    "dns_name": peer_info.get("DNSName", ""),
+                    "tailscale_ips": peer_info.get("TailscaleIPs", []),
+                    "online": peer_info.get("Online", False),
+                    "exit_node": peer_info.get("ExitNode", False),
+                    "os": peer_info.get("OS", "")
+                })
+
+            return {"peers": peers, "count": len(peers)}
+        else:
+            return {"peers": [], "message": "Not connected to Tailscale"}
+
+    except Exception as e:
+        return {"peers": [], "error": str(e)}
+
+class TailscaleAuthKeyRequest(BaseModel):
+    auth_key: str
+
+@router.post("/tailscale/set-auth-key")
+def set_tailscale_auth_key(request: TailscaleAuthKeyRequest, user_id: int = Depends(get_current_user_id)):
+    """Store Tailscale auth key in database"""
+    try:
+        # Validate auth key format (starts with tskey-)
+        if not request.auth_key.startswith("tskey-"):
+            raise HTTPException(status_code=400, detail="Invalid auth key format. Should start with 'tskey-'")
+
+        database.set_setting("tailscale_auth_key", request.auth_key)
+        return {"status": "success", "message": "Auth key saved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/tailscale/auth-key")
+def get_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
+    """Get stored Tailscale auth key (masked)"""
+    try:
+        auth_key = database.get_setting("tailscale_auth_key")
+        if auth_key:
+            # Mask the key, show only first 10 and last 4 characters
+            if len(auth_key) > 20:
+                masked = auth_key[:10] + "..." + auth_key[-4:]
+            else:
+                masked = "***"
+            return {"has_key": True, "masked_key": masked}
+        else:
+            return {"has_key": False}
+    except Exception as e:
+        return {"has_key": False, "error": str(e)}
+
+@router.delete("/tailscale/auth-key")
+def delete_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
+    """Delete stored Tailscale auth key"""
+    try:
+        database.set_setting("tailscale_auth_key", "")
+        return {"status": "success", "message": "Auth key deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1367,17 +1812,186 @@ def get_dlna_info(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"enabled": False, "message": str(e)}
 
-@router.post("/dlna/restart")
-def restart_dlna(user_id: int = Depends(get_current_user_id)):
-    """Restart DLNA server"""
+@router.get("/dlna/status")
+def get_dlna_status(user_id: int = Depends(get_current_user_id)):
+    """Get DLNA diagnostic information"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
-    
+
+    import glob
+    diagnostics = {}
+
+    # Check if service is running
     try:
-        subprocess.run(["sudo", "systemctl", "restart", "minidlna"], check=True)
-        # Force rescan
-        subprocess.run(["sudo", "minidlnad", "-R"], check=False)
-        return {"status": "ok", "message": "DLNA server restarted and rescanning media"}
+        result = subprocess.run(["systemctl", "is-active", "minidlna"], capture_output=True, text=True)
+        diagnostics["service_running"] = result.stdout.strip() == "active"
+    except:
+        diagnostics["service_running"] = False
+
+    # Read config to see what paths it's scanning
+    db_dir = "/var/cache/minidlna"
+    log_dir = "/var/log/minidlna"
+    try:
+        with open("/etc/minidlna.conf", "r") as f:
+            config = f.read()
+            lines = config.split("\n")
+            media_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("media_dir=")]
+            root_container = [line.split("=", 1)[1].strip() for line in lines if line.startswith("root_container=")]
+            parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+            parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+            if parsed_db_dirs and parsed_db_dirs[0]:
+                db_dir = parsed_db_dirs[0]
+            if parsed_log_dirs and parsed_log_dirs[0]:
+                log_dir = parsed_log_dirs[0]
+            diagnostics["configured_paths"] = media_dirs
+            diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
+    except:
+        diagnostics["configured_paths"] = ["ERROR: Could not read config"]
+        diagnostics["root_container"] = "ERROR"
+    diagnostics["db_dir"] = db_dir
+    diagnostics["log_dir"] = log_dir
+
+    # Count actual files in data directories
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    movies_dir = os.path.join(base_dir, "data", "movies")
+    shows_dir = os.path.join(base_dir, "data", "shows")
+
+    # Check if directories exist
+    diagnostics["movies_dir_exists"] = os.path.exists(movies_dir)
+    diagnostics["shows_dir_exists"] = os.path.exists(shows_dir)
+    diagnostics["movies_dir_path"] = movies_dir
+    diagnostics["shows_dir_path"] = shows_dir
+
+    # Check permissions
+    try:
+        import stat
+        if os.path.exists(movies_dir):
+            st = os.stat(movies_dir)
+            diagnostics["movies_dir_perms"] = oct(st.st_mode)[-3:]
+            diagnostics["movies_dir_owner"] = f"{st.st_uid}:{st.st_gid}"
+    except:
+        pass
+
+    try:
+        movies = glob.glob(os.path.join(movies_dir, "**", "*.mp4"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.mkv"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.avi"), recursive=True)
+        diagnostics["movie_files_found"] = len(movies)
+        diagnostics["movie_samples"] = [os.path.relpath(m, movies_dir) for m in movies[:5]]
+    except Exception as e:
+        diagnostics["movie_files_found"] = 0
+        diagnostics["movie_samples"] = []
+        diagnostics["movie_scan_error"] = str(e)
+
+    try:
+        shows = glob.glob(os.path.join(shows_dir, "**", "*.mp4"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.mkv"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.avi"), recursive=True)
+        diagnostics["show_files_found"] = len(shows)
+        diagnostics["show_samples"] = [os.path.relpath(s, shows_dir) for s in shows[:5]]
+    except Exception as e:
+        diagnostics["show_files_found"] = 0
+        diagnostics["show_samples"] = []
+        diagnostics["show_scan_error"] = str(e)
+
+    # Check cache directory permissions
+    try:
+        cache_st = os.stat(db_dir)
+        diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
+        diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
+        diagnostics["cache_dir_exists"] = True
+    except:
+        diagnostics["cache_dir_exists"] = False
+
+    # Read recent log entries - try multiple locations
+    logs_found = False
+    log_locations = [
+        "/var/log/minidlna.log",
+        "/var/log/minidlna/minidlna.log",
+    ]
+
+    for log_path in log_locations:
+        try:
+            result = subprocess.run(["sudo", "tail", "-30", log_path],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = log_path
+                logs_found = True
+                break
+        except:
+            pass
+
+    if not logs_found:
+        # Try systemd journal
+        try:
+            result = subprocess.run(["sudo", "journalctl", "-u", "minidlna", "-n", "20", "--no-pager"],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = "systemd journal"
+            else:
+                diagnostics["recent_logs"] = ["No logs found in any location"]
+                diagnostics["log_file_location"] = "none"
+        except:
+            diagnostics["recent_logs"] = ["Could not read logs"]
+            diagnostics["log_file_location"] = "error"
+
+    # Check database file
+    try:
+        db_file = os.path.join(db_dir, "files.db")
+        db_exists = os.path.exists(db_file)
+        diagnostics["database_exists"] = db_exists
+        diagnostics["database_path"] = db_file
+        if db_exists:
+            db_size = os.path.getsize(db_file)
+            diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
+    except:
+        diagnostics["database_exists"] = False
+        diagnostics["database_size_mb"] = 0
+
+    return diagnostics
+
+@router.post("/dlna/restart")
+def restart_dlna(user_id: int = Depends(get_current_user_id)):
+    """Restart DLNA server and rebuild database"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="DLNA only available on Linux")
+
+    try:
+        db_dir = "/var/cache/minidlna"
+        log_dir = "/var/log/minidlna"
+        try:
+            with open("/etc/minidlna.conf", "r") as f:
+                config = f.read()
+                lines = config.split("\n")
+                parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+                parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+                if parsed_db_dirs and parsed_db_dirs[0]:
+                    db_dir = parsed_db_dirs[0]
+                if parsed_log_dirs and parsed_log_dirs[0]:
+                    log_dir = parsed_log_dirs[0]
+        except Exception:
+            pass
+
+        # Stop service
+        subprocess.run(["sudo", "systemctl", "stop", "minidlna"], check=False)
+
+        # Clear database
+        subprocess.run(["sudo", "rm", "-f", os.path.join(db_dir, "files.db")], check=False)
+
+        # Recreate cache directory with proper permissions
+        subprocess.run(["sudo", "mkdir", "-p", db_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", db_dir], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", log_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", log_dir], check=False)
+
+        # Start service
+        subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)
+
+        # MiniDLNA will automatically scan on startup when database is missing
+
+        return {"status": "ok", "message": "DLNA database cleared and rebuilding. Wait 2-3 minutes then check your TV."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

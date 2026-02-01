@@ -17,7 +17,7 @@ try:
     auth.ensure_admin_user()
 
     from app.services import ingest
-    from app.routers import media, system, uploads
+    from app.routers import media, system, uploads, dashboard
 except Exception as e:
     print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
@@ -259,6 +259,7 @@ app.include_router(media.public_router, prefix="/api/media", tags=["media"])
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_id)])
+app.include_router(dashboard.router)  # Dashboard has its own prefix and auth where needed
 
 @app.on_event("startup")
 def _startup_tasks():
@@ -287,7 +288,8 @@ def _startup_tasks():
                                 continue
                                 
                             os.makedirs(target, exist_ok=True)
-                            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+                            from app.routers.system import mount_with_permissions
+                            mount_with_permissions(device, target)
                             logger.info(f"Restored mount: {device} -> {target}")
                         except Exception as e:
                             logger.error(f"Failed to restore mount {device}: {e}")
@@ -296,12 +298,27 @@ def _startup_tasks():
     except Exception as e:
         logger.error(f"Error during mount restoration: {e}")
 
+    try:
+        import platform
+
+        if platform.system() == "Linux":
+            media.refresh_external_links()
+    except Exception as e:
+        logger.warning(f"Failed to refresh external drive links: {e}")
+
     # Start scheduler
     scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
     scheduler.start()
     logger.info("Background scheduler started")
     
-    # 1. Staggered background tasks to prevent OOM on SBCs
+    # 1. Start Discovery Service
+    try:
+        from app.services import discovery
+        discovery.service.start()
+    except Exception as e:
+        logger.error(f"Failed to start discovery service: {e}")
+
+    # 2. Staggered background tasks to prevent OOM on SBCs
     def run_staggered():
         # Wait a bit for the main web server to settle
         time.sleep(10)
@@ -389,6 +406,12 @@ async def protect_data(request: Request, call_next):
     p = request.url.path
     if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
         response.headers["Cache-Control"] = "no-store"
+    if p.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    ct = (response.headers.get("content-type") or "").strip().lower()
+    if ct == "application/json":
+        response.headers["content-type"] = "application/json; charset=utf-8"
     return response
 
 # Mount data for direct access (streaming)

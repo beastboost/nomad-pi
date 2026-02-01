@@ -851,6 +851,7 @@ button.primary:active {
 .toast {
     background: rgba(20, 20, 20, 0.9);
     backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: white;
     padding: 12px 24px;
@@ -864,18 +865,6 @@ button.primary:active {
 @keyframes toast-in {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
-}
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.1);
-    color: white;
-    padding: 12px 24px;
-    border-radius: 50px;
-    font-weight: 500;
-    box-shadow: var(--shadow-lg);
-    animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .toast.success { border-color: var(--success-color); }
@@ -1035,6 +1024,7 @@ button.primary:active {
     height: 100%;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     animation: backdropFadeIn 0.3s ease-out;
 }
 
@@ -1401,6 +1391,7 @@ button.primary:active {
     width: 100%;
     max-width: 450px;
     backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     box-shadow: 0 15px 25px rgba(0,0,0,0.6);
 }
 
@@ -1681,6 +1672,7 @@ h1, h2, h3 {
     cursor: pointer;
     font-weight: 700;
     backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .poster-play:hover {
@@ -2625,6 +2617,7 @@ button i, .button i {
     border-bottom: 1px solid var(--border-color);
     background: rgba(20, 20, 20, 0.9);
     backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
 }
 
 .comic-btn {
@@ -2717,6 +2710,7 @@ button i, .button i {
     align-items: center;
     justify-content: center;
     backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     transition: all 0.2s;
 }
 

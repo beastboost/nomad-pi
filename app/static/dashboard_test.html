@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard WebSocket Test - Nomad Pi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 1.5rem;
+        }
+
+        .status.connected {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status.disconnected {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: #cbd5e1;
+        }
+
+        .session {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .session:last-child {
+            margin-bottom: 0;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 0.75rem;
+        }
+
+        .session-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: #e2e8f0;
+        }
+
+        .session-state {
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .state-playing {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .state-paused {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+
+        .session-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-top: 0.75rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.75rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+            transition: width 0.3s ease;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        .stat-value.temp {
+            color: #ef4444;
+        }
+
+        .stat-value.good {
+            color: #10b981;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #64748b;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .controls {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e2e8f0;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+
+        .info-box {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 3px solid #3b82f6;
+            padding: 1rem;
+            margin-top: 1rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Dashboard WebSocket Test</h1>
+        <div id="status" class="status disconnected">
+            <span class="status-dot"></span>
+            <span>Disconnected</span>
+        </div>
+
+        <div class="grid">
+            <!-- Now Playing Sessions -->
+            <div class="card">
+                <h2>📺 Now Playing (<span id="session-count">0</span>)</h2>
+                <div id="sessions">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🎭</div>
+                        <p>No active playback sessions</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Stats -->
+            <div class="card">
+                <h2>💻 System Performance</h2>
+                <div class="stat-grid">
+                    <div class="stat">
+                        <div class="stat-label">CPU Usage</div>
+                        <div class="stat-value" id="cpu">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Temperature</div>
+                        <div class="stat-value temp" id="temp">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">RAM Usage</div>
+                        <div class="stat-value" id="ram">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Disk Usage</div>
+                        <div class="stat-value" id="disk">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Download</div>
+                        <div class="stat-value good" id="download">--</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Upload</div>
+                        <div class="stat-value good" id="upload">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Info -->
+        <div class="info-box">
+            <strong>ℹ️ Instructions:</strong><br>
+            • This page connects to <code>ws://[current-host]/api/dashboard/ws</code><br>
+            • Updates every 2 seconds automatically<br>
+            • Start playing media in the main app to see sessions appear here<br>
+            • Perfect for testing before implementing ESP32 display
+        </div>
+
+        <div class="controls">
+            <button class="btn-primary" onclick="connect()">Reconnect</button>
+            <button class="btn-secondary" onclick="location.reload()">Refresh Page</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectInterval = null;
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B/s';
+            const k = 1000;
+            const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+        }
+
+        function formatTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) {
+                return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            }
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/api/dashboard/ws`;
+
+            console.log('Connecting to:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('status').innerHTML = '<span class="status-dot"></span><span>Connected</span>';
+
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').innerHTML = '<span class="status-dot"></span><span>Disconnected - Reconnecting...</span>';
+
+                // Auto-reconnect
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(() => connect(), 5000);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateDashboard(data);
+                } catch (e) {
+                    console.error('Error parsing message:', e);
+                }
+            };
+        }
+
+        function updateDashboard(data) {
+            // Update sessions
+            const sessionsEl = document.getElementById('sessions');
+            const sessionCountEl = document.getElementById('session-count');
+
+            sessionCountEl.textContent = data.sessions.length;
+
+            if (data.sessions.length === 0) {
+                sessionsEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🎭</div>
+                        <p>No active playback sessions</p>
+                    </div>
+                `;
+            } else {
+                sessionsEl.innerHTML = data.sessions.map(session => `
+                    <div class="session">
+                        <div class="session-header">
+                            <div class="session-title">${session.title || 'Unknown'}</div>
+                            <span class="session-state state-${session.state}">${session.state}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${session.progress_percent}%"></div>
+                        </div>
+                        <div class="session-info">
+                            <div>👤 ${session.username}</div>
+                            <div>📁 ${session.media_type}</div>
+                            <div>⏱️ ${formatTime(session.current_time)} / ${formatTime(session.duration)}</div>
+                            <div>📊 ${session.progress_percent.toFixed(1)}%</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Update system stats
+            const sys = data.system;
+            document.getElementById('cpu').textContent = `${sys.cpu_percent}%`;
+            document.getElementById('temp').textContent = sys.cpu_temp ? `${sys.cpu_temp}°C` : 'N/A';
+            document.getElementById('ram').textContent = `${sys.ram_percent}%`;
+            document.getElementById('disk').textContent = `${sys.disk_percent}%`;
+            document.getElementById('download').textContent = formatBytes(sys.network_down_bps);
+            document.getElementById('upload').textContent = formatBytes(sys.network_up_bps);
+        }
+
+        // Connect on page load
+        connect();
+    </script>
+</body>
+</html>

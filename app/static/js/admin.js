@@ -124,6 +124,21 @@ createApp({
                 loading: false
             },
 
+            // Tailscale VPN
+            tailscale: {
+                loading: false,
+                connecting: false,
+                status: {
+                    installed: false,
+                    connected: false,
+                    service_running: false
+                },
+                ip: null,
+                authKey: '',
+                peers: [],
+                showPeers: false
+            },
+
             // Toasts
             toasts: [],
 
@@ -302,6 +317,9 @@ createApp({
             try {
                 const response = await this.apiCall('/api/system/settings/omdb', 'GET');
                 this.settings.omdb_key = response.key;
+                
+                // Refresh Tailscale status when loading settings
+                await this.refreshTailscaleStatus();
             } catch (error) {
                 console.error('Error loading settings:', error);
             }
@@ -529,6 +547,152 @@ createApp({
             }
         },
 
+        // Tailscale VPN Methods
+        async refreshTailscaleStatus() {
+            try {
+                this.tailscale.loading = true;
+                const status = await this.apiCall('/api/system/tailscale/status', 'GET');
+                this.tailscale.status = status;
+
+                if (status.connected) {
+                    const ipResponse = await this.apiCall('/api/system/tailscale/ip', 'GET');
+                    this.tailscale.ip = ipResponse.ip;
+                } else {
+                    this.tailscale.ip = null;
+                }
+
+                // Check for saved auth key
+                const authKeyResponse = await this.apiCall('/api/system/tailscale/auth-key', 'GET');
+                if (authKeyResponse.has_key) {
+                    this.tailscale.authKey = authKeyResponse.masked_key;
+                }
+            } catch (error) {
+                console.error('Failed to load Tailscale status:', error);
+                this.tailscale.status = {
+                    installed: false,
+                    connected: false,
+                    service_running: false
+                };
+            } finally {
+                this.tailscale.loading = false;
+            }
+        },
+
+        async connectTailscale() {
+            try {
+                this.tailscale.connecting = true;
+                const response = await this.apiCall('/api/system/tailscale/up', 'POST');
+
+                if (response.status === 'success') {
+                    this.showNotification('Connected to Tailscale!', 'success');
+                    await this.refreshTailscaleStatus();
+                } else if (response.status === 'needs_auth') {
+                    // Show authentication URL to user
+                    this.showNotification('Please authenticate Tailscale. Check the terminal output or admin panel.', 'info');
+                    // You might want to show the output in a modal
+                    console.log('Tailscale auth output:', response.output);
+                }
+            } catch (error) {
+                if (error.response && error.response.data && error.response.data.detail) {
+                    // Check if it contains a URL for authentication
+                    const detail = error.response.data.detail;
+                    if (detail.includes('https://')) {
+                        // Extract URL and show it to user
+                        const urlMatch = detail.match(/https:\/\/[^\s]+/);
+                        if (urlMatch) {
+                            const url = urlMatch[0];
+                            this.showConfirmModal = true;
+                            this.confirmModal = {
+                                title: 'Tailscale Authentication Required',
+                                message: `Please visit this URL to authenticate:\n\n${url}`,
+                                action: () => {
+                                    window.open(url, '_blank');
+                                    this.showConfirmModal = false;
+                                },
+                                actionText: 'Open URL',
+                                actionClass: 'btn-primary'
+                            };
+                        }
+                    } else {
+                        this.showNotification(`Failed to connect: ${detail}`, 'error');
+                    }
+                } else {
+                    this.showNotification('Failed to connect to Tailscale', 'error');
+                }
+            } finally {
+                this.tailscale.connecting = false;
+            }
+        },
+
+        async disconnectTailscale() {
+            try {
+                this.tailscale.connecting = true;
+                await this.apiCall('/api/system/tailscale/down', 'POST');
+                this.showNotification('Disconnected from Tailscale', 'info');
+                await this.refreshTailscaleStatus();
+            } catch (error) {
+                this.showNotification('Failed to disconnect from Tailscale', 'error');
+            } finally {
+                this.tailscale.connecting = false;
+            }
+        },
+
+        async viewTailscalePeers() {
+            try {
+                const response = await this.apiCall('/api/system/tailscale/peers', 'GET');
+                this.tailscale.peers = response.peers || [];
+                this.tailscale.showPeers = true;
+                if (this.tailscale.peers.length === 0) {
+                    this.showNotification('No peers found on your Tailscale network', 'info');
+                }
+            } catch (error) {
+                this.showNotification('Failed to fetch Tailscale peers', 'error');
+            }
+        },
+
+        async saveTailscaleAuthKey() {
+            if (!this.tailscale.authKey) {
+                this.showNotification('Please enter an auth key', 'warning');
+                return;
+            }
+
+            try {
+                await this.apiCall('/api/system/tailscale/set-auth-key', 'POST', {
+                    auth_key: this.tailscale.authKey
+                });
+                this.showNotification('Auth key saved successfully', 'success');
+            } catch (error) {
+                if (error.response && error.response.data && error.response.data.detail) {
+                    this.showNotification(error.response.data.detail, 'error');
+                } else {
+                    this.showNotification('Failed to save auth key', 'error');
+                }
+            }
+        },
+
+        copyToClipboard(text) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    this.showNotification('Copied to clipboard!', 'success');
+                }).catch(() => {
+                    this.showNotification('Failed to copy', 'error');
+                });
+            } else {
+                // Fallback for older browsers
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    this.showNotification('Copied to clipboard!', 'success');
+                } catch (err) {
+                    this.showNotification('Failed to copy', 'error');
+                }
+                document.body.removeChild(textarea);
+            }
+        },
+
         async confirmRestart() {
             this.showConfirmModal = true;
             this.confirmModal = {
@@ -676,6 +840,8 @@ createApp({
                 this.fetchLogs();
             } else if (view === 'media') {
                 this.loadMediaStats();
+            } else if (view === 'settings') {
+                this.refreshTailscaleStatus();
             }
         },
 

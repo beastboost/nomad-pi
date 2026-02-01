@@ -7,26 +7,27 @@ set -e
 
 # Correctly identify the real user even if run with sudo
 REAL_USER=${SUDO_USER:-$USER}
+REAL_HOME=$(eval echo "~$REAL_USER" 2>/dev/null || echo "$HOME")
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SCRIPT_DIR" == /boot* ]]; then
-    mkdir -p "$HOME/nomad-pi"
+    mkdir -p "$REAL_HOME/nomad-pi"
     if command -v rsync >/dev/null 2>&1; then
-        sudo rsync -a --delete "$SCRIPT_DIR/app/" "$HOME/nomad-pi/app/" || true
+        sudo rsync -a --delete "$SCRIPT_DIR/app/" "$REAL_HOME/nomad-pi/app/" || true
     else
-        sudo rm -rf "$HOME/nomad-pi/app" || true
-        sudo cp -r "$SCRIPT_DIR/app" "$HOME/nomad-pi/" || true
+        sudo rm -rf "$REAL_HOME/nomad-pi/app" || true
+        sudo cp -r "$SCRIPT_DIR/app" "$REAL_HOME/nomad-pi/" || true
     fi
-    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$HOME/nomad-pi/" || true
-    sudo chown -R "$REAL_USER:$REAL_USER" "$HOME/nomad-pi"
-    sudo chmod +x "$HOME/nomad-pi/setup.sh" "$HOME/nomad-pi/update.sh"
-    exec bash "$HOME/nomad-pi/setup.sh"
+    sudo cp -f "$SCRIPT_DIR/setup.sh" "$SCRIPT_DIR/update.sh" "$SCRIPT_DIR/requirements.txt" "$REAL_HOME/nomad-pi/" || true
+    sudo chown -R "$REAL_USER:$REAL_USER" "$REAL_HOME/nomad-pi"
+    sudo chmod +x "$REAL_HOME/nomad-pi/setup.sh" "$REAL_HOME/nomad-pi/update.sh"
+    exec bash "$REAL_HOME/nomad-pi/setup.sh"
 fi
 
 # Also move out of /root if we're there, as it causes permission issues for the user
 if [[ "$SCRIPT_DIR" == /root* ]]; then
-    echo "Detected installation in /root. Moving to $HOME/nomad-pi for better permissions..."
-    TARGET_DIR="$HOME/nomad-pi"
+    echo "Detected installation in /root. Moving to $REAL_HOME/nomad-pi for better permissions..."
+    TARGET_DIR="$REAL_HOME/nomad-pi"
     sudo mkdir -p "$TARGET_DIR"
     sudo cp -r "$SCRIPT_DIR/." "$TARGET_DIR/"
     sudo chown -R "$REAL_USER:$REAL_USER" "$TARGET_DIR"
@@ -55,7 +56,7 @@ if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf; then
 fi
 
 # Ensure home directory is traversable by services (minidlna, etc)
-chmod +x "$HOME"
+sudo chmod o+x "$REAL_HOME" 2>/dev/null || true
 
 echo "=========================================="
 echo "      Nomad Pi Installation Script        "
@@ -63,27 +64,52 @@ echo "=========================================="
 
 # 0. Check for Updates and Fix Git Remote
 if [ -d ".git" ]; then
-    echo "[0/9] Optimizing Git configuration..."
+    echo "[0/10] Optimizing Git configuration..."
     
-    # Mark directory as safe for git (common issue on newer git versions)
-    git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
+    GIT_PREFIX=()
+    if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+        GIT_PREFIX=(sudo -u "$REAL_USER")
+    fi
+
+    if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+        if [ -d "$SCRIPT_DIR/.git" ]; then
+            sudo chown -R "$REAL_USER:$REAL_USER" "$SCRIPT_DIR/.git" 2>/dev/null || true
+        fi
+    fi
+
+    "${GIT_PREFIX[@]}" git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
 
     # Refined Git config for stability on Pi OS (GnuTLS handshake workarounds)
-    git config --global --unset http.sslBackend 2>/dev/null || true
-    git config --global http.sslVerify true
-    git config --global http.version HTTP/1.1
-    git config --global http.postBuffer 52428800
+    "${GIT_PREFIX[@]}" git config --global --unset http.sslBackend 2>/dev/null || true
+    "${GIT_PREFIX[@]}" git config --global http.sslVerify true
+    "${GIT_PREFIX[@]}" git config --global http.version HTTP/1.1
+    "${GIT_PREFIX[@]}" git config --global http.postBuffer 52428800
     # Memory optimizations for Git on Pi Zero
-    git config --global pack.windowMemory "10m"
-    git config --global pack.packSizeLimit "20m"
-    git config --global core.packedGitLimit "20m"
-    git config --global core.packedGitWindowSize "10m"
+    "${GIT_PREFIX[@]}" git config --global pack.windowMemory "10m"
+    "${GIT_PREFIX[@]}" git config --global pack.packSizeLimit "20m"
+    "${GIT_PREFIX[@]}" git config --global core.packedGitLimit "20m"
+    "${GIT_PREFIX[@]}" git config --global core.packedGitWindowSize "10m"
     
-    git remote set-url origin https://github.com/beastboost/nomad-pi.git
-    git config credential.helper 'cache --timeout=2592000'
+    "${GIT_PREFIX[@]}" git remote set-url origin https://github.com/beastboost/nomad-pi.git
+    "${GIT_PREFIX[@]}" git config credential.helper 'cache --timeout=2592000'
     
     echo "Pulling latest changes from GitHub..."
-    git pull || echo "Warning: Could not pull latest changes. Continuing with current version."
+    AUTOSTASH_NAME=""
+    if ! "${GIT_PREFIX[@]}" git diff --quiet 2>/dev/null || ! "${GIT_PREFIX[@]}" git diff --cached --quiet 2>/dev/null; then
+        AUTOSTASH_NAME="setup-autostash-$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s)"
+        "${GIT_PREFIX[@]}" git stash push -u -m "$AUTOSTASH_NAME" >/dev/null 2>&1 || AUTOSTASH_NAME=""
+    fi
+
+    if ! "${GIT_PREFIX[@]}" git pull --rebase; then
+        echo "Warning: Could not pull latest changes. Continuing with current version."
+    fi
+
+    if [ -n "$AUTOSTASH_NAME" ]; then
+        if ! "${GIT_PREFIX[@]}" git stash pop >/dev/null 2>&1; then
+            echo "Warning: Local changes were stashed as '$AUTOSTASH_NAME' but could not be reapplied automatically."
+            echo "Run: git stash list && git stash pop"
+        fi
+    fi
 fi
 
 # 0.1 Proactive Swap Check (Crucial for Pi Zero 512MB RAM)
@@ -120,8 +146,8 @@ if [ "$TOTAL_SWAP" -lt 1000 ]; then
 fi
 
 # 1. System Updates
-echo "[1/9] Checking system packages..."
-PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools"
+echo "[1/10] Checking system packages..."
+PACKAGES="python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools curl ffmpeg"
 MISSING_PACKAGES=""
 
 for pkg in $PACKAGES; do
@@ -143,7 +169,7 @@ else
 fi
 
 # 2. Set Hostname (for http://nomadpi.local:8000)
-echo "[2/9] Configuring Hostname and mDNS..."
+echo "[2/10] Configuring Hostname and mDNS..."
 CURRENT_HOSTNAME=$(cat /etc/hostname | tr -d " \t\n\r")
 NEW_HOSTNAME="nomadpi"
 if [ "$CURRENT_HOSTNAME" != "$NEW_HOSTNAME" ]; then
@@ -158,7 +184,12 @@ sudo systemctl restart avahi-daemon
 echo "Hostname set to 'nomadpi'. You can access the server at http://nomadpi.local:8000"
 
 # 3. Python Environment
-echo "[3/9] Setting up Python environment..."
+echo "[3/10] Setting up Python environment..."
+
+VENV_PREFIX=()
+if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+    VENV_PREFIX=(sudo -u "$REAL_USER")
+fi
 
 # Check if venv exists but is broken (e.g. moved from /root)
 if [ -d "venv" ]; then
@@ -171,7 +202,11 @@ if [ -d "venv" ]; then
 fi
 
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    "${VENV_PREFIX[@]}" python3 -m venv venv
+fi
+
+if [ "$(id -u)" = "0" ] && [ -n "$REAL_USER" ] && id "$REAL_USER" >/dev/null 2>&1; then
+    sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/venv" 2>/dev/null || true
 fi
 
 echo "Checking Python dependencies..."
@@ -186,36 +221,40 @@ fi
 
 if [ "$CURRENT_HASH" != "$PREV_HASH" ] || [ ! -f "venv/bin/activate" ]; then
     echo "Installing/Updating Python dependencies (this may take a while on Pi Zero)..."
-    ./venv/bin/pip install --upgrade pip
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --upgrade pip
     
     # Split installation into chunks to avoid massive memory spikes
     echo "Installing base dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
     
     echo "Installing security and utility dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
+    "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
     
     echo "Installing remaining requirements..."
-    if ! ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt; then
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt; then
         echo "Error: Dependency installation failed even with 1GB swap."
         echo "The Pi Zero 2W may need a reboot or more swap space."
         exit 1
     fi
     
-    # Final check for uvicorn
-    if [ ! -f "./venv/bin/uvicorn" ]; then
-        echo "CRITICAL: uvicorn still missing. Trying emergency install..."
-        ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn, passlib" >/dev/null 2>&1; then
+        echo "CRITICAL: core Python modules missing. Re-installing requirements..."
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt
     fi
     
     echo "$CURRENT_HASH" > "$REQ_HASH_FILE"
 else
     echo "Dependencies are already up to date."
+    if ! "${VENV_PREFIX[@]}" ./venv/bin/python3 -c "import uvicorn, passlib" >/dev/null 2>&1; then
+        echo "Detected missing core Python modules in venv. Repairing..."
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --upgrade pip
+        "${VENV_PREFIX[@]}" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt
+    fi
 fi
 
 # 4. Create Directories
-echo "[4/9] Ensuring data directories exist..."
-mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery
+echo "[4/10] Ensuring data directories exist..."
+mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
 
 # Optimize chown/chmod - only run if needed, and skip data/ for the main pass
 echo "Verifying file permissions..."
@@ -227,23 +266,32 @@ if [ "$CURRENT_OWNER" != "$REAL_USER:$REAL_USER" ]; then
     sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR"
 fi
 
-# Only chmod/chown data directory if absolutely necessary
-if [ ! -w "$CURRENT_DIR/data" ]; then
-    echo "Updating data directory permissions..."
-    sudo chown "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
-    sudo chmod 775 "$CURRENT_DIR/data"
-fi
+# Ensure data directory permissions are correct
+echo "Setting data directory permissions..."
+sudo chown -R "$REAL_USER:$REAL_USER" "$CURRENT_DIR/data"
+sudo chmod -R 755 "$CURRENT_DIR/data"
 
 # Ensure MiniDLNA user can access the media directories
 if id "minidlna" &>/dev/null; then
     echo "Adding minidlna user to $REAL_USER group..."
     sudo usermod -a -G "$REAL_USER" minidlna
-    # Ensure data subdirectories are readable and executable by the group
-    sudo chmod -R g+rX "$CURRENT_DIR/data"
+
+    # Get the actual home directory path
+    USER_HOME=$(eval echo ~$REAL_USER)
+
+    # CRITICAL: Home directory must have group read+execute for minidlna user to traverse
+    # Use 755 (rwxr-xr-x) to allow group and others to read and traverse
+    sudo chmod 755 "$USER_HOME" 2>/dev/null || true
+
+    # Make nomad-pi directory traversable and readable
+    sudo chmod 755 "$CURRENT_DIR" 2>/dev/null || true
+
+    # Ensure data subdirectories are readable and executable
+    sudo chmod -R 755 "$CURRENT_DIR/data" 2>/dev/null || true
 fi
 
 # 5. Systemd Service Setup
-echo "[5/9] Setting up Systemd service..."
+echo "[5/10] Setting up Systemd service..."
 
 SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
 # Use REAL_USER defined in step 4
@@ -307,6 +355,7 @@ EOL
 
 echo "Enabling and starting service..."
 sudo systemctl daemon-reload
+sudo systemctl reset-failed nomad-pi 2>/dev/null || true
 
 # Only restart if configuration changed or service is not running
 if ! systemctl is-active --quiet nomad-pi; then
@@ -334,7 +383,7 @@ for i in {1..10}; do
 done
 
 # 6. Sudoers Configuration (for Mount/Shutdown/Reboot/Service)
-echo "[6/9] Configuring permissions..."
+echo "[6/10] Configuring permissions..."
 
 # Detect paths for sudoers to be universal
 MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
@@ -344,15 +393,25 @@ REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
+TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
+CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
+CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
-sudo bash -c "cat > $SUDOERS_FILE" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
+SUDOERS_TMP=$(mktemp)
+cat > "$SUDOERS_TMP" <<EOL
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
-sudo chmod 0440 $SUDOERS_FILE
+if sudo visudo -cf "$SUDOERS_TMP"; then
+    sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
+    sudo chmod 0440 "$SUDOERS_FILE"
+else
+    echo "ERROR: Generated sudoers file failed validation. Not installing."
+fi
+rm -f "$SUDOERS_TMP"
 
 # 7. Network Configuration (Home Wi-Fi + Hotspot Fallback)
-echo "[7/9] Configuring Network..."
+echo "[7/10] Configuring Network..."
 
 if command -v nmcli &> /dev/null; then
     echo "NetworkManager found."
@@ -456,7 +515,7 @@ else
 fi
 
 # 8. Samba Configuration (File Sharing)
-echo "[8/9] Configuring Samba..."
+echo "[8/10] Configuring Samba..."
 
 # Install Samba if not already installed (extra safety check)
 if ! dpkg -s samba >/dev/null 2>&1; then
@@ -515,21 +574,66 @@ sudo systemctl enable nmbd
 sudo systemctl restart nmbd
 
 # 9. MiniDLNA Configuration (Smart TV Streaming)
-echo "[9/9] Configuring MiniDLNA..."
+echo "[9/10] Configuring MiniDLNA..."
+
+# Ensure MiniDLNA is installed
+if ! command -v minidlnad >/dev/null 2>&1; then
+    echo "Installing MiniDLNA..."
+    sudo apt-get update
+    sudo apt-get install -y minidlna
+fi
+
+# Set up MiniDLNA cache and log directories with proper permissions
+echo "Setting up MiniDLNA cache directories..."
+sudo mkdir -p /var/cache/minidlna /var/log/minidlna
+sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
+sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
+
+# Fix inotify max_user_watches limit for MiniDLNA file monitoring
+# MiniDLNA needs to watch for file changes, increase the limit from default 8192 to 524288
+if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
+    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
+    # Make it persistent across reboots
+    if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf 2>/dev/null; then
+        echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
+    fi
+fi
+
 MINIDLNA_CONF="/etc/minidlna.conf"
 MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
 cat > "$MINIDLNA_TEMP" <<EOL
-media_dir=V,$CURRENT_DIR/data/movies
-media_dir=V,$CURRENT_DIR/data/shows
-media_dir=A,$CURRENT_DIR/data/music
-media_dir=P,$CURRENT_DIR/data/gallery
-media_dir=P,$CURRENT_DIR/data/books
+# Scan the entire data directory (includes external drives under data/external)
+media_dir=$CURRENT_DIR/data
+
+# Database and logging
 db_dir=/var/cache/minidlna
-log_dir=/var/log
+log_dir=/var/log/minidlna
+log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
+
+# Network settings
 friendly_name=$NEW_HOSTNAME
+port=8200
+
+# File monitoring - scan every 60 seconds for changes
 inotify=yes
-root_container=V
+notify_interval=60
+
+# Container settings - use "." for hierarchical folders
+root_container=.
+
+# Presentation
 presentation_url=http://$NEW_HOSTNAME.local:8000/
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+
+# Optimization
+max_connections=50
+strict_dlna=no
+enable_tivo=no
+wide_links=yes
+
+# Exclusions - skip junk folders from Windows/Mac/Linux systems
+# This prevents log spam from scanning recycle bins, system folders, etc.
+exclude=\$RECYCLE.BIN,\$Recycle.Bin,Recycled,System Volume Information,.Trashes,.Trash-*,.TemporaryItems,.Spotlight-V100,.fseventsd,lost+found,.AppleDouble,.DS_Store,Thumbs.db
 EOL
 
 # Ensure the data directory is fully accessible to minidlna
@@ -541,22 +645,67 @@ sudo chmod -R 755 "$CURRENT_DIR/data"
 if ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
     echo "Updating MiniDLNA configuration..."
     sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
-    
-    # Only rebuild database if config actually changed
-    echo "Clean start MiniDLNA (rebuilding database)..."
-    sudo systemctl stop minidlna
+
+    # Rebuild database and force rescan
+    echo "Rebuilding MiniDLNA database..."
+    sudo systemctl stop minidlna 2>/dev/null || true
     sudo rm -f /var/cache/minidlna/files.db
     sudo systemctl enable minidlna
     sudo systemctl start minidlna
-    sudo minidlnad -R
+    # MiniDLNA will automatically scan on startup when database is missing
 else
     echo "MiniDLNA configuration unchanged. Skipping rebuild."
     # Ensure it's running though
     if ! systemctl is-active --quiet minidlna; then
+        sudo systemctl enable minidlna
         sudo systemctl start minidlna
     fi
 fi
 rm -f "$MINIDLNA_TEMP"
+
+# 10. Tailscale VPN Configuration (Remote Access)
+echo "[10/10] Installing Tailscale VPN..."
+
+# Check if Tailscale is already installed
+if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale is already installed."
+    TAILSCALE_VERSION=$(tailscale version | head -n 1)
+    echo "Installed version: $TAILSCALE_VERSION"
+else
+    echo "Installing Tailscale..."
+    # Download and install Tailscale using the official install script
+    if curl -fsSL https://tailscale.com/install.sh | sh; then
+        echo "Tailscale installed successfully!"
+    else
+        echo "WARNING: Failed to install Tailscale. You can install it manually later."
+        echo "To install manually, run: curl -fsSL https://tailscale.com/install.sh | sh"
+    fi
+fi
+
+# Check if tailscaled service is running
+if systemctl is-active --quiet tailscaled 2>/dev/null; then
+    echo "Tailscale service is running."
+else
+    if command -v tailscale >/dev/null 2>&1; then
+        echo "Starting Tailscale service..."
+        sudo systemctl enable tailscaled 2>/dev/null || true
+        sudo systemctl start tailscaled 2>/dev/null || true
+    fi
+fi
+
+# Optional non-interactive Tailscale login (set TAILSCALE_AUTHKEY in /etc/nomadpi.env)
+if [ -f "/etc/nomadpi.env" ]; then
+    source "/etc/nomadpi.env" 2>/dev/null || true
+fi
+if [ -n "${TAILSCALE_AUTHKEY:-}" ] && command -v tailscale >/dev/null 2>&1; then
+    if ! sudo -n tailscale status >/dev/null 2>&1; then
+        sudo -n tailscale up --authkey "$TAILSCALE_AUTHKEY" --hostname "$NEW_HOSTNAME" >/dev/null 2>&1 || true
+    fi
+fi
+
+echo "Tailscale setup complete. You can configure it from the web admin panel under Settings."
+echo "To connect manually: sudo tailscale up"
+echo "To check status: sudo tailscale status"
 
 if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; then
     CFG=""
@@ -567,6 +716,18 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
     fi
 
     if [ -n "$CFG" ]; then
+        set_boot_cfg() {
+            local k="$1"
+            local v="$2"
+            local f="$3"
+
+            if sudo grep -Eq "^[#[:space:]]*${k}=" "$f"; then
+                sudo sed -i -E "s|^[#[:space:]]*${k}=.*|${k}=${v}|g" "$f"
+            else
+                echo "${k}=${v}" | sudo tee -a "$f" >/dev/null
+            fi
+        }
+
         MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || true)"
 
         ARM_FREQ=""
@@ -597,21 +758,19 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
 
             if [ -n "${NOMADPI_OVER_VOLTAGE:-}" ]; then
                 OVER_VOLTAGE="${NOMADPI_OVER_VOLTAGE}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
-                OVER_VOLTAGE="4"
             else
                 OVER_VOLTAGE="2"
             fi
 
             if [ -n "${NOMADPI_SDRAM_FREQ:-}" ]; then
                 SDRAM_FREQ="${NOMADPI_SDRAM_FREQ}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
+            else
                 SDRAM_FREQ="500"
             fi
 
             if [ -n "${NOMADPI_OVER_VOLTAGE_SDRAM:-}" ]; then
                 OVER_VOLTAGE_SDRAM="${NOMADPI_OVER_VOLTAGE_SDRAM}"
-            elif [ "$OC_LEVEL" = "perf" ]; then
+            else
                 OVER_VOLTAGE_SDRAM="2"
             fi
 
@@ -640,27 +799,27 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
 
         if [ -n "$ARM_FREQ" ]; then
             echo "Overclock enabled for: ${MODEL:-Unknown Pi model}"
-            grep -q "^arm_freq=" "$CFG" || echo "arm_freq=$ARM_FREQ" | sudo tee -a "$CFG" >/dev/null
+            set_boot_cfg "arm_freq" "$ARM_FREQ" "$CFG"
             if [ -n "$GPU_FREQ" ]; then
-                grep -q "^gpu_freq=" "$CFG" || echo "gpu_freq=$GPU_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "gpu_freq" "$GPU_FREQ" "$CFG"
             fi
             if [ -n "$CORE_FREQ" ]; then
-                grep -q "^core_freq=" "$CFG" || echo "core_freq=$CORE_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "core_freq" "$CORE_FREQ" "$CFG"
             fi
             if [ -n "$OVER_VOLTAGE" ]; then
-                grep -q "^over_voltage=" "$CFG" || echo "over_voltage=$OVER_VOLTAGE" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "over_voltage" "$OVER_VOLTAGE" "$CFG"
             fi
             if [ -n "$GPU_MEM" ]; then
-                grep -q "^gpu_mem=" "$CFG" || echo "gpu_mem=$GPU_MEM" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "gpu_mem" "$GPU_MEM" "$CFG"
             fi
             if [ -n "$SDRAM_FREQ" ]; then
-                grep -q "^sdram_freq=" "$CFG" || echo "sdram_freq=$SDRAM_FREQ" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "sdram_freq" "$SDRAM_FREQ" "$CFG"
             fi
             if [ -n "$OVER_VOLTAGE_SDRAM" ]; then
-                grep -q "^over_voltage_sdram=" "$CFG" || echo "over_voltage_sdram=$OVER_VOLTAGE_SDRAM" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "over_voltage_sdram" "$OVER_VOLTAGE_SDRAM" "$CFG"
             fi
             if [ -n "$TEMP_LIMIT" ]; then
-                grep -q "^temp_limit=" "$CFG" || echo "temp_limit=$TEMP_LIMIT" | sudo tee -a "$CFG" >/dev/null
+                set_boot_cfg "temp_limit" "$TEMP_LIMIT" "$CFG"
             fi
             echo "Overclock settings written to $CFG. Reboot required."
         else

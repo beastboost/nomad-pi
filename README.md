@@ -28,14 +28,17 @@ Nomad Pi is designed to run on a variety of Single Board Computers:
 
 ## 📥 Installation
 
-### 1. Prepare Environment
+### 1. Install Git (fresh OS only)
 ```bash
-mkdir -p ~/nomad-pi && cd ~/nomad-pi
+sudo apt update
+sudo apt install -y git
 ```
 
 ### 2. Clone & Setup
 ```bash
-git clone https://github.com/beastboost/nomad-pi.git .
+cd ~
+git clone https://github.com/beastboost/nomad-pi.git
+cd nomad-pi
 chmod +x setup.sh
 sudo ./setup.sh
 ```

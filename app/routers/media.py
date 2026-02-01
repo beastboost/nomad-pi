@@ -24,6 +24,7 @@ from hashlib import md5
 import threading
 import math
 import time as time_module
+import psutil
 from app import database
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,65 @@ _progress_log_next_at = {}
 BASE_DIR = os.path.abspath("data")
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
 os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
+POSTER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
+
+def _get_setting_int(key: str, default: int) -> int:
+    raw = database.get_setting(key)
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return int(default)
+
+def _normalize_data_web_root(web_root: str) -> Optional[str]:
+    s = str(web_root or "").strip()
+    if not s:
+        return None
+    if not s.startswith("/data/"):
+        return None
+    s = s.rstrip("/")
+    if s == "/data":
+        return None
+    return s
+
+def get_storage_target_web(category: str) -> str:
+    cat = (category or "").strip().lower()
+    key = f"storage.target.{cat}"
+    v = _normalize_data_web_root(database.get_setting(key) or "")
+    if v:
+        return v
+    return f"/data/{cat}"
+
+def get_storage_failover_web(category: str) -> Optional[str]:
+    cat = (category or "").strip().lower()
+    key = f"storage.failover.target.{cat}"
+    return _normalize_data_web_root(database.get_setting(key) or "")
+
+def get_storage_failover_threshold_free_percent() -> int:
+    v = _get_setting_int("storage.failover.threshold_free_percent", 15)
+    return max(1, min(50, int(v)))
+
+def get_storage_failover_enabled() -> bool:
+    return bool(_get_setting_int("storage.failover.enabled", 0))
+
+def pick_effective_storage_root_web(category: str) -> str:
+    target = get_storage_target_web(category)
+    if not get_storage_failover_enabled():
+        return target
+    try:
+        usage = psutil.disk_usage(BASE_DIR)
+        free_pct = int(round((usage.free / usage.total) * 100)) if usage.total else 0
+    except Exception:
+        free_pct = 100
+    if free_pct > get_storage_failover_threshold_free_percent():
+        return target
+    failover = get_storage_failover_web(category)
+    return failover or target
+
+def pick_effective_storage_root_fs(category: str) -> str:
+    web_root = pick_effective_storage_root_web(category)
+    fs_root = safe_fs_path_from_web_path(web_root)
+    os.makedirs(fs_root, exist_ok=True)
+    return fs_root
 
 @lru_cache(maxsize=100)
 def _get_paged_data_cached(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, user_id: int):
@@ -90,6 +150,10 @@ _index_building = {}
 
 def get_scan_paths(category: str):
     paths = [os.path.join(BASE_DIR, category)]
+    if category in ["movies", "shows"]:
+        uploads_path = os.path.join(BASE_DIR, "uploads")
+        if os.path.exists(uploads_path):
+            paths.append(uploads_path)
     # Also check data/media/category
     media_cat_path = os.path.join(BASE_DIR, "media", category)
     if os.path.exists(media_cat_path):
@@ -240,6 +304,16 @@ def natural_sort_key(s):
 def guess_title_year(name: str):
     # Remove extension
     s = os.path.splitext(os.path.basename(name or ""))[0]
+
+    spam_prefix_patterns = [
+        r"(?i)^\s*[\[\(\{]?\s*(?:www[\W_]*\.)?\s*(?:uindex|unidex)[\W_]*\.(?:org|com|net)[\W_]*[\]\)\}]?\s*",
+        r"(?i)^\s*[\[\(\{]?\s*(?:www[\W_]*)?\s*(?:uindex|unidex)[\W_]*(?:org|com|net)[\W_]*[\]\)\}]?\s*",
+    ]
+    for pat in spam_prefix_patterns:
+        s = re.sub(pat, "", s).strip()
+    s = re.sub(r"(?i)\b(?:www[\W_]*\.)?(?:uindex|unidex)[\W_]*\.(?:org|com|net)\b", " ", s)
+    s = re.sub(r"(?i)\b(?:www[\W_]*)?(?:uindex|unidex)[\W_]*(?:org|com|net)\b", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     
     # 1. Truncate at common show markers if it looks like a TV show episode
     show_m = re.search(r"(?i)\bS(\d{1,3})\s*[\.\-_\s]*\s*E(\d{1,3})\b", s)
@@ -261,7 +335,8 @@ def guess_title_year(name: str):
         r'yify', r'yts', r'rarbg', r'ettv', r'psa', r'tgx', r'qxr', r'utp', r'vxt',
         r'dual[- ]audio', r'multi[- ]audio', r'multi', r'hindi', r'english', r'subbed', r'subs',
         r'proper', r'repack', r'extended', r'director s cut', r'uncut', r'remastered',
-        r'ctrlhd', r'dimension', r'lol', r'fleet', r'batv', r'asap', r'immerse', r'avs', r'evolve', r'publicHD'
+        r'ctrlhd', r'dimension', r'lol', r'fleet', r'batv', r'asap', r'immerse', r'avs', r'evolve', r'publicHD',
+        r'uindex', r'unidex'
     ]
     
     # Pre-clean dots/underscores/hyphens to spaces for tag matching
@@ -458,13 +533,81 @@ async def cache_remote_poster(poster_url: str):
     out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
     
     if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
-        rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
-        return f"/data/{rel}"
+        try:
+            age = time_module.time() - os.path.getmtime(out_fs)
+            if age < POSTER_CACHE_TTL_SECONDS:
+                rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
+                return f"/data/{rel}"
+        except Exception:
+            rel = os.path.relpath(out_fs, BASE_DIR).replace(os.sep, "/")
+            return f"/data/{rel}"
+
+    def _is_jpeg_bytes(b: bytes) -> bool:
+        try:
+            return isinstance(b, (bytes, bytearray)) and len(b) >= 3 and b[0:3] == b"\xff\xd8\xff"
+        except Exception:
+            return False
+
+    def _transcode_image_to_jpg(input_fs: str, output_fs: str) -> bool:
+        if not isinstance(input_fs, str) or not input_fs:
+            return False
+        if not isinstance(output_fs, str) or not output_fs:
+            return False
+        if not os.path.isfile(input_fs):
+            return False
+        tmp_out = output_fs + ".tmp"
+        try:
+            if os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+            cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                input_fs,
+                "-frames:v",
+                "1",
+                "-q:v",
+                "4",
+                tmp_out,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+            if result.returncode != 0:
+                try:
+                    if os.path.exists(tmp_out):
+                        os.remove(tmp_out)
+                except Exception:
+                    pass
+                return False
+            if not (os.path.isfile(tmp_out) and os.path.getsize(tmp_out) > 0):
+                try:
+                    if os.path.exists(tmp_out):
+                        os.remove(tmp_out)
+                except Exception:
+                    pass
+                return False
+            os.replace(tmp_out, output_fs)
+            return True
+        except Exception:
+            try:
+                if os.path.exists(tmp_out):
+                    os.remove(tmp_out)
+            except Exception:
+                pass
+            return False
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(poster_url, timeout=10.0, headers={"User-Agent": "NomadPi/1.0"})
             response.raise_for_status()
+            ctype = str(response.headers.get("content-type") or "").lower()
+            if "image/" not in ctype:
+                return None
             data = response.content
             if len(data) > 5_000_000: # Limit to 5MB
                 return None
@@ -472,9 +615,29 @@ async def cache_remote_poster(poster_url: str):
             return None
 
     try:
-        # Use aiofiles if we want to be fully async, but for small files this is okay
-        with open(out_fs, "wb") as f:
+        tmp_in = out_fs + ".download"
+        tmp_out = out_fs + ".tmp"
+        for p in (tmp_in, tmp_out):
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+        with open(tmp_in, "wb") as f:
             f.write(data)
+
+        if _is_jpeg_bytes(data):
+            os.replace(tmp_in, out_fs)
+        else:
+            ok = _transcode_image_to_jpg(tmp_in, out_fs)
+            try:
+                if os.path.exists(tmp_in):
+                    os.remove(tmp_in)
+            except Exception:
+                pass
+            if not ok:
+                return None
     except Exception:
         return None
 
@@ -1855,23 +2018,48 @@ def refresh_external_links():
 
     ext_root = os.path.join(BASE_DIR, "external")
     os.makedirs(ext_root, exist_ok=True)
+    changed = False
+    created_folders = False
     
     # Check /media/pi or /media/ (standard mount points)
-    for mount_root in ["/media/pi", "/media"]:
+    for mount_root in ["/media/pi", "/media", "/mnt"]:
         if os.path.exists(mount_root):
             try:
                 for drive in os.listdir(mount_root):
                     drive_path = os.path.join(mount_root, drive)
                     if os.path.ismount(drive_path) or os.path.isdir(drive_path):
+                        try:
+                            subprocess.run(["sudo", "-n", "chmod", "o+rx", drive_path], check=False, capture_output=True, text=True, timeout=2)
+                        except Exception:
+                            pass
                         external_link = os.path.join(ext_root, drive)
-                        if not os.path.exists(external_link):
+                        if os.path.islink(external_link) and not os.path.exists(external_link):
+                            try:
+                                os.unlink(external_link)
+                                changed = True
+                            except Exception:
+                                pass
+
+                        if not os.path.exists(external_link) and not os.path.islink(external_link):
                             try:
                                 os.symlink(drive_path, external_link)
                                 logger.info(f"Auto-created symlink for USB drive: {drive_path} -> {external_link}")
+                                changed = True
                             except Exception as e:
                                 logger.warning(f"Failed to create symlink for {drive_path}: {e}")
+                        if os.path.isdir(external_link):
+                            for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
+                                try:
+                                    p = os.path.join(external_link, folder)
+                                    if not os.path.exists(p):
+                                        os.makedirs(p, exist_ok=True)
+                                        created_folders = True
+                                except Exception:
+                                    continue
             except Exception:
                 pass
+    if changed or created_folders:
+        trigger_dlna_rescan()
 
 @router.get("/browse")
 def browse_files(path: str = Query(default="/data"), user_id: int = Depends(get_current_user_id)):
@@ -2640,6 +2828,10 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
 
     if not dry_run:
         _cleanup_empty_folders(show_bases)
+        # Trigger DLNA rescan after organizing shows
+        if moved > 0:
+            logger.info(f"Organized {moved} episodes, triggering DLNA rescan")
+            trigger_dlna_rescan()
 
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
@@ -2656,6 +2848,16 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
     moved = 0
     skipped = 0
     errors = 0
+
+    # Ensure base directories exist
+    for base in movie_bases:
+        if not os.path.exists(base):
+            try:
+                os.makedirs(base, exist_ok=True)
+                logger.info(f"Created movie directory: {base}")
+            except (OSError, PermissionError) as e:
+                logger.error(f"Cannot create base directory {base}: {e}")
+                continue
 
     for base in movie_bases:
         if not os.path.isdir(base):
@@ -2774,17 +2976,21 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
                 # CHECK FOR DUPLICATES: Check if this movie already exists in the library
                 # We check the final destination folder name in the base movies directory
                 exists_in_library = False
-                for existing_folder in os.listdir(base):
-                    existing_path = os.path.join(base, existing_folder)
-                    if os.path.isdir(existing_path):
-                        # If a folder with this title and year already exists, skip it
-                        if existing_folder.lower() == folder.lower():
-                            # Check if it contains a video file
-                            has_video = any(os.path.splitext(f)[1].lower() in [".mp4", ".mkv", ".avi", ".mov", ".webm"] 
-                                          for f in os.listdir(existing_path))
-                            if has_video:
-                                exists_in_library = True
-                                break
+                try:
+                    if os.path.isdir(base):
+                        for existing_folder in os.listdir(base):
+                            existing_path = os.path.join(base, existing_folder)
+                            if os.path.isdir(existing_path):
+                                # If a folder with this title and year already exists, skip it
+                                if existing_folder.lower() == folder.lower():
+                                    # Check if it contains a video file
+                                    has_video = any(os.path.splitext(f)[1].lower() in [".mp4", ".mkv", ".avi", ".mov", ".webm"]
+                                                  for f in os.listdir(existing_path))
+                                    if has_video:
+                                        exists_in_library = True
+                                        break
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"Could not check for duplicates in {base}: {e}")
                 
                 if exists_in_library and os.path.abspath(src_fs) != os.path.abspath(dest_fs):
                     logger.info(f"Skipping duplicate movie: {title} already exists in library")
@@ -2812,7 +3018,12 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
                     # Already in correct location, but we still want to ensure metadata and posters
                     dest_fs = src_fs
                 else:
-                    os.makedirs(dest_dir, exist_ok=True)
+                    try:
+                        os.makedirs(dest_dir, exist_ok=True)
+                    except (OSError, PermissionError) as e:
+                        logger.error(f"Cannot create directory {dest_dir}: {e}")
+                        errors += 1
+                        continue
                     dest_fs = _pick_unique_dest(dest_fs)
                     try:
                         shutil.move(src_fs, dest_fs)
@@ -2847,7 +3058,7 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
                     elif meta and meta.get("Poster") and meta["Poster"] != "N/A":
                         try:
                             poster_url = meta["Poster"]
-                            cached = cache_remote_poster(poster_url)
+                            cached = await cache_remote_poster(poster_url)
                             if cached and cached.startswith("/data/"):
                                 cached_fs = safe_fs_path_from_web_path(cached)
                                 if os.path.isfile(cached_fs):
@@ -2872,12 +3083,12 @@ async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True,
 
     if not dry_run:
         _cleanup_empty_folders(movie_bases)
+        # Trigger DLNA rescan after organizing movies
+        if moved > 0:
+            logger.info(f"Organized {moved} movies, triggering DLNA rescan")
+            trigger_dlna_rescan()
 
     return {"status": "ok", "dry_run": bool(dry_run), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "planned": planned[: min(len(planned), 1000)]}
-
-import psutil
-import subprocess
-import platform
 
 def _get_bin_path(name: str, default: str) -> str:
     """Find binary path dynamically or use default"""
@@ -2888,13 +3099,11 @@ def trigger_dlna_rescan():
     """Trigger a MiniDLNA rescan if on Linux"""
     if platform.system() == "Linux":
         try:
-            # We try to use dynamic paths for better SBC compatibility
-            minidlnad = _get_bin_path("minidlnad", "/usr/sbin/minidlnad")
+            # Restart the service which triggers automatic rescan
+            # Note: Do NOT use minidlnad -R as it fails when service is already running
             systemctl = _get_bin_path("systemctl", "/usr/bin/systemctl")
-            
-            subprocess.run(["sudo", minidlnad, "-R"], check=False)
             subprocess.run(["sudo", systemctl, "restart", "minidlna"], check=False)
-            logger.info("Triggered MiniDLNA rescan")
+            logger.info("Triggered MiniDLNA rescan via service restart")
         except Exception as e:
             logger.error(f"Failed to trigger MiniDLNA rescan: {e}")
 
@@ -3031,31 +3240,35 @@ def delete_media(path: str, background_tasks: BackgroundTasks, user_id: int = De
         raise HTTPException(status_code=404, detail="File not found")
     
     try:
-        # Get metadata before deleting from DB to find poster
         meta = database.get_file_metadata(path)
         
         logger.info(f"Attempting to delete {fs_path} (from web path {path})")
         
-        if os.path.isdir(fs_path):
+        is_dir = os.path.isdir(fs_path)
+        if is_dir:
             shutil.rmtree(fs_path)
         else:
             os.remove(fs_path)
             
         logger.info(f"Successfully deleted {fs_path}")
             
-        # Clean up database (now also cleans metadata and progress)
-        database.delete_library_index_item(path)
+        if is_dir:
+            database.delete_library_index_items_by_prefix(path)
+        else:
+            database.delete_library_index_item(path)
         
-        # Clean up cached poster if it exists
-        if meta and meta.get("poster"):
-            poster_url = meta.get("poster")
-            if poster_url.startswith("/data/cache/posters/"):
-                try:
-                    poster_fs = safe_fs_path_from_web_path(poster_url)
-                    if os.path.exists(poster_fs):
-                        os.remove(poster_fs)
-                except:
-                    pass
+        try:
+            poster_url = None
+            if meta and meta.get("poster"):
+                poster_url = meta.get("poster")
+            elif meta and isinstance(meta.get("meta"), dict) and meta["meta"].get("Poster"):
+                poster_url = meta["meta"].get("Poster")
+            if poster_url and isinstance(poster_url, str) and poster_url.startswith("/data/cache/posters/"):
+                poster_fs = safe_fs_path_from_web_path(poster_url)
+                if os.path.exists(poster_fs):
+                    os.remove(poster_fs)
+        except Exception:
+            pass
 
         # If it's a media file, check if we should remove the parent folder if empty or only contains posters
         parent = os.path.dirname(fs_path)
@@ -3076,6 +3289,71 @@ def delete_media(path: str, background_tasks: BackgroundTasks, user_id: int = De
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
 
+class BatchDeleteRequest(BaseModel):
+    paths: List[str]
+
+@router.post("/delete/batch")
+def delete_media_batch(req: BatchDeleteRequest, background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+    raw_paths = req.paths if isinstance(req, BatchDeleteRequest) else None
+    paths = [p for p in (raw_paths or []) if isinstance(p, str) and p.startswith("/data/")]
+    if not paths:
+        raise HTTPException(status_code=400, detail="No valid paths provided")
+
+    deleted = []
+    failed = []
+
+    for web_path in paths:
+        try:
+            fs_path = safe_fs_path_from_web_path(web_path)
+            if not os.path.exists(fs_path):
+                failed.append({"path": web_path, "error": "File not found"})
+                continue
+
+            meta = database.get_file_metadata(web_path)
+            is_dir = os.path.isdir(fs_path)
+
+            if is_dir:
+                shutil.rmtree(fs_path)
+                database.delete_library_index_items_by_prefix(web_path)
+            else:
+                os.remove(fs_path)
+                database.delete_library_index_item(web_path)
+
+            try:
+                poster_url = None
+                if meta and meta.get("poster"):
+                    poster_url = meta.get("poster")
+                elif meta and isinstance(meta.get("meta"), dict) and meta["meta"].get("Poster"):
+                    poster_url = meta["meta"].get("Poster")
+                if poster_url and isinstance(poster_url, str) and poster_url.startswith("/data/cache/posters/"):
+                    poster_fs = safe_fs_path_from_web_path(poster_url)
+                    if os.path.exists(poster_fs):
+                        os.remove(poster_fs)
+            except Exception:
+                pass
+
+            if not is_dir:
+                parent = os.path.dirname(fs_path)
+                if os.path.exists(parent) and parent != BASE_DIR:
+                    remaining = os.listdir(parent)
+                    junk = {".ds_store", "thumbs.db", "desktop.ini", "poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png", "fanart.jpg", "movie.nfo", "banner.jpg", "clearart.png", "disc.png", "logo.png", "landscape.jpg", "metadata.nfo"}
+                    if not remaining or all(f.lower() in junk for f in remaining):
+                        try:
+                            shutil.rmtree(parent)
+                        except Exception:
+                            pass
+
+            deleted.append(web_path)
+        except HTTPException as e:
+            failed.append({"path": web_path, "error": str(e.detail)})
+        except Exception as e:
+            failed.append({"path": web_path, "error": str(e)})
+
+    if deleted:
+        background_tasks.add_task(trigger_dlna_rescan)
+
+    return {"status": "ok", "deleted": deleted, "failed": failed}
+
 @router.post("/system/prepare_drive")
 def prepare_drive(path: str, user_id: int = Depends(get_current_user_id)):
     """Create standard media folders on the specified drive path."""
@@ -3083,7 +3361,7 @@ def prepare_drive(path: str, user_id: int = Depends(get_current_user_id)):
          raise HTTPException(status_code=404, detail="Drive path not found")
     
     created = []
-    for folder in ["movies", "shows", "music", "books", "gallery"]:
+    for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
         target = os.path.join(path, folder)
         if not os.path.exists(target):
             try:
