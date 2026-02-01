@@ -72,18 +72,51 @@ function getCookie(name) {
     return null;
 }
 
-function getAuthTokenValue() {
-    return getCookie('auth_token') || localStorage.getItem('nomad_auth_token');
+// Theme Management
+function initTheme() {
+    const savedTheme = localStorage.getItem('nomadpi_theme') || 'default';
+    applyTheme(savedTheme, false);
 }
 
-function addTokenToDataUrl(url) {
-    if (!url || typeof url !== 'string') return url;
-    if (!url.startsWith('/data/')) return url;
-    if (url.includes('token=')) return url;
-    const token = getAuthTokenValue();
-    if (!token) return url;
-    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+function toggleTheme() {
+    const currentTheme = localStorage.getItem('nomadpi_theme') || 'default';
+    const themes = ['default', 'light-theme', 'dark-theme'];
+    const currentIndex = themes.indexOf(currentTheme);
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
+
+    applyTheme(nextTheme, true);
+    localStorage.setItem('nomadpi_theme', nextTheme);
 }
+
+function applyTheme(theme, animate = false) {
+    const body = document.body;
+    const icon = document.getElementById('theme-icon');
+
+    if (animate) {
+        body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+        setTimeout(() => { body.style.transition = ''; }, 300);
+    }
+
+    // Remove all theme classes
+    body.classList.remove('light-theme', 'dark-theme');
+
+    // Apply new theme
+    if (theme !== 'default') {
+        body.classList.add(theme);
+    }
+
+    // Update icon
+    if (icon) {
+        if (theme === 'light-theme') {
+            icon.className = 'fas fa-sun';
+        } else if (theme === 'dark-theme') {
+            icon.className = 'fas fa-moon';
+        } else {
+            icon.className = 'fas fa-adjust';
+        }
+    }
+}
+
 let currentMedia = null;
 let currentProfile = null;
 let driveScanInterval = null;
@@ -103,244 +136,11 @@ let movieMetaActive = 0;
 const MOVIE_META_CONCURRENCY = 2;
 const mediaPageState = {};
 const mediaState = { path: '/data' };
-const batchSelectEnabled = {};
-const batchSelectSelected = {};
-const fileBrowserSelect = { enabled: false, selected: new Set() };
 let activeVideoProgressInterval = null;
 let activeVideoEl = null;
 let activeVideoPath = null;
-let activeDashboardSessionId = null;
-let activeDashboardMeta = null;
-let lastDashboardUpdateAt = 0;
-let activeControlSocket = null;
 let playbackHeartbeatInstalled = false;
 const progressDebugSent = new Set();
-
-function isBatchSelectEnabled(category) {
-    return Boolean(batchSelectEnabled[category]);
-}
-
-function getBatchSelectedSet(category) {
-    if (!batchSelectSelected[category]) batchSelectSelected[category] = new Set();
-    return batchSelectSelected[category];
-}
-
-function clearBatchSelection(category) {
-    const set = getBatchSelectedSet(category);
-    set.clear();
-    updateBatchToolbar(category);
-    const container = document.getElementById(`${category}-list`);
-    if (!container) return;
-    for (const el of container.querySelectorAll('[data-path]')) {
-        el.classList.remove('batch-selected');
-        const cb = el.querySelector('input.batch-checkbox');
-        if (cb) cb.checked = false;
-    }
-}
-
-function toggleBatchSelectItem(category, path) {
-    if (!path) return;
-    const set = getBatchSelectedSet(category);
-    if (set.has(path)) set.delete(path);
-    else set.add(path);
-    updateBatchToolbar(category);
-    const container = document.getElementById(`${category}-list`);
-    if (!container) return;
-    for (const el of container.querySelectorAll('[data-path]')) {
-        if (el.dataset.path === path) {
-            const selected = set.has(path);
-            el.classList.toggle('batch-selected', selected);
-            const cb = el.querySelector('input.batch-checkbox');
-            if (cb) cb.checked = selected;
-            break;
-        }
-    }
-}
-
-function updateBatchToolbar(category) {
-    const toolbar = document.getElementById(`${category}-batch-toolbar`);
-    if (!toolbar) return;
-    const toggleBtn = document.getElementById(`${category}-select-toggle`);
-    const countEl = document.getElementById(`${category}-select-count`);
-    const delBtn = document.getElementById(`${category}-delete-selected`);
-    const clearBtn = document.getElementById(`${category}-clear-selected`);
-    const selectAllBtn = document.getElementById(`${category}-select-all-visible`);
-
-    const enabled = isBatchSelectEnabled(category);
-    const count = getBatchSelectedSet(category).size;
-    if (toggleBtn) toggleBtn.textContent = enabled ? 'Done' : 'Select';
-    if (countEl) countEl.textContent = enabled ? `${count} selected` : '';
-    if (delBtn) delBtn.disabled = !enabled || count === 0;
-    if (clearBtn) clearBtn.disabled = !enabled || count === 0;
-    if (selectAllBtn) selectAllBtn.disabled = !enabled;
-}
-
-function ensureBatchToolbar(category) {
-    if (!category || category === 'files') return;
-    const section = document.getElementById(category);
-    if (!section) return;
-    if (document.getElementById(`${category}-batch-toolbar`)) return;
-
-    const toolbar = document.createElement('div');
-    toolbar.id = `${category}-batch-toolbar`;
-    toolbar.style.display = 'flex';
-    toolbar.style.gap = '8px';
-    toolbar.style.flexWrap = 'wrap';
-    toolbar.style.alignItems = 'center';
-    toolbar.style.margin = '10px 0';
-
-    toolbar.innerHTML = `
-        <button id="${category}-select-toggle" class="secondary">Select</button>
-        <button id="${category}-select-all-visible" class="secondary">Select visible</button>
-        <button id="${category}-clear-selected" class="secondary" disabled>Clear</button>
-        <button id="${category}-delete-selected" class="danger" disabled>Delete selected</button>
-        <span id="${category}-select-count" style="color:var(--text-muted);font-size:0.9em;"></span>
-    `;
-
-    const filterBar = document.getElementById(`${category}-filter-bar`);
-    if (filterBar && filterBar.parentNode) {
-        filterBar.parentNode.insertBefore(toolbar, filterBar.nextSibling);
-    } else {
-        const h2 = section.querySelector('h2');
-        if (h2 && h2.parentNode) h2.parentNode.insertBefore(toolbar, h2.nextSibling);
-        else section.insertBefore(toolbar, section.firstChild);
-    }
-
-    const toggleBtn = document.getElementById(`${category}-select-toggle`);
-    const delBtn = document.getElementById(`${category}-delete-selected`);
-    const clearBtn = document.getElementById(`${category}-clear-selected`);
-    const selectAllBtn = document.getElementById(`${category}-select-all-visible`);
-
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            batchSelectEnabled[category] = !isBatchSelectEnabled(category);
-            if (!isBatchSelectEnabled(category)) clearBatchSelection(category);
-            updateBatchToolbar(category);
-            renderMediaFromCache(category);
-        });
-    }
-    if (clearBtn) clearBtn.addEventListener('click', () => clearBatchSelection(category));
-    if (selectAllBtn) {
-        selectAllBtn.addEventListener('click', () => {
-            if (!isBatchSelectEnabled(category)) return;
-            const container = document.getElementById(`${category}-list`);
-            if (!container) return;
-            const set = getBatchSelectedSet(category);
-            for (const el of container.querySelectorAll('[data-path]')) {
-                const p = el.dataset.path;
-                if (p) set.add(p);
-                el.classList.add('batch-selected');
-                const cb = el.querySelector('input.batch-checkbox');
-                if (cb) cb.checked = true;
-            }
-            updateBatchToolbar(category);
-        });
-    }
-    if (delBtn) delBtn.addEventListener('click', () => deleteSelectedItems(category));
-
-    updateBatchToolbar(category);
-}
-
-async function deleteBatchPaths(paths) {
-    const res = await fetch(`${API_BASE}/media/delete/batch`, {
-        method: 'POST',
-        headers: {
-            ...getAuthHeaders(),
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ paths })
-    });
-    if (res.status === 401) { logout(); return null; }
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.detail || 'Batch delete failed');
-    return data;
-}
-
-async function deleteSelectedItems(category) {
-    const set = getBatchSelectedSet(category);
-    const paths = Array.from(set.values());
-    if (!paths.length) return;
-    if (!confirm(`Delete ${paths.length} selected item(s)? This cannot be undone.`)) return;
-    try {
-        await deleteBatchPaths(paths);
-        clearBatchSelection(category);
-        delete mediaCache['movies'];
-        delete mediaCache['music'];
-        delete mediaCache['books'];
-        delete mediaCache['gallery'];
-        delete mediaCache['files'];
-        showsLibraryCache = null;
-        const active = document.querySelector('main > section.active')?.id;
-        if (active === 'shows') loadShowsLibrary();
-        else if (active) loadMedia(active);
-    } catch (e) {
-        alert(e.message);
-    }
-}
-
-function createDashboardSessionId() {
-    try {
-        if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
-    } catch {}
-    return `s_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function inferMediaTypeFromPath(path) {
-    const p = String(path || '');
-    if (p.includes('/movies/')) return 'movie';
-    if (p.includes('/shows/')) return 'show';
-    return 'video';
-}
-
-async function updateDashboardSession(mediaElement, filePath, state, force = false) {
-    if (!filePath) return;
-    const now = Date.now();
-    if (!force && (now - lastDashboardUpdateAt) < 5000) return;
-    lastDashboardUpdateAt = now;
-
-    if (!activeDashboardSessionId) activeDashboardSessionId = createDashboardSessionId();
-    if (!activeDashboardMeta) {
-        activeDashboardMeta = {
-            title: cleanTitle(String(filePath).split('/').pop() || 'Unknown'),
-            media_type: inferMediaTypeFromPath(filePath),
-            poster_url: null,
-            poster_thumb: null
-        };
-    }
-
-    const username = (currentProfile && typeof currentProfile.name === 'string' && currentProfile.name.trim()) ? currentProfile.name.trim() : 'Unknown';
-    const avatar_url = (currentProfile && typeof currentProfile.avatar === 'string' && currentProfile.avatar.trim()) ? currentProfile.avatar.trim() : null;
-
-    const current_time = mediaElement && Number.isFinite(mediaElement.currentTime) ? mediaElement.currentTime : 0;
-    const duration = mediaElement && Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.duration : 0;
-
-    const payload = {
-        session_id: activeDashboardSessionId,
-        path: filePath,
-        title: activeDashboardMeta.title,
-        media_type: activeDashboardMeta.media_type,
-        current_time,
-        duration,
-        state: state || (mediaElement && mediaElement.paused ? 'paused' : 'playing'),
-        poster_url: activeDashboardMeta.poster_url,
-        poster_thumb: activeDashboardMeta.poster_thumb,
-        username,
-        avatar_url
-    };
-
-    try {
-        const res = await fetch(`${API_BASE}/dashboard/session/update`, {
-            method: 'POST',
-            headers: {
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json'
-            },
-            keepalive: true,
-            body: JSON.stringify(payload)
-        });
-        if (res.status === 401) { logout(); }
-    } catch {}
-}
 
 function getPageState(category) {
     if (!mediaPageState[category]) {
@@ -420,7 +220,6 @@ function applyMovieMetaToCard(cardEl, file, data) {
     if (shell && !file.poster) {
         const posterUrl = data.poster || data.meta?.Poster;
         if (posterUrl && posterUrl !== 'N/A') {
-            file.poster = posterUrl;
             const existingImg = shell.querySelector('img.poster-img');
             if (!existingImg) {
                 const placeholder = shell.querySelector('.poster-placeholder');
@@ -428,7 +227,7 @@ function applyMovieMetaToCard(cardEl, file, data) {
                 img.className = 'poster-img';
                 img.loading = 'lazy';
                 img.alt = file?.name || 'Poster';
-                img.src = addTokenToDataUrl(posterUrl);
+                img.src = posterUrl;
                 if (placeholder) placeholder.replaceWith(img);
                 else shell.prepend(img);
             }
@@ -968,7 +767,6 @@ function showSection(id) {
         loadDrives();
         loadWifiStatus();
         loadUsers();
-        checkTailscale();
         // Auto-refresh drives every 5 seconds while in admin panel
         driveScanInterval = setInterval(() => {
             // Only refresh if we are not currently interacting (simple check)
@@ -1044,64 +842,6 @@ async function loadFileBrowser(path) {
         const data = await res.json();
         
         container.innerHTML = '';
-
-        const toolbar = document.createElement('div');
-        toolbar.style.display = 'flex';
-        toolbar.style.gap = '10px';
-        toolbar.style.alignItems = 'center';
-        toolbar.style.padding = '10px';
-
-        const selectAllBtn = document.createElement('button');
-        selectAllBtn.textContent = 'Select All';
-        selectAllBtn.onclick = () => {
-            const boxes = container.querySelectorAll('input.file-batch-checkbox');
-            const allChecked = Array.from(boxes).every(b => b.checked);
-            boxes.forEach(b => { b.checked = !allChecked; });
-        };
-
-        const deleteSelectedBtn = document.createElement('button');
-        deleteSelectedBtn.textContent = 'Delete Selected';
-        deleteSelectedBtn.className = 'warning';
-        deleteSelectedBtn.onclick = async () => {
-            const boxes = container.querySelectorAll('input.file-batch-checkbox:checked');
-            const paths = Array.from(boxes)
-                .map(b => b.dataset.webPath)
-                .filter(p => typeof p === 'string' && p.startsWith('/data/'));
-
-            if (!paths.length) {
-                showToast('No /data items selected', 'warning');
-                return;
-            }
-            if (!confirm(`Delete ${paths.length} selected item(s)? This cannot be undone.`)) return;
-
-            try {
-                const delRes = await fetch(`${API_BASE}/media/delete/batch`, {
-                    method: 'POST',
-                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ paths })
-                });
-                if (delRes.status === 401) { logout(); return; }
-                const delData = await delRes.json().catch(() => null);
-                if (!delRes.ok) {
-                    const msg = delData?.detail || delData?.message || 'Delete failed';
-                    showToast(msg, 'error');
-                    return;
-                }
-                const failed = Array.isArray(delData?.failed) ? delData.failed : [];
-                if (failed.length) {
-                    showToast(`Deleted with ${failed.length} failure(s)`, 'warning');
-                } else {
-                    showToast('Deleted', 'success');
-                }
-                loadFileBrowser(path);
-            } catch (e) {
-                showToast(`Delete failed: ${e.message}`, 'error');
-            }
-        };
-
-        toolbar.appendChild(selectAllBtn);
-        toolbar.appendChild(deleteSelectedBtn);
-        container.appendChild(toolbar);
         
         // Add "Back" and "Drives" buttons
         const isWindows = path.includes(':');
@@ -1162,7 +902,6 @@ async function loadFileBrowser(path) {
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
-                div.style.position = 'relative';
                 const itemPath = item.path.replaceAll('\\', '\\\\');
 
                 if (item.is_dir) {
@@ -1190,18 +929,6 @@ async function loadFileBrowser(path) {
                         </div>
                     `;
                 }
-
-                const cb = document.createElement('input');
-                cb.type = 'checkbox';
-                cb.className = 'file-batch-checkbox';
-                cb.dataset.webPath = item.path;
-                cb.style.position = 'absolute';
-                cb.style.top = '10px';
-                cb.style.left = '10px';
-                cb.style.zIndex = '10';
-                cb.addEventListener('click', (e) => { e.stopPropagation(); });
-                div.appendChild(cb);
-
                 container.appendChild(div);
             });
         }
@@ -1547,7 +1274,7 @@ function renderMediaList(category, files) {
                 // Root level shows view (using data from query_shows)
                 div.className = 'media-item media-card';
                 const poster = file.poster 
-                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : `<div class="poster-placeholder"></div>`;
                 
                 const subtitle = `${file.episode_count || 0} episodes` + (file.year ? ` • ${file.year}` : '');
@@ -1590,7 +1317,7 @@ function renderMediaList(category, files) {
                 if (e.target.closest('button')) return;
                 if (isVideo) {
                     if (category === 'movies') openMovieDetails(file);
-                    else openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
+                    else openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                 } else {
                     openImageViewer(file.path, cleanTitle(file.name));
                 }
@@ -1613,8 +1340,8 @@ function renderMediaList(category, files) {
                 const subtitle = metaSubtitleParts.length ? escapeHtml(metaSubtitleParts.join(' • ')) : (file.folder && file.folder !== '.' ? escapeHtml(file.folder) : 'Movie');
                 const metaPoster = (!file.poster && (file.omdb?.poster || file.omdb?.meta?.Poster) && (file.omdb?.poster || file.omdb?.meta?.Poster) !== 'N/A') ? (file.omdb?.poster || file.omdb?.meta?.Poster) : null;
                 const poster = file.poster
-                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
-                    : (metaPoster ? `<img class="poster-img" src="${addTokenToDataUrl(metaPoster)}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
+                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    : (metaPoster ? `<img class="poster-img" src="${metaPoster}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
                 
                 const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
                 const playLabel = Number(file?.progress?.current_time || 0) > 10 ? 'Resume' : 'Play';
@@ -1641,7 +1368,7 @@ function renderMediaList(category, files) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                 }
 
@@ -1680,7 +1407,7 @@ function renderMediaList(category, files) {
                 if (playBtn) {
                     playBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                 }
             } else {
@@ -1913,11 +1640,13 @@ function playMusicAt(idx) {
     if (titleEl) titleEl.textContent = cleanTitle(track.name);
     if (playBtn) playBtn.textContent = '⏳';
     
-    const token = getAuthTokenValue();
+    const token = getCookie('auth_token');
     
     // Use the /api/media/stream endpoint for all playback to handle auth and external paths
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(track.path)}`;
-    if (token) streamUrl += '&token=' + encodeURIComponent(token);
+    if (token) {
+        streamUrl += '&token=' + token;
+    }
     
     console.log('Playing track:', track.name, 'Stream URL:', streamUrl);
 
@@ -1988,26 +1717,7 @@ function closeViewer() {
         clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
     }
-    if (activeControlSocket) {
-        try { activeControlSocket.close(); } catch {}
-        activeControlSocket = null;
-    }
     try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
-    try { updateDashboardSession(activeVideoEl, activeVideoPath, 'stopped', true); } catch (e) {}
-    if (activeDashboardSessionId) {
-        const sid = activeDashboardSessionId;
-        activeDashboardSessionId = null;
-        activeDashboardMeta = null;
-        try {
-            fetch(`${API_BASE}/dashboard/session/${encodeURIComponent(sid)}/stop`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                keepalive: true
-            }).catch(() => {});
-        } catch {}
-    } else {
-        activeDashboardMeta = null;
-    }
     activeVideoEl = null;
     activeVideoPath = null;
     const modal = document.getElementById('viewer-modal');
@@ -2024,9 +1734,9 @@ function openImageViewer(path, title) {
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading) return;
 
-    const token = getAuthTokenValue();
+    const token = getCookie('auth_token');
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
-    if (token) streamUrl += '&token=' + encodeURIComponent(token);
+    if (token) streamUrl += '&token=' + token;
 
     heading.textContent = title ? String(title) : 'Image';
     body.innerHTML = `<div class="image-viewer"><img src="${streamUrl}" style="max-width:100%; max-height:80vh; border-radius:8px;"></div>`;
@@ -2038,7 +1748,7 @@ async function openMovieDetails(file) {
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading || !file?.path) {
-        openVideoViewer(file?.path, cleanTitle(file?.name || 'Movie'), file?.progress?.current_time || 0, { poster_url: file?.poster || null });
+        openVideoViewer(file?.path, cleanTitle(file?.name || 'Movie'), file?.progress?.current_time || 0);
         return;
     }
 
@@ -2050,7 +1760,7 @@ async function openMovieDetails(file) {
             <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
                 <div style="width: 180px; flex: 0 0 180px;">
                     <div style="width:100%; aspect-ratio:2/3; border-radius: 14px; overflow:hidden; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);">
-                        ${file.poster ? `<img src="${addTokenToDataUrl(file.poster)}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
+                        ${file.poster ? `<img src="${file.poster}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
                     </div>
                 </div>
                 <div style="flex: 1 1 260px; min-width: 240px;">
@@ -2067,9 +1777,9 @@ async function openMovieDetails(file) {
         </div>
     `;
 
-    const token = getAuthTokenValue();
+    const token = getCookie('auth_token');
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(file.path)}`;
-    if (token) streamUrl += '&token=' + encodeURIComponent(token);
+    if (token) streamUrl += '&token=' + token;
     const fullUrl = window.location.origin + streamUrl;
     const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
 
@@ -2116,14 +1826,14 @@ async function openMovieDetails(file) {
     }
 
     document.getElementById('movie-play-btn')?.addEventListener('click', () => {
-        openVideoViewer(file.path, baseTitle, startSeconds, { poster_url: file.poster || null });
+        openVideoViewer(file.path, baseTitle, startSeconds);
     });
     document.getElementById('movie-play-from-start-btn')?.addEventListener('click', () => {
-        openVideoViewer(file.path, baseTitle, 0, { poster_url: file.poster || null });
+        openVideoViewer(file.path, baseTitle, 0);
     });
 }
 
-function openVideoViewer(path, title, startSeconds = 0, opts = null) {
+function openVideoViewer(path, title, startSeconds = 0) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -2132,9 +1842,9 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
         return;
     }
 
-    const token = getAuthTokenValue();
+    const token = getCookie('auth_token');
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
-    if (token) streamUrl += '&token=' + encodeURIComponent(token);
+    if (token) streamUrl += '&token=' + token;
 
     // Build the full URL for external players
     const fullUrl = window.location.origin + streamUrl;
@@ -2142,13 +1852,6 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
 
     // Sanitize title and filename
     const safeTitle = title ? escapeHtml(String(title)) : 'Video';
-    activeDashboardSessionId = createDashboardSessionId();
-    activeDashboardMeta = {
-        title: title ? String(title) : 'Video',
-        media_type: inferMediaTypeFromPath(path),
-        poster_url: opts && typeof opts.poster_url === 'string' ? opts.poster_url : null,
-        poster_thumb: opts && typeof opts.poster_thumb === 'string' ? opts.poster_thumb : null
-    };
     const extMatch = path.match(/\.([a-z0-9]+)$/i);
     const safeExt = extMatch ? extMatch[0] : '.mp4';
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
@@ -2180,23 +1883,19 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
     video.controls = true;
     video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
-    const posterUrl = addTokenToDataUrl(activeDashboardMeta?.poster_url || '');
-    if (posterUrl) video.poster = posterUrl;
     video.src = streamUrl;
     video.addEventListener('timeupdate', () => updateProgress(video, path));
-    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} try { updateDashboardSession(video, path, 'paused', true); } catch (e) {} });
-    video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} try { updateDashboardSession(video, path, video.paused ? 'paused' : 'playing', true); } catch (e) {} });
+    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} });
+    video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} });
     video.addEventListener('play', () => {
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = setInterval(() => {
             try { updateProgress(video, path); } catch (e) {}
         }, 5000);
-        try { updateDashboardSession(video, path, 'playing', true); } catch (e) {}
     });
     video.addEventListener('ended', () => {
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
-        try { updateDashboardSession(video, path, 'stopped', true); } catch (e) {}
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
@@ -2213,29 +1912,6 @@ function openVideoViewer(path, title, startSeconds = 0, opts = null) {
 
     activeVideoEl = video;
     activeVideoPath = path;
-
-    if (activeControlSocket) {
-        try { activeControlSocket.close(); } catch {}
-        activeControlSocket = null;
-    }
-    try {
-        const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const wsUrl = `${wsProto}://${window.location.host}${API_BASE}/dashboard/control/ws?session_id=${encodeURIComponent(activeDashboardSessionId)}`;
-        activeControlSocket = new WebSocket(wsUrl);
-        activeControlSocket.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                if (!msg || msg.session_id !== activeDashboardSessionId) return;
-                if (msg.action === 'pause') {
-                    try { video.pause(); } catch {}
-                } else if (msg.action === 'resume') {
-                    try { video.play(); } catch {}
-                } else if (msg.action === 'stop') {
-                    try { closeViewer(); } catch {}
-                }
-            } catch {}
-        };
-    } catch {}
     if (!playbackHeartbeatInstalled) {
         playbackHeartbeatInstalled = true;
         window.addEventListener('pagehide', () => {
@@ -2540,9 +2216,7 @@ function collectContinueEpisodes(showName = null) {
         const at = Date.parse(a.progress?.last_played || '') || 0;
         const bt = Date.parse(b.progress?.last_played || '') || 0;
         if (bt !== at) return bt - at;
-        const ak = `${a.showName || ''} ${a.name || ''}`.toLowerCase();
-        const bk = `${b.showName || ''} ${b.name || ''}`.toLowerCase();
-        return ak.localeCompare(bk);
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     });
 
     return out;
@@ -2644,9 +2318,8 @@ function renderShows() {
                     div.style.cursor = 'pointer';
                     
                     const start = Number(item.progress?.current_time || 0);
-                    const displayTitle = `${item.showName} - ${item.name}`;
                     const posterHtml = item.poster 
-                        ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(displayTitle)}">`
+                        ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
                         : `<div class="poster-placeholder"></div>`;
 
                     let progressHtml = '';
@@ -2661,28 +2334,28 @@ function renderShows() {
                         <div class="poster-shell">
                             ${posterHtml}
                             <div class="media-info">
-                                <h3>${escapeHtml(displayTitle)}</h3>
+                                <h3>${escapeHtml(item.name)}</h3>
                                 <div class="media-details">${subtitle}</div>
                             </div>
                             <button class="poster-play">Resume</button>
                         </div>
                         <div class="card-meta">
                             <div style="color:#aaa;font-size:0.85em;margin-bottom:4px;">${subtitle}</div>
-                            <div class="card-title">${escapeHtml(displayTitle)}</div>
+                            <div class="card-title">${escapeHtml(item.name)}</div>
                         </div>
                         ${progressHtml}
                     `;
 
                     div.addEventListener('click', (e) => {
                         if (e.target.closest('button')) return;
-                        openVideoViewer(item.path, displayTitle, start, { poster_url: item.poster || null });
+                        openVideoViewer(item.path, item.name, start);
                     });
 
                     const playBtn = div.querySelector('.poster-play');
                     if (playBtn) {
                         playBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            openVideoViewer(item.path, displayTitle, start, { poster_url: item.poster || null });
+                            openVideoViewer(item.path, item.name, start);
                         });
                     }
 
@@ -2698,7 +2371,7 @@ function renderShows() {
             div.className = 'media-item show-card';
             const contEp = collectContinueEpisodes(show.name)[0] || null;
             const poster = show.poster
-                ? `<img class="show-poster" src="${addTokenToDataUrl(show.poster)}" loading="lazy" alt="${escapeHtml(show.name)}">`
+                ? `<img class="show-poster" src="${show.poster}" loading="lazy" alt="${escapeHtml(show.name)}">`
                 : `<div class="show-poster" style="background: radial-gradient(circle at 30% 20%, rgba(229, 9, 20, 0.35), rgba(20, 20, 20, 0.95) 60%);"></div>`;
             
             const subtitle = contEp ? `Continue • ${escapeHtml(contEp.seasonName || '')}` : `${(show.seasons || []).length} season(s)`;
@@ -2734,19 +2407,17 @@ function renderShows() {
             const resume = div.querySelector('.poster-play');
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
-                const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
+                    openVideoViewer(contEp.path, contEp.name, start);
                 });
             }
             const resumeInline = div.querySelector('.show-resume-inline');
             if (resumeInline && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
-                const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
+                    openVideoViewer(contEp.path, contEp.name, start);
                 });
             }
             container.appendChild(div);
@@ -2768,7 +2439,7 @@ function renderShows() {
             div.style.cursor = 'pointer';
             
             const posterHtml = season.poster 
-                ? `<img class="poster-img" src="${addTokenToDataUrl(season.poster)}" loading="lazy" alt="${escapeHtml(season.name)}">`
+                ? `<img class="poster-img" src="${season.poster}" loading="lazy" alt="${escapeHtml(season.name)}">`
                 : `<div class="poster-placeholder"></div>`;
 
             const contEp = Array.isArray(season.episodes) ? season.episodes.find(ep => shouldContinue(ep?.progress)) : null;
@@ -2804,19 +2475,17 @@ function renderShows() {
             const resume = div.querySelector('.poster-play');
             if (resume && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
-                const displayTitle = `${show.name} - ${contEp.name}`;
                 resume.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
+                    openVideoViewer(contEp.path, contEp.name, start);
                 });
             }
             const resumeInline = div.querySelector('.season-resume-inline');
             if (resumeInline && contEp) {
                 const start = Number(contEp.progress?.current_time || 0);
-                const displayTitle = `${show.name} - ${contEp.name}`;
                 resumeInline.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    openVideoViewer(contEp.path, displayTitle, start, { poster_url: contEp.poster || null });
+                    openVideoViewer(contEp.path, contEp.name, start);
                 });
             }
             container.appendChild(div);
@@ -2842,7 +2511,7 @@ function renderShows() {
             div.style.cursor = 'pointer';
         
         const posterHtml = ep.poster 
-            ? `<img class="poster-img" src="${addTokenToDataUrl(ep.poster)}" loading="lazy" alt="${escapeHtml(ep.name)}">`
+            ? `<img class="poster-img" src="${ep.poster}" loading="lazy" alt="${escapeHtml(ep.name)}">`
             : `<div class="poster-placeholder"></div>`;
 
         let progressHtml = '';
@@ -2854,7 +2523,6 @@ function renderShows() {
 
         const subtitle = `${escapeHtml(show.name)} • ${escapeHtml(season.name)}`;
         const playLabel = shouldContinue(ep.progress) ? 'Resume' : 'Play';
-    const displayTitle = `${show.name} - ${ep.name}`;
 
         div.innerHTML = `
             ${getDelBtn(ep.path)}
@@ -2862,13 +2530,13 @@ function renderShows() {
             <div class="poster-shell">
                 ${posterHtml}
                 <div class="media-info">
-                    <h3>${escapeHtml(displayTitle)}</h3>
+                    <h3>${escapeHtml(ep.name)}</h3>
                     <div class="media-details">${subtitle}</div>
                 </div>
                 <button class="poster-play">${playLabel}</button>
             </div>
             <div class="card-meta">
-                <div class="card-title">${escapeHtml(displayTitle)}</div>
+                <div class="card-title">${escapeHtml(ep.name)}</div>
                 <div class="card-subtitle">${subtitle}</div>
             </div>
             ${progressHtml}
@@ -2876,14 +2544,14 @@ function renderShows() {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0, { poster_url: ep.poster || null });
+            openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
         });
 
         const btn = div.querySelector('.poster-play');
         if (btn) {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                openVideoViewer(ep.path, displayTitle, ep.progress?.current_time || 0, { poster_url: ep.poster || null });
+                openVideoViewer(ep.path, ep.name, ep.progress?.current_time || 0);
             });
         }
 
@@ -2910,7 +2578,6 @@ async function updateProgress(mediaElement, filePath, force = false, opts = null
     mediaElement.lastTime = mediaElement.currentTime;
 
     try {
-        try { await updateDashboardSession(mediaElement, filePath, mediaElement.paused ? 'paused' : 'playing', false); } catch (e) {}
         const duration = Number.isFinite(mediaElement.duration) && mediaElement.duration > 0 ? mediaElement.duration : null;
         const payload = {
             file_path: filePath,
@@ -3071,7 +2738,7 @@ async function loadResume() {
                  const label = file.type ? escapeHtml(file.type) : 'Video';
                  
                  const posterHtml = file.poster 
-                    ? `<img class="poster-img" src="${addTokenToDataUrl(file.poster)}" loading="lazy" alt="${escapeHtml(file.name)}">`
+                    ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : `<div class="poster-placeholder"></div>`;
 
                  const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
@@ -3101,14 +2768,14 @@ async function loadResume() {
                  
                  div.addEventListener('click', (e) => {
                     if (e.target.closest('button')) return;
-                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
+                    openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                  });
 
                  const btn = div.querySelector('.poster-play');
                  if (btn) {
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0, { poster_url: file.poster || null });
+                        openVideoViewer(file.path, cleanTitle(file.name), file.progress?.current_time || 0);
                     });
                  }
 
@@ -3164,7 +2831,7 @@ async function loadRecent() {
                 const title = item.category === 'movies' ? (item.omdb?.title || cleanTitle(item.name)) : item.name;
                 const subtitle = item.category === 'movies' ? 'Movie' : 'TV Show';
                 const poster = item.poster 
-                    ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(title)}">`
+                    ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(title)}">`
                     : `<div class="poster-placeholder"></div>`;
 
                 div.innerHTML = `
@@ -3183,7 +2850,7 @@ async function loadRecent() {
 
                 div.addEventListener('click', () => {
                     if (item.category === 'movies') {
-                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0, { poster_url: item.poster || null });
+                        openVideoViewer(item.path, cleanTitle(item.name), item.progress?.current_time || 0);
                     } else {
                         showSection('shows');
                         setShowsLevel('seasons', item.name);
@@ -3331,116 +2998,6 @@ async function scanWifi() {
                 Error: ${e.message}
             </div>
         `;
-    }
-}
-
-async function loadDLNADiagnostics() {
-    const container = document.getElementById('dlna-diagnostics');
-    const content = document.getElementById('dlna-diagnostics-content');
-
-    if (!container || !content) return;
-
-    container.style.display = 'block';
-    content.innerHTML = 'Loading diagnostics...';
-
-    try {
-        const res = await fetch(`${API_BASE}/system/dlna/status`, {
-            headers: getAuthHeaders()
-        });
-
-        if (res.status === 401) {
-            logout();
-            return;
-        }
-
-        if (!res.ok) {
-            content.innerHTML = '<div style="color:var(--danger-color);">Failed to load diagnostics</div>';
-            return;
-        }
-
-        const data = await res.json();
-
-        const serviceStatus = data.service_running
-            ? '<span style="color:#4ade80;">Running ✓</span>'
-            : '<span style="color:#f87171;">Not Running ✗</span>';
-
-        const rootContainer = data.root_container === '.'
-            ? '<span style="color:#4ade80;">. (Hierarchical) ✓</span>'
-            : `<span style="color:#f87171;">${data.root_container} (Should be ".") ✗</span>`;
-
-        let html = `
-            <div style="font-family:monospace; font-size:0.9em;">
-                <div style="margin-bottom:15px;">
-                    <strong>Service Status:</strong> ${serviceStatus}<br>
-                    <strong>Root Container:</strong> ${rootContainer}<br>
-                    <strong>Database Exists:</strong> ${data.database_exists ? 'Yes (' + data.database_size_mb + ' MB)' : 'No'}<br>
-                    <strong>Movies Found:</strong> ${data.movie_files_found}<br>
-                    <strong>TV Episodes Found:</strong> ${data.show_files_found}
-                </div>
-
-                <div style="margin-bottom:15px;">
-                    <strong>Configured Media Paths:</strong><br>
-                    ${data.configured_paths.map(p => `<div style="padding-left:20px; color:var(--text-muted);">${p}</div>`).join('')}
-                </div>
-        `;
-
-        if (data.movie_samples && data.movie_samples.length > 0) {
-            html += `
-                <div style="margin-bottom:15px;">
-                    <strong>Sample Movies (first 5):</strong><br>
-                    ${data.movie_samples.map(m => `<div style="padding-left:20px; color:var(--text-muted);">${m}</div>`).join('')}
-                </div>
-            `;
-        }
-
-        if (data.recent_logs && data.recent_logs.length > 0) {
-            html += `
-                <div>
-                    <strong>Recent Log Entries:</strong><br>
-                    <div style="padding:10px; background:rgba(0,0,0,0.5); border-radius:4px; max-height:200px; overflow-y:auto;">
-                        ${data.recent_logs.filter(l => l.trim()).map(l => `<div style="font-size:0.85em; color:var(--text-muted);">${l}</div>`).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        html += '</div>';
-        content.innerHTML = html;
-
-    } catch (e) {
-        content.innerHTML = `<div style="color:var(--danger-color);">Error: ${e.message}</div>`;
-    }
-}
-
-async function restartDLNA() {
-    if (!confirm('Restart DLNA and rebuild the media database? This will rescan all your movies, shows, and music. It may take a few minutes.')) {
-        return;
-    }
-
-    showToast('Restarting DLNA server...', 'info');
-
-    try {
-        const res = await fetch(`${API_BASE}/system/dlna/restart`, {
-            method: 'POST',
-            headers: getAuthHeaders()
-        });
-
-        if (res.status === 401) {
-            logout();
-            return;
-        }
-
-        const data = await res.json();
-
-        if (res.ok) {
-            showToast('DLNA server restarted! Database is rebuilding. Check your TV in 1-2 minutes.', 'success', { duration: 8000 });
-            // Reload diagnostics after a few seconds
-            setTimeout(() => loadDLNADiagnostics(), 3000);
-        } else {
-            showToast(`Error: ${data.detail || 'Failed to restart DLNA'}`, 'error');
-        }
-    } catch (e) {
-        showToast(`Error: ${e.message}`, 'error');
     }
 }
 
@@ -3598,6 +3155,7 @@ function cancelUpload() {
 // Debounce function moved to utilities section (line ~503)
 
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme(); // Initialize theme before anything else
     checkAuth(); // Check auth on load
 
     const setupHintEl = document.getElementById('setup-hint');
@@ -4382,37 +3940,6 @@ async function changePassword() {
     }
 }
 
-async function saveOmdbKey() {
-    const input = document.getElementById('omdb-api-key');
-    if (!input) return;
-
-    const key = String(input.value || '').trim();
-    if (!key) {
-        showToast('Enter an OMDb API key first', 'error');
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/system/settings/omdb`, {
-            method: 'POST',
-            headers: {
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ key })
-        });
-        if (res.status === 401) { logout(); return; }
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            showToast(data.detail || 'Failed to save OMDb key', 'error');
-            return;
-        }
-        showToast('OMDb key saved', 'success');
-    } catch (e) {
-        showToast('Network error saving OMDb key', 'error');
-    }
-}
-
 async function rebuildLibrary() {
     try {
         const res = await fetch(`${API_BASE}/media/rebuild`, { 
@@ -4801,6 +4328,70 @@ async function unmountDrive(mountpoint) {
         }
     } catch (e) {
         alert('Error: ' + e);
+    }
+}
+
+async function changePassword() {
+    const current = document.getElementById('change-pwd-current').value;
+    const newPass = document.getElementById('change-pwd-new').value;
+    const confirm = document.getElementById('change-pwd-confirm').value;
+
+    if (!current || !newPass || !confirm) {
+        alert('Please fill in all password fields.');
+        return;
+    }
+
+    if (newPass !== confirm) {
+        alert('New passwords do not match.');
+        return;
+    }
+
+    if (newPass.length < 8) {
+        alert('New password must be at least 8 characters long.');
+        return;
+    }
+
+    if (!/[A-Z]/.test(newPass)) {
+        alert('New password must contain at least one uppercase letter.');
+        return;
+    }
+
+    if (!/[a-z]/.test(newPass)) {
+        alert('New password must contain at least one lowercase letter.');
+        return;
+    }
+
+    if (!/[0-9]/.test(newPass)) {
+        alert('New password must contain at least one digit.');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            headers: { 
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({
+                current_password: current,
+                new_password: newPass
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            alert('Password updated successfully!');
+            // Clear fields
+            document.getElementById('change-pwd-current').value = '';
+            document.getElementById('change-pwd-new').value = '';
+            document.getElementById('change-pwd-confirm').value = '';
+        } else {
+            alert(data.detail || 'Failed to update password.');
+        }
+    } catch (e) {
+        console.error('Error updating password:', e);
+        alert('Error updating password. See console for details.');
     }
 }
 
@@ -5209,7 +4800,7 @@ function renderUpNext(items) {
         div.style.cursor = 'pointer';
 
         const posterHtml = item.poster
-            ? `<img class="poster-img" src="${addTokenToDataUrl(item.poster)}" loading="lazy" alt="${escapeHtml(item.name)}">`
+            ? `<img class="poster-img" src="${item.poster}" loading="lazy" alt="${escapeHtml(item.name)}">`
             : `<div class="poster-placeholder"></div>`;
 
         const subtitleParts = [item.show, item.season].filter(Boolean).map(v => escapeHtml(v));
@@ -5232,12 +4823,12 @@ function renderUpNext(items) {
 
         div.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
-            openVideoViewer(item.path, item.name, 0, { poster_url: item.poster || null });
+            openVideoViewer(item.path, item.name, 0);
         });
 
         div.querySelector('.poster-play')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            openVideoViewer(item.path, item.name, 0, { poster_url: item.poster || null });
+            openVideoViewer(item.path, item.name, 0);
         });
 
         container.appendChild(div);
@@ -5488,191 +5079,5 @@ async function fixDuplicates() {
     } catch (e) {
         showToast(`Error: ${e.message}`, 'error');
         console.error('Failed to fix duplicates:', e);
-    }
-}
-
-// Tailscale VPN Management
-async function checkTailscale() {
-    const panel = document.getElementById('tailscale-panel');
-    if (!panel) return;
-
-    const loading = document.getElementById('ts-loading');
-    const content = document.getElementById('ts-content');
-    const badge = document.getElementById('ts-status-badge');
-    const ipContainer = document.getElementById('ts-ip-container');
-    const ipEl = document.getElementById('ts-ip');
-    const authSection = document.getElementById('ts-auth-section');
-    const btnConnect = document.getElementById('btn-ts-connect');
-    const btnDisconnect = document.getElementById('btn-ts-disconnect');
-    const messageEl = document.getElementById('ts-message');
-
-    try {
-        const res = await fetch(`${API_BASE}/system/tailscale/status`, {
-            headers: getAuthHeaders()
-        });
-        const status = await res.json();
-
-        if (loading) loading.style.display = 'none';
-        if (content) content.style.display = 'block';
-
-        if (!status.installed) {
-            if (badge) {
-                badge.textContent = 'Not Installed';
-                badge.style.background = '#f59e0b'; // warning color
-                badge.style.color = '#fff';
-            }
-            if (messageEl) messageEl.innerHTML = 'Tailscale is not installed. Run setup script or install manually.';
-            if (btnConnect) btnConnect.disabled = true;
-            return;
-        }
-
-        if (status.connected) {
-            if (badge) {
-                badge.textContent = 'Connected';
-                badge.style.background = '#10b981'; // success color
-                badge.style.color = '#fff';
-            }
-            
-            // Get IP
-            try {
-                const ipRes = await fetch(`${API_BASE}/system/tailscale/ip`, {
-                    headers: getAuthHeaders()
-                });
-                const ipData = await ipRes.json();
-                
-                if (ipData.ip && ipEl) {
-                    if (ipContainer) ipContainer.style.display = 'flex';
-                    ipEl.textContent = ipData.ip;
-                }
-            } catch(e) { console.error('IP fetch error', e); }
-
-            if (btnConnect) btnConnect.style.display = 'none';
-            if (btnDisconnect) btnDisconnect.style.display = 'inline-block';
-            if (authSection) authSection.style.display = 'none';
-            if (messageEl) messageEl.textContent = '';
-        } else {
-            if (badge) {
-                badge.textContent = 'Disconnected';
-                badge.style.background = '#ef4444'; // danger color
-                badge.style.color = '#fff';
-            }
-            
-            if (ipContainer) ipContainer.style.display = 'none';
-            if (btnConnect) {
-                btnConnect.style.display = 'inline-block';
-                btnConnect.disabled = false;
-            }
-            if (btnDisconnect) btnDisconnect.style.display = 'none';
-            
-            // Check if auth key is saved
-            try {
-                const authRes = await fetch(`${API_BASE}/system/tailscale/auth-key`, {
-                    headers: getAuthHeaders()
-                });
-                const authData = await authRes.json();
-                
-                if (authSection) authSection.style.display = 'block';
-                const keyInput = document.getElementById('ts-auth-key');
-                if (keyInput && authData.has_key) {
-                    keyInput.placeholder = "Auth key saved (enter new to overwrite)";
-                }
-            } catch(e) { console.error('Auth key check error', e); }
-        }
-
-    } catch (e) {
-        console.error('Error checking Tailscale:', e);
-        if (loading) loading.textContent = 'Error loading status';
-    }
-}
-
-async function connectTailscale() {
-    const btn = document.getElementById('btn-ts-connect');
-    const msg = document.getElementById('ts-message');
-    
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Connecting...';
-    }
-    if (msg) msg.textContent = '';
-
-    try {
-        const res = await fetch(`${API_BASE}/system/tailscale/up`, {
-            method: 'POST',
-            headers: getAuthHeaders()
-        });
-        const data = await res.json();
-
-        if (data.status === 'success') {
-            showToast('Tailscale connected!', 'success');
-            checkTailscale();
-        } else if (data.status === 'needs_auth') {
-            const authUrl = (data.output && data.output.match(/https:\/\/[^\s]+/)) ? data.output.match(/https:\/\/[^\s]+/)[0] : '#';
-            if (msg) msg.innerHTML = `Authentication required. <a href="${authUrl}" target="_blank" style="color:#3b82f6;text-decoration:underline;">Click here to authenticate</a>`;
-            showToast('Authentication required', 'warning');
-        } else {
-            const err = data.detail || 'Connection failed';
-            showToast(err, 'error');
-            if (msg) msg.textContent = err;
-        }
-    } catch (e) {
-        showToast('Connection failed: ' + e.message, 'error');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Connect';
-        }
-    }
-}
-
-async function disconnectTailscale() {
-    if (!confirm('Are you sure you want to disconnect Tailscale? Remote access will be lost.')) return;
-
-    try {
-        const res = await fetch(`${API_BASE}/system/tailscale/down`, {
-            method: 'POST',
-            headers: getAuthHeaders()
-        });
-        
-        if (res.ok) {
-            showToast('Tailscale disconnected', 'success');
-            checkTailscale();
-        } else {
-            showToast('Failed to disconnect', 'error');
-        }
-    } catch (e) {
-        showToast('Error: ' + e.message, 'error');
-    }
-}
-
-async function saveTsKey() {
-    const input = document.getElementById('ts-auth-key');
-    if (!input) return;
-    
-    const key = input.value.trim();
-    if (!key) {
-        showToast('Please enter an auth key', 'warning');
-        return;
-    }
-
-    try {
-        const headers = getAuthHeaders();
-        headers['Content-Type'] = 'application/json';
-        
-        const res = await fetch(`${API_BASE}/system/tailscale/set-auth-key`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify({ auth_key: key })
-        });
-
-        if (res.ok) {
-            showToast('Auth key saved', 'success');
-            input.value = '';
-            checkTailscale();
-        } else {
-            const data = await res.json();
-            showToast(data.detail || 'Failed to save key', 'error');
-        }
-    } catch (e) {
-        showToast('Error saving key', 'error');
     }
 }

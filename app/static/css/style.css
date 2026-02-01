@@ -23,6 +23,20 @@
 }
 
 /* Theme Variations */
+body.light-theme {
+    --bg-color: #f8fafc;
+    --card-bg: #ffffff;
+    --card-hover: #f1f5f9;
+    --text-color: #1e293b;
+    --text-muted: #64748b;
+    --header-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: 1px solid rgba(0, 0, 0, 0.08);
+    --border-color: rgba(0, 0, 0, 0.1);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -2px rgba(0,0,0,0.1);
+}
+
 body.dark-theme {
     --bg-color: #050505;
     --card-bg: #0d0d0d;
@@ -374,6 +388,96 @@ select {
 }
 
 select:focus {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Form Group Helpers */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: var(--text-color);
+    font-size: 0.95rem;
+}
+
+.form-group label i {
+    color: var(--accent-color);
+    margin-right: 6px;
+}
+
+.form-group .help-text, .help-text {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 8px;
+    line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.help-text i {
+    margin-top: 2px;
+    font-size: 0.9em;
+}
+
+.help-text a {
+    color: var(--accent-color);
+    text-decoration: none;
+}
+
+.help-text a:hover {
+    text-decoration: underline;
+}
+
+.form-error-message {
+    color: var(--danger-color);
+    font-size: 0.85rem;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.form-success-message {
+    color: var(--success-color);
+    font-size: 0.85rem;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+input.error, select.error {
+    border-color: var(--danger-color);
+    background: rgba(239, 68, 68, 0.05);
+}
+
+input.success, select.success {
+    border-color: var(--success-color);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+textarea {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.2s ease;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 100px;
+}
+
+textarea:focus {
     background-color: rgba(255, 255, 255, 0.08);
     border-color: var(--accent-color);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
@@ -1417,6 +1521,22 @@ nav button:hover, nav button.active {
     background: rgba(255, 255, 255, 0.1);
 }
 
+nav .theme-toggle-btn {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-base);
+    font-size: 1.1rem;
+}
+
+nav .theme-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
+
 nav .logout-btn {
     background-color: var(--accent-color);
     color: white;
@@ -2127,67 +2247,198 @@ h1, h2, h3 {
 }
 
 /* Admin & Upload */
+/* Admin Panels & Sections */
 .upload-section, .admin-panel {
     background: var(--card-bg);
-    padding: 30px;
-    border-radius: 8px;
-    max-width: 800px;
-    margin: 0 auto;
+    padding: 24px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
     border: var(--glass-border);
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition-base);
+}
+
+.admin-panel:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.admin-panel h3 {
+    margin: 0 0 20px 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--accent-color);
+    padding-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-panel h3 i {
+    color: var(--accent-color);
+}
+
+.admin-panel h4 {
+    margin: 20px 0 12px 0;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.admin-panel p {
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+/* Button Grid Layout */
+.button-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+    .button-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .drop-zone {
-    border: 2px dashed #444;
-    padding: 40px;
+    border: 2px dashed var(--border-color);
+    padding: 40px 20px;
     text-align: center;
     margin: 20px 0;
-    border-radius: 8px;
-    transition: border-color 0.2s, background 0.2s;
+    border-radius: var(--radius-md);
+    transition: all 0.3s ease;
+    background: rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+}
+
+.drop-zone:hover {
+    border-color: var(--accent-color);
+    background: rgba(59, 130, 246, 0.05);
 }
 
 .drop-zone.dragover {
     border-color: var(--accent-color);
-    background: rgba(229, 9, 20, 0.1);
+    background: rgba(59, 130, 246, 0.1);
+    transform: scale(1.02);
 }
 
-button.primary {
-    background-color: var(--accent-color);
+.drop-zone i {
+    font-size: 3rem;
+    color: var(--accent-color);
+    margin-bottom: 16px;
+    display: block;
+}
+
+.drop-zone h4 {
+    margin: 12px 0 8px 0;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.drop-zone p {
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+/* Modern Buttons */
+button, .button {
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 500;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    border: none;
+    cursor: pointer;
+    transition: var(--transition-base);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+}
+
+button:disabled, .button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+button.primary, .button.primary {
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
     color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
-button.primary:hover {
-    background-color: var(--accent-hover);
+button.primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
-button.danger {
-    background-color: var(--danger-color);
+button.primary:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+button.secondary, .button.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+button.secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+}
+
+button.danger, .button.danger {
+    background: linear-gradient(135deg, var(--danger-color), #dc2626);
     color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-button.danger:hover {
-    background-color: #c9302c;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
 }
 
-button.warning {
-    background-color: var(--warning-color);
-    color: black;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
+button.danger:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
-button.small {
-    padding: 5px 10px;
-    font-size: 0.8rem;
+button.warning, .button.warning {
+    background: linear-gradient(135deg, var(--warning-color), #ea580c);
+    color: white;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+button.warning:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
+button.success, .button.success {
+    background: linear-gradient(135deg, var(--success-color), #059669);
+    color: white;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+button.success:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+button.small, .button.small {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+button.large, .button.large {
+    padding: 14px 28px;
+    font-size: 1.05rem;
+}
+
+button i, .button i {
+    font-size: 1.1em;
 }
 
 .download-btn {

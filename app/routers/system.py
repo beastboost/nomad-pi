@@ -62,6 +62,31 @@ def get_system_status():
         commit = None
     return {"status": "online", "version": VERSION, "commit": commit}
 
+@public_router.get("/info")
+def get_public_system_info():
+    """Get basic system info including IP address for setup page"""
+    import socket
+
+    ip_address = None
+    try:
+        # Try to get the local IP address
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip_address = s.getsockname()[0]
+        s.close()
+    except Exception:
+        # Fallback methods
+        try:
+            ip_address = socket.gethostbyname(socket.gethostname())
+        except:
+            pass
+
+    return {
+        "ip_address": ip_address,
+        "hostname": platform.node(),
+        "version": VERSION
+    }
+
 @public_router.get("/setup/status")
 def get_setup_status():
     admin_password = os.environ.get("ADMIN_PASSWORD")
