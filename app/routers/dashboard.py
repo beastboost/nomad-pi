@@ -423,7 +423,7 @@ def get_system_stats() -> Dict:
             if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
                 with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                     cpu_temp = float(f.read().strip()) / 1000.0
-        except:
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
             pass
 
         # Memory
@@ -458,7 +458,7 @@ def get_system_stats() -> Dict:
         # Load average
         try:
             load_avg = os.getloadavg()[0]
-        except:
+        except (OSError, AttributeError):
             load_avg = 0.0
 
         return {
@@ -844,3 +844,20 @@ async def get_public_dashboard_snapshot():
         "tz_offset_sec": tz_offset_sec,
         "source": "http",
     }
+
+# Watch History Endpoints
+from app import database
+
+@router.get("/watch-history")
+def get_watch_history(user_id: int = Depends(get_current_user_id), limit: int = 20):
+    """Get recently watched items for the current user."""
+    if limit > 100:
+        limit = 100  # Cap at 100 to prevent excessive queries
+    return database.get_recently_watched(user_id, limit)
+
+@router.get("/most-watched")
+def get_most_watched_items(user_id: int = Depends(get_current_user_id), limit: int = 20):
+    """Get most watched items for the current user."""
+    if limit > 100:
+        limit = 100  # Cap at 100 to prevent excessive queries
+    return database.get_most_watched(user_id, limit)

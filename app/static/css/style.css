@@ -2252,7 +2252,8 @@ h1, h2, h3 {
     background: var(--card-bg);
     padding: 24px;
     border-radius: var(--radius-md);
-    margin-bottom: 20px;
+    margin: 0 auto 20px auto;
+    max-width: 900px;
     border: var(--glass-border);
     box-shadow: var(--shadow-sm);
     transition: var(--transition-base);
@@ -2302,6 +2303,20 @@ h1, h2, h3 {
 @media (max-width: 768px) {
     .button-grid {
         grid-template-columns: 1fr;
+    }
+
+    .admin-panel, .upload-section {
+        padding: 16px;
+        margin: 0 8px 16px 8px;
+        max-width: none;
+    }
+
+    .admin-panel h3 {
+        font-size: 1.1rem;
+    }
+
+    .form-grid {
+        grid-template-columns: 1fr !important;
     }
 }
 

@@ -203,7 +203,7 @@ class IngestHandler(FileSystemEventHandler):
                 try:
                     cat_root = os.path.join(media.BASE_DIR, category)
                     folder = os.path.relpath(os.path.dirname(target_abs), cat_root).replace(os.sep, '/')
-                except:
+                except (ValueError, OSError):
                     folder = "."
                 
                 st = os.stat(target_abs)
@@ -301,7 +301,7 @@ def start_ingest_service():
                                 try:
                                     # Still recursive=False for external drives to save memory/CPU
                                     _observer.schedule(IngestHandler(is_direct=True), drive_path, recursive=False)
-                                except: pass
+                                except (OSError, RuntimeError): pass
                                 
                         logger.info(f"Ingest service watching mount roots (non-recursively): {mount_root}")
                     except Exception as e:

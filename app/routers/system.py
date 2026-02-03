@@ -78,7 +78,7 @@ def get_public_system_info():
         # Fallback methods
         try:
             ip_address = socket.gethostbyname(socket.gethostname())
-        except:
+        except (socket.gaierror, OSError):
             pass
 
     return {
@@ -127,7 +127,7 @@ def get_samba_config():
         try:
             import getpass
             user = getpass.getuser()
-        except:
+        except (ImportError, OSError):
             # Fallback to env or whoami
             user = os.environ.get("USER") or subprocess.check_output(["whoami"], text=True).strip()
     
@@ -145,7 +145,7 @@ def get_samba_config():
         ip = s.getsockname()[0]
         s.close()
         path = f"\\\\{ip}\\data"
-    except:
+    except (socket.gaierror, OSError):
         pass
         
     return {
@@ -191,7 +191,7 @@ def get_aggregate_disk_usage():
                 used += usage.used
                 free += usage.free
                 seen_mounts.add(part.mountpoint)
-            except:
+            except (PermissionError, OSError):
                 pass
     else:
         # Windows/Other
@@ -206,7 +206,7 @@ def get_aggregate_disk_usage():
                 used += usage.used
                 free += usage.free
                 seen_mounts.add(part.mountpoint)
-            except:
+            except (PermissionError, OSError):
                 pass
                 
     if total == 0:
@@ -214,7 +214,7 @@ def get_aggregate_disk_usage():
         try:
             usage = psutil.disk_usage(os.getcwd())
             return usage.total, usage.used, usage.free, usage.percent
-        except:
+        except (PermissionError, OSError):
             return 0, 0, 0, 0
             
     percent = (used / total) * 100 if total > 0 else 0
@@ -249,7 +249,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp = int(f.read()) / 1000
-        except:
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
             pass
         
         # Get CPU frequency (Raspberry Pi specific)
@@ -264,7 +264,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 # Output format: frequency(48)=1500000000
                 freq_str = result.stdout.strip().split('=')[1]
                 cpu_freq = int(freq_str) / 1000000  # Convert to MHz
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             # Fallback to psutil
             try:
                 freq = psutil.cpu_freq()
@@ -272,7 +272,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                     cpu_freq = freq.current
                     cpu_freq_max = freq.max
                     cpu_freq_min = freq.min
-            except:
+            except (AttributeError, OSError):
                 pass
         
         # Check for throttling (Raspberry Pi specific)
@@ -289,7 +289,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 throttled_value = int(throttled_hex, 16)
                 # Bit 0: under-voltage, Bit 1: arm frequency capped, Bit 2: currently throttled
                 throttled = (throttled_value & 0x7) != 0
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             pass
 
         # Get Overclocking config (Raspberry Pi specific)
@@ -300,7 +300,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 if res.returncode == 0 and "=" in res.stdout:
                     val = res.stdout.strip().split("=")[1]
                     cpu_overclock[param] = val
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError):
             pass
 
     return {
@@ -345,7 +345,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     size_bytes = 0
                     try:
                         size_bytes = int(dev.get("size", 0))
-                    except:
+                    except (ValueError, TypeError):
                         pass
 
                     d = {
@@ -364,7 +364,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                             d["free"] = usage.free
                             d["used"] = usage.used
                             d["total"] = usage.total # More accurate than lsblk size
-                        except:
+                        except (PermissionError, OSError):
                             pass
                     drives.append(d)
                 
@@ -372,7 +372,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     size_bytes = 0
                     try:
                         size_bytes = int(child.get("size", 0))
-                    except:
+                    except (ValueError, TypeError):
                         pass
 
                     c = {
@@ -391,10 +391,10 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                             c["free"] = usage.free
                             c["used"] = usage.used
                             c["total"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             pass
                     drives.append(c)
-        except:
+        except (subprocess.SubprocessError, json.JSONDecodeError, KeyError):
             pass
     else:
         for p in psutil.disk_partitions():
@@ -409,7 +409,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     "mountpoint": p.mountpoint,
                     "fstype": p.fstype
                 })
-            except:
+            except (PermissionError, OSError):
                 pass
 
     return {
@@ -434,7 +434,7 @@ def get_services(user_id: int = Depends(get_current_user_id)):
             try:
                 status = subprocess.run(["systemctl", "is-active", s], capture_output=True, text=True).stdout.strip()
                 services.append({"name": s, "status": "running" if status == "active" else "stopped"})
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
     else:
         services = [
@@ -486,7 +486,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     d = dev.copy()
                     # Ensure size is a number
                     try: d["size"] = int(d.get("size", 0))
-                    except: d["size"] = 0
+                    except (ValueError, TypeError): d["size"] = 0
 
                     # Add free space if mounted
                     if d.get("mountpoint"):
@@ -494,7 +494,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                             usage = psutil.disk_usage(d["mountpoint"])
                             d["free"] = usage.free
                             d["size"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             d["free"] = 0
                     else:
                         d["free"] = 0
@@ -505,14 +505,14 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     c = child.copy()
                     # Ensure size is a number
                     try: c["size"] = int(c.get("size", 0))
-                    except: c["size"] = 0
+                    except (ValueError, TypeError): c["size"] = 0
 
                     if c.get("mountpoint"):
                         try:
                             usage = psutil.disk_usage(c["mountpoint"])
                             c["free"] = usage.free
                             c["size"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             c["free"] = 0
                     else:
                         c["free"] = 0
@@ -536,7 +536,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     "size": usage.total,
                     "label": p.mountpoint
                 })
-            except:
+            except (PermissionError, OSError):
                 pass
     return {"blockdevices": drives}
 
@@ -548,7 +548,7 @@ def save_mount(device, mount_point):
         try:
             with open(PERSISTENT_MOUNTS_FILE, 'r') as f:
                 mounts = json.load(f)
-        except: pass
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError): pass
     mounts[device] = mount_point
     with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
         json.dump(mounts, f)
@@ -615,7 +615,7 @@ def remove_mount(target):
             mounts = {k: v for k, v in mounts.items() if v != target}
             with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
                 json.dump(mounts, f)
-        except: pass
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError): pass
 
 def ensure_media_folders(root: str) -> List[str]:
     created = []
@@ -672,8 +672,20 @@ def restart_minidlna_best_effort() -> None:
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        # Validate device path
         if not device.startswith("/dev/"):
             raise HTTPException(status_code=400, detail="Invalid device path")
+
+        # Additional security checks for device path
+        if '..' in device or any(char in device for char in [';', '&', '|', '`', '$', '\x00']):
+            raise HTTPException(status_code=400, detail="Invalid characters in device path")
+
+        # Validate mount_point - prevent directory traversal and command injection
+        if any(char in mount_point for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in mount point")
+
+        if '..' in mount_point or mount_point.startswith('/'):
+            raise HTTPException(status_code=400, detail="Invalid mount point path")
 
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
@@ -697,6 +709,14 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
 @router.post("/unmount")
 def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        # Validate target path - prevent command injection
+        if any(char in target for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in target path")
+
+        # Ensure target is within expected directory structure
+        if not target.startswith("data/external/") and not target.startswith("/media/") and not target.startswith("/mnt/"):
+            raise HTTPException(status_code=400, detail="Invalid unmount target path")
+
         try:
             subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
             remove_mount(target)
@@ -709,13 +729,32 @@ def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
 def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         return {"status": "success", "message": "Simulated format success"}
-        
+
     device = request.device
     label = request.label
     fstype = request.fstype
-    
+
+    # Validate device path - prevent path traversal and command injection
     if not device.startswith("/dev/sd") and not device.startswith("/dev/nvme") and not device.startswith("/dev/mmcblk"):
-         raise HTTPException(status_code=400, detail="Invalid device path")
+        raise HTTPException(status_code=400, detail="Invalid device path")
+
+    # Additional security checks for device path
+    if '..' in device or ';' in device or '&' in device or '|' in device or '`' in device or '$' in device:
+        raise HTTPException(status_code=400, detail="Invalid characters in device path")
+
+    # Validate fstype - only allow specific safe filesystem types
+    allowed_fstypes = ['ext4', 'ext3', 'exfat', 'vfat', 'ntfs']
+    if fstype not in allowed_fstypes:
+        raise HTTPException(status_code=400, detail=f"Invalid filesystem type. Allowed: {', '.join(allowed_fstypes)}")
+
+    # Validate and sanitize label - prevent command injection
+    if label:
+        # Remove any dangerous characters
+        if any(char in label for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in label")
+        # Limit label length
+        if len(label) > 255:
+            raise HTTPException(status_code=400, detail="Label too long (max 255 characters)")
          
     try:
         subprocess.run(["sudo", "umount", device], check=False)
@@ -871,12 +910,12 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
         if os.path.exists(log_file):
             try:
                 os.remove(log_file)
-            except:
+            except (PermissionError, OSError):
                 pass
         if os.path.exists(status_file):
             try:
                 os.remove(status_file)
-            except:
+            except (PermissionError, OSError):
                 pass
         
         with open(log_file, "w") as f:
@@ -1056,7 +1095,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 if ':wifi' in line:
                     wifi_iface = line.split(':')[0]
                     break
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
 
         # Get active wifi info directly from 'dev wifi' which is more accurate for current SSID
@@ -1073,7 +1112,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ,BARS", "dev", "wifi"],
                 text=True
             ).strip().split('\n')
-            
+
             for line in dev_wifi:
                 if line.startswith('yes:'):
                     parts = line.split(':')
@@ -1087,7 +1126,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                         ssid = ":".join(parts[1:-3])
                         signal = int(signal_str) if signal_str.isdigit() else 0
                         break
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
             pass
 
         # If not found via dev wifi, check if hotspot is active
@@ -1104,7 +1143,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 elif "wifi" in active_conns.lower():
                     # If nmcli says wifi is active but we didn't find the SSID yet
                     mode = "wifi"
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
         
         # Get IP address if connected
@@ -1115,14 +1154,14 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                     ip_addr = ip_output[0]
                     if mode == "disconnected":
                         mode = "wifi" # Fallback if we have an IP but nmcli was unsure
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
 
         # If we have mode=wifi but no SSID, try to get it from iwgetid
         if mode == "wifi" and not ssid:
             try:
                 ssid = subprocess.check_output(["iwgetid", "-r"], text=True).strip()
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
 
         # Get bitrate from iwconfig if on wifi
@@ -1133,13 +1172,13 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 br_match = re.search(r'Bit Rate[:=](\d+\.?\d*\s*\w+/s)', iw_output)
                 if br_match:
                     bitrate = br_match.group(1)
-                
+
                 # If freq not found yet
                 if not freq:
                     fr_match = re.search(r'Frequency[:=](\d+\.?\d*\s*\w+Hz)', iw_output)
                     if fr_match:
                         freq = fr_match.group(1)
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
         
         return {
@@ -1208,7 +1247,7 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
                     "mode": "wifi",
                     "message": "Connected to WiFi"
                 }
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 return {
                     "status": "ok",
                     "mode": "disconnected",
@@ -1825,7 +1864,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
     try:
         result = subprocess.run(["systemctl", "is-active", "minidlna"], capture_output=True, text=True)
         diagnostics["service_running"] = result.stdout.strip() == "active"
-    except:
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
         diagnostics["service_running"] = False
 
     # Read config to see what paths it's scanning
@@ -1845,7 +1884,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
                 log_dir = parsed_log_dirs[0]
             diagnostics["configured_paths"] = media_dirs
             diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
-    except:
+    except (FileNotFoundError, PermissionError, OSError):
         diagnostics["configured_paths"] = ["ERROR: Could not read config"]
         diagnostics["root_container"] = "ERROR"
     diagnostics["db_dir"] = db_dir
@@ -1869,7 +1908,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
             st = os.stat(movies_dir)
             diagnostics["movies_dir_perms"] = oct(st.st_mode)[-3:]
             diagnostics["movies_dir_owner"] = f"{st.st_uid}:{st.st_gid}"
-    except:
+    except (FileNotFoundError, PermissionError, OSError):
         pass
 
     try:
@@ -1900,7 +1939,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
         diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
         diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
         diagnostics["cache_dir_exists"] = True
-    except:
+    except (FileNotFoundError, PermissionError, OSError):
         diagnostics["cache_dir_exists"] = False
 
     # Read recent log entries - try multiple locations
@@ -1919,7 +1958,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
                 diagnostics["log_file_location"] = log_path
                 logs_found = True
                 break
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
 
     if not logs_found:
@@ -1933,7 +1972,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
             else:
                 diagnostics["recent_logs"] = ["No logs found in any location"]
                 diagnostics["log_file_location"] = "none"
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             diagnostics["recent_logs"] = ["Could not read logs"]
             diagnostics["log_file_location"] = "error"
 
@@ -1946,7 +1985,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
         if db_exists:
             db_size = os.path.getsize(db_file)
             diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
-    except:
+    except (FileNotFoundError, PermissionError, OSError):
         diagnostics["database_exists"] = False
         diagnostics["database_size_mb"] = 0
 
@@ -2013,7 +2052,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
         try:
             with open("/proc/device-tree/model", "r") as f:
                 info["model"] = f.read().strip().replace('\x00', '')
-        except:
+        except (FileNotFoundError, PermissionError, OSError):
             info["model"] = "Unknown"
         
         # Get OS info
@@ -2026,14 +2065,14 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                         os_info[key] = value.strip('"')
                 info["os_name"] = os_info.get("PRETTY_NAME", "Linux")
                 info["os_version"] = os_info.get("VERSION", "Unknown")
-        except:
+        except (FileNotFoundError, PermissionError, OSError):
             info["os_name"] = "Linux"
             info["os_version"] = "Unknown"
         
         # Get kernel version
         try:
             info["kernel"] = subprocess.check_output(["uname", "-r"], text=True).strip()
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             info["kernel"] = platform.release()
         
         # Get uptime
@@ -2044,7 +2083,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                 hours = int((uptime_seconds % 86400) // 3600)
                 minutes = int((uptime_seconds % 3600) // 60)
                 info["uptime_formatted"] = f"{days}d {hours}h {minutes}m"
-        except:
+        except (FileNotFoundError, PermissionError, OSError, ValueError, IndexError):
             info["uptime_formatted"] = "Unknown"
         
         # Get memory info
@@ -2052,14 +2091,14 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
             mem = psutil.virtual_memory()
             info["memory_total_gb"] = round(mem.total / (1024**3), 2)
             info["memory_available_gb"] = round(mem.available / (1024**3), 2)
-        except:
+        except (AttributeError, OSError):
             pass
         
         # Get CPU info
         try:
             info["cpu_count"] = psutil.cpu_count(logical=False)
             info["cpu_count_logical"] = psutil.cpu_count(logical=True)
-        except:
+        except (AttributeError, OSError):
             pass
         
         # Get voltage (Raspberry Pi specific)
@@ -2074,7 +2113,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                 # Output format: volt=1.2000V
                 voltage_str = result.stdout.strip().split('=')[1].rstrip('V')
                 info["voltage"] = float(voltage_str)
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             pass
     
     return info
@@ -2171,7 +2210,7 @@ def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
                 "fix": "Consider cleaning up media files",
                 "impact": "Limited space for new media"
             })
-    except:
+    except (PermissionError, OSError):
         pass
 
     # Check memory usage
@@ -2185,7 +2224,7 @@ def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
                 "fix": "Consider restarting the system",
                 "impact": "May cause slow performance"
             })
-    except:
+    except (AttributeError, OSError):
         pass
 
     return diagnostics

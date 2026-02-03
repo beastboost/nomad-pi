@@ -19,8 +19,37 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Simple in-memory rate limiter
 login_attempts = defaultdict(list)
-MAX_ATTEMPTS = 5
+password_change_attempts = defaultdict(list)
+user_creation_attempts = defaultdict(list)
+MAX_LOGIN_ATTEMPTS = 5
+MAX_PASSWORD_CHANGE_ATTEMPTS = 3
+MAX_USER_CREATION_ATTEMPTS = 10
 LOCKOUT_MINUTES = 15
+
+def check_rate_limit(attempts_dict: dict, client_ip: str, max_attempts: int, lockout_minutes: int = LOCKOUT_MINUTES) -> None:
+    """
+    Check if an IP has exceeded rate limits.
+    Raises HTTPException if rate limit is exceeded.
+    """
+    now = datetime.now()
+    attempts = attempts_dict[client_ip]
+    # Clean up old attempts
+    attempts = [t for t in attempts if now - t < timedelta(minutes=lockout_minutes)]
+    attempts_dict[client_ip] = attempts
+
+    if len(attempts) >= max_attempts:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many attempts. Try again in {lockout_minutes} minutes."
+        )
+
+def record_attempt(attempts_dict: dict, client_ip: str) -> None:
+    """Record a failed attempt for an IP address."""
+    attempts_dict[client_ip].append(datetime.now())
+
+def clear_attempts(attempts_dict: dict, client_ip: str) -> None:
+    """Clear all attempts for an IP address (on success)."""
+    attempts_dict[client_ip] = []
 
 # Authentication configuration
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -133,17 +162,9 @@ class ProfileUpdateRequest(BaseModel):
 @router.post("/login")
 def login(request: LoginRequest, request_obj: Request):
     client_ip = request_obj.client.host if request_obj.client else "unknown"
-    
+
     # Rate limiting
-    now = datetime.now()
-    attempts = login_attempts[client_ip]
-    attempts = [t for t in attempts if now - t < timedelta(minutes=LOCKOUT_MINUTES)]
-    
-    if len(attempts) >= MAX_ATTEMPTS:
-        raise HTTPException(
-            status_code=429, 
-            detail=f"Too many login attempts. Try again in {LOCKOUT_MINUTES} minutes."
-        )
+    check_rate_limit(login_attempts, client_ip, MAX_LOGIN_ATTEMPTS)
 
     user = database.get_user_by_username(request.username)
     verified = False
@@ -156,12 +177,12 @@ def login(request: LoginRequest, request_obj: Request):
 
     if user and verified:
         # Clear attempts on success
-        login_attempts[client_ip] = []
+        clear_attempts(login_attempts, client_ip)
         token = str(uuid.uuid4())
         database.create_session(token, user['id'])
-        
+
         response = JSONResponse(content={
-            "status": "ok", 
+            "status": "ok",
             "token": token,
             "user": {
                 "id": user['id'],
@@ -171,20 +192,19 @@ def login(request: LoginRequest, request_obj: Request):
             }
         })
         response.set_cookie(
-            key="auth_token", 
-            value=token, 
-            httponly=True, 
+            key="auth_token",
+            value=token,
+            httponly=True,
             max_age=86400 * 30,
             path="/",
             secure=os.getenv('NOMAD_SECURE_COOKIES', 'false').lower() == 'true',
             samesite="lax"
         )
         return response
-    
+
     # Record failed attempt
-    attempts.append(now)
-    login_attempts[client_ip] = attempts
-    
+    record_attempt(login_attempts, client_ip)
+
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
 # Dependency for protecting routes
@@ -217,12 +237,21 @@ def list_users(admin=Depends(get_current_admin)):
     return database.get_all_users()
 
 @router.post("/users")
-def create_user(request: UserCreateRequest, admin=Depends(get_current_admin)):
+def create_user(request: UserCreateRequest, request_obj: Request, admin=Depends(get_current_admin)):
+    client_ip = request_obj.client.host if request_obj.client else "unknown"
+
+    # Rate limiting to prevent user creation spam
+    check_rate_limit(user_creation_attempts, client_ip, MAX_USER_CREATION_ATTEMPTS, lockout_minutes=5)
+
     if database.get_user_by_username(request.username):
         raise HTTPException(status_code=400, detail="Username already exists")
-    
+
     h = pwd_context.hash(request.password)
     user_id = database.create_user(request.username, h, is_admin=request.is_admin)
+
+    # Record attempt (even on success) to prevent spam
+    record_attempt(user_creation_attempts, client_ip)
+
     return {"status": "ok", "user_id": user_id}
 
 @router.delete("/users/{user_id}")
@@ -265,13 +294,24 @@ def update_profile(request: ProfileUpdateRequest, user_id=Depends(get_current_us
     return {"status": "ok"}
 
 @router.post("/change-password")
-def change_password(request: PasswordChangeRequest, user_id=Depends(get_current_user_id)):
+def change_password(request: PasswordChangeRequest, request_obj: Request, user_id=Depends(get_current_user_id)):
+    client_ip = request_obj.client.host if request_obj.client else "unknown"
+
+    # Rate limiting to prevent brute forcing current password
+    check_rate_limit(password_change_attempts, client_ip, MAX_PASSWORD_CHANGE_ATTEMPTS)
+
     user = database.get_user_by_id(user_id)
     if not user or not pwd_context.verify(request.current_password, user['password_hash']):
+        record_attempt(password_change_attempts, client_ip)
         raise HTTPException(status_code=400, detail="Current password incorrect")
-    
+
+    # Clear attempts on success
+    clear_attempts(password_change_attempts, client_ip)
+
     new_hash = pwd_context.hash(request.new_password)
     database.update_user_password(user_id, new_hash)
+    # Clear must_change_password flag if it was set
+    database.db.execute("UPDATE users SET must_change_password = 0 WHERE id = ?", (user_id,))
     return {"status": "ok", "message": "Password changed successfully"}
 
 @router.post("/logout")
