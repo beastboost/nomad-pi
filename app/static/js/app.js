@@ -3181,6 +3181,15 @@ function cancelUpload() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initTheme(); // Initialize theme before anything else
+
+    // Ensure all sections except home are hidden on page load
+    document.querySelectorAll('main > section').forEach(section => {
+        if (section.id !== 'home') {
+            section.classList.add('hidden');
+            section.style.display = 'none';
+        }
+    });
+
     checkAuth(); // Check auth on load
 
     const setupHintEl = document.getElementById('setup-hint');
