@@ -242,8 +242,9 @@ def safe_fs_path_from_web_path(web_path: str):
     if len(web_path) > 4096:
         raise HTTPException(status_code=400, detail="Path too long")
 
-    # 3. Check for dangerous characters that could be used for command injection
-    dangerous_chars = ['`', '$', ';', '&', '|', '<', '>','(', ')']
+    # 3. Check for shell metacharacters that could be used for command injection
+    # NOTE: We allow parentheses () as they're common in media filenames like "Movie (2024).mp4"
+    dangerous_chars = ['`', '$', ';', '&', '|', '<', '>', '\n', '\r']
     if any(char in web_path for char in dangerous_chars):
         raise HTTPException(status_code=400, detail="Invalid path - dangerous characters detected")
 
