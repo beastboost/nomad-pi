@@ -310,8 +310,6 @@ def change_password(request: PasswordChangeRequest, request_obj: Request, user_i
 
     new_hash = pwd_context.hash(request.new_password)
     database.update_user_password(user_id, new_hash)
-    # Clear must_change_password flag if it was set
-    database.db.execute("UPDATE users SET must_change_password = 0 WHERE id = ?", (user_id,))
     return {"status": "ok", "message": "Password changed successfully"}
 
 @router.post("/logout")
