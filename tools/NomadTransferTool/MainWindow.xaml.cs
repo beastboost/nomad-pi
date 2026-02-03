@@ -2384,7 +2384,7 @@ namespace NomadTransferTool
             if (items == null || items.Count() == 0) return;
 
             string? targetPath = null;
-            bool effectiveUseSamba = UseSamba;
+            bool effectiveUseSamba = false;
             long requiredSpace = 0;
 
             // Calculate total required space first
@@ -2404,33 +2404,45 @@ namespace NomadTransferTool
                 }
             }
 
-            if (UseSamba)
+            var selectedDrive = DriveList.SelectedItem as DriveInfoModel;
+
+            if (selectedDrive != null && !string.IsNullOrWhiteSpace(selectedDrive.Name))
             {
-                if (string.IsNullOrEmpty(SambaPath))
+                targetPath = selectedDrive.Name;
+                effectiveUseSamba = targetPath.StartsWith("\\\\");
+            }
+            else if (UseSamba && !string.IsNullOrWhiteSpace(SambaPath))
+            {
+                targetPath = SambaPath;
+                if (!targetPath.StartsWith("\\\\"))
+                    targetPath = "\\\\" + targetPath.TrimStart('\\');
+
+                effectiveUseSamba = targetPath.StartsWith("\\\\");
+            }
+
+            if (effectiveUseSamba)
+            {
+                if (string.IsNullOrWhiteSpace(targetPath))
                 {
-                    System.Windows.MessageBox.Show("Samba path is required when Samba transfer is enabled.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show("Select a destination or configure a Samba path.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-
-                // Ensure the path starts with \\
-                if (!SambaPath.StartsWith("\\\\"))
-                {
-                    SambaPath = "\\\\" + SambaPath.TrimStart('\\');
-                }
-                
-                targetPath = SambaPath;
 
                 // Check for Samba Failover (10% threshold)
                 try {
                     long freeBytes, totalBytes, totalFreeBytes;
-                    if (GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes) && totalBytes > 0)
+                    if (GetDiskFreeSpaceEx(targetPath, out freeBytes, out totalBytes, out totalFreeBytes) && totalBytes > 0)
                     {
                         double percentFree = (double)freeBytes / totalBytes;
                         if (percentFree < 0.10)
                         {
                             AddLog($"Samba share is low on space ({percentFree:P1} free). Checking for USB failover...");
                             // Look for a USB drive with enough space
-                            var usbDrive = Drives.FirstOrDefault(d => d.Name != SambaPath && d.IsMounted && d.AvailableFreeSpace > requiredSpace);
+                            var usbDrive = Drives.FirstOrDefault(d =>
+                                !string.IsNullOrWhiteSpace(d.Name) &&
+                                !d.Name.StartsWith("\\\\") &&
+                                d.IsMounted &&
+                                d.AvailableFreeSpace > requiredSpace);
                             if (usbDrive != null)
                             {
                                 AddLog($"FAILOVER: Switching to USB drive {usbDrive.Name} ({usbDrive.Label}) as fail-safe.");
@@ -2444,10 +2456,6 @@ namespace NomadTransferTool
                         }
                     }
                 } catch (Exception ex) { AddLog($"Failover check error: {ex.Message}"); }
-            }
-            else
-            {
-                targetPath = (DriveList.SelectedItem as DriveInfoModel)?.Name;
             }
             
             // Disk space check (only for local drives - starts with drive letter like C:\)
