@@ -233,6 +233,20 @@ def safe_fs_path_from_web_path(web_path: str):
     if not isinstance(web_path, str) or not web_path:
         raise HTTPException(status_code=400, detail="Invalid path")
 
+    # Security checks
+    # 1. Check for null byte injection
+    if '\x00' in web_path:
+        raise HTTPException(status_code=400, detail="Invalid path - null byte detected")
+
+    # 2. Check for excessive path length (4096 is typical Linux PATH_MAX)
+    if len(web_path) > 4096:
+        raise HTTPException(status_code=400, detail="Path too long")
+
+    # 3. Check for dangerous characters that could be used for command injection
+    dangerous_chars = ['`', '$', ';', '&', '|', '<', '>','(', ')']
+    if any(char in web_path for char in dangerous_chars):
+        raise HTTPException(status_code=400, detail="Invalid path - dangerous characters detected")
+
     # 1. Handle absolute paths for Windows (e.g., C:/...)
     if platform.system() == "Windows" and len(web_path) >= 2 and web_path[1] == ":":
         p = pathlib.Path(web_path).resolve()
@@ -468,13 +482,33 @@ async def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, m
     if not api_key:
         raise HTTPException(status_code=400, detail="OMDb not configured")
 
+    # Create cache key from parameters
+    cache_parts = []
+    if imdb_id:
+        cache_parts.append(f"i:{imdb_id}")
+    elif title:
+        cache_parts.append(f"t:{title}")
+    else:
+        raise HTTPException(status_code=400, detail="Missing title")
+
+    if year:
+        cache_parts.append(f"y:{year}")
+    if media_type:
+        cache_parts.append(f"type:{media_type}")
+
+    cache_key = "|".join(cache_parts)
+
+    # Check cache first
+    cached_data = database.get_omdb_cache(cache_key)
+    if cached_data is not None:
+        return cached_data
+
+    # Fetch from OMDb API
     params = {"apikey": api_key, "plot": "short"}
     if imdb_id:
         params["i"] = imdb_id
     elif title:
         params["t"] = title
-    else:
-        raise HTTPException(status_code=400, detail="Missing title")
 
     if year:
         params["y"] = str(year)
@@ -493,6 +527,10 @@ async def omdb_fetch(title: str = None, year: str = None, imdb_id: str = None, m
 
     if str(data.get("Response") or "").lower() == "false":
         raise HTTPException(status_code=404, detail=str(data.get("Error") or "Not found"))
+
+    # Cache the successful response
+    database.set_omdb_cache(cache_key, data)
+
     return data
 
 async def omdb_search(query: str, year: str = None, media_type: str = None):
@@ -500,6 +538,21 @@ async def omdb_search(query: str, year: str = None, media_type: str = None):
     if not api_key:
         raise HTTPException(status_code=400, detail="OMDb not configured")
 
+    # Create cache key from parameters
+    cache_parts = [f"s:{query}"]
+    if year:
+        cache_parts.append(f"y:{year}")
+    if media_type:
+        cache_parts.append(f"type:{media_type}")
+
+    cache_key = "|".join(cache_parts)
+
+    # Check cache first
+    cached_data = database.get_omdb_cache(cache_key)
+    if cached_data is not None:
+        return cached_data
+
+    # Fetch from OMDb API
     params = {"apikey": api_key, "s": query}
     if year:
         params["y"] = str(year)
@@ -518,6 +571,10 @@ async def omdb_search(query: str, year: str = None, media_type: str = None):
 
     if str(data.get("Response") or "").lower() == "false":
         raise HTTPException(status_code=404, detail=str(data.get("Error") or "Not found"))
+
+    # Cache the successful response
+    database.set_omdb_cache(cache_key, data)
+
     return data
 
 async def cache_remote_poster(poster_url: str):
@@ -1815,7 +1872,8 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                 try:
                     meta = await omdb_fetch(title=q_title, year=q_year, media_type="movie")
                     if meta: break
-                except: pass
+                except Exception:
+                    pass
 
             # Try search if direct fetch fails
             try:
@@ -1843,7 +1901,8 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                                     y_val = int(re.search(r'\d{4}', y_str).group())
                                     if abs(y_val - int(q_year)) <= 1:
                                         score += 15
-                                except: pass
+                                except (AttributeError, ValueError, TypeError):
+                                    pass
                             
                         # Boost movies/series based on the inferred type
                         if r.get("Type") == media_type:
@@ -1875,7 +1934,7 @@ async def get_metadata(path: str = Query(...), fetch: bool = Query(default=False
                 
                 if best and best_score > 0.5:
                     meta = await omdb_fetch(imdb_id=best.get("imdbID"))
-        except:
+        except Exception:
             pass
 
     if not meta:
@@ -1919,7 +1978,7 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
     """Get technical info about a media file using ffprobe."""
     try:
         fs_path = safe_fs_path_from_web_path(path)
-    except:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
 
     if not os.path.isfile(fs_path):
@@ -1990,7 +2049,7 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
         if path.startswith("/data/"):
             try:
                 fs_path = safe_fs_path_from_web_path(path)
-            except:
+            except Exception:
                 raise HTTPException(status_code=400, detail="Invalid data path")
         else:
             # Absolute path (e.g. D:\Music)
@@ -2117,7 +2176,7 @@ def browse_files(path: str = Query(default="/data"), user_id: int = Depends(get_
                 
                 try:
                     size = os.path.getsize(full_path) if not is_dir else 0
-                except:
+                except OSError:
                     size = 0
 
                 items.append({
@@ -3279,7 +3338,7 @@ def delete_media(path: str, background_tasks: BackgroundTasks, user_id: int = De
             if not remaining or all(f.lower() in junk for f in remaining):
                 try:
                     shutil.rmtree(parent)
-                except:
+                except OSError:
                     pass
                 
         # Trigger MiniDLNA rescan after deletion
@@ -3435,7 +3494,8 @@ def fix_duplicates(background_tasks: BackgroundTasks, user_id: int = Depends(get
         for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
             try:
                 build_library_index(cat)
-            except: pass
+            except Exception:
+                pass
         trigger_dlna_rescan()
 
     background_tasks.add_task(run_fix)

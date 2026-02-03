@@ -74,8 +74,33 @@ function getCookie(name) {
 
 // Theme Management
 function initTheme() {
-    const savedTheme = localStorage.getItem('nomadpi_theme') || 'default';
+    let savedTheme = localStorage.getItem('nomadpi_theme');
+
+    // If no saved preference, detect system preference
+    if (!savedTheme) {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            savedTheme = 'dark-theme';
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            savedTheme = 'light-theme';
+        } else {
+            savedTheme = 'default';
+        }
+    }
+
     applyTheme(savedTheme, false);
+
+    // Listen for system theme changes (if user hasn't manually set a theme)
+    if (window.matchMedia) {
+        const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        darkModeQuery.addEventListener('change', (e) => {
+            // Only auto-switch if user hasn't manually set a theme
+            const manualTheme = localStorage.getItem('nomadpi_theme');
+            if (!manualTheme) {
+                const newTheme = e.matches ? 'dark-theme' : 'light-theme';
+                applyTheme(newTheme, true);
+            }
+        });
+    }
 }
 
 function toggleTheme() {
