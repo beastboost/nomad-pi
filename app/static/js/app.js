@@ -823,33 +823,45 @@ async function refreshTailscaleStatus() {
         let controlsHtml = '';
         let showAuth = false;
 
-        if (!status.installed) {
-            html = `<div class="badge badge-warning"><i class="fas fa-exclamation-triangle"></i> Not Installed</div>
-                    <p style="margin-top:10px; font-size:0.9em;">Tailscale is not installed on this system.</p>`;
-        } else if (!status.service_running) {
-            html = `<div class="badge badge-danger"><i class="fas fa-times-circle"></i> Service Stopped</div>`;
-            controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
-        } else if (status.connected) {
-            html = `<div class="badge badge-success"><i class="fas fa-check-circle"></i> Connected</div>`;
-            
-            // Get IP
-            try {
-                const ipRes = await fetch(`${API_BASE}/system/tailscale/ip`, { headers: getAuthHeaders() });
-                const ipData = await ipRes.json();
-                if (ipData.ip) {
-                    html += `<div style="margin-top:10px; font-family:monospace; background:rgba(0,0,0,0.2); padding:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
-                        <span>${ipData.ip}</span>
-                        <button onclick="copyToClipboard('${ipData.ip}')" class="secondary btn-sm"><i class="fas fa-copy"></i></button>
-                    </div>`;
-                }
-            } catch (e) {}
+        // Header with state and refresh button
+        const stateClass = status.connected ? 'success' : (status.backend_state === 'NeedsLogin' ? 'warning' : 'secondary');
+        const stateIcon = status.connected ? 'check-circle' : (status.backend_state === 'NeedsLogin' ? 'key' : 'circle');
+        
+        html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div class="badge badge-${stateClass}"><i class="fas fa-${stateIcon}"></i> ${status.backend_state || 'Unknown'}</div>
+            <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+        </div>`;
 
-            controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>
-                           <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
+        if (!status.installed) {
+            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> Tailscale is not installed on this system.</p>`;
+        } else if (!status.service_running) {
+            html += `<p style="margin-top:10px; color:var(--text-muted);">The Tailscale system service is stopped.</p>`;
+            controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
         } else {
-            html = `<div class="badge badge-secondary"><i class="fas fa-circle"></i> Disconnected</div>`;
-            controlsHtml = `<button onclick="connectTailscale()" class="primary"><i class="fas fa-plug"></i> Connect</button>`;
-            showAuth = true;
+            // Service is running, show details
+            if (status.ipv4) {
+                 html += `<div style="margin-top:10px; font-family:monospace; background:rgba(0,0,0,0.2); padding:10px; border-radius:6px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="color:var(--text-muted); font-size:0.8em;">Tailscale IP</span>
+                        <button onclick="copyToClipboard('${status.ipv4}')" class="secondary btn-sm" style="padding:2px 6px; font-size:0.7em;"><i class="fas fa-copy"></i></button>
+                    </div>
+                    <div style="font-size:1.1em; font-weight:bold; letter-spacing:0.5px;">${status.ipv4}</div>
+                    ${status.magic_dns ? `<div style="font-size:0.8em; color:var(--text-muted); margin-top:4px;">${status.magic_dns}</div>` : ''}
+                </div>`;
+            }
+
+            if (status.peer_count > 0) {
+                 html += `<div style="margin-top:8px; font-size:0.9em; color:var(--text-muted);"><i class="fas fa-network-wired"></i> ${status.peer_count} Peer${status.peer_count === 1 ? '' : 's'} Connected</div>`;
+            }
+
+            if (status.connected) {
+                controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>
+                               <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
+            } else {
+                controlsHtml = `<button onclick="connectTailscale()" class="primary"><i class="fas fa-plug"></i> Connect</button>
+                               <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
+                showAuth = true;
+            }
         }
 
         statusDiv.innerHTML = html;
@@ -858,7 +870,8 @@ async function refreshTailscaleStatus() {
 
     } catch (e) {
         console.error('Tailscale status error:', e);
-        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div>`;
+        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.8em;">${e.message}</p>
+        <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" style="margin-top:8px;">Try Again</button>`;
     }
 }
 

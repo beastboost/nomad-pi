@@ -1597,12 +1597,19 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
                 timeout=5
             )
 
+            # Get IP and other details
+            self_node = status_data.get("Self", {})
+            tailscale_ips = self_node.get("TailscaleIPs", [])
+            ipv4 = next((ip for ip in tailscale_ips if "." in ip), None)
+            
             return {
                 "installed": True,
                 "connected": backend_state == "Running",
                 "service_running": True,
                 "backend_state": backend_state,
-                "self": status_data.get("Self", {}),
+                "self": self_node,
+                "ipv4": ipv4,
+                "magic_dns": status_data.get("MagicDNSSuffix", ""),
                 "peer_count": len(status_data.get("Peer", {})),
                 "status_output": status_simple.stdout
             }
