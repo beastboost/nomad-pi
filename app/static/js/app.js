@@ -800,6 +800,136 @@ function showSection(id) {
             }
         }, 5000);
     }
+    if (id === 'settings') {
+        refreshTailscaleStatus();
+    }
+}
+
+// Tailscale Functions
+async function refreshTailscaleStatus() {
+    const statusDiv = document.getElementById('tailscale-status');
+    const controlsDiv = document.getElementById('tailscale-controls');
+    const authDiv = document.getElementById('tailscale-auth-section');
+    
+    if (!statusDiv) return;
+
+    statusDiv.innerHTML = '<div class="spinner-small"></div> Checking status...';
+
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/status`, { headers: getAuthHeaders() });
+        const status = await res.json();
+
+        let html = '';
+        let controlsHtml = '';
+        let showAuth = false;
+
+        if (!status.installed) {
+            html = `<div class="badge badge-warning"><i class="fas fa-exclamation-triangle"></i> Not Installed</div>
+                    <p style="margin-top:10px; font-size:0.9em;">Tailscale is not installed on this system.</p>`;
+        } else if (!status.service_running) {
+            html = `<div class="badge badge-danger"><i class="fas fa-times-circle"></i> Service Stopped</div>`;
+        } else if (status.connected) {
+            html = `<div class="badge badge-success"><i class="fas fa-check-circle"></i> Connected</div>`;
+            
+            // Get IP
+            try {
+                const ipRes = await fetch(`${API_BASE}/system/tailscale/ip`, { headers: getAuthHeaders() });
+                const ipData = await ipRes.json();
+                if (ipData.ip) {
+                    html += `<div style="margin-top:10px; font-family:monospace; background:rgba(0,0,0,0.2); padding:8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>${ipData.ip}</span>
+                        <button onclick="copyToClipboard('${ipData.ip}')" class="secondary btn-sm"><i class="fas fa-copy"></i></button>
+                    </div>`;
+                }
+            } catch (e) {}
+
+            controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>`;
+        } else {
+            html = `<div class="badge badge-secondary"><i class="fas fa-circle"></i> Disconnected</div>`;
+            controlsHtml = `<button onclick="connectTailscale()" class="primary"><i class="fas fa-plug"></i> Connect</button>`;
+            showAuth = true;
+        }
+
+        statusDiv.innerHTML = html;
+        if (controlsDiv) controlsDiv.innerHTML = controlsHtml;
+        if (authDiv) authDiv.style.display = showAuth ? 'block' : 'none';
+
+    } catch (e) {
+        console.error('Tailscale status error:', e);
+        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div>`;
+    }
+}
+
+async function connectTailscale() {
+    showToast('Connecting to Tailscale...', 'info');
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/up`, { 
+            method: 'POST',
+            headers: getAuthHeaders() 
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast('Connected to Tailscale!', 'success');
+            refreshTailscaleStatus();
+        } else if (data.status === 'needs_auth') {
+            const urlMatch = data.output && data.output.match(/https:\/\/[^\s]+/);
+            if (urlMatch) {
+                if (confirm(`Authentication required. Open Tailscale login page?\n\n${urlMatch[0]}`)) {
+                    window.open(urlMatch[0], '_blank');
+                }
+            } else {
+                showToast('Authentication required. Check logs.', 'warning');
+            }
+        } else {
+            showToast('Connection failed: ' + (data.detail || 'Unknown error'), 'error');
+        }
+    } catch (e) {
+        showToast('Connection failed', 'error');
+    }
+}
+
+async function disconnectTailscale() {
+    if (!confirm('Disconnect from Tailscale VPN?')) return;
+    try {
+        await fetch(`${API_BASE}/system/tailscale/down`, { 
+            method: 'POST',
+            headers: getAuthHeaders() 
+        });
+        showToast('Disconnected', 'info');
+        refreshTailscaleStatus();
+    } catch (e) {
+        showToast('Disconnect failed', 'error');
+    }
+}
+
+async function saveTailscaleKey() {
+    const input = document.getElementById('tailscale-auth-key');
+    if (!input || !input.value) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/set-auth-key`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ auth_key: input.value })
+        });
+        if (res.ok) {
+            showToast('Auth key saved', 'success');
+            input.value = '';
+        } else {
+            showToast('Failed to save key', 'error');
+        }
+    } catch (e) {
+        showToast('Error saving key', 'error');
+    }
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied to clipboard', 'success');
+    }).catch(err => {
+        console.error('Could not copy text: ', err);
+    });
 }
 
 async function loadMedia(category) {
