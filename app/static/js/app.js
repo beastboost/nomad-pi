@@ -828,6 +828,7 @@ async function refreshTailscaleStatus() {
                     <p style="margin-top:10px; font-size:0.9em;">Tailscale is not installed on this system.</p>`;
         } else if (!status.service_running) {
             html = `<div class="badge badge-danger"><i class="fas fa-times-circle"></i> Service Stopped</div>`;
+            controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
         } else if (status.connected) {
             html = `<div class="badge badge-success"><i class="fas fa-check-circle"></i> Connected</div>`;
             
@@ -843,7 +844,8 @@ async function refreshTailscaleStatus() {
                 }
             } catch (e) {}
 
-            controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>`;
+            controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>
+                           <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
         } else {
             html = `<div class="badge badge-secondary"><i class="fas fa-circle"></i> Disconnected</div>`;
             controlsHtml = `<button onclick="connectTailscale()" class="primary"><i class="fas fa-plug"></i> Connect</button>`;
@@ -900,6 +902,28 @@ async function disconnectTailscale() {
         refreshTailscaleStatus();
     } catch (e) {
         showToast('Disconnect failed', 'error');
+    }
+}
+
+async function controlTailscaleService(action) {
+    if (!confirm(`${action === 'start' ? 'Start' : 'Stop'} Tailscale service?`)) return;
+    showToast(`${action === 'start' ? 'Starting' : 'Stopping'} Tailscale service...`, 'info');
+    
+    try {
+        const res = await fetch(`${API_BASE}/system/tailscale/service/${action}`, { 
+            method: 'POST',
+            headers: getAuthHeaders() 
+        });
+        
+        if (res.ok) {
+            showToast(`Service ${action}ed`, 'success');
+            setTimeout(refreshTailscaleStatus, 2000); // Wait a bit for service to come up
+        } else {
+            const data = await res.json();
+            showToast(`Failed: ${data.detail}`, 'error');
+        }
+    } catch (e) {
+        showToast('Service control failed', 'error');
     }
 }
 

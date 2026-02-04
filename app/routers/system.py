@@ -1619,6 +1619,24 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"installed": True, "connected": False, "error": str(e)}
 
+@router.post("/tailscale/service/{action}")
+def tailscale_service_control(action: str, user_id: int = Depends(get_current_user_id)):
+    """Start or stop the Tailscale system service"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale service control only available on Linux")
+        
+    if action not in ["start", "stop", "restart"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    try:
+        cmd = ["sudo", "-n", "systemctl", action, "tailscaled"]
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=10)
+        return {"status": "success", "message": f"Service {action}ed successfully"}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to {action} service: {e.stderr or str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/tailscale/ip")
 def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
     """Get Tailscale IP address"""
