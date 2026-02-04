@@ -863,6 +863,12 @@ async function refreshTailscaleStatus() {
                 showAuth = true;
             }
         }
+        
+        // Always allow showing auth key input if not connected (even if service stopped)
+        // or if explicitly toggled (we could add a toggle later)
+        if (!status.connected) {
+            showAuth = true;
+        }
 
         statusDiv.innerHTML = html;
         if (controlsDiv) controlsDiv.innerHTML = controlsHtml;

@@ -1666,6 +1666,15 @@ def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"ip": None, "error": str(e)}
 
+class TailscaleKeyRequest(BaseModel):
+    auth_key: str
+
+@router.post("/tailscale/set-auth-key")
+def set_tailscale_key(request: TailscaleKeyRequest, user_id: int = Depends(get_current_user_id)):
+    """Save Tailscale Auth Key to database"""
+    database.set_setting("tailscale_auth_key", request.auth_key)
+    return {"status": "success", "message": "Auth key saved"}
+
 @router.post("/tailscale/up")
 def tailscale_up(user_id: int = Depends(get_current_user_id)):
     """Connect to Tailscale network"""
