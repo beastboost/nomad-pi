@@ -22,7 +22,8 @@ update_status() {
                "$1" "$escaped_msg" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp_file"
     fi
     chmod 644 "$tmp_file" 2>/dev/null || true
-    mv -f "$tmp_file" "$STATUS_FILE"
+    # Try to move, if fails (e.g. permission denied), try sudo, otherwise fail silently so script doesn't crash
+    mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || sudo mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || true
 }
 
 update_status 5 "Checking System Health..."
@@ -111,11 +112,36 @@ update_status 50 "Installing system dependencies..."
 echo "Installing/Updating system dependencies..."
 # Ensure all required system packages are present
 # We only run update if install fails to save time on Pi
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools; then
+# Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
+# Note: 7zip replaces p7zip-full on Ubuntu 24.04+
+if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
     echo "Some packages missing, updating list and trying again..." >> update.log
     sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna p7zip-full unar libarchive-tools
+    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
 fi
+
+# Ensure Tailscale is installed (for updates via UI)
+update_status 55 "Checking Tailscale..."
+if command -v tailscale >/dev/null 2>&1; then
+    echo "Tailscale is already installed."
+else
+    echo "Installing Tailscale..."
+    if curl -fsSL https://tailscale.com/install.sh | sh; then
+        echo "Tailscale installed successfully!"
+    else
+        echo "WARNING: Failed to install Tailscale. Check logs."
+    fi
+fi
+
+# Ensure Tailscale service is running
+if command -v tailscale >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet tailscaled 2>/dev/null; then
+        echo "Starting Tailscale service..."
+        sudo systemctl enable tailscaled 2>/dev/null || true
+        sudo systemctl start tailscaled 2>/dev/null || true
+    fi
+fi
+
 update_status 60 "Installing Python dependencies..."
 echo "Installing Python dependencies..."
 
@@ -162,6 +188,9 @@ if [ ! -f "./venv/bin/uvicorn" ]; then
     ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
 fi
 
+# Ensure Tailscale is installed (moved up)
+# update_status 80 "Checking Tailscale..." (Logic moved up)
+
 update_status 85 "Running database migrations..."
 echo "Running database migrations..."
 if [ -f "migrate_db.py" ]; then
@@ -173,27 +202,127 @@ else
 fi
 
 
-# Fix MiniDLNA permissions and sudoers after update
+# Ensure data directories exist
+echo "Ensuring media directories exist..." >> update.log
+mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
+
+# Install MiniDLNA if not present
+if ! command -v minidlnad >/dev/null 2>&1; then
+    echo "Installing MiniDLNA..." >> update.log
+    sudo apt-get update >> update.log 2>&1
+    sudo apt-get install -y minidlna >> update.log 2>&1
+fi
+
+# Add minidlna user to group and fix permissions
+if id "minidlna" &>/dev/null; then
+    echo "Configuring minidlna permissions..." >> update.log
+
+    # Add minidlna to user's group so it can access files
+    sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
+
+    # Get the actual home directory path
+    USER_HOME=$(eval echo ~$REAL_USER)
+
+    # CRITICAL: Home directory must have group read+execute for minidlna user to traverse
+    # Use 755 (rwxr-xr-x) to allow group and others to read and traverse
+    sudo chmod 755 "$USER_HOME" 2>/dev/null || true
+
+    # Make nomad-pi directory traversable and readable
+    sudo chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
+
+    # Set ownership and permissions on data directory
+    sudo chown -R $REAL_USER:$REAL_USER "$SCRIPT_DIR/data" 2>/dev/null || true
+    sudo chmod -R 755 "$SCRIPT_DIR/data" 2>/dev/null || true
+fi
+
+# Fix MiniDLNA permissions and configuration
 echo "Checking MiniDLNA configuration..." >> update.log
+
+MINIDLNA_CONF="/etc/minidlna.conf"
+MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
+DLNA_CONFIG_CHANGED=0
+CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
+
+sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+sudo chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+
+# Fix inotify max_user_watches limit for MiniDLNA file monitoring
+# MiniDLNA needs to watch for file changes, increase the limit from default 8192 to 524288
+if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
+    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
+    # Make it persistent across reboots
+    if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf 2>/dev/null; then
+        echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
+    fi
+fi
+
+# Build the complete config in a temp file
+cat > "$MINIDLNA_TEMP" <<EOL
+# Scan the entire data directory (includes external drives under data/external)
+media_dir=$SCRIPT_DIR/data
+
+# Database and logging
+db_dir=/var/cache/minidlna
+log_dir=/var/log/minidlna
+log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
+
+# Network settings
+friendly_name=$CURRENT_HOSTNAME
+port=8200
+
+# File monitoring - scan every 60 seconds for changes
+inotify=yes
+notify_interval=60
+
+# Container settings - use "." for hierarchical folders
+root_container=.
+
+# Presentation
+presentation_url=http://$CURRENT_HOSTNAME.local:8000/
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+
+# Optimization
+max_connections=50
+strict_dlna=no
+enable_tivo=no
+wide_links=yes
+
+# Exclusions - skip junk folders from Windows/Mac/Linux systems
+# This prevents log spam from scanning recycle bins, system folders, etc.
+exclude=\$RECYCLE.BIN,\$Recycle.Bin,Recycled,System Volume Information,.Trashes,.Trash-*,.TemporaryItems,.Spotlight-V100,.fseventsd,lost+found,.AppleDouble,.DS_Store,Thumbs.db
+EOL
+
+# Only update if config changed (use diff like setup.sh does)
+if [ ! -f "$MINIDLNA_CONF" ] || ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
+    echo "Updating MiniDLNA configuration..." >> update.log
+    sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
+    DLNA_CONFIG_CHANGED=1
+else
+    echo "MiniDLNA configuration unchanged." >> update.log
+fi
+rm -f "$MINIDLNA_TEMP"
 
 # Re-verify sudoers configuration (in case it was removed by system update)
 REAL_USER=${SUDO_USER:-$USER}
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
 MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
+CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 
-if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
-    echo "Re-applying sudoers permissions for MiniDLNA..." >> update.log
+if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHOWN_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHMOD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
+    echo "Re-applying sudoers permissions..." >> update.log
     MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
     UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
     SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
     REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
     NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
+    TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
 
     # Write to temp file first and validate before installing
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH
+$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then
@@ -207,15 +336,20 @@ EOL
 fi
 
 if command -v minidlnad >/dev/null 2>&1; then
-    echo "Fixing MiniDLNA cache permissions..." >> update.log
+    echo "Configuring MiniDLNA service..." >> update.log
+
+    # Setup cache directories
+    sudo mkdir -p /var/cache/minidlna /var/log 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
 
-    # Restart MiniDLNA if it's running
-    if systemctl is-active --quiet minidlna; then
-        echo "Restarting MiniDLNA..." >> update.log
-        sudo systemctl restart minidlna >> update.log 2>&1 || echo "MiniDLNA restart failed (non-critical)" >> update.log
-    fi
+    # Always rebuild DLNA database during updates to ensure fresh state
+    echo "Rebuilding MiniDLNA database..." >> update.log
+    sudo systemctl stop minidlna 2>/dev/null || true
+    sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
+    sudo systemctl enable minidlna >> update.log 2>&1
+    sudo systemctl start minidlna >> update.log 2>&1
+    # MiniDLNA will automatically scan on startup when database is missing
 fi
 
 update_status 90 "Update complete. Finalizing..."

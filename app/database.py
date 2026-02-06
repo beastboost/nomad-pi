@@ -3,9 +3,20 @@ import os
 import json
 import re
 import threading
-from queue import Queue
+from queue import Queue, Empty, Full
 from typing import List, Dict, Optional
 # Removed heavy scikit-learn/numpy imports for SBC stability
+
+# Detect if running on Raspberry Pi for resource-constrained optimization
+def is_raspberry_pi():
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            model = f.read().lower()
+            return 'raspberry pi' in model
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
+
+IS_RPI = is_raspberry_pi()
 
 def sanitize_like_pattern(pattern: str) -> str:
     """
@@ -22,8 +33,8 @@ def sanitize_like_pattern(pattern: str) -> str:
 
 DB_PATH = "data/nomad.db"
 
-# Connection Pool
-_connection_pool = Queue(maxsize=10)
+# Connection Pool - reduced size for Raspberry Pi
+_connection_pool = Queue(maxsize=5 if IS_RPI else 10)
 _pool_lock = threading.Lock()
 
 def natural_sort_key_list(s):
@@ -47,7 +58,7 @@ def get_db():
         except (sqlite3.ProgrammingError, sqlite3.OperationalError):
             # Connection closed or invalid, create new one below
             pass
-    except:
+    except Empty:
         # Pool empty, create new connection below
         pass
 
@@ -59,7 +70,9 @@ def get_db():
     # Enable performance settings
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+    # Reduced cache size for Raspberry Pi: 16MB for Pi, 64MB for others
+    cache_size = -16000 if IS_RPI else -64000
+    conn.execute(f"PRAGMA cache_size={cache_size}")
     conn.execute("PRAGMA temp_store=MEMORY")
     return conn
 
@@ -69,11 +82,12 @@ def return_db(conn):
         return
     try:
         _connection_pool.put_nowait(conn)
-    except:
+    except Full:
         # Pool full, close connection
         try:
             conn.close()
-        except:
+        except Exception:
+            # Ignore errors when closing connection
             pass
 
 def init_db():
@@ -167,6 +181,14 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS omdb_cache (
+                cache_key TEXT PRIMARY KEY,
+                response_data TEXT,
+                cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+        ''')
         
         # Migrations for existing tables
         try:
@@ -200,6 +222,26 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_library_mtime ON library_index(mtime)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_progress_path ON progress(path)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_metadata_path ON file_metadata(path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_omdb_expires ON omdb_cache(expires_at)")
+
+        # Additional performance indexes
+        # For "recently watched" and watch history queries
+        c.execute("CREATE INDEX IF NOT EXISTS idx_progress_user_lastplayed ON progress(user_id, last_played DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_progress_user_playcount ON progress(user_id, play_count DESC)")
+
+        # For metadata searches
+        c.execute("CREATE INDEX IF NOT EXISTS idx_metadata_title ON file_metadata(title)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_metadata_imdb ON file_metadata(imdb_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_metadata_year ON file_metadata(year)")
+
+        # For library filtering and sorting
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_category_year ON library_index(category, year)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_genre ON library_index(genre)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_library_name ON library_index(name)")
+
+        # For session lookups
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at)")
 
         conn.commit()
     finally:
@@ -315,7 +357,7 @@ def get_profile(user_id: int) -> Optional[dict]:
             if data.get('preferences'):
                 try:
                     data['preferences'] = json.loads(data['preferences'])
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     data['preferences'] = {}
             return data
         return None
@@ -1092,11 +1134,141 @@ def cleanup_sessions():
     try:
         c = conn.cursor()
         c.execute('''
-            DELETE FROM sessions 
+            DELETE FROM sessions
             WHERE created_at < datetime('now', '-' || ? || ' days')
         ''', (SESSION_MAX_AGE_DAYS,))
         conn.commit()
     except Exception as e:
         print(f"Error cleaning up sessions: {e}")
+    finally:
+        return_db(conn)
+
+# OMDb Cache Functions
+OMDB_CACHE_DAYS = 30
+
+def get_omdb_cache(cache_key: str) -> Optional[dict]:
+    """Get cached OMDb response if not expired."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT response_data
+            FROM omdb_cache
+            WHERE cache_key = ? AND expires_at > datetime('now')
+        ''', (cache_key,))
+        row = c.fetchone()
+        if row:
+            try:
+                return json.loads(row[0])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                # Invalid cached data, delete it
+                c.execute('DELETE FROM omdb_cache WHERE cache_key = ?', (cache_key,))
+                conn.commit()
+        return None
+    finally:
+        return_db(conn)
+
+def set_omdb_cache(cache_key: str, response_data: dict):
+    """Cache an OMDb API response."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO omdb_cache (cache_key, response_data, cached_at, expires_at)
+            VALUES (?, ?, datetime('now'), datetime('now', '+' || ? || ' days'))
+            ON CONFLICT(cache_key) DO UPDATE SET
+                response_data = excluded.response_data,
+                cached_at = excluded.cached_at,
+                expires_at = excluded.expires_at
+        ''', (cache_key, json.dumps(response_data), OMDB_CACHE_DAYS))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def cleanup_expired_omdb_cache():
+    """Remove expired OMDb cache entries."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM omdb_cache WHERE expires_at < datetime('now')")
+        conn.commit()
+    except Exception as e:
+        print(f"Error cleaning up OMDb cache: {e}")
+    finally:
+        return_db(conn)
+
+def get_recently_watched(user_id: int, limit: int = 20) -> List[Dict]:
+    """Get recently watched items for a user, ordered by last_played."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT p.path, p.current_time, p.duration, p.play_count, p.last_played,
+                   fm.title, fm.year, fm.poster, fm.media_type, fm.plot, fm.rated, fm.genre
+            FROM progress p
+            LEFT JOIN file_metadata fm ON p.path = fm.path
+            WHERE p.user_id = ? AND p.last_played IS NOT NULL
+            ORDER BY p.last_played DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        rows = c.fetchall()
+        results = []
+        for row in rows:
+            item = {
+                'path': row[0],
+                'current_time': row[1],
+                'duration': row[2],
+                'play_count': row[3],
+                'last_played': row[4],
+                'title': row[5],
+                'year': row[6],
+                'poster': row[7],
+                'media_type': row[8],
+                'plot': row[9],
+                'rated': row[10],
+                'genre': row[11]
+            }
+            # Calculate progress percentage
+            if item['duration'] and item['duration'] > 0:
+                item['progress_percent'] = int((item['current_time'] / item['duration']) * 100)
+            else:
+                item['progress_percent'] = 0
+            results.append(item)
+        return results
+    finally:
+        return_db(conn)
+
+def get_most_watched(user_id: int, limit: int = 20) -> List[Dict]:
+    """Get most watched items for a user, ordered by play_count."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT p.path, p.current_time, p.duration, p.play_count, p.last_played,
+                   fm.title, fm.year, fm.poster, fm.media_type, fm.plot, fm.rated, fm.genre
+            FROM progress p
+            LEFT JOIN file_metadata fm ON p.path = fm.path
+            WHERE p.user_id = ? AND p.play_count > 0
+            ORDER BY p.play_count DESC, p.last_played DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        rows = c.fetchall()
+        results = []
+        for row in rows:
+            results.append({
+                'path': row[0],
+                'current_time': row[1],
+                'duration': row[2],
+                'play_count': row[3],
+                'last_played': row[4],
+                'title': row[5],
+                'year': row[6],
+                'poster': row[7],
+                'media_type': row[8],
+                'plot': row[9],
+                'rated': row[10],
+                'genre': row[11]
+            })
+        return results
     finally:
         return_db(conn)

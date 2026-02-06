@@ -51,6 +51,9 @@
                 <button onclick="event.stopPropagation(); showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
                 <button onclick="event.stopPropagation(); showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
                 <span id="header-stats" class="header-stats"></span>
+                <button onclick="event.stopPropagation(); toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
                 <button onclick="event.stopPropagation(); logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
             </nav>
         </header>
@@ -240,23 +243,39 @@
             </section>
 
             <section id="admin" class="hidden">
-                <h2>Admin & Uploads</h2>
-                
+                <h2><i class="fas fa-user-shield"></i> Admin Dashboard</h2>
+
                 <div class="admin-panel">
-                    <h3>System Control</h3>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button onclick="rebuildLibrary()" class="primary">Scan Library for Changes</button>
-                        <button onclick="fixDuplicates()" class="primary">Mass Fix Duplicates</button>
-                        <button onclick="systemControl('update')" class="primary">Update from GitHub</button>
-                        <button onclick="systemControl('reboot')" class="warning">Reboot Device</button>
-                        <button onclick="systemControl('shutdown')" class="danger">Shutdown Device</button>
+                    <h3><i class="fas fa-cogs"></i> System Control</h3>
+                    <div class="button-grid">
+                        <button onclick="rebuildLibrary()" class="primary">
+                            <i class="fas fa-sync"></i> Scan Library
+                        </button>
+                        <button onclick="fixDuplicates()" class="primary">
+                            <i class="fas fa-copy"></i> Fix Duplicates
+                        </button>
+                        <button onclick="systemControl('update')" class="success">
+                            <i class="fas fa-download"></i> Update from GitHub
+                        </button>
+                        <button onclick="systemControl('reboot')" class="warning">
+                            <i class="fas fa-redo"></i> Reboot Device
+                        </button>
+                        <button onclick="systemControl('shutdown')" class="danger">
+                            <i class="fas fa-power-off"></i> Shutdown Device
+                        </button>
                     </div>
-                    
-                    <h4 style="margin-top:20px; margin-bottom:10px;">Wi-Fi Control</h4>
-                    <div class="wifi-controls-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px;">
-                        <button id="wifi-toggle-btn" onclick="toggleWifiUI()" class="primary">Checking Wi-Fi...</button>
-                        <button onclick="systemControl('wifi_restart')" class="warning">Restart Wi-Fi</button>
-                        <button onclick="scanWifi()" class="secondary">Scan Networks</button>
+
+                    <h4><i class="fas fa-wifi"></i> Wi-Fi Control</h4>
+                    <div class="button-grid">
+                        <button id="wifi-toggle-btn" onclick="toggleWifiUI()" class="primary">
+                            <i class="fas fa-toggle-on"></i> Checking Wi-Fi...
+                        </button>
+                        <button onclick="systemControl('wifi_restart')" class="warning">
+                            <i class="fas fa-sync-alt"></i> Restart Wi-Fi
+                        </button>
+                        <button onclick="scanWifi()" class="secondary">
+                            <i class="fas fa-search"></i> Scan Networks
+                        </button>
                     </div>
                     
                     <div id="wifi-status-info" class="glass" style="padding:12px 20px; border-radius:12px; margin-bottom:15px; display:flex; align-items:center; gap:12px;">
@@ -315,164 +334,248 @@
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Upload Files</h3>
-                    <div class="upload-controls">
-                        <label>Category:</label>
+                    <h3><i class="fas fa-cloud-upload-alt"></i> Upload Files</h3>
+                    <div class="form-group">
+                        <label for="upload-category">
+                            <i class="fas fa-folder"></i> Upload Category
+                        </label>
                         <select id="upload-category">
-                            <option value="movies">Movies</option>
-                            <option value="shows">Shows</option>
-                            <option value="music">Music</option>
-                            <option value="books">Books</option>
-                            <option value="gallery">Gallery</option>
-                            <option value="files">Files</option>
+                            <option value="movies">🎬 Movies</option>
+                            <option value="shows">📺 Shows</option>
+                            <option value="music">🎵 Music</option>
+                            <option value="books">📚 Books</option>
+                            <option value="gallery">🖼️ Gallery</option>
+                            <option value="files">📁 Files</option>
                         </select>
-                        <br><br>
+                    </div>
 
-                        <div id="shows-upload-options" class="hidden" style="margin-bottom:10px;">
-                            <label for="upload-show-name">Show name (optional):</label>
-                            <input id="upload-show-name" type="text" placeholder="e.g. Bluey" style="width:100%;margin:8px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
-                            <div style="color:var(--text-muted); font-size:0.85rem;">Helps keep seasons grouped under the right show.</div>
+                        <div id="shows-upload-options" class="hidden form-group">
+                            <label for="upload-show-name">Show Name (optional)</label>
+                            <input id="upload-show-name" type="text" placeholder="e.g. Bluey">
+                            <div class="help-text">
+                                <i class="fas fa-info-circle"></i> Helps keep seasons grouped under the right show
+                            </div>
                         </div>
                         
                         <div class="drop-zone" id="drop-zone">
-                            <p>Drag & drop files or folders here</p>
-                            <input type="file" id="file-input" multiple>
-                            <label for="file-input" class="button">Select Files</label>
-                            
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h4>Drag & Drop Files Here</h4>
+                            <p>or choose files to upload</p>
+                            <input type="file" id="file-input" multiple style="display: none;">
                             <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none">
-                            <label for="folder-input" class="button">Select Folder</label>
+                            <div style="display: flex; gap: 12px; justify-content: center; margin-top: 16px;">
+                                <label for="file-input" class="button secondary">
+                                    <i class="fas fa-file"></i> Select Files
+                                </label>
+                                <label for="folder-input" class="button secondary">
+                                    <i class="fas fa-folder"></i> Select Folder
+                                </label>
+                            </div>
                         </div>
 
-                        <div id="upload-queue" style="margin-top:10px; max-height: 150px; overflow-y: auto;"></div>
-                        
-                        <div style="display: flex; gap: 10px;">
-                            <button id="start-upload-btn" onclick="uploadFiles()" class="primary" style="margin-top:10px; flex-grow: 1;">Start Upload</button>
-                            <button id="cancel-upload-btn" onclick="cancelUpload()" class="danger hidden" style="margin-top:10px; flex-grow: 0;">Cancel</button>
+                        <div id="upload-queue" style="margin-top:16px; max-height: 200px; overflow-y: auto;"></div>
+
+                        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-top: 16px;">
+                            <button id="start-upload-btn" onclick="uploadFiles()" class="primary large">
+                                <i class="fas fa-upload"></i> Start Upload
+                            </button>
+                            <button id="cancel-upload-btn" onclick="cancelUpload()" class="danger hidden">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
                         </div>
-                    </div>
                     <div id="upload-status"></div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>User Management</h3>
-                    <div id="user-management-list" class="list-view" style="margin-bottom: 20px;">
+                    <h3><i class="fas fa-users"></i> User Management</h3>
+                    <div id="user-management-list" class="list-view" style="margin-bottom: 24px;">
                         <!-- Users will be listed here -->
-                        <div class="loading">Loading users...</div>
+                        <div class="loading">
+                            <i class="fas fa-spinner fa-spin"></i> Loading users...
+                        </div>
                     </div>
-                    
-                    <h4>Add New User</h4>
-                    <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end;">
-                        <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" id="new-user-username" placeholder="Username">
+
+                    <h4><i class="fas fa-user-plus"></i> Add New User</h4>
+                    <div class="form-grid" style="grid-template-columns: 1fr 1fr auto 1fr; gap: 12px; align-items: end;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="new-user-username">
+                                <i class="fas fa-user"></i> Username
+                            </label>
+                            <input type="text" id="new-user-username" placeholder="Enter username">
                         </div>
-                        <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" id="new-user-password" placeholder="Password">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="new-user-password">
+                                <i class="fas fa-lock"></i> Password
+                            </label>
+                            <input type="password" id="new-user-password" placeholder="Enter password">
                         </div>
-                        <div class="form-group">
-                            <label style="display: block; margin-bottom: 5px;">Admin</label>
-                            <input type="checkbox" id="new-user-is-admin" style="width: auto; height: auto;">
+                        <div class="form-group" style="margin-bottom: 0; text-align: center;">
+                            <label for="new-user-is-admin" style="margin-bottom: 12px;">
+                                <i class="fas fa-shield-alt"></i> Admin
+                            </label>
+                            <input type="checkbox" id="new-user-is-admin">
                         </div>
-                        <button onclick="addUser()" class="primary" style="grid-column: span 3;">Create User</button>
+                        <button onclick="addUser()" class="primary">
+                            <i class="fas fa-plus"></i> Create User
+                        </button>
                     </div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Storage Management</h3>
-                    <button onclick="loadDrives()">Scan Drives</button>
-                    <div id="drive-list"></div>
+                    <h3><i class="fas fa-hdd"></i> Storage Management</h3>
+                    <button onclick="loadDrives()" class="secondary">
+                        <i class="fas fa-search"></i> Scan Drives
+                    </button>
+                    <div id="drive-list" style="margin-top: 16px;"></div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Library Tools (v1.1)</h3>
-                    <button onclick="rescanLibrary()">Rescan Library</button>
-                    <label style="display:flex; align-items:center; gap:8px; margin:10px 0; color:var(--text-muted); font-size:0.9rem;">
-                        <input type="checkbox" id="show-organize-rename-files" style="width:auto; height:auto;">
-                        Rename episodes to SxxEyy (optional)
+                    <h3><i class="fas fa-tools"></i> Library Tools</h3>
+                    <div class="button-grid" style="margin-bottom: 16px;">
+                        <button onclick="rescanLibrary()" class="secondary">
+                            <i class="fas fa-sync"></i> Rescan Library
+                        </button>
+                        <button onclick="organizeShows(true)" class="secondary">
+                            <i class="fas fa-eye"></i> Preview Show Organize
+                        </button>
+                        <button onclick="organizeShows(false)" class="warning">
+                            <i class="fas fa-check"></i> Apply Show Organize
+                        </button>
+                        <button onclick="organizeMovies(true)" class="secondary">
+                            <i class="fas fa-eye"></i> Preview Movie Organize
+                        </button>
+                        <button onclick="organizeMovies(false)" class="warning">
+                            <i class="fas fa-check"></i> Apply Movie Organize
+                        </button>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:0.9rem;">
+                        <input type="checkbox" id="show-organize-rename-files">
+                        <span><i class="fas fa-tag"></i> Rename episodes to SxxEyy format (optional)</span>
                     </label>
-                    <button onclick="organizeShows(true)">Preview Show Organize</button>
-                    <button onclick="organizeShows(false)" class="warning">Apply Show Organize</button>
-                    <button onclick="organizeMovies(true)">Preview Movie Organize</button>
-                    <button onclick="organizeMovies(false)" class="warning">Apply Movie Organize</button>
-                    <div id="organize-status" style="margin-top:10px;"></div>
+                    <div id="organize-status" style="margin-top:16px;"></div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Smart Media Management</h3>
-                    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:10px;">Identify duplicate files and content across your library.</p>
-                    <button onclick="findDuplicates()" class="primary">Find Duplicates</button>
-                    <div id="duplicates-status" style="margin-top:10px;"></div>
+                    <h3><i class="fas fa-clone"></i> Smart Media Management</h3>
+                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:16px; line-height: 1.6;">
+                        <i class="fas fa-info-circle"></i> Identify duplicate files and content across your library to save space and keep your media organized.
+                    </p>
+                    <button onclick="findDuplicates()" class="primary">
+                        <i class="fas fa-search"></i> Find Duplicates
+                    </button>
+                    <div id="duplicates-status" style="margin-top:16px;"></div>
                 </div>
             </section>
 
             <section id="settings" class="hidden">
-                <h2>Settings</h2>
-                
+                <h2><i class="fas fa-cog"></i> Settings</h2>
+
                 <div class="admin-panel">
-                    <h3>Your Profile</h3>
-                    <div class="settings-form">
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Display Name</label>
-                            <input type="text" id="profile-name" placeholder="How you want to be called" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                    <h3><i class="fas fa-user"></i> Your Profile</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="profile-name">
+                                <i class="fas fa-id-card"></i> Display Name
+                            </label>
+                            <input type="text" id="profile-name" placeholder="How you want to be called">
                         </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Avatar URL (optional)</label>
-                            <input type="text" id="profile-avatar" placeholder="https://..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                        <div class="form-group">
+                            <label for="profile-avatar">
+                                <i class="fas fa-image"></i> Avatar URL (optional)
+                            </label>
+                            <input type="url" id="profile-avatar" placeholder="https://...">
                         </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Parental Controls Level</label>
-                            <select id="profile-parental" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
-                                <option value="0">All Access</option>
-                                <option value="1">Level 1 (Kids)</option>
-                                <option value="2">Level 2 (Teens)</option>
-                                <option value="3">Level 3 (Restricted)</option>
+                        <div class="form-group">
+                            <label for="profile-parental">
+                                <i class="fas fa-child"></i> Parental Controls Level
+                            </label>
+                            <select id="profile-parental">
+                                <option value="0">🌐 All Access</option>
+                                <option value="1">👶 Level 1 (Kids)</option>
+                                <option value="2">👦 Level 2 (Teens)</option>
+                                <option value="3">🔒 Level 3 (Restricted)</option>
                             </select>
                         </div>
-                        <button onclick="saveProfileUI()" class="primary">Update Profile</button>
+                    </div>
+                    <button onclick="saveProfileUI()" class="primary">
+                        <i class="fas fa-save"></i> Update Profile
+                    </button>
+                </div>
+
+                <div class="admin-panel">
+                    <h3><i class="fas fa-lock"></i> Account Security</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="change-pw-current">
+                                <i class="fas fa-key"></i> Current Password
+                            </label>
+                            <input type="password" id="change-pw-current" placeholder="Enter current password">
+                        </div>
+                        <div class="form-group">
+                            <label for="change-pw-new">
+                                <i class="fas fa-lock"></i> New Password
+                            </label>
+                            <input type="password" id="change-pw-new" placeholder="Enter new password">
+                        </div>
+                        <div class="form-group">
+                            <label for="change-pw-confirm">
+                                <i class="fas fa-lock"></i> Confirm New Password
+                            </label>
+                            <input type="password" id="change-pw-confirm" placeholder="Confirm new password">
+                        </div>
+                    </div>
+                    <p id="change-pw-status" style="margin: 12px 0; font-size: 0.9em;"></p>
+                    <button onclick="changePassword()" class="primary">
+                        <i class="fas fa-save"></i> Update Password
+                    </button>
+                </div>
+
+                <div class="admin-panel">
+                    <h3><i class="fas fa-database"></i> Metadata Configuration</h3>
+                    <div class="form-group">
+                        <label for="omdb-api-key">
+                            <i class="fas fa-film"></i> OMDb API Key
+                        </label>
+                        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px;">
+                            <input type="text" id="omdb-api-key" placeholder="Enter OMDb API Key">
+                            <button onclick="saveOmdbKey()" class="primary">
+                                <i class="fas fa-save"></i> Save Key
+                            </button>
+                        </div>
+                        <div class="help-text">
+                            <i class="fas fa-info-circle"></i> Used for fetching movie/show posters and metadata. Get one at <a href="https://www.omdbapi.com/" target="_blank" style="color:var(--accent-color);">omdbapi.com</a>
+                        </div>
                     </div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Account Security</h3>
-                    <div class="settings-form">
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Current Password</label>
-                            <input type="password" id="change-pw-current" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
+                    <h3><i class="fas fa-network-wired"></i> Tailscale VPN</h3>
+                    <div id="tailscale-status" style="margin-bottom:12px;">Checking status...</div>
+                    <div id="tailscale-controls" style="margin-bottom:12px;"></div>
+                    <div id="tailscale-auth-section" style="display:none; background:rgba(0,0,0,0.2); padding:12px; border-radius:8px; margin-top:12px;">
+                        <label for="tailscale-auth-key" style="display:block; margin-bottom:8px;">Auth Key (Optional)</label>
+                        <div style="display:flex; gap:8px;">
+                            <input type="password" id="tailscale-auth-key" placeholder="tskey-auth-..." style="flex:1;">
+                            <button onclick="saveTailscaleKey()" class="secondary">Save</button>
                         </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">New Password</label>
-                            <input type="password" id="change-pw-new" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
-                        </div>
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">Confirm New Password</label>
-                            <input type="password" id="change-pw-confirm" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
-                        </div>
-                        <p id="change-pw-status" style="margin-bottom: 10px; font-size: 0.9em;"></p>
-                        <button onclick="changePassword()" class="primary">Update Password</button>
+                        <p style="font-size:0.8em; color:var(--text-muted); margin-top:8px;">
+                            Or authenticate via URL after clicking Connect.
+                        </p>
                     </div>
                 </div>
 
                 <div class="admin-panel">
-                    <h3>Metadata Configuration</h3>
-                    <div class="settings-form">
-                        <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px;">OMDb API Key</label>
-                            <div style="display: flex; gap: 10px;">
-                                <input type="text" id="omdb-api-key" placeholder="Enter OMDb API Key" style="flex: 1; padding:10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(0,0,0,0.2); color:var(--text-color);">
-                                <button onclick="saveOmdbKey()" class="primary">Save Key</button>
-                            </div>
-                            <p style="color:var(--text-muted); font-size:0.85rem; margin-top:5px;">Used for fetching movie/show posters and metadata. Get one at omdbapi.com</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="admin-panel">
-                    <h3>Interface Settings</h3>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button onclick="toggleTheme()" class="secondary">Toggle Dark/Light Mode</button>
-                        <button onclick="toggleGlassEffect()" class="secondary">Toggle Glass Effect</button>
-                        <button id="install-pwa-btn" onclick="installPWA()" class="primary hidden">✨ Install Nomad Pi App</button>
+                    <h3><i class="fas fa-palette"></i> Interface Settings</h3>
+                    <div class="button-grid">
+                        <button onclick="toggleTheme()" class="secondary">
+                            <i class="fas fa-moon"></i> Toggle Theme
+                        </button>
+                        <button onclick="toggleGlassEffect()" class="secondary">
+                            <i class="fas fa-adjust"></i> Toggle Glass Effect
+                        </button>
+                        <button id="install-pwa-btn" onclick="installPWA()" class="primary hidden">
+                            <i class="fas fa-download"></i> Install Nomad Pi App
+                        </button>
                     </div>
                 </div>
             </section>

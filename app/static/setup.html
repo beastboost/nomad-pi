@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Nomad Pi - Setup</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        .setup-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 10px;
+            background: linear-gradient(to right, #fff, #e0e7ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            opacity: 0.9;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+
+        .step {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #fff;
+        }
+
+        .step-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            background: #fff;
+            color: #667eea;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+
+        .step-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .step-content {
+            padding-left: 42px;
+            opacity: 0.95;
+            line-height: 1.6;
+        }
+
+        .ip-box {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .ip-address {
+            font-size: 1.5rem;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            color: #fff;
+        }
+
+        .copy-btn {
+            background: #fff;
+            color: #667eea;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+        }
+
+        .copy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+
+        .copy-btn.copied {
+            background: #10b981;
+            color: #fff;
+        }
+
+        .btn-primary {
+            width: 100%;
+            background: linear-gradient(135deg, #fff, #e0e7ff);
+            color: #667eea;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 255, 255, 0.3);
+        }
+
+        .warning {
+            background: rgba(245, 158, 11, 0.2);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .warning-icon {
+            color: #fbbf24;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+        }
+
+        .warning-text {
+            font-size: 0.95rem;
+            line-height: 1.5;
+            opacity: 0.95;
+        }
+
+        .platform-icon {
+            margin-left: 10px;
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 600px) {
+            .setup-container {
+                padding: 25px;
+            }
+
+            .logo {
+                font-size: 2rem;
+            }
+
+            .ip-address {
+                font-size: 1.2rem;
+            }
+
+            .step-content {
+                font-size: 0.95rem;
+            }
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #10b981;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: none;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn 0.3s ease-out;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            display: flex;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="logo">Nomad Pi ✨</div>
+        <div class="subtitle">Welcome! Let's get you set up</div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">1</span>
+                Save This IP Address
+            </div>
+            <div class="step-content">
+                This is your Nomad Pi server address. Copy it now so you can access your media later:
+                <div class="ip-box">
+                    <span class="ip-address" id="ip-address">Loading...</span>
+                    <button class="copy-btn" id="copy-btn" onclick="copyIP()">
+                        <i class="fas fa-copy"></i>
+                        Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">2</span>
+                Stay Connected on Hotspot
+                <span class="platform-icon"><i class="fab fa-android"></i> <i class="fab fa-apple"></i></span>
+            </div>
+            <div class="step-content">
+                When using the Nomad Pi hotspot, your device will warn you about "no internet connection":
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li><strong>Android:</strong> Tap "Use network as is" or "Stay connected"</li>
+                    <li><strong>iPhone:</strong> Tap "Use Without Internet" when prompted</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-title">
+                <span class="step-number">3</span>
+                Bookmark or Save to Home Screen
+            </div>
+            <div class="step-content">
+                For quick access:
+                <ul style="margin-left: 20px; margin-top: 10px;">
+                    <li><strong>iPhone/iPad:</strong> Tap Share <i class="fas fa-share"></i> → "Add to Home Screen"</li>
+                    <li><strong>Android:</strong> Tap Menu → "Add to Home screen" or "Install app"</li>
+                    <li><strong>Desktop:</strong> Bookmark this page (Ctrl+D or ⌘+D)</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="warning">
+            <i class="fas fa-info-circle warning-icon"></i>
+            <div class="warning-text">
+                <strong>Tip:</strong> If you're on WiFi and this opened automatically, that's the captive portal detection.
+                Make sure to save the IP address above - you'll need it to access Nomad Pi!
+            </div>
+        </div>
+
+        <button class="btn-primary" onclick="goToApp()">
+            Continue to Nomad Pi
+            <i class="fas fa-arrow-right"></i>
+        </button>
+    </div>
+
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span>IP address copied to clipboard!</span>
+    </div>
+
+    <script>
+        // Get server IP address
+        async function getServerIP() {
+            try {
+                const response = await fetch('/api/system/info');
+                const data = await response.json();
+
+                // Try to get the IP from various sources
+                let ip = window.location.hostname;
+
+                // If it's localhost, try to get the actual IP
+                if (ip === 'localhost' || ip === '127.0.0.1') {
+                    if (data.ip_address) {
+                        ip = data.ip_address;
+                    }
+                }
+
+                // Format the full URL
+                const port = window.location.port ? ':' + window.location.port : '';
+                const fullURL = `http://${ip}${port}`;
+
+                document.getElementById('ip-address').textContent = fullURL;
+
+                // Store in localStorage for later use
+                localStorage.setItem('nomad_ip', fullURL);
+            } catch (error) {
+                console.error('Failed to get IP:', error);
+                // Fallback to current URL
+                const fullURL = window.location.origin;
+                document.getElementById('ip-address').textContent = fullURL;
+                localStorage.setItem('nomad_ip', fullURL);
+            }
+        }
+
+        function copyIP() {
+            const ipText = document.getElementById('ip-address').textContent;
+            const btn = document.getElementById('copy-btn');
+
+            navigator.clipboard.writeText(ipText).then(() => {
+                // Update button
+                btn.classList.add('copied');
+                btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+
+                // Show toast
+                const toast = document.getElementById('toast');
+                toast.classList.add('show');
+
+                // Reset after 2 seconds
+                setTimeout(() => {
+                    btn.classList.remove('copied');
+                    btn.innerHTML = '<i class="fas fa-copy"></i> Copy';
+                    toast.classList.remove('show');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy. Please copy manually: ' + ipText);
+            });
+        }
+
+        function goToApp() {
+            window.location.href = '/';
+        }
+
+        // Load IP on page load
+        getServerIP();
+
+        // Detect platform and highlight relevant instruction
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const isAndroid = /Android/.test(navigator.userAgent);
+    </script>
+</body>
+</html>

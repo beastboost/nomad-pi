@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+from typing import List
 from datetime import datetime
 from app import database
 from app.routers.auth import get_current_user_id
@@ -61,6 +62,31 @@ def get_system_status():
         commit = None
     return {"status": "online", "version": VERSION, "commit": commit}
 
+@public_router.get("/info")
+def get_public_system_info():
+    """Get basic system info including IP address for setup page"""
+    import socket
+
+    ip_address = None
+    try:
+        # Try to get the local IP address
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip_address = s.getsockname()[0]
+        s.close()
+    except Exception:
+        # Fallback methods
+        try:
+            ip_address = socket.gethostbyname(socket.gethostname())
+        except (socket.gaierror, OSError):
+            pass
+
+    return {
+        "ip_address": ip_address,
+        "hostname": platform.node(),
+        "version": VERSION
+    }
+
 @public_router.get("/setup/status")
 def get_setup_status():
     admin_password = os.environ.get("ADMIN_PASSWORD")
@@ -101,7 +127,7 @@ def get_samba_config():
         try:
             import getpass
             user = getpass.getuser()
-        except:
+        except (ImportError, OSError):
             # Fallback to env or whoami
             user = os.environ.get("USER") or subprocess.check_output(["whoami"], text=True).strip()
     
@@ -119,7 +145,7 @@ def get_samba_config():
         ip = s.getsockname()[0]
         s.close()
         path = f"\\\\{ip}\\data"
-    except:
+    except (socket.gaierror, OSError):
         pass
         
     return {
@@ -165,7 +191,7 @@ def get_aggregate_disk_usage():
                 used += usage.used
                 free += usage.free
                 seen_mounts.add(part.mountpoint)
-            except:
+            except (PermissionError, OSError):
                 pass
     else:
         # Windows/Other
@@ -180,7 +206,7 @@ def get_aggregate_disk_usage():
                 used += usage.used
                 free += usage.free
                 seen_mounts.add(part.mountpoint)
-            except:
+            except (PermissionError, OSError):
                 pass
                 
     if total == 0:
@@ -188,7 +214,7 @@ def get_aggregate_disk_usage():
         try:
             usage = psutil.disk_usage(os.getcwd())
             return usage.total, usage.used, usage.free, usage.percent
-        except:
+        except (PermissionError, OSError):
             return 0, 0, 0, 0
             
     percent = (used / total) * 100 if total > 0 else 0
@@ -223,7 +249,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp = int(f.read()) / 1000
-        except:
+        except (FileNotFoundError, PermissionError, OSError, ValueError):
             pass
         
         # Get CPU frequency (Raspberry Pi specific)
@@ -238,7 +264,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 # Output format: frequency(48)=1500000000
                 freq_str = result.stdout.strip().split('=')[1]
                 cpu_freq = int(freq_str) / 1000000  # Convert to MHz
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             # Fallback to psutil
             try:
                 freq = psutil.cpu_freq()
@@ -246,7 +272,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                     cpu_freq = freq.current
                     cpu_freq_max = freq.max
                     cpu_freq_min = freq.min
-            except:
+            except (AttributeError, OSError):
                 pass
         
         # Check for throttling (Raspberry Pi specific)
@@ -263,7 +289,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 throttled_value = int(throttled_hex, 16)
                 # Bit 0: under-voltage, Bit 1: arm frequency capped, Bit 2: currently throttled
                 throttled = (throttled_value & 0x7) != 0
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             pass
 
         # Get Overclocking config (Raspberry Pi specific)
@@ -274,7 +300,7 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 if res.returncode == 0 and "=" in res.stdout:
                     val = res.stdout.strip().split("=")[1]
                     cpu_overclock[param] = val
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError):
             pass
 
     return {
@@ -319,7 +345,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     size_bytes = 0
                     try:
                         size_bytes = int(dev.get("size", 0))
-                    except:
+                    except (ValueError, TypeError):
                         pass
 
                     d = {
@@ -338,7 +364,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                             d["free"] = usage.free
                             d["used"] = usage.used
                             d["total"] = usage.total # More accurate than lsblk size
-                        except:
+                        except (PermissionError, OSError):
                             pass
                     drives.append(d)
                 
@@ -346,7 +372,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     size_bytes = 0
                     try:
                         size_bytes = int(child.get("size", 0))
-                    except:
+                    except (ValueError, TypeError):
                         pass
 
                     c = {
@@ -365,10 +391,10 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                             c["free"] = usage.free
                             c["used"] = usage.used
                             c["total"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             pass
                     drives.append(c)
-        except:
+        except (subprocess.SubprocessError, json.JSONDecodeError, KeyError):
             pass
     else:
         for p in psutil.disk_partitions():
@@ -383,7 +409,7 @@ def get_storage_info(user_id: int = Depends(get_current_user_id)):
                     "mountpoint": p.mountpoint,
                     "fstype": p.fstype
                 })
-            except:
+            except (PermissionError, OSError):
                 pass
 
     return {
@@ -408,7 +434,7 @@ def get_services(user_id: int = Depends(get_current_user_id)):
             try:
                 status = subprocess.run(["systemctl", "is-active", s], capture_output=True, text=True).stdout.strip()
                 services.append({"name": s, "status": "running" if status == "active" else "stopped"})
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
     else:
         services = [
@@ -460,7 +486,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     d = dev.copy()
                     # Ensure size is a number
                     try: d["size"] = int(d.get("size", 0))
-                    except: d["size"] = 0
+                    except (ValueError, TypeError): d["size"] = 0
 
                     # Add free space if mounted
                     if d.get("mountpoint"):
@@ -468,7 +494,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                             usage = psutil.disk_usage(d["mountpoint"])
                             d["free"] = usage.free
                             d["size"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             d["free"] = 0
                     else:
                         d["free"] = 0
@@ -479,14 +505,14 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     c = child.copy()
                     # Ensure size is a number
                     try: c["size"] = int(c.get("size", 0))
-                    except: c["size"] = 0
+                    except (ValueError, TypeError): c["size"] = 0
 
                     if c.get("mountpoint"):
                         try:
                             usage = psutil.disk_usage(c["mountpoint"])
                             c["free"] = usage.free
                             c["size"] = usage.total
-                        except:
+                        except (PermissionError, OSError):
                             c["free"] = 0
                     else:
                         c["free"] = 0
@@ -510,7 +536,7 @@ def list_drives(user_id: int = Depends(get_current_user_id)):
                     "size": usage.total,
                     "label": p.mountpoint
                 })
-            except:
+            except (PermissionError, OSError):
                 pass
     return {"blockdevices": drives}
 
@@ -522,10 +548,64 @@ def save_mount(device, mount_point):
         try:
             with open(PERSISTENT_MOUNTS_FILE, 'r') as f:
                 mounts = json.load(f)
-        except: pass
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError): pass
     mounts[device] = mount_point
     with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
         json.dump(mounts, f)
+
+def get_device_fstype(device: str) -> str:
+    for cmd in (
+        ["lsblk", "-no", "FSTYPE", device],
+        ["blkid", "-o", "value", "-s", "TYPE", device],
+    ):
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                fstype = (res.stdout or "").strip().splitlines()[0].strip()
+                if fstype:
+                    return fstype
+        except Exception:
+            continue
+    return ""
+
+def mount_with_permissions(device: str, target: str) -> None:
+    uid = os.getuid()
+    gid = os.getgid()
+    fstype = get_device_fstype(device).lower()
+
+    mount_bin = shutil.which("mount") or "/usr/bin/mount"
+    chown_bin = shutil.which("chown") or "/usr/bin/chown"
+    chmod_bin = shutil.which("chmod") or "/usr/bin/chmod"
+
+    attempts = []
+    if fstype in {"ntfs", "ntfs3"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs3", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid},umask=0002,big_writes", device, target])
+        attempts.append(["sudo", "-n", mount_bin, "-t", "ntfs", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype == "exfat":
+        attempts.append(["sudo", "-n", mount_bin, "-t", "exfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+    elif fstype in {"vfat", "fat", "msdos"}:
+        attempts.append(["sudo", "-n", mount_bin, "-t", "vfat", "-o", f"uid={uid},gid={gid},umask=0002", device, target])
+
+    attempts.append(["sudo", "-n", mount_bin, device, target])
+
+    last_err = None
+    for cmd in attempts:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            last_err = None
+            break
+        except subprocess.CalledProcessError as e:
+            last_err = (e.stderr or e.stdout or str(e)).strip()
+
+    if last_err:
+        raise RuntimeError(last_err)
+
+    try:
+        subprocess.run(["sudo", "-n", chown_bin, f"{uid}:{gid}", target], check=False, capture_output=True, text=True)
+        subprocess.run(["sudo", "-n", chmod_bin, "0775", target], check=False, capture_output=True, text=True)
+    except Exception:
+        pass
 
 def remove_mount(target):
     if os.path.exists(PERSISTENT_MOUNTS_FILE):
@@ -535,11 +615,78 @@ def remove_mount(target):
             mounts = {k: v for k, v in mounts.items() if v != target}
             with open(PERSISTENT_MOUNTS_FILE, 'w') as f:
                 json.dump(mounts, f)
-        except: pass
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError): pass
+
+def ensure_media_folders(root: str) -> List[str]:
+    created = []
+    if not isinstance(root, str) or not root:
+        return created
+    for folder in ["movies", "shows", "music", "books", "gallery", "files"]:
+        try:
+            p = os.path.join(root, folder)
+            if not os.path.exists(p):
+                os.makedirs(p, exist_ok=True)
+                created.append(folder)
+        except Exception:
+            continue
+    return created
+
+def ensure_external_category_symlinks(external_root: str, label: str) -> None:
+    if platform.system() != "Linux":
+        return
+    if not isinstance(external_root, str) or not external_root:
+        return
+    if not isinstance(label, str) or not label:
+        return
+
+    data_root = os.path.abspath("data")
+    for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
+        src = os.path.join(external_root, cat)
+        if not os.path.isdir(src):
+            continue
+        dst_parent = os.path.join(data_root, cat)
+        try:
+            os.makedirs(dst_parent, exist_ok=True)
+        except Exception:
+            continue
+        dst = os.path.join(dst_parent, f"External_{label}")
+        try:
+            if os.path.islink(dst):
+                if os.path.exists(dst):
+                    continue
+                os.unlink(dst)
+            if os.path.exists(dst):
+                continue
+            os.symlink(src, dst)
+        except Exception:
+            continue
+
+def restart_minidlna_best_effort() -> None:
+    if platform.system() != "Linux":
+        return
+    try:
+        subprocess.run(["sudo", "-n", "systemctl", "restart", "minidlna"], check=False, capture_output=True, text=True, timeout=10)
+    except Exception:
+        pass
 
 @router.post("/mount")
 def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        # Validate device path
+        if not device.startswith("/dev/"):
+            raise HTTPException(status_code=400, detail="Invalid device path")
+
+        # Additional security checks for device path
+        if '..' in device or any(char in device for char in [';', '&', '|', '`', '$', '\x00']):
+            raise HTTPException(status_code=400, detail="Invalid characters in device path")
+
+        # Validate mount_point - prevent directory traversal and command injection
+        if any(char in mount_point for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in mount point")
+
+        if '..' in mount_point or mount_point.startswith('/'):
+            raise HTTPException(status_code=400, detail="Invalid mount point path")
+
         # Create a clean mount point name from the label or device name
         clean_name = "".join(c for c in mount_point if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name:
@@ -549,10 +696,12 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
         os.makedirs(target, exist_ok=True)
         
         try:
-            # Check if already mounted
-            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+            mount_with_permissions(device, target)
             save_mount(device, target)
-            return {"status": "mounted", "device": device, "target": target}
+            created = ensure_media_folders(target)
+            ensure_external_category_symlinks(target, clean_name)
+            restart_minidlna_best_effort()
+            return {"status": "mounted", "device": device, "target": target, "created_folders": created}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
@@ -560,6 +709,14 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
 @router.post("/unmount")
 def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
     if platform.system() == "Linux":
+        # Validate target path - prevent command injection
+        if any(char in target for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in target path")
+
+        # Ensure target is within expected directory structure
+        if not target.startswith("data/external/") and not target.startswith("/media/") and not target.startswith("/mnt/"):
+            raise HTTPException(status_code=400, detail="Invalid unmount target path")
+
         try:
             subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
             remove_mount(target)
@@ -572,13 +729,32 @@ def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
 def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         return {"status": "success", "message": "Simulated format success"}
-        
+
     device = request.device
     label = request.label
     fstype = request.fstype
-    
+
+    # Validate device path - prevent path traversal and command injection
     if not device.startswith("/dev/sd") and not device.startswith("/dev/nvme") and not device.startswith("/dev/mmcblk"):
-         raise HTTPException(status_code=400, detail="Invalid device path")
+        raise HTTPException(status_code=400, detail="Invalid device path")
+
+    # Additional security checks for device path
+    if '..' in device or ';' in device or '&' in device or '|' in device or '`' in device or '$' in device:
+        raise HTTPException(status_code=400, detail="Invalid characters in device path")
+
+    # Validate fstype - only allow specific safe filesystem types
+    allowed_fstypes = ['ext4', 'ext3', 'exfat', 'vfat', 'ntfs']
+    if fstype not in allowed_fstypes:
+        raise HTTPException(status_code=400, detail=f"Invalid filesystem type. Allowed: {', '.join(allowed_fstypes)}")
+
+    # Validate and sanitize label - prevent command injection
+    if label:
+        # Remove any dangerous characters
+        if any(char in label for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
+            raise HTTPException(status_code=400, detail="Invalid characters in label")
+        # Limit label length
+        if len(label) > 255:
+            raise HTTPException(status_code=400, detail="Label too long (max 255 characters)")
          
     try:
         subprocess.run(["sudo", "umount", device], check=False)
@@ -597,10 +773,12 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         target = os.path.join("data", "external", clean_name)
         os.makedirs(target, exist_ok=True)
         
-        subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+        mount_with_permissions(device, target)
         save_mount(device, target)
-        
-        return {"status": "formatted", "device": device, "target": target}
+        created = ensure_media_folders(target)
+        ensure_external_category_symlinks(target, clean_name)
+        restart_minidlna_best_effort()
+        return {"status": "formatted", "device": device, "target": target, "created_folders": created}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Format failed: {str(e)}")
@@ -632,14 +810,45 @@ def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
     try:
         action = "on" if enable else "off"
         # Try nmcli first
-        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True)
+        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             return {"status": "success", "enabled": enable}
         
         # Fallback to rfkill
         action = "unblock" if enable else "block"
-        subprocess.run(["sudo", "rfkill", action, "wifi"], check=True)
+        fallback = subprocess.run(
+            ["sudo", "-n", "rfkill", action, "wifi"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if fallback.returncode != 0:
+            msg = (fallback.stderr or fallback.stdout or "rfkill failed").strip()
+            raise HTTPException(status_code=500, detail=msg)
         return {"status": "success", "enabled": enable}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/wifi/restart")
+def restart_wifi(user_id: int = Depends(get_current_user_id)):
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Wi-Fi restart only supported on Linux/Raspberry Pi")
+
+    try:
+        script = "nmcli connection down NomadPi >/dev/null 2>&1 || true; nmcli radio wifi off >/dev/null 2>&1 || true; sleep 2; nmcli radio wifi on >/dev/null 2>&1 || true"
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            cmd = ["bash", "-lc", script]
+        else:
+            probe = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, timeout=2)
+            if probe.returncode != 0:
+                raise HTTPException(status_code=500, detail=(probe.stderr or probe.stdout or "sudo not permitted").strip())
+            cmd = ["sudo", "-n", "bash", "-lc", script]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"status": "ok", "message": "Wi-Fi restart initiated"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -701,12 +910,12 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
         if os.path.exists(log_file):
             try:
                 os.remove(log_file)
-            except:
+            except (PermissionError, OSError):
                 pass
         if os.path.exists(status_file):
             try:
                 os.remove(status_file)
-            except:
+            except (PermissionError, OSError):
                 pass
         
         with open(log_file, "w") as f:
@@ -886,7 +1095,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 if ':wifi' in line:
                     wifi_iface = line.split(':')[0]
                     break
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
 
         # Get active wifi info directly from 'dev wifi' which is more accurate for current SSID
@@ -903,7 +1112,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 ["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ,BARS", "dev", "wifi"],
                 text=True
             ).strip().split('\n')
-            
+
             for line in dev_wifi:
                 if line.startswith('yes:'):
                     parts = line.split(':')
@@ -917,7 +1126,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                         ssid = ":".join(parts[1:-3])
                         signal = int(signal_str) if signal_str.isdigit() else 0
                         break
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
             pass
 
         # If not found via dev wifi, check if hotspot is active
@@ -934,7 +1143,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 elif "wifi" in active_conns.lower():
                     # If nmcli says wifi is active but we didn't find the SSID yet
                     mode = "wifi"
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
         
         # Get IP address if connected
@@ -945,14 +1154,14 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                     ip_addr = ip_output[0]
                     if mode == "disconnected":
                         mode = "wifi" # Fallback if we have an IP but nmcli was unsure
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
 
         # If we have mode=wifi but no SSID, try to get it from iwgetid
         if mode == "wifi" and not ssid:
             try:
                 ssid = subprocess.check_output(["iwgetid", "-r"], text=True).strip()
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
 
         # Get bitrate from iwconfig if on wifi
@@ -963,13 +1172,13 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
                 br_match = re.search(r'Bit Rate[:=](\d+\.?\d*\s*\w+/s)', iw_output)
                 if br_match:
                     bitrate = br_match.group(1)
-                
+
                 # If freq not found yet
                 if not freq:
                     fr_match = re.search(r'Frequency[:=](\d+\.?\d*\s*\w+Hz)', iw_output)
                     if fr_match:
                         freq = fr_match.group(1)
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 pass
         
         return {
@@ -994,10 +1203,11 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         if enable:
             # Enable hotspot
             subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "up", "NomadPi"],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=20
             )
             return {
                 "status": "ok",
@@ -1010,15 +1220,23 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
         else:
             # Disable hotspot and try to connect to saved WiFi
             subprocess.run(
-                ["sudo", "nmcli", "connection", "down", "NomadPi"],
+                ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
                 check=False,
-                capture_output=True
+                capture_output=True,
+                timeout=20
             )
             
             # Try to connect to home WiFi
             try:
+                home_ssid = os.environ.get("HOME_SSID", "").strip()
+                if not home_ssid:
+                    return {
+                        "status": "ok",
+                        "mode": "disconnected",
+                        "message": "Hotspot disabled. No WiFi configured."
+                    }
                 subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", os.environ.get("HOME_SSID", "")],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1029,7 +1247,7 @@ def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_
                     "mode": "wifi",
                     "message": "Connected to WiFi"
                 }
-            except:
+            except (subprocess.SubprocessError, FileNotFoundError, OSError):
                 return {
                     "status": "ok",
                     "mode": "disconnected",
@@ -1058,7 +1276,7 @@ def scan_wifi(user_id: int = Depends(get_current_user_id)):
         def get_networks(use_sudo=True, force_rescan=True):
             cmd = []
             if use_sudo:
-                cmd = ["sudo", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
+                cmd = ["sudo", "-n", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             else:
                 cmd = ["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ,BARS", "dev", "wifi", "list"]
             
@@ -1137,16 +1355,30 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
     
     try:
         # First, try to delete any existing connection profile for this SSID to avoid conflicts
-        subprocess.run(["sudo", "nmcli", "connection", "delete", "id", request.ssid], capture_output=True, check=False)
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "delete", "id", request.ssid],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False
+        )
+
+        subprocess.run(
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False
+        )
         
         # Connect to WiFi using nmcli
         # We use 'nmcli device wifi connect' which creates a new profile if needed
         # Adding 'name' helps ensure the connection is identifiable
         result = subprocess.run(
-            ["sudo", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
+            ["sudo", "-n", "nmcli", "dev", "wifi", "connect", request.ssid, "password", request.password, "name", request.ssid],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=45
         )
         
         if result.returncode == 0:
@@ -1162,22 +1394,22 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
                 logging.info("Attempting fallback manual connection creation...")
                 # 1. Add the connection manually
                 add_cmd = [
-                    "sudo", "nmcli", "con", "add", "type", "wifi", "ifname", "*", 
+                    "sudo", "-n", "nmcli", "con", "add", "type", "wifi", "ifname", "*",
                     "con-name", request.ssid, "ssid", request.ssid
                 ]
-                subprocess.run(add_cmd, capture_output=True, check=False)
+                subprocess.run(add_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 2. Set the password and security
                 modify_cmd = [
-                    "sudo", "nmcli", "con", "modify", request.ssid,
+                    "sudo", "-n", "nmcli", "con", "modify", request.ssid,
                     "wifi-sec.key-mgmt", "wpa-psk",
                     "wifi-sec.psk", request.password
                 ]
-                subprocess.run(modify_cmd, capture_output=True, check=False)
+                subprocess.run(modify_cmd, capture_output=True, text=True, timeout=20, check=False)
                 
                 # 3. Try to bring it up
                 up_result = subprocess.run(
-                    ["sudo", "nmcli", "con", "up", "id", request.ssid],
+                    ["sudo", "-n", "nmcli", "con", "up", "id", request.ssid],
                     capture_output=True, text=True, timeout=20
                 )
                 
@@ -1189,6 +1421,8 @@ def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current
             raise HTTPException(status_code=400, detail=err_msg)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Connection attempt timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1201,15 +1435,16 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
     try:
         # First, disable hotspot if active
         subprocess.run(
-            ["sudo", "nmcli", "connection", "down", "NomadPi"],
+            ["sudo", "-n", "nmcli", "connection", "down", "NomadPi"],
             check=False,
-            capture_output=True
+            capture_output=True,
+            timeout=15
         )
         
         # If SSID provided, try to connect to it
         if ssid:
             result = subprocess.run(
-                ["sudo", "nmcli", "connection", "up", "id", ssid],
+                ["sudo", "-n", "nmcli", "connection", "up", "id", ssid],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -1226,7 +1461,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
             home_ssid = os.environ.get("HOME_SSID", "")
             if home_ssid:
                 result = subprocess.run(
-                    ["sudo", "nmcli", "connection", "up", "id", home_ssid],
+                    ["sudo", "-n", "nmcli", "connection", "up", "id", home_ssid],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -1255,7 +1490,7 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
                     # Try first available WiFi connection
                     first_conn = connections[0]
                     subprocess.run(
-                        ["sudo", "nmcli", "connection", "up", "id", first_conn],
+                        ["sudo", "-n", "nmcli", "connection", "up", "id", first_conn],
                         check=True,
                         capture_output=True,
                         text=True,
@@ -1273,6 +1508,8 @@ def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)
         raise HTTPException(status_code=408, detail="Connection timeout")
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect: {e.stderr if e.stderr else str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1310,10 +1547,19 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
 
     try:
-        # Check if Tailscale is installed
-        which_result = subprocess.run(["which", "tailscale"], capture_output=True)
-        if which_result.returncode != 0:
-            return {"installed": False, "connected": False, "message": "Tailscale not installed"}
+        # Check if Tailscale is installed (check multiple paths)
+        paths_to_check = ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]
+        tailscale_path = shutil.which("tailscale")
+        
+        if not tailscale_path:
+            # Fallback check
+            for path in paths_to_check:
+                if os.path.exists(path):
+                    tailscale_path = path
+                    break
+        
+        if not tailscale_path:
+            return {"installed": False, "connected": False, "message": "Tailscale not found in PATH"}
 
         # Check if tailscaled service is running
         service_result = subprocess.run(
@@ -1351,12 +1597,19 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
                 timeout=5
             )
 
+            # Get IP and other details
+            self_node = status_data.get("Self", {})
+            tailscale_ips = self_node.get("TailscaleIPs", [])
+            ipv4 = next((ip for ip in tailscale_ips if "." in ip), None)
+            
             return {
                 "installed": True,
                 "connected": backend_state == "Running",
                 "service_running": True,
                 "backend_state": backend_state,
-                "self": status_data.get("Self", {}),
+                "self": self_node,
+                "ipv4": ipv4,
+                "magic_dns": status_data.get("MagicDNSSuffix", ""),
                 "peer_count": len(status_data.get("Peer", {})),
                 "status_output": status_simple.stdout
             }
@@ -1372,6 +1625,24 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": True, "connected": False, "error": "Status check timed out"}
     except Exception as e:
         return {"installed": True, "connected": False, "error": str(e)}
+
+@router.post("/tailscale/service/{action}")
+def tailscale_service_control(action: str, user_id: int = Depends(get_current_user_id)):
+    """Start or stop the Tailscale system service"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="Tailscale service control only available on Linux")
+        
+    if action not in ["start", "stop", "restart"]:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    try:
+        cmd = ["sudo", "-n", "systemctl", action, "tailscaled"]
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=10)
+        return {"status": "success", "message": f"Service {action}ed successfully"}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to {action} service: {e.stderr or str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/tailscale/ip")
 def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
@@ -1394,6 +1665,15 @@ def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
             return {"ip": None, "message": "Not connected to Tailscale"}
     except Exception as e:
         return {"ip": None, "error": str(e)}
+
+class TailscaleKeyRequest(BaseModel):
+    auth_key: str
+
+@router.post("/tailscale/set-auth-key")
+def set_tailscale_key(request: TailscaleKeyRequest, user_id: int = Depends(get_current_user_id)):
+    """Save Tailscale Auth Key to database"""
+    database.set_setting("tailscale_auth_key", request.auth_key)
+    return {"status": "success", "message": "Auth key saved"}
 
 @router.post("/tailscale/up")
 def tailscale_up(user_id: int = Depends(get_current_user_id)):
@@ -1605,17 +1885,186 @@ def get_dlna_info(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"enabled": False, "message": str(e)}
 
-@router.post("/dlna/restart")
-def restart_dlna(user_id: int = Depends(get_current_user_id)):
-    """Restart DLNA server"""
+@router.get("/dlna/status")
+def get_dlna_status(user_id: int = Depends(get_current_user_id)):
+    """Get DLNA diagnostic information"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
-    
+
+    import glob
+    diagnostics = {}
+
+    # Check if service is running
     try:
-        subprocess.run(["sudo", "systemctl", "restart", "minidlna"], check=True)
-        # Force rescan
-        subprocess.run(["sudo", "minidlnad", "-R"], check=False)
-        return {"status": "ok", "message": "DLNA server restarted and rescanning media"}
+        result = subprocess.run(["systemctl", "is-active", "minidlna"], capture_output=True, text=True)
+        diagnostics["service_running"] = result.stdout.strip() == "active"
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        diagnostics["service_running"] = False
+
+    # Read config to see what paths it's scanning
+    db_dir = "/var/cache/minidlna"
+    log_dir = "/var/log/minidlna"
+    try:
+        with open("/etc/minidlna.conf", "r") as f:
+            config = f.read()
+            lines = config.split("\n")
+            media_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("media_dir=")]
+            root_container = [line.split("=", 1)[1].strip() for line in lines if line.startswith("root_container=")]
+            parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+            parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+            if parsed_db_dirs and parsed_db_dirs[0]:
+                db_dir = parsed_db_dirs[0]
+            if parsed_log_dirs and parsed_log_dirs[0]:
+                log_dir = parsed_log_dirs[0]
+            diagnostics["configured_paths"] = media_dirs
+            diagnostics["root_container"] = root_container[0] if root_container else "NOT SET"
+    except (FileNotFoundError, PermissionError, OSError):
+        diagnostics["configured_paths"] = ["ERROR: Could not read config"]
+        diagnostics["root_container"] = "ERROR"
+    diagnostics["db_dir"] = db_dir
+    diagnostics["log_dir"] = log_dir
+
+    # Count actual files in data directories
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    movies_dir = os.path.join(base_dir, "data", "movies")
+    shows_dir = os.path.join(base_dir, "data", "shows")
+
+    # Check if directories exist
+    diagnostics["movies_dir_exists"] = os.path.exists(movies_dir)
+    diagnostics["shows_dir_exists"] = os.path.exists(shows_dir)
+    diagnostics["movies_dir_path"] = movies_dir
+    diagnostics["shows_dir_path"] = shows_dir
+
+    # Check permissions
+    try:
+        import stat
+        if os.path.exists(movies_dir):
+            st = os.stat(movies_dir)
+            diagnostics["movies_dir_perms"] = oct(st.st_mode)[-3:]
+            diagnostics["movies_dir_owner"] = f"{st.st_uid}:{st.st_gid}"
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+
+    try:
+        movies = glob.glob(os.path.join(movies_dir, "**", "*.mp4"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.mkv"), recursive=True)
+        movies += glob.glob(os.path.join(movies_dir, "**", "*.avi"), recursive=True)
+        diagnostics["movie_files_found"] = len(movies)
+        diagnostics["movie_samples"] = [os.path.relpath(m, movies_dir) for m in movies[:5]]
+    except Exception as e:
+        diagnostics["movie_files_found"] = 0
+        diagnostics["movie_samples"] = []
+        diagnostics["movie_scan_error"] = str(e)
+
+    try:
+        shows = glob.glob(os.path.join(shows_dir, "**", "*.mp4"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.mkv"), recursive=True)
+        shows += glob.glob(os.path.join(shows_dir, "**", "*.avi"), recursive=True)
+        diagnostics["show_files_found"] = len(shows)
+        diagnostics["show_samples"] = [os.path.relpath(s, shows_dir) for s in shows[:5]]
+    except Exception as e:
+        diagnostics["show_files_found"] = 0
+        diagnostics["show_samples"] = []
+        diagnostics["show_scan_error"] = str(e)
+
+    # Check cache directory permissions
+    try:
+        cache_st = os.stat(db_dir)
+        diagnostics["cache_dir_perms"] = oct(cache_st.st_mode)[-3:]
+        diagnostics["cache_dir_owner"] = f"{cache_st.st_uid}:{cache_st.st_gid}"
+        diagnostics["cache_dir_exists"] = True
+    except (FileNotFoundError, PermissionError, OSError):
+        diagnostics["cache_dir_exists"] = False
+
+    # Read recent log entries - try multiple locations
+    logs_found = False
+    log_locations = [
+        "/var/log/minidlna.log",
+        "/var/log/minidlna/minidlna.log",
+    ]
+
+    for log_path in log_locations:
+        try:
+            result = subprocess.run(["sudo", "tail", "-30", log_path],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = log_path
+                logs_found = True
+                break
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            pass
+
+    if not logs_found:
+        # Try systemd journal
+        try:
+            result = subprocess.run(["sudo", "journalctl", "-u", "minidlna", "-n", "20", "--no-pager"],
+                                  capture_output=True, text=True, timeout=5)
+            if result.stdout and result.stdout.strip():
+                diagnostics["recent_logs"] = result.stdout.split("\n")[-15:]
+                diagnostics["log_file_location"] = "systemd journal"
+            else:
+                diagnostics["recent_logs"] = ["No logs found in any location"]
+                diagnostics["log_file_location"] = "none"
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            diagnostics["recent_logs"] = ["Could not read logs"]
+            diagnostics["log_file_location"] = "error"
+
+    # Check database file
+    try:
+        db_file = os.path.join(db_dir, "files.db")
+        db_exists = os.path.exists(db_file)
+        diagnostics["database_exists"] = db_exists
+        diagnostics["database_path"] = db_file
+        if db_exists:
+            db_size = os.path.getsize(db_file)
+            diagnostics["database_size_mb"] = round(db_size / 1024 / 1024, 2)
+    except (FileNotFoundError, PermissionError, OSError):
+        diagnostics["database_exists"] = False
+        diagnostics["database_size_mb"] = 0
+
+    return diagnostics
+
+@router.post("/dlna/restart")
+def restart_dlna(user_id: int = Depends(get_current_user_id)):
+    """Restart DLNA server and rebuild database"""
+    if platform.system() != "Linux":
+        raise HTTPException(status_code=400, detail="DLNA only available on Linux")
+
+    try:
+        db_dir = "/var/cache/minidlna"
+        log_dir = "/var/log/minidlna"
+        try:
+            with open("/etc/minidlna.conf", "r") as f:
+                config = f.read()
+                lines = config.split("\n")
+                parsed_db_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("db_dir=")]
+                parsed_log_dirs = [line.split("=", 1)[1].strip() for line in lines if line.startswith("log_dir=")]
+                if parsed_db_dirs and parsed_db_dirs[0]:
+                    db_dir = parsed_db_dirs[0]
+                if parsed_log_dirs and parsed_log_dirs[0]:
+                    log_dir = parsed_log_dirs[0]
+        except Exception:
+            pass
+
+        # Stop service
+        subprocess.run(["sudo", "systemctl", "stop", "minidlna"], check=False)
+
+        # Clear database
+        subprocess.run(["sudo", "rm", "-f", os.path.join(db_dir, "files.db")], check=False)
+
+        # Recreate cache directory with proper permissions
+        subprocess.run(["sudo", "mkdir", "-p", db_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", db_dir], check=False)
+        subprocess.run(["sudo", "mkdir", "-p", log_dir], check=False)
+        subprocess.run(["sudo", "chown", "-R", "minidlna:minidlna", log_dir], check=False)
+
+        # Start service
+        subprocess.run(["sudo", "systemctl", "start", "minidlna"], check=True)
+
+        # MiniDLNA will automatically scan on startup when database is missing
+
+        return {"status": "ok", "message": "DLNA database cleared and rebuilding. Wait 2-3 minutes then check your TV."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1637,7 +2086,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
         try:
             with open("/proc/device-tree/model", "r") as f:
                 info["model"] = f.read().strip().replace('\x00', '')
-        except:
+        except (FileNotFoundError, PermissionError, OSError):
             info["model"] = "Unknown"
         
         # Get OS info
@@ -1650,14 +2099,14 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                         os_info[key] = value.strip('"')
                 info["os_name"] = os_info.get("PRETTY_NAME", "Linux")
                 info["os_version"] = os_info.get("VERSION", "Unknown")
-        except:
+        except (FileNotFoundError, PermissionError, OSError):
             info["os_name"] = "Linux"
             info["os_version"] = "Unknown"
         
         # Get kernel version
         try:
             info["kernel"] = subprocess.check_output(["uname", "-r"], text=True).strip()
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             info["kernel"] = platform.release()
         
         # Get uptime
@@ -1668,7 +2117,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                 hours = int((uptime_seconds % 86400) // 3600)
                 minutes = int((uptime_seconds % 3600) // 60)
                 info["uptime_formatted"] = f"{days}d {hours}h {minutes}m"
-        except:
+        except (FileNotFoundError, PermissionError, OSError, ValueError, IndexError):
             info["uptime_formatted"] = "Unknown"
         
         # Get memory info
@@ -1676,14 +2125,14 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
             mem = psutil.virtual_memory()
             info["memory_total_gb"] = round(mem.total / (1024**3), 2)
             info["memory_available_gb"] = round(mem.available / (1024**3), 2)
-        except:
+        except (AttributeError, OSError):
             pass
         
         # Get CPU info
         try:
             info["cpu_count"] = psutil.cpu_count(logical=False)
             info["cpu_count_logical"] = psutil.cpu_count(logical=True)
-        except:
+        except (AttributeError, OSError):
             pass
         
         # Get voltage (Raspberry Pi specific)
@@ -1698,7 +2147,7 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
                 # Output format: volt=1.2000V
                 voltage_str = result.stdout.strip().split('=')[1].rstrip('V')
                 info["voltage"] = float(voltage_str)
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             pass
     
     return info
@@ -1795,7 +2244,7 @@ def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
                 "fix": "Consider cleaning up media files",
                 "impact": "Limited space for new media"
             })
-    except:
+    except (PermissionError, OSError):
         pass
 
     # Check memory usage
@@ -1809,7 +2258,7 @@ def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
                 "fix": "Consider restarting the system",
                 "impact": "May cause slow performance"
             })
-    except:
+    except (AttributeError, OSError):
         pass
 
     return diagnostics

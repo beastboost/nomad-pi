@@ -317,6 +317,9 @@ createApp({
             try {
                 const response = await this.apiCall('/api/system/settings/omdb', 'GET');
                 this.settings.omdb_key = response.key;
+                
+                // Refresh Tailscale status when loading settings
+                await this.refreshTailscaleStatus();
             } catch (error) {
                 console.error('Error loading settings:', error);
             }

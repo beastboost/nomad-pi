@@ -7,7 +7,6 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios@1/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/css/admin.css?v=1768667846">
 </head>
 <body>
@@ -575,10 +574,10 @@
 
                                         <!-- Auth Key Input (only show if not connected) -->
                                         <div v-if="tailscale.status.installed && !tailscale.status.connected" class="form-group">
-                                            <label>Auth Key (optional)</label>
+                                            <label for="tailscale-auth-key">Auth Key (optional)</label>
                                             <div class="input-with-button">
-                                                <input type="password" v-model="tailscale.authKey" placeholder="tskey-auth-...">
-                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary">
+                                                <input id="tailscale-auth-key" type="password" v-model="tailscale.authKey" placeholder="tskey-auth-..." title="Tailscale Auth Key">
+                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary" title="Save Auth Key">
                                                     <i class="fas fa-save"></i>
                                                 </button>
                                             </div>

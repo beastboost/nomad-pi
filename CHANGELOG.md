@@ -68,6 +68,63 @@ This release represents a complete overhaul of the Books and Music sections with
 - Optimized for Raspberry Pi performance
 - No additional dependencies required in setup
 
+## [1.1.7] - 2026-02-01
+
+### Added
+- **Captive Portal**: Auto-detection for Android/iOS/Windows devices when connecting to hotspot
+  - Redirects to setup page automatically when devices check for internet connectivity
+  - Routes: `/generate_204`, `/gen_204` (Android), `/hotspot-detect.html` (iOS), `/connecttest.txt` (Windows)
+- **Setup Welcome Page** (`/setup.html`): Beautiful onboarding experience
+  - One-click IP address copy for easy bookmarking
+  - Platform-specific "Use Without Internet" instructions for hotspot mode
+  - Add to Home Screen instructions for iOS/Android
+  - Gradient glassmorphism design
+- **Dark Mode Toggle**: 3-state theme switcher in header
+  - Default Dark → Light → Extra Dark themes
+  - Persistent preference in localStorage
+  - Smooth animated transitions between themes
+  - Dynamic icon changes (moon/sun/adjust)
+- **Public System Info API**: New `/api/system/info` endpoint for IP detection
+
+### Changed
+- **UI Overhaul - Admin Panel**: Complete modernization
+  - Modern card-based layout with hover effects and shadows
+  - Section headers with accent-colored icons and underlines
+  - Responsive button grid system (`.button-grid`)
+  - Enhanced spacing and visual hierarchy
+- **UI Overhaul - Button System**: Professional redesign
+  - Gradient backgrounds for all button types
+  - Elevation hover animations with shadow enhancement
+  - New `.success` button variant (green gradient)
+  - Icon integration in all buttons
+  - Size variants: `.small`, `.large`
+- **UI Overhaul - Form System**: Modern input styling
+  - Form groups with icon labels
+  - Help text system with contextual information
+  - Validation states (error/success) with visual feedback
+  - Custom select dropdowns with styled arrows
+  - Focus glow effects on all inputs
+  - Textarea support with consistent styling
+- **UI Overhaul - Sections**: Modernized layouts
+  - System Control: Grid layout with color-coded actions
+  - File Upload: Redesigned drop zone with large icons
+  - User Management: Streamlined inline form grid
+  - Library Tools: Organized button groups
+  - WiFi Controls: Better status indicators
+  - Settings: Clean form layouts with icons
+
+### Fixed
+- **CRITICAL**: DNS configuration issue (empty `/etc/resolv.conf` preventing package installation)
+- **CRITICAL**: CBR/RAR extraction tools missing (installed 7zip, unrar, unar, libarchive-tools)
+- **CBR Comics**: Replaced deprecated `p7zip-full` with `7zip` for Ubuntu 24.04+ compatibility
+
+### Technical
+- Light theme CSS variables for accessibility
+- Form validation CSS classes
+- Help text component styling
+- Enhanced admin panel card system
+- Responsive grid utilities
+
 ## [1.1.6] - 2026-01-14
 
 ### Added

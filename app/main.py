@@ -228,6 +228,28 @@ DATA_DIRS = ["data/movies", "data/shows", "data/music", "data/books", "data/file
 for d in DATA_DIRS:
     os.makedirs(d, exist_ok=True)
 
+# Captive Portal Detection Routes
+# These routes handle auto-detection for Android/iOS devices
+from fastapi.responses import RedirectResponse, HTMLResponse
+
+@app.get("/generate_204")
+@app.get("/gen_204")
+async def android_captive_portal():
+    """Android captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
+@app.get("/hotspot-detect.html")
+@app.get("/library/test/success.html")
+async def ios_captive_portal():
+    """iOS captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
+@app.get("/connecttest.txt")
+@app.get("/redirect")
+async def windows_captive_portal():
+    """Windows captive portal detection"""
+    return RedirectResponse(url="/setup.html", status_code=302)
+
 # Routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Public system endpoints
@@ -266,7 +288,8 @@ def _startup_tasks():
                                 continue
                                 
                             os.makedirs(target, exist_ok=True)
-                            subprocess.run(["sudo", "-n", "/usr/bin/mount", device, target], check=True)
+                            from app.routers.system import mount_with_permissions
+                            mount_with_permissions(device, target)
                             logger.info(f"Restored mount: {device} -> {target}")
                         except Exception as e:
                             logger.error(f"Failed to restore mount {device}: {e}")
@@ -275,12 +298,27 @@ def _startup_tasks():
     except Exception as e:
         logger.error(f"Error during mount restoration: {e}")
 
+    try:
+        import platform
+
+        if platform.system() == "Linux":
+            media.refresh_external_links()
+    except Exception as e:
+        logger.warning(f"Failed to refresh external drive links: {e}")
+
     # Start scheduler
     scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
     scheduler.start()
     logger.info("Background scheduler started")
     
-    # 1. Staggered background tasks to prevent OOM on SBCs
+    # 1. Start Discovery Service
+    try:
+        from app.services import discovery
+        discovery.service.start()
+    except Exception as e:
+        logger.error(f"Failed to start discovery service: {e}")
+
+    # 2. Staggered background tasks to prevent OOM on SBCs
     def run_staggered():
         # Wait a bit for the main web server to settle
         time.sleep(10)
@@ -368,6 +406,12 @@ async def protect_data(request: Request, call_next):
     p = request.url.path
     if p == "/" or p.endswith(".html") or p.endswith(".js") or p.endswith(".css"):
         response.headers["Cache-Control"] = "no-store"
+    if p.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    ct = (response.headers.get("content-type") or "").strip().lower()
+    if ct == "application/json":
+        response.headers["content-type"] = "application/json; charset=utf-8"
     return response
 
 # Mount data for direct access (streaming)
