@@ -1362,6 +1362,13 @@ function cleanTitle(name) {
 }
 
 function startMusicQueue(list, startIdx) {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.startQueue(list, startIdx);
+        return;
+    }
+
+    // Fallback to old player
     const audio = document.getElementById('global-audio');
     const bar = document.getElementById('player-bar');
     if (!audio || !bar) return;
@@ -1465,6 +1472,13 @@ function playMusicAt(idx) {
 }
 
 function musicNext() {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.playNext();
+        return;
+    }
+
+    // Fallback to old player
     if (!musicQueue.length) return;
     if (musicShuffle) {
         if (!musicShuffleOrder.length) musicShuffleOrder = shuffleOrder(musicQueue.length, musicIndex);
@@ -1476,6 +1490,13 @@ function musicNext() {
 }
 
 function musicPrev() {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.playPrevious();
+        return;
+    }
+
+    // Fallback to old player
     if (!musicQueue.length) return;
     if (musicShuffle) {
         musicShufflePos = Math.max(musicShufflePos - 1, 0);
@@ -2974,6 +2995,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof EBookReader !== 'undefined') {
         window.ebookReader = new EBookReader();
         console.log('eBook reader initialized');
+    }
+
+    // Initialize music player
+    if (typeof MusicPlayer !== 'undefined') {
+        window.musicPlayer = new MusicPlayer();
+        console.log('Music player initialized');
     }
 
     const setupHintEl = document.getElementById('setup-hint');

@@ -11,6 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=1768131100">
     <link rel="stylesheet" href="css/ebook-reader.css">
+    <link rel="stylesheet" href="css/music-player.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -490,23 +491,54 @@
     </div>
 
     <div id="player-bar" class="player-bar glass hidden">
-        <div class="player-title" id="player-title">Not playing</div>
+        <img id="player-album-art" class="player-album-art" src="/icons/music-placeholder.svg" alt="Album Art">
+
+        <div class="player-info">
+            <div class="player-title" id="player-title">Not playing</div>
+            <div class="player-artist" id="player-artist">Unknown Artist</div>
+        </div>
+
         <div class="player-controls">
-            <button id="player-prev" class="player-btn" title="Previous">⏮</button>
-            <button id="player-play" class="player-btn" title="Play/Pause">▶</button>
-            <button id="player-next" class="player-btn" title="Next">⏭</button>
             <button id="player-shuffle" class="player-btn" title="Shuffle">🔀</button>
+            <button id="player-prev" class="player-btn" title="Previous">⏮</button>
+            <button id="player-play" class="player-btn primary" title="Play/Pause">▶</button>
+            <button id="player-next" class="player-btn" title="Next">⏭</button>
+            <button id="player-repeat" class="player-btn" title="Repeat">🔁</button>
+        </div>
+
+        <div class="player-progress-section">
+            <div class="player-progress">
+                <span class="player-time" id="player-time-current">0:00</span>
+                <input id="player-seek" class="player-seek" type="range" min="0" max="100" value="0">
+                <span class="player-time" id="player-time-duration">0:00</span>
+            </div>
+        </div>
+
+        <div class="player-volume-section">
+            <span style="font-size: 0.9rem;">🔊</span>
+            <input id="player-volume" class="player-volume" type="range" min="0" max="1" step="0.01" value="1">
+        </div>
+
+        <div class="player-controls">
+            <button id="player-queue" class="player-btn" title="Queue">📋</button>
             <button id="player-close" class="player-btn" title="Close Player">✕</button>
         </div>
-        <div class="player-progress">
-            <input id="player-seek" type="range" min="0" max="100" value="0">
-            <div id="player-time" class="player-time">0:00 / 0:00</div>
-        </div>
-        <div class="player-volume">
-            <span style="font-size: 0.8rem; margin-right: 5px;">🔊</span>
-            <input id="player-volume" type="range" min="0" max="1" step="0.01" value="1">
-        </div>
+
         <audio id="global-audio" preload="auto"></audio>
+    </div>
+
+    <!-- Music Queue Panel -->
+    <div id="music-queue-panel" class="music-queue-panel">
+        <div class="queue-header">
+            <div class="queue-title">Queue</div>
+            <div class="queue-actions">
+                <button class="queue-btn" onclick="window.musicPlayer && window.musicPlayer.clearQueue()">Clear</button>
+                <button class="queue-close" onclick="window.musicPlayer && window.musicPlayer.toggleQueueView()">×</button>
+            </div>
+        </div>
+        <div id="music-queue-list" class="music-queue-list">
+            <div class="empty-queue">Queue is empty</div>
+        </div>
     </div>
     <div id="what-is-new-modal" class="modal hidden">
         <div class="modal-backdrop" onclick="closeWhatIsNew()"></div>
@@ -618,6 +650,7 @@
 
     <div id="toast-container"></div>
     <script src="js/ebook-reader.js"></script>
+    <script src="js/music-player.js"></script>
     <script src="js/app.js?v=1768131100"></script>
     <script>
         if ('serviceWorker' in navigator) {
