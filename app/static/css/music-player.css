@@ -516,8 +516,9 @@
 @media (max-width: 768px) {
     .player-bar {
         flex-wrap: wrap;
-        padding: 10px 12px;
-        gap: 8px;
+        padding: 8px 12px;
+        gap: 12px;
+        bottom: 60px; /* Account for mobile bottom nav */
     }
 
     .player-album-art {
@@ -526,39 +527,55 @@
     }
 
     .player-info {
-        order: 2;
-        width: 100%;
-    }
-
-    .player-controls {
+        flex: 1;
+        min-width: 0;
         order: 1;
     }
 
+    .player-controls {
+        order: 0;
+        width: 100%;
+        justify-content: center;
+        gap: 12px;
+    }
+
+    .player-btn {
+        width: 40px;
+        height: 40px;
+    }
+
+    .player-btn.primary {
+        width: 48px;
+        height: 48px;
+    }
+
     .player-progress-section {
-        order: 3;
+        order: 2;
         width: 100%;
         max-width: none;
+        margin-top: 4px;
     }
 
     .player-volume-section {
-        order: 4;
-        min-width: auto;
+        display: none; /* Hide volume on mobile to save space */
     }
 
     .music-queue-panel {
         width: 100%;
-        height: calc(100vh - 120px);
+        height: calc(100vh - 140px);
+        bottom: 60px;
     }
 
     .albums-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 12px;
     }
-}
 
-/* Mobile Bottom Navigation Adjustment */
-@media (max-width: 768px) {
-    .player-bar {
-        bottom: 60px; /* Account for mobile bottom nav */
+    .player-title {
+        font-size: 0.9rem;
+    }
+
+    .player-artist {
+        font-size: 0.8rem;
     }
 }
