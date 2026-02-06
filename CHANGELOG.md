@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.2] - 2026-02-06
+
+### Fixed - Music Player
+- **Play/Pause Button**: Fixed button not holding pause state
+  - Root cause: Old music player code was adding duplicate event listeners
+  - Old player listeners now only added if new music player unavailable
+  - Prevents conflict between old and new player button handlers
+  - Added console logging to help debug playback issues
+- **Mobile Layout**: Increased button spacing significantly
+  - Gap between buttons: 24px (was 16px)
+  - Button sizes: 56px play button, 48px other buttons (was 52px/44px)
+  - Added horizontal padding (16px) to controls row
+  - Much better thumb access and less cramped appearance
+
+### Fixed - eBook Reader
+- **EPUB Rendering**: Enhanced EPUB loading with better error handling
+  - Clear viewer content before loading new book
+  - Wait for library initialization (100ms delay)
+  - Validate all objects created successfully
+  - Individual try-catch for library loading
+  - Better error messages at each step
+  - Non-fatal TOC loading (continues if TOC fails)
+  - Added 'paginated' flow mode for better rendering
+
+### Technical
+- Removed duplicate event listeners for audio play/pause
+- Enhanced EPUB.js initialization with validation checks
+- Better console logging for debugging on mobile
+
 ## [2.0.1] - 2026-02-06
 
 ### Fixed - Music Player

@@ -205,12 +205,23 @@ class MusicPlayer {
 
     // Toggle play/pause
     togglePlay() {
-        if (!this.audio.src) return;
+        if (!this.audio.src) {
+            console.log('No audio source loaded');
+            return;
+        }
+
+        console.log('Toggle play - currently paused:', this.audio.paused);
 
         if (this.audio.paused) {
-            this.audio.play().catch(err => console.error('Play error:', err));
+            this.audio.play()
+                .then(() => console.log('Playback started'))
+                .catch(err => {
+                    console.error('Play error:', err);
+                    alert('Playback error: ' + err.message);
+                });
         } else {
             this.audio.pause();
+            console.log('Playback paused');
         }
     }
 
@@ -384,16 +395,24 @@ class MusicPlayer {
     }
 
     onPlay() {
+        console.log('onPlay event fired');
         const btnPlay = document.getElementById('player-play');
         if (btnPlay) {
             btnPlay.textContent = '⏸';
+            console.log('Play button updated to pause icon');
+        } else {
+            console.error('Play button element not found');
         }
     }
 
     onPause() {
+        console.log('onPause event fired');
         const btnPlay = document.getElementById('player-play');
         if (btnPlay) {
             btnPlay.textContent = '▶';
+            console.log('Play button updated to play icon');
+        } else {
+            console.error('Play button element not found');
         }
     }
 
