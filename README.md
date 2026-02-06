@@ -7,14 +7,10 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 ## 📱 Screenshots
 
 <p align="center">
-  <img src=".github/screenshots/dashboard.png" alt="Dashboard" width="200"/>
-  <img src=".github/screenshots/shows.png" alt="TV Shows Library" width="200"/>
-  <img src=".github/screenshots/movies.png" alt="Movies Library" width="200"/>
-  <img src=".github/screenshots/movie-detail.png" alt="Movie Details" width="200"/>
-</p>
-
-<p align="center">
-  <em>Mobile PWA interface - Dashboard, TV Shows, Movies, and Movie Details</em>
+  <img src=".github/screenshots/dashboard.png" width="200"/>
+  <img src=".github/screenshots/shows.png" width="200"/>
+  <img src=".github/screenshots/movies.png" width="200"/>
+  <img src=".github/screenshots/movie-detail.png" width="200"/>
 </p>
 
 ## 🚀 Key Features
