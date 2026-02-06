@@ -288,12 +288,26 @@ class EBookReader {
             const token = getCookie('auth_token');
             const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
 
+            console.log('Starting EPUB load for:', path);
+
             // Load EPUB.js if not already loaded
             if (typeof window.ePub === 'undefined') {
                 console.log('Loading JSZip library...');
-                await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+                try {
+                    await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+                } catch (err) {
+                    throw new Error('Failed to load JSZip library. Check internet connection.');
+                }
+
                 console.log('Loading EPUB.js library...');
-                await this.loadScript('https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js');
+                try {
+                    await this.loadScript('https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js');
+                } catch (err) {
+                    throw new Error('Failed to load EPUB.js library. Check internet connection.');
+                }
+
+                // Wait a bit for library to initialize
+                await new Promise(resolve => setTimeout(resolve, 100));
 
                 // Check if library loaded successfully
                 if (typeof window.ePub === 'undefined') {
@@ -304,22 +318,36 @@ class EBookReader {
 
             const epubViewer = document.getElementById('epub-viewer');
             if (!epubViewer) {
-                throw new Error('EPUB viewer element not found');
+                throw new Error('EPUB viewer element not found in page');
             }
             epubViewer.classList.remove('hidden');
+            epubViewer.innerHTML = ''; // Clear any previous content
 
-            console.log('Creating EPUB book instance...');
+            console.log('Creating EPUB book instance from:', url);
             this.epubBook = window.ePub(url);
+
+            if (!this.epubBook) {
+                throw new Error('Failed to create EPUB book instance');
+            }
 
             console.log('Rendering to viewer...');
             const rendition = this.epubBook.renderTo(epubViewer, {
                 width: '100%',
                 height: '100%',
-                spread: 'none'
+                spread: 'none',
+                flow: 'paginated'
             });
 
+            if (!rendition) {
+                throw new Error('Failed to create EPUB rendition');
+            }
+
             console.log('Displaying EPUB...');
-            await rendition.display();
+            try {
+                await rendition.display();
+            } catch (err) {
+                throw new Error('Failed to display EPUB: ' + (err.message || err));
+            }
 
             // Apply theme
             this.applyEPUBTheme(rendition);
@@ -336,13 +364,18 @@ class EBookReader {
             this.epubRendition = rendition;
 
             // Load TOC
-            const navigation = await this.epubBook.loaded.navigation;
-            this.loadTOC(navigation.toc);
+            try {
+                const navigation = await this.epubBook.loaded.navigation;
+                this.loadTOC(navigation.toc);
+            } catch (err) {
+                console.warn('Failed to load TOC:', err);
+                // Non-fatal, continue anyway
+            }
 
             console.log('EPUB loaded successfully');
         } catch (error) {
             console.error('Error in loadEPUB:', error);
-            throw new Error(error.message || 'Failed to load EPUB file');
+            throw new Error(error.message || error.toString() || 'Failed to load EPUB file');
         }
     }
 

@@ -3531,8 +3531,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         audio.addEventListener('ended', () => musicNext());
-        audio.addEventListener('play', () => { if (btnPlay) btnPlay.textContent = '⏸'; });
-        audio.addEventListener('pause', () => { if (btnPlay) btnPlay.textContent = '▶'; });
+        // Only add play/pause button updates if new music player is not available
+        if (!window.musicPlayer) {
+            audio.addEventListener('play', () => { if (btnPlay) btnPlay.textContent = '⏸'; });
+            audio.addEventListener('pause', () => { if (btnPlay) btnPlay.textContent = '▶'; });
+        }
         audio.addEventListener('error', (e) => {
             console.error('Global audio error:', audio.error);
             const titleEl = document.getElementById('player-title');
@@ -3554,7 +3557,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnPlay && audio) {
+    // Only add old player click handler if new music player is not available
+    if (btnPlay && audio && !window.musicPlayer) {
         btnPlay.addEventListener('click', () => {
             if (!audio.src) return;
             if (audio.paused) audio.play().catch(() => {});
