@@ -7,10 +7,9 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 ## 📱 Screenshots
 
 <p align="center">
-  <img src=".github/screenshots/dashboard.png" width="200"/>
-  <img src=".github/screenshots/shows.png" width="200"/>
-  <img src=".github/screenshots/movies.png" width="200"/>
-  <img src=".github/screenshots/movie-detail.png" width="200"/>
+  <img src=".github/screenshots/image_5666.png" width="200"/>
+  <img src=".github/screenshots/image_5665.png" width="200"/>
+  <img src=".github/screenshots/image_5667.png" width="200"/>
 </p>
 
 ## 🚀 Key Features
