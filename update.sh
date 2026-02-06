@@ -231,8 +231,21 @@ if id "minidlna" &>/dev/null; then
     sudo chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
 
     # Set ownership and permissions on data directory
-    sudo chown -R $REAL_USER:$REAL_USER "$SCRIPT_DIR/data" 2>/dev/null || true
-    sudo chmod -R 755 "$SCRIPT_DIR/data" 2>/dev/null || true
+    # IMPORTANT: Exclude data/external to avoid I/O errors on unmounted drives
+    # Use find with -mount to not cross filesystem boundaries (stops at mount points)
+    echo "Setting permissions on data directories (excluding external mounts)..." >> update.log
+    for dir in data/movies data/shows data/music data/books data/files data/gallery data/uploads data/cache; do
+        if [ -d "$SCRIPT_DIR/$dir" ]; then
+            sudo chown -R $REAL_USER:$REAL_USER "$SCRIPT_DIR/$dir" 2>/dev/null || true
+            sudo chmod -R 755 "$SCRIPT_DIR/$dir" 2>/dev/null || true
+        fi
+    done
+
+    # Fix data/external directory itself (but not contents/mounts)
+    if [ -d "$SCRIPT_DIR/data/external" ]; then
+        sudo chown $REAL_USER:$REAL_USER "$SCRIPT_DIR/data/external" 2>/dev/null || true
+        sudo chmod 755 "$SCRIPT_DIR/data/external" 2>/dev/null || true
+    fi
 fi
 
 # Fix MiniDLNA permissions and configuration

@@ -243,12 +243,12 @@ class EBookReader {
         const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
 
         // Load PDF.js if not already loaded
-        if (typeof pdfjsLib === 'undefined') {
+        if (typeof window.pdfjsLib === 'undefined') {
             await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         }
 
-        const loadingTask = pdfjsLib.getDocument(url);
+        const loadingTask = window.pdfjsLib.getDocument(url);
         this.pdfDoc = await loadingTask.promise;
         this.totalPages = this.pdfDoc.numPages;
 
@@ -287,7 +287,7 @@ class EBookReader {
         const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
 
         // Load EPUB.js if not already loaded
-        if (typeof ePub === 'undefined') {
+        if (typeof window.ePub === 'undefined') {
             await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
             await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js');
         }
@@ -295,7 +295,7 @@ class EBookReader {
         const epubViewer = document.getElementById('epub-viewer');
         epubViewer.classList.remove('hidden');
 
-        this.epubBook = ePub(url);
+        this.epubBook = window.ePub(url);
         const rendition = this.epubBook.renderTo(epubViewer, {
             width: '100%',
             height: '100%',

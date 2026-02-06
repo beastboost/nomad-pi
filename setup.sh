@@ -388,6 +388,8 @@ echo "[6/10] Configuring permissions..."
 # Detect paths for sudoers to be universal
 MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
 UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
+LSOF_PATH=$(command -v lsof || echo "/usr/bin/lsof")
+FUSER_PATH=$(command -v fuser || echo "/usr/bin/fuser")
 SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
 REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
 SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
@@ -400,7 +402,7 @@ CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
 SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
 SUDOERS_TMP=$(mktemp)
 cat > "$SUDOERS_TMP" <<EOL
-$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
+$USER_NAME ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $LSOF_PATH, $FUSER_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
 EOL
 if sudo visudo -cf "$SUDOERS_TMP"; then
     sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"

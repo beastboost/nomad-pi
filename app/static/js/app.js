@@ -4569,27 +4569,46 @@ async function mountDrive(device, name, btn) {
 }
 
 
-async function unmountDrive(mountpoint) {
-    if (!confirm(`Unmount ${mountpoint}?`)) return;
-    
+async function unmountDrive(mountpoint, force = false) {
+    if (!force && !confirm(`Unmount ${mountpoint}?`)) return;
+
     try {
-        const res = await fetch(`${API_BASE}/system/unmount?target=${encodeURIComponent(mountpoint)}`, {
+        const res = await fetch(`${API_BASE}/system/unmount`, {
             method: 'POST',
-            headers: getAuthHeaders()
+            headers: {
+                ...getAuthHeaders(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                target: mountpoint,
+                force: force
+            })
         });
         if (res.status === 401) { logout(); return; }
+
         const result = await res.json().catch(() => ({}));
+
         if (!res.ok) {
+            // Check if drive is busy (409 Conflict)
+            if (res.status === 409 && result.detail && result.detail.includes('Drive is busy')) {
+                const forceUnmount = confirm(
+                    `${result.detail}\n\nDo you want to force unmount and kill these processes?`
+                );
+                if (forceUnmount) {
+                    await unmountDrive(mountpoint, true);
+                }
+                return;
+            }
             throw new Error(result.detail || result.error || 'Unmount failed');
         }
-        
+
         if (result.status === 'unmounted' || result.status === 'not_implemented_on_windows') {
             loadDrives();
         } else {
             alert('Error: ' + (result.message || JSON.stringify(result)));
         }
     } catch (e) {
-        alert('Error: ' + e);
+        alert('Error: ' + e.message);
     }
 }
 
