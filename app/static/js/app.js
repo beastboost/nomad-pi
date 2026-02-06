@@ -1431,11 +1431,12 @@ function renderMediaList(category, files) {
             }
         } else if (category === 'books') {
             const isPdf = /\.pdf$/i.test(file.name || '');
+            const isEpub = /\.epub$/i.test(file.name || '');
             const isCbz = /\.cbz$/i.test(file.name || '');
             const isCbr = /\.cbr$/i.test(file.name || '');
             const title = escapeHtml(cleanTitle(file.name));
             const folder = file.folder && file.folder !== '.' ? `<div style="color:#aaa;font-size:0.85em;">${escapeHtml(file.folder)}</div>` : '';
-            const canView = isPdf || isCbz || isCbr;
+            const canView = isPdf || isEpub || isCbz || isCbr;
             const viewBtn = canView ? `<button class="modal-close view-btn">View</button>` : '';
             const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
 
@@ -1453,8 +1454,15 @@ function renderMediaList(category, files) {
             const btn = div.querySelector('.view-btn');
             if (btn) {
                 btn.addEventListener('click', () => {
-                    if (isPdf) openPdfViewer(file.path, file.name || 'PDF');
-                    else openComicViewer(file.path, file.name || 'Comic');
+                    if (window.ebookReader) {
+                        // Use new eBook reader for all formats
+                        window.ebookReader.open(file.path, file.name || 'Book');
+                    } else {
+                        // Fallback to old viewers
+                        if (isPdf) openPdfViewer(file.path, file.name || 'PDF');
+                        else if (isEpub) window.open(file.path, '_blank');
+                        else openComicViewer(file.path, file.name || 'Comic');
+                    }
                 });
             }
             const renameBtn = div.querySelector('.rename-btn-card');
@@ -1771,6 +1779,13 @@ function cleanTitle(name) {
 }
 
 function startMusicQueue(list, startIdx) {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.startQueue(list, startIdx);
+        return;
+    }
+
+    // Fallback to old player
     const audio = document.getElementById('global-audio');
     const bar = document.getElementById('player-bar');
     if (!audio || !bar) return;
@@ -1874,6 +1889,13 @@ function playMusicAt(idx) {
 }
 
 function musicNext() {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.playNext();
+        return;
+    }
+
+    // Fallback to old player
     if (!musicQueue.length) return;
     if (musicShuffle) {
         if (!musicShuffleOrder.length) musicShuffleOrder = shuffleOrder(musicQueue.length, musicIndex);
@@ -1885,6 +1907,13 @@ function musicNext() {
 }
 
 function musicPrev() {
+    // Use new music player if available
+    if (window.musicPlayer) {
+        window.musicPlayer.playPrevious();
+        return;
+    }
+
+    // Fallback to old player
     if (!musicQueue.length) return;
     if (musicShuffle) {
         musicShufflePos = Math.max(musicShufflePos - 1, 0);
@@ -1895,6 +1924,13 @@ function musicPrev() {
 }
 
 function openPdfViewer(path, title) {
+    // Use new eBook reader if available
+    if (window.ebookReader) {
+        window.ebookReader.open(path, title || 'PDF');
+        return;
+    }
+
+    // Fallback to simple iframe viewer
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -2127,6 +2163,13 @@ function openVideoViewer(path, title, startSeconds = 0) {
 }
 
 async function openComicViewer(path, title) {
+    // Use new eBook reader if available
+    if (window.ebookReader) {
+        window.ebookReader.open(path, title || 'Comic');
+        return;
+    }
+
+    // Fallback to old comic viewer
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -3364,6 +3407,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     checkAuth(); // Check auth on load
+
+    // Initialize eBook reader
+    if (typeof EBookReader !== 'undefined') {
+        window.ebookReader = new EBookReader();
+        console.log('eBook reader initialized');
+    }
+
+    // Initialize music player
+    if (typeof MusicPlayer !== 'undefined') {
+        window.musicPlayer = new MusicPlayer();
+        console.log('Music player initialized');
+    }
 
     const setupHintEl = document.getElementById('setup-hint');
     const passwordInput = document.getElementById('password-input');
