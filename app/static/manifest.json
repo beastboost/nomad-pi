@@ -1,7 +1,7 @@
 {
   "name": "Nomad Pi Media Server",
   "short_name": "Nomad Pi",
-  "version": "1.1.7",
+  "version": "2.0.0",
   "description": "Your portable media server for movies, shows, music and more.",
   "start_url": "/",
   "display": "standalone",

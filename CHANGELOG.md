@@ -1,5 +1,73 @@
 # Changelog
 
+## [2.0.0] - 2026-02-06
+
+### 🎉 Major Release - Comprehensive Media Experience
+
+This release represents a complete overhaul of the Books and Music sections with professional-grade readers and players.
+
+### Added - eBook Reader
+- **📚 PDF Support**: Full PDF rendering using PDF.js with canvas-based display
+  - Navigate pages with arrow keys or touch swipes
+  - Zoom and pan controls
+  - Table of contents extraction
+  - Progress tracking with auto-save
+- **📖 EPUB Support**: Reflowable text using EPUB.js
+  - Adjustable font sizes
+  - Theme switching (light, sepia, dark)
+  - Chapter navigation
+  - Text reflow for optimal reading
+- **🎨 Comic Book Support**: CBZ/CBR viewing with full-page display
+  - High-quality image rendering
+  - Keyboard and touch navigation
+  - Fit-to-screen modes
+- **🔖 Bookmarks System**: Save and restore reading positions
+  - LocalStorage-based persistence
+  - Quick jump to bookmarked pages
+  - Bookmark management UI
+- **⚡ Enhanced UI**: Modern full-screen reader modal
+  - Keyboard shortcuts (arrows, ESC, fullscreen)
+  - Touch gestures for mobile
+  - Progress slider with visual feedback
+  - Responsive design for all screen sizes
+
+### Added - Music Player
+- **🎵 Professional Player**: Complete rewrite of music playback system
+  - Album art display (ready for metadata extraction)
+  - Artist and title information
+  - Visual waveform-style progress bar
+- **📋 Queue Management**: Full control over playback queue
+  - Add, remove, and reorder tracks
+  - Side panel with queue visualization
+  - Clear queue functionality
+  - Queue persistence across sessions
+- **🔀 Advanced Controls**: Professional playback features
+  - Shuffle mode with proper randomization
+  - Repeat modes (none, all, one track)
+  - Previous/next track navigation
+  - Volume control with localStorage persistence
+- **🎨 Enhanced UI**: Modern glassmorphic player bar
+  - Album art thumbnail
+  - Dual time display (current/total)
+  - Responsive controls for mobile
+  - Queue panel with drag handles
+- **📱 Media Session API**: Native OS integration
+  - Lockscreen controls on mobile
+  - Notification media controls
+  - System playback integration
+
+### Changed
+- Books section now supports PDF, EPUB, and comic books with unified reader
+- Music player completely redesigned with queue management
+- Improved mobile responsiveness for player controls
+- Better progress tracking integration for all media types
+
+### Technical
+- Dynamic CDN loading for PDF.js and EPUB.js libraries
+- Backward compatibility maintained (old viewers as fallback)
+- Optimized for Raspberry Pi performance
+- No additional dependencies required in setup
+
 ## [1.1.6] - 2026-01-14
 
 ### Added
