@@ -354,11 +354,15 @@ class MusicPlayer {
         }
 
         // Update time display
-        const timeEl = document.getElementById('player-time');
-        if (timeEl) {
-            const current = this.formatTime(this.audio.currentTime);
-            const duration = this.formatTime(this.audio.duration);
-            timeEl.textContent = `${current} / ${duration}`;
+        const currentTimeEl = document.getElementById('player-time-current');
+        const durationTimeEl = document.getElementById('player-time-duration');
+
+        if (currentTimeEl) {
+            currentTimeEl.textContent = this.formatTime(this.audio.currentTime);
+        }
+
+        if (durationTimeEl) {
+            durationTimeEl.textContent = this.formatTime(this.audio.duration);
         }
 
         // Update progress tracking in backend
