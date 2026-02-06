@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.1] - 2026-02-06
+
+### Fixed - Music Player
+- **Time Tracking**: Fixed time display not updating (was looking for wrong element IDs)
+  - Now correctly updates current time and duration separately
+  - Progress bar syncs properly with playback
+- **Mobile Layout**: Improved mobile player layout
+  - Larger touch targets (52px play button, 44px other buttons)
+  - Better spacing between controls (16px gaps)
+  - Album art and track info in top row
+  - Controls centered below for easy thumb access
+  - More padding and breathing room
+  - Larger fonts for better readability
+
+### Fixed - eBook Reader
+- **EPUB Loading**: Fixed "fail to load book: undefined" error
+  - Switched EPUB.js CDN from cdnjs to jsdelivr (more reliable)
+  - Added proper error handling with meaningful messages
+  - Added validation checks for library loading
+  - Enhanced console logging for debugging
+  - Better error propagation with specific error messages
+
+### Fixed - Drive Management
+- **Force Unmount**: Added force unmount option for busy drives
+  - Detects processes using mount point before unmounting
+  - Shows user which processes are blocking
+  - Prompts to force unmount and kill blocking processes
+  - Better error messages and timeout handling
+  - Added lsof and fuser to sudoers configuration
+
+### Technical
+- Fixed element ID mismatch in music player time display
+- Improved EPUB.js library loading reliability
+- Enhanced mobile CSS for better UX
+
 ## [2.0.0] - 2026-02-06
 
 ### 🎉 Major Release - Comprehensive Media Experience

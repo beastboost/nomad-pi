@@ -233,7 +233,8 @@ class EBookReader {
             this.showLoading(false);
         } catch (error) {
             console.error('Error loading book:', error);
-            alert('Failed to load book: ' + error.message);
+            const errorMsg = error?.message || error?.toString() || 'Unknown error occurred';
+            alert('Failed to load book: ' + errorMsg);
             this.close();
         }
     }
@@ -283,44 +284,66 @@ class EBookReader {
     }
 
     async loadEPUB(path) {
-        const token = getCookie('auth_token');
-        const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
+        try {
+            const token = getCookie('auth_token');
+            const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
 
-        // Load EPUB.js if not already loaded
-        if (typeof window.ePub === 'undefined') {
-            await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
-            await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js');
+            // Load EPUB.js if not already loaded
+            if (typeof window.ePub === 'undefined') {
+                console.log('Loading JSZip library...');
+                await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
+                console.log('Loading EPUB.js library...');
+                await this.loadScript('https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js');
+
+                // Check if library loaded successfully
+                if (typeof window.ePub === 'undefined') {
+                    throw new Error('EPUB.js library failed to load. Please check your internet connection.');
+                }
+                console.log('EPUB.js loaded successfully');
+            }
+
+            const epubViewer = document.getElementById('epub-viewer');
+            if (!epubViewer) {
+                throw new Error('EPUB viewer element not found');
+            }
+            epubViewer.classList.remove('hidden');
+
+            console.log('Creating EPUB book instance...');
+            this.epubBook = window.ePub(url);
+
+            console.log('Rendering to viewer...');
+            const rendition = this.epubBook.renderTo(epubViewer, {
+                width: '100%',
+                height: '100%',
+                spread: 'none'
+            });
+
+            console.log('Displaying EPUB...');
+            await rendition.display();
+
+            // Apply theme
+            this.applyEPUBTheme(rendition);
+
+            // Navigation
+            rendition.on('relocated', (location) => {
+                this.currentPage = location.start.displayed.page;
+                this.totalPages = location.start.displayed.total;
+                this.updatePageInfo();
+                this.saveProgress();
+            });
+
+            // Store rendition for navigation
+            this.epubRendition = rendition;
+
+            // Load TOC
+            const navigation = await this.epubBook.loaded.navigation;
+            this.loadTOC(navigation.toc);
+
+            console.log('EPUB loaded successfully');
+        } catch (error) {
+            console.error('Error in loadEPUB:', error);
+            throw new Error(error.message || 'Failed to load EPUB file');
         }
-
-        const epubViewer = document.getElementById('epub-viewer');
-        epubViewer.classList.remove('hidden');
-
-        this.epubBook = window.ePub(url);
-        const rendition = this.epubBook.renderTo(epubViewer, {
-            width: '100%',
-            height: '100%',
-            spread: 'none'
-        });
-
-        await rendition.display();
-
-        // Apply theme
-        this.applyEPUBTheme(rendition);
-
-        // Navigation
-        rendition.on('relocated', (location) => {
-            this.currentPage = location.start.displayed.page;
-            this.totalPages = location.start.displayed.total;
-            this.updatePageInfo();
-            this.saveProgress();
-        });
-
-        // Store rendition for navigation
-        this.epubRendition = rendition;
-
-        // Load TOC
-        const navigation = await this.epubBook.loaded.navigation;
-        this.loadTOC(navigation.toc);
     }
 
     async loadComic(path) {
@@ -666,8 +689,15 @@ class EBookReader {
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = src;
-            script.onload = resolve;
-            script.onerror = reject;
+            script.onload = () => {
+                console.log('Script loaded:', src);
+                resolve();
+            };
+            script.onerror = () => {
+                const error = new Error(`Failed to load script: ${src}`);
+                console.error(error);
+                reject(error);
+            };
             document.head.appendChild(script);
         });
     }

@@ -516,14 +516,15 @@
 @media (max-width: 768px) {
     .player-bar {
         flex-wrap: wrap;
-        padding: 8px 12px;
+        padding: 12px 16px;
         gap: 12px;
         bottom: 60px; /* Account for mobile bottom nav */
     }
 
     .player-album-art {
-        width: 48px;
-        height: 48px;
+        width: 56px;
+        height: 56px;
+        order: 0;
     }
 
     .player-info {
@@ -533,27 +534,30 @@
     }
 
     .player-controls {
-        order: 0;
+        order: 2;
         width: 100%;
         justify-content: center;
-        gap: 12px;
+        gap: 16px;
+        margin-top: 8px;
     }
 
     .player-btn {
-        width: 40px;
-        height: 40px;
+        width: 44px;
+        height: 44px;
+        font-size: 1.1rem;
     }
 
     .player-btn.primary {
-        width: 48px;
-        height: 48px;
+        width: 52px;
+        height: 52px;
+        font-size: 1.3rem;
     }
 
     .player-progress-section {
-        order: 2;
+        order: 3;
         width: 100%;
         max-width: none;
-        margin-top: 4px;
+        margin-top: 8px;
     }
 
     .player-volume-section {
@@ -562,7 +566,7 @@
 
     .music-queue-panel {
         width: 100%;
-        height: calc(100vh - 140px);
+        height: calc(100vh - 160px);
         bottom: 60px;
     }
 
@@ -572,10 +576,15 @@
     }
 
     .player-title {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
+        font-weight: 600;
     }
 
     .player-artist {
+        font-size: 0.85rem;
+    }
+
+    .player-time {
         font-size: 0.8rem;
     }
 }
