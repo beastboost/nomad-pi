@@ -4,6 +4,15 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 
 > **Note:** This project is a fork of [Jcorp Nomad](https://github.com/Jstudner/jcorp-nomad) by Jstudner, with significant enhancements and optimizations for mobile UX, PWA support, and additional features.
 
+## 📱 Screenshots
+
+<p align="center">
+  <img src=".github/screenshots/dashboard.png" width="200"/>
+  <img src=".github/screenshots/shows.png" width="200"/>
+  <img src=".github/screenshots/movies.png" width="200"/>
+  <img src=".github/screenshots/movie-detail.png" width="200"/>
+</p>
+
 ## 🚀 Key Features
 
 - **Modern Glassmorphism UI**: A stunning, responsive interface with dark mode and real-time glass effects.
