@@ -780,16 +780,27 @@ createApp({
             }
         },
 
-        async unmountDrive(drive) {
+        async unmountDrive(drive, force = false) {
             try {
                 this.isLoading = true;
                 await this.apiCall('/api/system/unmount', 'POST', {
-                    target: drive.mountpoint
+                    target: drive.mountpoint,
+                    force: force
                 });
                 this.showNotification(`Drive ${drive.device} unmounted successfully`, 'success');
                 await this.loadStorageInfo();
             } catch (error) {
-                this.showNotification(`Failed to unmount ${drive.device}`, 'error');
+                // Check if drive is busy (409 Conflict)
+                if (error.message && error.message.includes('Drive is busy')) {
+                    const forceUnmount = confirm(
+                        `${error.message}\n\nDo you want to force unmount and kill these processes?`
+                    );
+                    if (forceUnmount) {
+                        await this.unmountDrive(drive, true);
+                    }
+                } else {
+                    this.showNotification(`Failed to unmount ${drive.device}: ${error.message || 'Unknown error'}`, 'error');
+                }
             } finally {
                 this.isLoading = false;
             }

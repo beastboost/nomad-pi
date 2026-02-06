@@ -40,6 +40,10 @@ class FormatDriveRequest(BaseModel):
     label: str
     fstype: str = "ext4"
 
+class UnmountRequest(BaseModel):
+    target: str
+    force: bool = False
+
 @public_router.get("/settings/omdb")
 def get_omdb_key():
     key = database.get_setting("omdb_api_key")
@@ -707,7 +711,10 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
 
 @router.post("/unmount")
-def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
+def unmount_drive(request: UnmountRequest, user_id: int = Depends(get_current_user_id)):
+    target = request.target
+    force = request.force
+
     if platform.system() == "Linux":
         # Validate target path - prevent command injection
         if any(char in target for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
@@ -717,12 +724,80 @@ def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
         if not target.startswith("data/external/") and not target.startswith("/media/") and not target.startswith("/mnt/"):
             raise HTTPException(status_code=400, detail="Invalid unmount target path")
 
+        # Check what processes are using this mount
+        busy_processes = []
         try:
-            subprocess.run(["sudo", "-n", "/usr/bin/umount", "-l", target], check=True)
+            # Use lsof to find processes using the mount point
+            lsof_result = subprocess.run(
+                ["sudo", "-n", "/usr/bin/lsof", "+f", "--", target],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if lsof_result.returncode == 0 and lsof_result.stdout:
+                # Parse lsof output to get process names
+                lines = lsof_result.stdout.strip().split('\n')[1:]  # Skip header
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        busy_processes.append(f"{parts[0]} (PID: {parts[1]})")
+        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+            # lsof might not be available or timeout, continue anyway
+            pass
+
+        try:
+            if force and busy_processes:
+                # Kill processes using the mount point
+                try:
+                    subprocess.run(
+                        ["sudo", "-n", "/usr/bin/fuser", "-km", target],
+                        check=False,
+                        capture_output=True,
+                        timeout=10
+                    )
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    pass
+
+            # Try normal unmount first
+            umount_result = subprocess.run(
+                ["sudo", "-n", "/usr/bin/umount", target],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if umount_result.returncode != 0:
+                # If normal unmount fails, try lazy unmount
+                umount_result = subprocess.run(
+                    ["sudo", "-n", "/usr/bin/umount", "-l", target],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if umount_result.returncode != 0:
+                    error_msg = umount_result.stderr.strip() if umount_result.stderr else "Unknown error"
+                    if busy_processes and not force:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Drive is busy. Processes using it: {', '.join(busy_processes[:5])}. Use force unmount to kill these processes."
+                        )
+                    raise HTTPException(status_code=500, detail=f"Unmount failed: {error_msg}")
+
             remove_mount(target)
-            return {"status": "unmounted", "target": target}
+            return {
+                "status": "unmounted",
+                "target": target,
+                "killed_processes": busy_processes if force else []
+            }
+
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="Unmount operation timed out")
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"Unmount error: {str(e)}")
+
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
 
 @router.post("/storage/format")
