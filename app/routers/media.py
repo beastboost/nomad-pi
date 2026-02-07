@@ -1159,7 +1159,10 @@ def build_library_index(category: str):
     paths_to_scan = get_scan_paths(category)
     count = 0
     batch = []
+    errors = []  # Track errors for debugging
+    skipped_files = []  # Track skipped files
 
+    logger.info(f"Building library index for {category}. Scanning paths: {paths_to_scan}")
     database.clear_library_index_category(category)
 
     allowed = None
@@ -1174,9 +1177,15 @@ def build_library_index(category: str):
 
     for base in paths_to_scan:
         if not os.path.exists(base):
+            logger.warning(f"Scan path does not exist: {base}")
             continue
+
+        logger.info(f"Scanning directory: {base}")
+        files_in_base = 0
+
         for root, _, filenames in os.walk(base):
             for f in filenames:
+                files_in_base += 1
                 if f.startswith('.'):
                     continue
                 ext = os.path.splitext(f)[1].lower()
@@ -1185,14 +1194,15 @@ def build_library_index(category: str):
                 full_path = os.path.join(root, f)
                 try:
                     st = os.stat(full_path)
-                except Exception:
+                except Exception as e:
+                    errors.append(f"stat error for {full_path}: {e}")
                     continue
 
                 try:
                     # Check if full_path is within BASE_DIR
                     abs_full = os.path.abspath(full_path)
                     abs_base_dir = os.path.abspath(BASE_DIR)
-                    
+
                     if abs_full.startswith(abs_base_dir):
                         rel_path = os.path.relpath(full_path, BASE_DIR)
                         url_path = rel_path.replace(os.sep, '/')
@@ -1210,17 +1220,18 @@ def build_library_index(category: str):
                                 web_path = f"/data/external/{drive_name}/{rest}".replace(os.sep, '/')
                                 drive_info = True
                                 break
-                        
+
                         if not drive_info:
                             # Fallback to relpath if possible, though it might have ..
                             rel_path = os.path.relpath(full_path, BASE_DIR)
                             url_path = rel_path.replace(os.sep, '/')
                             web_path = f"/data/{url_path}"
-                        
+
                         # Ensure rel_path is defined even for external drives
                         # We use the web_path (minus the /data/ prefix) as a virtual rel_path
                         rel_path = web_path.replace("/data/", "").replace("/", os.sep)
                 except Exception as e:
+                    errors.append(f"Path calculation error for {full_path}: {e}")
                     logger.error(f"Error calculating paths for {full_path}: {e}")
                     continue
 
@@ -1299,6 +1310,15 @@ def build_library_index(category: str):
     if batch:
         database.upsert_library_index_items(batch)
     database.set_library_index_state(category, count)
+
+    # Log scanning summary
+    logger.info(f"Finished scanning {category}: indexed {count} items")
+    if errors:
+        logger.warning(f"Encountered {len(errors)} errors during {category} scan:")
+        for err in errors[:10]:  # Log first 10 errors
+            logger.warning(f"  - {err}")
+        if len(errors) > 10:
+            logger.warning(f"  ... and {len(errors) - 10} more errors")
 
 def maybe_start_index_build(category: str, force: bool = False):
     state = database.get_library_index_state(category)
@@ -3437,6 +3457,80 @@ def manual_organize(background_tasks: BackgroundTasks, user_id: int = Depends(ge
     """Manually trigger automated media organization"""
     background_tasks.add_task(trigger_auto_organize)
     return {"status": "ok", "message": "Automated organization started in background"}
+
+@router.get("/scan/diagnostics")
+def get_scan_diagnostics(category: str = "movies", user_id: int = Depends(get_current_user_id)):
+    """Diagnostic endpoint to see what paths are being scanned and file counts"""
+    paths_to_scan = get_scan_paths(category)
+    diagnostics = {
+        "category": category,
+        "scan_paths": [],
+        "total_files_found": 0,
+        "indexed_count": 0,
+        "external_drives": []
+    }
+
+    allowed = None
+    if category in ['movies', 'shows']:
+        allowed = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg'}
+    elif category == 'music':
+        allowed = {'.mp3', '.flac', '.wav', '.m4a'}
+    elif category == 'books':
+        allowed = {'.pdf', '.epub', '.mobi', '.cbz', '.cbr'}
+
+    # Check external drives
+    for mount_root in ["/media/pi", "/media", "/mnt"]:
+        if os.path.exists(mount_root):
+            try:
+                for drive in os.listdir(mount_root):
+                    drive_path = os.path.join(mount_root, drive)
+                    if os.path.isdir(drive_path):
+                        diagnostics["external_drives"].append({
+                            "name": drive,
+                            "path": drive_path,
+                            "mounted": os.path.ismount(drive_path),
+                            "accessible": os.access(drive_path, os.R_OK)
+                        })
+            except Exception as e:
+                diagnostics["external_drives"].append({"error": f"Failed to list {mount_root}: {e}"})
+
+    # Count files in each scan path
+    for base in paths_to_scan:
+        path_info = {
+            "path": base,
+            "exists": os.path.exists(base),
+            "files": 0,
+            "valid_files": 0,
+            "sample_files": []
+        }
+
+        if os.path.exists(base):
+            try:
+                for root, _, filenames in os.walk(base):
+                    for f in filenames:
+                        if f.startswith('.'):
+                            continue
+                        path_info["files"] += 1
+                        ext = os.path.splitext(f)[1].lower()
+                        if allowed and ext in allowed:
+                            path_info["valid_files"] += 1
+                            if len(path_info["sample_files"]) < 5:
+                                path_info["sample_files"].append(f"{os.path.join(root, f)}")
+
+                diagnostics["total_files_found"] += path_info["valid_files"]
+            except Exception as e:
+                path_info["error"] = str(e)
+
+        diagnostics["scan_paths"].append(path_info)
+
+    # Get indexed count from database
+    try:
+        state = database.get_library_index_state(category)
+        diagnostics["indexed_count"] = state.get("item_count", 0) if state else 0
+    except Exception as e:
+        diagnostics["indexed_error"] = str(e)
+
+    return diagnostics
 
 @router.post("/scan")
 def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
