@@ -6,10 +6,11 @@ import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QPushButton, QListWidget, 
                              QListWidgetItem, QStackedWidget, QMessageBox,
-                             QProgressBar, QFileDialog)
+                             QProgressBar, QFileDialog, QInputDialog)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtGui import QIcon, QFont
+import requests
 
 # --- Styles ---
 DARK_THEME = """
@@ -60,7 +61,12 @@ class DiscoveryThread(QThread):
 
     def run(self):
         zc = zeroconf.Zeroconf()
-        browser = zeroconf.ServiceBrowser(zc, "_http._tcp.local.", handlers=[self.on_service_state_change])
+        # Browse multiple common service types
+        services = ["_http._tcp.local.", "_workstation._tcp.local.", "_nomad._tcp.local."]
+        browsers = []
+        for service in services:
+            browsers.append(zeroconf.ServiceBrowser(zc, service, handlers=[self.on_service_state_change]))
+            
         # Keep browsing
         while not self.isInterruptionRequested():
             self.msleep(500)
@@ -68,16 +74,22 @@ class DiscoveryThread(QThread):
 
     def on_service_state_change(self, zeroconf_obj, service_type, name, state_change):
         if state_change is zeroconf.ServiceStateChange.Added:
-            info = zeroconf_obj.get_service_info(service_type, name)
-            if info:
-                address = socket.inet_ntoa(info.addresses[0])
-                port = info.port
-                server_name = name.split('.')[0]
-                url = f"http://{address}:{port}"
-                # Filter for Nomad Pi instances if possible, or just list all HTTP services
-                # For now, we assume any HTTP service might be it, but we can filter by name
-                if "nomad" in server_name.lower():
-                    self.found_server.emit(server_name, address, url)
+            try:
+                info = zeroconf_obj.get_service_info(service_type, name)
+                if info and info.addresses:
+                    address = socket.inet_ntoa(info.addresses[0])
+                    port = info.port
+                    server_name = name.split('.')[0]
+                    
+                    # Try to validate if it's really a Nomad Pi instance
+                    # For now, accept anything with "nomad", "pi", "raspberry", or "media" in the name
+                    # OR if it's explicitly the _nomad service type
+                    is_likely_target = any(k in server_name.lower() for k in ["nomad", "pi", "raspberry", "media"])
+                    if is_likely_target or "_nomad" in service_type:
+                        url = f"http://{address}:{port}"
+                        self.found_server.emit(server_name, address, url)
+            except Exception as e:
+                print(f"Error resolving service {name}: {e}")
 
 class NomadApp(QMainWindow):
     def __init__(self):
@@ -141,6 +153,11 @@ class NomadApp(QMainWindow):
         self.status_label = QLabel("Connected")
         tb_layout.addWidget(self.status_label)
         
+        # Add Player Button to Toolbar
+        self.player_btn = QPushButton("Open Native Player")
+        self.player_btn.clicked.connect(self.open_player)
+        tb_layout.addWidget(self.player_btn)
+        
         tb_layout.addStretch()
         
         layout.addWidget(toolbar)
@@ -164,8 +181,25 @@ class NomadApp(QMainWindow):
         self.load_url(url)
 
     def manual_connect(self):
-        # Placeholder for manual IP entry
-        pass
+        url, ok = QInputDialog.getText(self, "Connect Manually", 
+                                     "Enter Nomad Pi URL or IP:", 
+                                     text="http://nomadpi.local:8000")
+        if ok and url:
+            if not url.startswith("http"):
+                url = "http://" + url
+            # Basic validation
+            try:
+                # Try to reach the server quickly to verify
+                # We use a short timeout so the UI doesn't hang long
+                self.status_label.setText(f"Connecting to {url}...")
+                self.load_url(url)
+            except Exception as e:
+                QMessageBox.warning(self, "Connection Failed", f"Could not reach {url}\nError: {e}")
+
+    def open_player(self):
+        from player import VideoPlayer
+        self.player_window = VideoPlayer()
+        self.player_window.show()
 
     def load_url(self, url):
         self.status_label.setText(f"Connected to: {url}")
