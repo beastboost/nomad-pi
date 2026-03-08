@@ -814,8 +814,10 @@ def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
     
     try:
         action = "on" if enable else "off"
-        # Try nmcli first
-        result = subprocess.run(["nmcli", "radio", "wifi", action], capture_output=True, text=True, timeout=5)
+        # Try nmcli first with sudo -n
+        cmd = ["sudo", "-n", "nmcli", "radio", "wifi", action]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        
         if result.returncode == 0:
             return {"status": "success", "enabled": enable}
         
@@ -842,14 +844,10 @@ def restart_wifi(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=400, detail="Wi-Fi restart only supported on Linux/Raspberry Pi")
 
     try:
+        # Use sudo -n for passwordless execution, relying on sudoers config
         script = "nmcli connection down NomadPi >/dev/null 2>&1 || true; nmcli radio wifi off >/dev/null 2>&1 || true; sleep 2; nmcli radio wifi on >/dev/null 2>&1 || true"
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
-            cmd = ["bash", "-lc", script]
-        else:
-            probe = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, timeout=2)
-            if probe.returncode != 0:
-                raise HTTPException(status_code=500, detail=(probe.stderr or probe.stdout or "sudo not permitted").strip())
-            cmd = ["sudo", "-n", "bash", "-lc", script]
+        cmd = ["sudo", "-n", "bash", "-c", script]
+        
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return {"status": "ok", "message": "Wi-Fi restart initiated"}
     except HTTPException:
