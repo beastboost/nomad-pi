@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#1e293b" rx="64"/>
+
+  <!-- Music note icon -->
+  <g transform="translate(120, 100)">
+    <!-- Note stem -->
+    <rect x="200" y="40" width="20" height="220" fill="#3b82f6" rx="10"/>
+
+    <!-- Note head 1 -->
+    <ellipse cx="180" cy="260" rx="50" ry="35" fill="#3b82f6"/>
+
+    <!-- Note head 2 (for eighth note) -->
+    <ellipse cx="180" cy="220" rx="45" ry="32" fill="#1e293b" stroke="#3b82f6" stroke-width="8"/>
+
+    <!-- Musical staff lines -->
+    <line x1="30" y1="150" x2="150" y2="150" stroke="#64748b" stroke-width="3"/>
+    <line x1="30" y1="180" x2="150" y2="180" stroke="#64748b" stroke-width="3"/>
+    <line x1="30" y1="210" x2="150" y2="210" stroke="#64748b" stroke-width="3"/>
+    <line x1="30" y1="240" x2="150" y2="240" stroke="#64748b" stroke-width="3"/>
+    <line x1="30" y1="270" x2="150" y2="270" stroke="#64748b" stroke-width="3"/>
+  </g>
+</svg>
