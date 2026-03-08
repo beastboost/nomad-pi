@@ -42,9 +42,9 @@ TOTAL_SWAP=$(free -m | awk '/Swap/ {print $2}')
 if [ "$TOTAL_SWAP" -lt 1000 ]; then
     echo "Increasing swap to 1GB for stability..."
     if [ -f /etc/dphys-swapfile ]; then
-        sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
-        sudo dphys-swapfile setup
-        sudo dphys-swapfile swapon
+        sudo -n sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+        sudo -n dphys-swapfile setup
+        sudo -n dphys-swapfile swapon
     fi
 fi
 
@@ -64,7 +64,7 @@ update_status 15 "Ensuring repository permissions..."
 echo "Ensuring correct repository permissions..."
 REAL_USER=${SUDO_USER:-$USER}
 
-sudo chown -R "$REAL_USER:$REAL_USER" . 2>/dev/null || true
+sudo -n chown -R "$REAL_USER:$REAL_USER" . 2>/dev/null || true
 # Mark directory as safe for git (common issue on newer git versions)
 git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
 
@@ -114,10 +114,10 @@ echo "Installing/Updating system dependencies..."
 # We only run update if install fails to save time on Pi
 # Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
 # Note: 7zip replaces p7zip-full on Ubuntu 24.04+
-if ! sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
+if ! sudo -n apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
     echo "Some packages missing, updating list and trying again..." >> update.log
-    sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
+    sudo -n apt-get update
+    sudo -n apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
 fi
 
 # Ensure Tailscale is installed (for updates via UI)
@@ -244,15 +244,15 @@ DLNA_CONFIG_CHANGED=0
 CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
 
 sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
-sudo chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
+sudo -n chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
 
 # Fix inotify max_user_watches limit for MiniDLNA file monitoring
 # MiniDLNA needs to watch for file changes, increase the limit from default 8192 to 524288
 if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
-    echo 524288 | sudo tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
+    echo 524288 | sudo -n tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
     # Make it persistent across reboots
     if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf 2>/dev/null; then
-        echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
+        echo "fs.inotify.max_user_watches=524288" | sudo -n tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
     fi
 fi
 
@@ -295,7 +295,7 @@ EOL
 # Only update if config changed (use diff like setup.sh does)
 if [ ! -f "$MINIDLNA_CONF" ] || ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
     echo "Updating MiniDLNA configuration..." >> update.log
-    sudo cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
+    sudo -n cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
     DLNA_CONFIG_CHANGED=1
 else
     echo "MiniDLNA configuration unchanged." >> update.log
@@ -326,9 +326,9 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
 $REAL_USER ALL=(ALL) NOPASSWD: ALL
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
-    if sudo visudo -cf "$SUDOERS_TMP"; then
-        sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
-        sudo chmod 0440 "$SUDOERS_FILE"
+    if sudo -n visudo -cf "$SUDOERS_TMP"; then
+        sudo -n cp "$SUDOERS_TMP" "$SUDOERS_FILE"
+        sudo -n chmod 0440 "$SUDOERS_FILE"
         echo "Sudoers permissions restored (Full Access)." >> update.log
     else
         echo "ERROR: Generated sudoers file failed syntax validation. Not installing." >> update.log
@@ -344,13 +344,21 @@ if command -v minidlnad >/dev/null 2>&1; then
     sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
     sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
 
-    # Always rebuild DLNA database during updates to ensure fresh state
-    echo "Rebuilding MiniDLNA database..." >> update.log
-    sudo systemctl stop minidlna 2>/dev/null || true
-    sudo rm -f /var/cache/minidlna/files.db 2>/dev/null || true
-    sudo systemctl enable minidlna >> update.log 2>&1
-    sudo systemctl start minidlna >> update.log 2>&1
-    # MiniDLNA will automatically scan on startup when database is missing
+    if [ "$DLNA_CONFIG_CHANGED" = "1" ]; then
+        echo "Restarting MiniDLNA to apply changes..." >> update.log
+        # Stop first to ensure clean DB if needed
+        sudo -n systemctl stop minidlna 2>/dev/null || true
+        sudo -n rm -f /var/cache/minidlna/files.db 2>/dev/null || true
+        sudo -n systemctl enable minidlna
+        sudo -n systemctl start minidlna
+    else
+        # Restart to ensure permissions apply (group changes)
+        echo "Restarting MiniDLNA to apply permissions..." >> update.log
+        sudo -n systemctl enable minidlna
+        sudo -n systemctl restart minidlna
+    fi
+else
+    echo "MiniDLNA not installed. Skipping configuration." >> update.log
 fi
 
 update_status 90 "Update complete. Finalizing..."
@@ -373,82 +381,24 @@ sleep 2
 
 # Try to restart the service, with fallback if service doesn't exist
 if command -v systemctl >/dev/null 2>&1; then
-    SERVICE_FILE="/etc/systemd/system/nomad-pi.service"
-    ENV_FILE="/etc/nomadpi.env"
-    USER_NAME=${SUDO_USER:-$USER}
-    if [ -f "$SERVICE_FILE" ]; then
-        sudo bash -c "cat > \"$SERVICE_FILE\"" <<EOL
-[Unit]
-Description=Nomad Pi Media Server
-After=network.target
+    echo "Restarting nomad-pi service..." >> update.log
+    sudo -n systemctl daemon-reload
+    sudo -n systemctl enable nomad-pi.service
+    # Use systemd-run to defer restart (avoids self-restart issues)
+    echo "Scheduling deferred service restart..." >> update.log
 
-[Service]
-User=$USER_NAME
-WorkingDirectory=$SCRIPT_DIR
-EnvironmentFile=-$ENV_FILE
-ExecStart=$SCRIPT_DIR/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
-Restart=always
-RestartSec=5
-TimeoutStartSec=60
-TimeoutStopSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOL
-        sudo systemctl daemon-reload
-    fi
-
-    echo "Attempting to restart nomad-pi service via systemctl..." >> update.log
-    if [ -f "/etc/systemd/system/nomad-pi.service" ]; then
-        sudo systemctl daemon-reload
-        sudo systemctl enable nomad-pi.service
-        # Use systemd-run to defer restart (avoids self-restart issues)
-        echo "Scheduling deferred service restart..." >> update.log
-
-        # Create a one-shot script to restart the service after a delay
-        echo "Creating restart script..." >> update.log
-        cat > /tmp/nomad-restart.sh << 'RESTART_EOF'
+    # Create a one-shot script to restart the service after a delay
+    RESTART_SCRIPT="/tmp/restart_nomad_pi.sh"
+    cat > "$RESTART_SCRIPT" <<EOL
 #!/bin/bash
-echo "$(date): Deferred restart starting..." >> /home/pi/nomad-pi/update.log
-sleep 3
-systemctl stop nomad-pi
-echo "$(date): Service stopped" >> /home/pi/nomad-pi/update.log
-sleep 7
-systemctl start nomad-pi
-echo "$(date): Service start command issued" >> /home/pi/nomad-pi/update.log
-sleep 3
-if systemctl is-active --quiet nomad-pi; then
-    echo "$(date): Service restart successful!" >> /home/pi/nomad-pi/update.log
-else
-    echo "$(date): First start failed, retrying..." >> /home/pi/nomad-pi/update.log
-    sleep 2
-    systemctl start nomad-pi
-    sleep 2
-    if systemctl is-active --quiet nomad-pi; then
-        echo "$(date): Service started on retry!" >> /home/pi/nomad-pi/update.log
-    else
-        echo "$(date): ERROR: Service failed to start!" >> /home/pi/nomad-pi/update.log
-    fi
-fi
-rm -f /tmp/nomad-restart.sh
-RESTART_EOF
-
-        chmod +x /tmp/nomad-restart.sh
-        echo "Launching deferred restart in background..." >> update.log
-
-        # Use systemd-run if available, otherwise nohup
-        if command -v systemd-run >/dev/null 2>&1; then
-            sudo systemd-run --unit=nomad-pi-restart --description="Nomad Pi Deferred Restart" /tmp/nomad-restart.sh
-            echo "Restart scheduled via systemd-run" >> update.log
-        else
-            sudo nohup /tmp/nomad-restart.sh >/dev/null 2>&1 &
-            echo "Restart scheduled via nohup" >> update.log
-        fi
-
-        echo "Update complete. Service will restart in ~10 seconds." >> update.log
-    else
-        echo "Service file /etc/systemd/system/nomad-pi.service not found. Skipping service restart." >> update.log
-    fi
+sleep 2
+sudo -n systemctl restart nomad-pi.service
+EOL
+    chmod +x "$RESTART_SCRIPT"
+    nohup "$RESTART_SCRIPT" >/dev/null 2>&1 &
+    
+    echo "Update completed successfully!" >> update.log
+    update_status 100 "Update complete!"
 else
     echo "systemctl not found. If running manually, please restart the application." >> update.log
 fi
