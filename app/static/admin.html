@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nomad Pi - Admin Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js"></script>
+    <link rel="stylesheet" href="/css/admin.css?v=1768667846">
+</head>
+<body>
+    <div id="app">
+        <div class="admin-container">
+            <!-- Sidebar Navigation -->
+            <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+                <div class="sidebar-header">
+                    <h1 class="logo">
+                        <i class="fas fa-server"></i>
+                        <span v-if="!sidebarCollapsed">Nomad Pi</span>
+                    </h1>
+                    <button @click="toggleSidebar" class="toggle-btn">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+                <nav class="sidebar-nav">
+                    <a href="#" @click.prevent="setView('dashboard')" 
+                       :class="{ active: currentView === 'dashboard' }" class="nav-item">
+                        <i class="fas fa-chart-line"></i>
+                        <span v-if="!sidebarCollapsed">Dashboard</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('uploads')" 
+                       :class="{ active: currentView === 'uploads' }" class="nav-item">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span v-if="!sidebarCollapsed">Uploads</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('storage')" 
+                       :class="{ active: currentView === 'storage' }" class="nav-item">
+                        <i class="fas fa-hdd"></i>
+                        <span v-if="!sidebarCollapsed">Storage & Mounts</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('system')" 
+                       :class="{ active: currentView === 'system' }" class="nav-item">
+                        <i class="fas fa-cogs"></i>
+                        <span v-if="!sidebarCollapsed">System Control</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('media')"
+                       :class="{ active: currentView === 'media' }" class="nav-item">
+                        <i class="fas fa-film"></i>
+                        <span v-if="!sidebarCollapsed">Media Library</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('users')"
+                       :class="{ active: currentView === 'users' }" class="nav-item">
+                        <i class="fas fa-users"></i>
+                        <span v-if="!sidebarCollapsed">Users</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('settings')"
+                       :class="{ active: currentView === 'settings' }" class="nav-item">
+                        <i class="fas fa-sliders-h"></i>
+                        <span v-if="!sidebarCollapsed">Settings</span>
+                    </a>
+                    <a href="#" @click.prevent="setView('logs')"
+                       :class="{ active: currentView === 'logs' }" class="nav-item">
+                        <i class="fas fa-terminal"></i>
+                        <span v-if="!sidebarCollapsed">Logs</span>
+                    </a>
+                </nav>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="main-content">
+                <!-- Header -->
+                <header class="header">
+                    <div class="header-left">
+                        <button @click="toggleSidebar" class="mobile-toggle-btn" style="display:none; margin-right: 1rem; background:none; border:none; font-size: 1.25rem; color: var(--text-color); cursor: pointer;">
+                            <i class="fas fa-bars"></i>
+                        </button>
+                        <h2>{{ viewTitles[currentView] }}</h2>
+                    </div>
+                    <div class="header-right">
+                        <div class="status-indicator" :class="connectionStatus">
+                            <span class="status-dot"></span>
+                            {{ connectionStatus === 'connected' ? 'Online' : 'Offline' }}
+                        </div>
+                        <button @click="toggleTheme" class="theme-toggle">
+                            <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                        </button>
+                        <div class="user-menu">
+                            <img :src="userAvatar" alt="User" class="user-avatar">
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Content Area -->
+                <div class="content">
+                    <!-- Dashboard View -->
+                    <section v-if="currentView === 'dashboard'" class="view-section">
+                        <div class="stats-grid" v-if="statsLoading">
+                            <div v-for="i in 4" :key="i" class="stat-card">
+                                <div class="stat-icon skeleton skeleton-circle"></div>
+                                <div class="stat-content" style="flex: 1;">
+                                    <div class="skeleton skeleton-title" style="width: 40%;"></div>
+                                    <div class="skeleton skeleton-text" style="width: 60%;"></div>
+                                    <div class="skeleton skeleton-text" style="width: 30%;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stats-grid" v-else>
+                            <div class="stat-card">
+                                <div class="stat-icon storage-icon">
+                                    <i class="fas fa-database"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>Storage Used</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.storageUsed) }}</p>
+                                    <p class="stat-subtitle">{{ stats.storagePercent }}% full</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon cpu-icon">
+                                    <i class="fas fa-microchip"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>CPU Usage</h3>
+                                    <p class="stat-value">{{ stats.cpuPercent }}%</p>
+                                    <p class="stat-subtitle">{{ stats.cpuCores }} cores</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon ram-icon">
+                                    <i class="fas fa-memory"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>RAM Usage</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.ramUsed) }}</p>
+                                    <p class="stat-subtitle">{{ stats.ramPercent }}% of {{ formatBytes(stats.ramTotal) }}</p>
+                                </div>
+                            </div>
+
+                            <div class="stat-card">
+                                <div class="stat-icon network-icon">
+                                    <i class="fas fa-network-wired"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3>Network</h3>
+                                    <p class="stat-value">{{ formatBytes(stats.networkUp) }}/s</p>
+                                    <p class="stat-subtitle">↓ {{ formatBytes(stats.networkDown) }}/s</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="charts-grid">
+                            <div class="chart-container">
+                                <h3>Storage Usage</h3>
+                                <canvas id="storageChart"></canvas>
+                            </div>
+                            <div class="chart-container">
+                                <h3>System Resources</h3>
+                                <canvas id="resourcesChart"></canvas>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Uploads View -->
+                    <section v-if="currentView === 'uploads'" class="view-section">
+                        <div class="section-header">
+                            <h3>File Upload Manager</h3>
+                            <button @click="showUploadModal = true" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> New Upload
+                            </button>
+                        </div>
+
+                        <div class="upload-area" @dragover.prevent @drop.prevent="handleDrop" v-if="!uploads.length">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h4>Drag files here to upload</h4>
+                            <p>or click to select files</p>
+                            <input type="file" hidden ref="fileInput" @change="handleFileSelect" multiple>
+                            <button @click="$refs.fileInput.click()" class="btn btn-secondary">
+                                Select Files
+                            </button>
+                        </div>
+
+                        <div v-if="uploads.length" class="uploads-list">
+                            <div v-for="upload in uploads" :key="upload.id" class="upload-item">
+                                <div class="upload-info">
+                                    <i :class="getFileIcon(upload.name)"></i>
+                                    <div class="upload-details">
+                                        <h4>{{ upload.name }}</h4>
+                                        <p>{{ formatBytes(upload.size) }}</p>
+                                    </div>
+                                </div>
+                                <div class="upload-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" :style="{ width: upload.progress + '%' }"></div>
+                                    </div>
+                                    <span class="progress-text">{{ upload.progress }}%</span>
+                                </div>
+                                <button v-if="upload.status === 'completed'" @click="removeUpload(upload.id)" class="btn-icon">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Storage & Mounts View -->
+                    <section v-if="currentView === 'storage'" class="view-section">
+                        <div class="section-header">
+                            <h3>Storage & Drive Management</h3>
+                            <button @click="scanDrives" class="btn btn-primary">
+                                <i class="fas fa-sync"></i> Scan Drives
+                            </button>
+                        </div>
+
+                        <div class="drives-grid">
+                            <div v-for="drive in drives" :key="drive.device" class="drive-card">
+                                <div class="drive-header">
+                                    <h4>{{ drive.label || drive.device }}</h4>
+                                    <span :class="['drive-status', drive.mounted ? 'mounted' : 'unmounted']">
+                                        {{ drive.mounted ? 'Mounted' : 'Unmounted' }}
+                                    </span>
+                                </div>
+                                <div class="drive-info">
+                                    <p><strong>Device:</strong> {{ drive.device }}</p>
+                                    <p><strong>Type:</strong> {{ drive.fstype }}</p>
+                                    <p><strong>Size:</strong> {{ formatBytes(drive.total) }}</p>
+                                </div>
+                                <div class="drive-usage">
+                                    <div class="usage-bar">
+                                        <div class="usage-fill" :style="{ width: (drive.used / drive.total * 100) + '%' }"></div>
+                                    </div>
+                                    <p>{{ formatBytes(drive.used) }} / {{ formatBytes(drive.total) }}</p>
+                                </div>
+                                <div class="drive-actions">
+                                    <button v-if="!drive.mounted" @click="mountDrive(drive)" class="btn btn-success btn-sm">
+                                        <i class="fas fa-link"></i> Mount
+                                    </button>
+                                    <button v-else @click="unmountDrive(drive)" class="btn btn-warning btn-sm">
+                                        <i class="fas fa-unlink"></i> Unmount
+                                    </button>
+                                    <button @click="formatDrive(drive)" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-eraser"></i> Format
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- System Control View -->
+                    <section v-if="currentView === 'system'" class="view-section">
+                        <div class="section-header">
+                            <h3>System Control & Updates</h3>
+                        </div>
+
+                        <div class="control-panel">
+                            <div class="control-card">
+                                <div class="control-icon restart-icon" style="background: rgba(59, 130, 246, 0.1); color: var(--primary-color);">
+                                    <i class="fas fa-sync-alt"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>Restart Service</h4>
+                                    <p>Restart the Nomad Pi application service</p>
+                                </div>
+                                <button @click="confirmRestart" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Restart
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon update-icon">
+                                    <i class="fas fa-cloud-download-alt"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Update</h4>
+                                    <p>{{ updateStatus.available ? 'Update available' : 'System up to date' }}</p>
+                                </div>
+                                <button @click="checkUpdates" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-sync"></i> Check
+                                </button>
+                                <button v-if="updateStatus.available" @click="performUpdate" class="btn btn-success btn-sm">
+                                    <i class="fas fa-download"></i> Update
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon restart-icon">
+                                    <i class="fas fa-power-off"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Reboot</h4>
+                                    <p>Restart the Nomad Pi system</p>
+                                </div>
+                                <button @click="confirmReboot" class="btn btn-warning btn-sm">
+                                    <i class="fas fa-redo"></i> Reboot
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon restart-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                                    <i class="fas fa-broadcast-tower"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>DLNA Server</h4>
+                                    <p>Restart MiniDLNA and rescan media</p>
+                                </div>
+                                <button @click="restartDLNA" class="btn btn-success btn-sm">
+                                    <i class="fas fa-sync"></i> Restart
+                                </button>
+                            </div>
+
+                            <div class="control-card">
+                                <div class="control-icon shutdown-icon">
+                                    <i class="fas fa-stop-circle"></i>
+                                </div>
+                                <div class="control-info">
+                                    <h4>System Shutdown</h4>
+                                    <p>Safely shutdown the Nomad Pi</p>
+                                </div>
+                                <button @click="confirmShutdown" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-power-off"></i> Shutdown
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="updateStatus.updating" class="update-progress">
+                            <h4>Update in Progress...</h4>
+                            <div class="progress-bar large">
+                                <div class="progress-fill" :style="{ width: updateStatus.progress + '%' }"></div>
+                            </div>
+                            <p>{{ updateStatus.progress }}% - {{ updateStatus.message }}</p>
+                        </div>
+                    </section>
+
+                    <!-- Media Library View -->
+                    <section v-if="currentView === 'media'" class="view-section">
+                        <div class="section-header">
+                            <h3>Media Library Management</h3>
+                            <button @click="rebuildLibrary" class="btn btn-primary">
+                                <i class="fas fa-sync"></i> Rebuild Index
+                            </button>
+                            <button @click="triggerAutoOrganize" class="btn btn-secondary">
+                                <i class="fas fa-magic"></i> Auto-Organize Files
+                            </button>
+                        </div>
+
+                        <div class="media-stats">
+                            <div class="media-stat">
+                                <i class="fas fa-film"></i>
+                                <div>
+                                    <h4>Movies</h4>
+                                    <p>{{ mediaStats.movies }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-tv"></i>
+                                <div>
+                                    <h4>TV Shows</h4>
+                                    <p>{{ mediaStats.shows }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-music"></i>
+                                <div>
+                                    <h4>Music</h4>
+                                    <p>{{ mediaStats.music }} files</p>
+                                </div>
+                            </div>
+                            <div class="media-stat">
+                                <i class="fas fa-book"></i>
+                                <div>
+                                    <h4>Books</h4>
+                                    <p>{{ mediaStats.books }} files</p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Users View -->
+                    <section v-if="currentView === 'users'" class="view-section">
+                        <div class="section-header">
+                            <h3>User Management</h3>
+                            <button @click="openCreateUserModal" class="btn btn-primary">
+                                <i class="fas fa-user-plus"></i> Create User
+                            </button>
+                        </div>
+
+                        <div class="glass-card" style="margin-top: 20px;">
+                            <div v-if="usersLoading" class="loading-state">
+                                <div class="spinner"></div>
+                                <p>Loading users...</p>
+                            </div>
+                            <div v-else-if="users.length === 0" class="empty-state">
+                                <i class="fas fa-users-slash"></i>
+                                <p>No users found</p>
+                            </div>
+                            <table v-else class="admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Role</th>
+                                        <th>Created At</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="user in users" :key="user.id">
+                                        <td>
+                                            <div class="user-info">
+                                                <span class="username">{{ user.username }}</span>
+                                                <span v-if="user.id === currentUserId" class="badge">You</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span :class="['role-badge', user.is_admin ? 'admin' : 'user']">
+                                                {{ user.is_admin ? 'Admin' : 'User' }}
+                                            </span>
+                                        </td>
+                                        <td>{{ formatDate(user.created_at) }}</td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <button @click="resetUserPassword(user)" class="btn btn-secondary btn-sm" title="Reset Password">
+                                                    <i class="fas fa-key"></i>
+                                                </button>
+                                                <button v-if="user.id !== currentUserId" @click="deleteUser(user)" class="btn btn-danger btn-sm" title="Delete User">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Create User Modal -->
+                        <div v-if="showUserModal" class="modal-overlay">
+                            <div class="glass-modal animate-fade">
+                                <h3>Create New User</h3>
+                                <form @submit.prevent="createUser" class="settings-form">
+                                    <div class="form-group">
+                                        <label>Username</label>
+                                        <input type="text" v-model="newUser.username" placeholder="Username" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Password</label>
+                                        <input type="password" v-model="newUser.password" placeholder="Password" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" v-model="newUser.is_admin">
+                                            <span>Grant Admin Privileges</span>
+                                        </label>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" @click="showUserModal = false" class="btn btn-secondary">Cancel</button>
+                                        <button type="submit" class="btn btn-primary" :disabled="newUser.loading">
+                                            {{ newUser.loading ? 'Creating...' : 'Create User' }}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Settings View -->
+                    <section v-if="currentView === 'settings'" class="view-section">
+                        <div class="settings-grid">
+                            <!-- Security Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-shield-alt"></i>
+                                    <h3>Security Settings</h3>
+                                </div>
+                                <div class="card-body">
+                                    <form @submit.prevent="changePassword" class="settings-form">
+                                        <div class="form-group">
+                                            <label>Current Password</label>
+                                            <input type="password" v-model="passChange.current" placeholder="Current Password" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>New Password</label>
+                                            <input type="password" v-model="passChange.new" placeholder="New Password" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Confirm New Password</label>
+                                            <input type="password" v-model="passChange.confirm" placeholder="Confirm New Password" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary" :disabled="passChange.loading">
+                                            <i class="fas fa-key"></i> {{ passChange.loading ? 'Updating...' : 'Change Password' }}
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- API Keys Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-key"></i>
+                                    <h3>API Configuration</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label>OMDb API Key</label>
+                                        <div class="input-with-button">
+                                            <input type="text" v-model="settings.omdb_key" placeholder="Enter OMDb API Key">
+                                            <button @click="saveOmdbKey" class="btn btn-secondary">Save</button>
+                                        </div>
+                                        <p class="help-text">Used for fetching movie/show metadata</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Interface Settings Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-desktop"></i>
+                                    <h3>Interface Settings</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label>Theme Customization</label>
+                                        <div class="btn-group">
+                                            <button @click="toggleTheme" class="btn btn-secondary">
+                                                <i :class="isDarkMode ? 'fas fa-sun' : 'fas fa-moon'"></i>
+                                                {{ isDarkMode ? 'Switch to Glass' : 'Switch to Dark' }}
+                                            </button>
+                                            <button @click="toggleGlassEffect" class="btn btn-secondary">
+                                                <i class="fas fa-magic"></i>
+                                                {{ noGlass ? 'Enable Glass' : 'Disable Glass' }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tailscale VPN Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-shield-alt"></i>
+                                    <h3>Tailscale VPN</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div v-if="tailscale.loading" class="loading-state">
+                                        <div class="spinner-small"></div>
+                                        <p>Loading...</p>
+                                    </div>
+                                    <div v-else>
+                                        <!-- Status Display -->
+                                        <div class="status-row" style="margin-bottom: 1rem;">
+                                            <span class="status-label">Status:</span>
+                                            <span v-if="!tailscale.status.installed" class="badge badge-warning">
+                                                <i class="fas fa-exclamation-triangle"></i> Not Installed
+                                            </span>
+                                            <span v-else-if="tailscale.status.connected" class="badge badge-success">
+                                                <i class="fas fa-check-circle"></i> Connected
+                                            </span>
+                                            <span v-else class="badge badge-secondary">
+                                                <i class="fas fa-times-circle"></i> Disconnected
+                                            </span>
+                                        </div>
+
+                                        <div v-if="tailscale.status.connected && tailscale.ip" style="margin-bottom: 1rem;">
+                                            <div class="form-group">
+                                                <label>Tailscale IP</label>
+                                                <div class="input-with-button">
+                                                    <input type="text" :value="tailscale.ip" readonly style="font-family: monospace;">
+                                                    <button @click="copyToClipboard(tailscale.ip)" class="btn btn-secondary">
+                                                        <i class="fas fa-copy"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Auth Key Input (only show if not connected) -->
+                                        <div v-if="tailscale.status.installed && !tailscale.status.connected" class="form-group">
+                                            <label for="tailscale-auth-key">Auth Key (optional)</label>
+                                            <div class="input-with-button">
+                                                <input id="tailscale-auth-key" type="password" v-model="tailscale.authKey" placeholder="tskey-auth-..." title="Tailscale Auth Key">
+                                                <button @click="saveTailscaleAuthKey" class="btn btn-secondary" title="Save Auth Key">
+                                                    <i class="fas fa-save"></i>
+                                                </button>
+                                            </div>
+                                            <p class="help-text">Generate at <a href="https://login.tailscale.com/admin/settings/keys" target="_blank">Tailscale Admin</a></p>
+                                        </div>
+
+                                        <!-- Connection Controls -->
+                                        <div class="btn-group" style="margin-top: 1rem;">
+                                            <button v-if="tailscale.status.installed && !tailscale.status.connected"
+                                                    @click="connectTailscale"
+                                                    class="btn btn-success"
+                                                    :disabled="tailscale.connecting">
+                                                <i class="fas fa-plug"></i> {{ tailscale.connecting ? 'Connecting...' : 'Connect' }}
+                                            </button>
+                                            <button v-if="tailscale.status.installed && tailscale.status.connected"
+                                                    @click="disconnectTailscale"
+                                                    class="btn btn-warning"
+                                                    :disabled="tailscale.connecting">
+                                                <i class="fas fa-unlink"></i> Disconnect
+                                            </button>
+                                            <button @click="refreshTailscaleStatus" class="btn btn-secondary">
+                                                <i class="fas fa-sync"></i> Refresh
+                                            </button>
+                                            <button v-if="tailscale.status.connected"
+                                                    @click="viewTailscalePeers"
+                                                    class="btn btn-primary">
+                                                <i class="fas fa-network-wired"></i> View Peers
+                                            </button>
+                                        </div>
+
+                                        <!-- Peers Modal Info -->
+                                        <div v-if="tailscale.showPeers && tailscale.peers.length > 0" style="margin-top: 1rem; padding: 1rem; background: rgba(0,0,0,0.1); border-radius: 8px;">
+                                            <h4 style="margin-bottom: 0.5rem;">Connected Devices ({{ tailscale.peers.length }})</h4>
+                                            <div v-for="peer in tailscale.peers" :key="peer.id" style="padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                                <div><strong>{{ peer.hostname }}</strong></div>
+                                                <div style="font-size: 0.875rem; opacity: 0.8;">
+                                                    {{ peer.tailscale_ips[0] || 'No IP' }}
+                                                    <span v-if="peer.online" class="badge badge-success" style="margin-left: 0.5rem;">Online</span>
+                                                    <span v-else class="badge badge-secondary" style="margin-left: 0.5rem;">Offline</span>
+                                                </div>
+                                            </div>
+                                            <button @click="tailscale.showPeers = false" class="btn btn-secondary btn-sm" style="margin-top: 0.5rem;">
+                                                <i class="fas fa-times"></i> Close
+                                            </button>
+                                        </div>
+
+                                        <!-- Not Installed Message -->
+                                        <div v-if="!tailscale.status.installed" style="margin-top: 1rem; padding: 1rem; background: rgba(251, 191, 36, 0.1); border-radius: 8px; border-left: 3px solid #fbbf24;">
+                                            <p style="margin: 0;"><strong>Tailscale is not installed.</strong></p>
+                                            <p style="margin: 0.5rem 0 0 0; font-size: 0.875rem;">Run the setup script or install manually:</p>
+                                            <code style="display: block; margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; font-size: 0.875rem;">
+                                                curl -fsSL https://tailscale.com/install.sh | sh
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Logs View -->
+                    <section v-if="currentView === 'logs'" class="view-section">
+                        <div class="section-header">
+                            <h3>System Logs</h3>
+                            <div class="header-actions">
+                                <select v-model="logLines" @change="fetchLogs" class="form-select">
+                                    <option :value="50">Last 50 lines</option>
+                                    <option :value="100">Last 100 lines</option>
+                                    <option :value="500">Last 500 lines</option>
+                                    <option :value="1000">Last 1000 lines</option>
+                                </select>
+                                <button @click="fetchLogs" class="btn btn-primary">
+                                    <i class="fas fa-sync"></i> Refresh
+                                </button>
+                                <button @click="clearLogView" class="btn btn-secondary">
+                                    <i class="fas fa-eraser"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                        <div class="log-container">
+                            <pre class="log-viewer" ref="logViewer">{{ logs }}</pre>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+
+        <!-- Modal: Confirmation Dialog -->
+        <div v-if="showConfirmModal" class="modal-overlay" @click="showConfirmModal = false">
+            <div class="modal" @click.stop>
+                <div class="modal-header">
+                    <h3>{{ confirmModal.title }}</h3>
+                    <button @click="showConfirmModal = false" class="modal-close">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>{{ confirmModal.message }}</p>
+                </div>
+                <div class="modal-footer">
+                    <button @click="showConfirmModal = false" class="btn btn-secondary">Cancel</button>
+                    <button @click="confirmModal.action" :class="['btn', confirmModal.actionClass]">
+                        {{ confirmModal.actionText }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container">
+            <div v-for="toast in toasts" :key="toast.id" :class="['toast', toast.type]">
+                <i :class="getToastIcon(toast.type)"></i>
+                {{ toast.message }}
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/admin.js?v=1768667846"></script>
+</body>
+</html>

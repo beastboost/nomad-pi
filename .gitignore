@@ -1,0 +1,30 @@
+venv/
+__pycache__/
+*.pyc
+data/
+*.db
+.env
+.vscode/
+.idea/
+*.log
+app/static/data/
+# .NET Build artifacts
+**/bin/
+**/obj/
+publish/
+*.exe
+*.pdb
+*.user
+*.txt
+!requirements.txt
+!setup.sh
+
+# Debug scripts
+check_*.py
+debug_*.py
+diagnose_*.py
+apply_fixes.py
+*.patch
+
+# PlatformIO
+.pio/
