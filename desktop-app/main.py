@@ -1,16 +1,27 @@
 import sys
-import os
 import socket
 import zeroconf
 import requests
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QListWidget, 
-                             QListWidgetItem, QStackedWidget, QMessageBox,
-                             QProgressBar, QFileDialog, QInputDialog, QGridLayout, QScrollArea)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QSize
-from PyQt6.QtGui import QIcon, QFont, QPixmap, QAction
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
-import requests
+from urllib.parse import quote_plus
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QListWidget,
+    QListWidgetItem,
+    QStackedWidget,
+    QMessageBox,
+    QInputDialog,
+    QGridLayout,
+    QScrollArea,
+    QLineEdit,
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
 
 # --- Styles ---
 DARK_THEME = """
@@ -97,9 +108,11 @@ class MediaCard(QWidget):
             self.clicked.emit(self.path)
 
 class NativeDashboard(QWidget):
-    def __init__(self, api_url, parent=None):
+    def __init__(self, api_url, token, parent=None):
         super().__init__(parent)
         self.api_url = api_url
+        self.token = token
+        self.current_category = "movies"
         self.layout = QVBoxLayout(self)
         
         # Header
@@ -107,6 +120,13 @@ class NativeDashboard(QWidget):
         title = QLabel("Library")
         title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
         header.addWidget(title)
+
+        self.category_buttons = {}
+        for category in ["movies", "shows", "music", "books", "gallery", "files"]:
+            btn = QPushButton(category.title())
+            btn.clicked.connect(lambda _, c=category: self.set_category(c))
+            self.category_buttons[category] = btn
+            header.addWidget(btn)
         
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.load_library)
@@ -124,43 +144,54 @@ class NativeDashboard(QWidget):
         scroll.setWidget(self.grid_container)
         self.layout.addWidget(scroll)
         
+        self.set_category("movies")
+
+    def set_category(self, category):
+        self.current_category = category
         self.load_library()
         
     def load_library(self):
-        # Clear existing
-        for i in range(self.grid_layout.count()):
-            item = self.grid_layout.itemAt(i)
+        while self.grid_layout.count():
+            item = self.grid_layout.itemAt(0)
             if item.widget():
                 item.widget().deleteLater()
-                
-        # Fetch from API
+
         try:
-            # We'll fetch from the /api/media/list endpoint (assuming it exists or similar)
-            # For now, we might need to list directories or use a search endpoint
-            # Fallback to listing root data directory
-            resp = requests.get(f"{self.api_url}/api/media/list?path=")
+            headers = {"Authorization": f"Bearer {self.token}"}
+            resp = requests.get(
+                f"{self.api_url}/api/media/library/{self.current_category}?limit=200",
+                headers=headers,
+                timeout=8,
+            )
             if resp.status_code == 200:
-                files = resp.json().get("files", [])
+                payload = resp.json() or {}
+                items = payload.get("items", [])
                 row = 0
                 col = 0
                 max_cols = 5
-                
-                for f in files:
-                    if f['type'] == 'directory': continue
-                    
-                    card = MediaCard(f['name'], f['path'], "video")
-                    card.clicked.connect(self.parent().parent().play_media)
+
+                for item in items:
+                    path = item.get("path")
+                    if not path:
+                        continue
+                    name = item.get("title") or item.get("name") or "Unknown"
+                    media_type = "music" if self.current_category == "music" else "video"
+                    card = MediaCard(name, path, media_type)
+                    card.clicked.connect(self.parent().play_media)
                     self.grid_layout.addWidget(card, row, col)
-                    
+
                     col += 1
                     if col >= max_cols:
                         col = 0
                         row += 1
             else:
-                # If endpoint fails, show dummy data for testing UI structure
-                pass
+                QMessageBox.warning(
+                    self,
+                    "Library Error",
+                    f"Failed to load {self.current_category} library\nHTTP {resp.status_code}: {resp.text[:180]}",
+                )
         except Exception as e:
-            print(f"Failed to load library: {e}")
+            QMessageBox.warning(self, "Library Error", f"Failed to load library: {e}")
 
 class NomadApp(QMainWindow):
     def __init__(self):
@@ -175,14 +206,15 @@ class NomadApp(QMainWindow):
         self.init_discovery_page()
         # No init_browser_page anymore - purely native pages
         
-        self.servers = {}
+        self.servers = set()
         self.current_api_url = None
+        self.current_token = None
+        self.dashboard_page = None
         self.discovery_thread = DiscoveryThread()
         self.discovery_thread.found_server.connect(self.add_server)
         self.discovery_thread.start()
 
     def init_discovery_page(self):
-        # ... (keep existing discovery page code) ...
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -210,6 +242,10 @@ class NomadApp(QMainWindow):
         self.central_widget.addWidget(page)
 
     def init_dashboard_page(self, url):
+        if self.dashboard_page is not None:
+            self.central_widget.removeWidget(self.dashboard_page)
+            self.dashboard_page.deleteLater()
+
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -220,7 +256,7 @@ class NomadApp(QMainWindow):
         tb_layout = QHBoxLayout(toolbar)
         
         home_btn = QPushButton("Disconnect")
-        home_btn.clicked.connect(lambda: self.central_widget.setCurrentIndex(0))
+        home_btn.clicked.connect(self.disconnect)
         tb_layout.addWidget(home_btn)
         
         self.status_label = QLabel(f"Connected to {url}")
@@ -230,44 +266,127 @@ class NomadApp(QMainWindow):
         layout.addWidget(toolbar)
         
         # Native Content Area
-        self.dashboard = NativeDashboard(url, self)
+        self.dashboard = NativeDashboard(url, self.current_token, self)
         layout.addWidget(self.dashboard)
-        
+
+        self.dashboard_page = page
         self.central_widget.addWidget(page)
         self.central_widget.setCurrentWidget(page)
 
-    # ... (rest of methods) ...
+    def disconnect(self):
+        self.current_api_url = None
+        self.current_token = None
+        self.central_widget.setCurrentIndex(0)
+
+    def add_server(self, name, ip, url):
+        if url in self.servers:
+            return
+        self.servers.add(url)
+        item = QListWidgetItem(f"{name} ({ip})")
+        item.setData(Qt.ItemDataRole.UserRole, url)
+        self.server_list.addItem(item)
 
     def connect_to_server(self, item):
         url = item.data(Qt.ItemDataRole.UserRole)
         self.load_url(url)
 
+    def manual_connect(self):
+        value, ok = QInputDialog.getText(
+            self,
+            "Connect Manually",
+            "Enter Nomad Pi host, IP, or URL:",
+            text="nomadpi.local:8000",
+        )
+        if not ok or not value.strip():
+            return
+
+        value = value.strip()
+        if not value.startswith("http://") and not value.startswith("https://"):
+            value = f"http://{value}"
+        self.load_url(value)
+
+    def prompt_login(self):
+        username, ok = QInputDialog.getText(
+            self, "Nomad Login", "Username:", text="admin"
+        )
+        if not ok or not username.strip():
+            return None
+        password, ok = QInputDialog.getText(
+            self,
+            "Nomad Login",
+            "Password:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return None
+        return username.strip(), password
+
+    def authenticate(self, url):
+        creds = self.prompt_login()
+        if not creds:
+            return None
+        username, password = creds
+        try:
+            resp = requests.post(
+                f"{url}/api/auth/login",
+                json={"username": username, "password": password},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                QMessageBox.warning(
+                    self,
+                    "Login Failed",
+                    f"Could not log in to {url}\nHTTP {resp.status_code}: {resp.text[:180]}",
+                )
+                return None
+            payload = resp.json() or {}
+            token = payload.get("token")
+            if not token:
+                QMessageBox.warning(self, "Login Failed", "No token returned by server.")
+                return None
+            return token
+        except Exception as e:
+            QMessageBox.warning(self, "Connection Failed", f"Unable to connect to {url}\n{e}")
+            return None
+
     def load_url(self, url):
-        self.current_api_url = url
-        self.init_dashboard_page(url)
+        token = self.authenticate(url)
+        if not token:
+            return
+        self.current_api_url = url.rstrip("/")
+        self.current_token = token
+        self.init_dashboard_page(self.current_api_url)
 
     def play_media(self, path):
-        # Convert path to stream URL
-        # Assuming path starts with /data/
-        # API needs stream endpoint
-        stream_url = f"{self.current_api_url}/api/stream?path={path}"
+        encoded_path = quote_plus(path)
+        stream_url = f"{self.current_api_url}/api/media/stream?path={encoded_path}&token={self.current_token}"
         from player import VideoPlayer
+
         self.player_window = VideoPlayer()
         self.player_window.load_media(stream_url)
         self.player_window.show()
+
+    def closeEvent(self, event):
+        if self.discovery_thread.isRunning():
+            self.discovery_thread.requestInterruption()
+            self.discovery_thread.quit()
+            self.discovery_thread.wait(2000)
+        event.accept()
 
 class DiscoveryThread(QThread):
     found_server = pyqtSignal(str, str, str)
 
     def run(self):
         zc = zeroconf.Zeroconf()
-        # Browse multiple common service types
         services = ["_http._tcp.local.", "_workstation._tcp.local.", "_nomad._tcp.local."]
         browsers = []
         for service in services:
-            browsers.append(zeroconf.ServiceBrowser(zc, service, handlers=[self.on_service_state_change]))
-            
-        # Keep browsing
+            browsers.append(
+                zeroconf.ServiceBrowser(zc, service, handlers=[self.on_service_state_change])
+            )
+
+        self.try_common_hosts()
+
         while not self.isInterruptionRequested():
             self.msleep(500)
         zc.close()
@@ -301,6 +420,17 @@ class DiscoveryThread(QThread):
                         self.found_server.emit(server_name, address, url)
             except Exception as e:
                 print(f"Error resolving service {name}: {e}")
+
+    def try_common_hosts(self):
+        for host in ["nomadpi.local", "raspberrypi.local", "radxa.local"]:
+            try:
+                ip = socket.gethostbyname(host)
+                url = f"http://{ip}:8000"
+                r = requests.get(f"{url}/api/system/status", timeout=2)
+                if r.status_code == 200:
+                    self.found_server.emit(host, ip, url)
+            except Exception:
+                continue
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
