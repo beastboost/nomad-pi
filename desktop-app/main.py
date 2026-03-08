@@ -19,9 +19,13 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QScrollArea,
     QLineEdit,
+    QComboBox,
+    QFileDialog,
+    QSplitter,
+    QTextEdit,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPixmap
 
 # --- Styles ---
 DARK_THEME = """
@@ -77,9 +81,12 @@ QScrollArea > QWidget > QWidget {
 class MediaCard(QWidget):
     clicked = pyqtSignal(str)  # Emits file path
 
-    def __init__(self, title, path, type="video"):
+    def __init__(self, title, path, api_url, token, media_type="video", poster=None):
         super().__init__()
         self.path = path
+        self.api_url = api_url
+        self.token = token
+        self.poster = poster
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedWidth(160)
         self.setFixedHeight(200)
@@ -92,8 +99,9 @@ class MediaCard(QWidget):
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setStyleSheet("background-color: #2d2d30; border-radius: 8px;")
         self.icon_label.setFixedHeight(140)
-        self.icon_label.setText("🎬" if type == "video" else "🎵")
+        self.icon_label.setText("🎬" if media_type == "video" else "🎵")
         self.icon_label.setFont(QFont("Segoe UI Emoji", 48))
+        self._try_load_poster()
         layout.addWidget(self.icon_label)
         
         # Title
@@ -106,6 +114,32 @@ class MediaCard(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.path)
+
+    def _try_load_poster(self):
+        if not self.poster:
+            return
+
+        try:
+            if isinstance(self.poster, str) and self.poster.startswith("/"):
+                poster_url = f"{self.api_url}{self.poster}"
+            else:
+                poster_url = str(self.poster)
+
+            response = requests.get(poster_url, timeout=4)
+            if response.status_code == 200 and response.content:
+                pix = QPixmap()
+                if pix.loadFromData(response.content):
+                    self.icon_label.setPixmap(
+                        pix.scaled(
+                            self.icon_label.width(),
+                            self.icon_label.height(),
+                            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                    )
+                    self.icon_label.setText("")
+        except Exception:
+            pass
 
 class NativeDashboard(QWidget):
     def __init__(self, api_url, token, parent=None):
@@ -143,6 +177,8 @@ class NativeDashboard(QWidget):
         self.grid_layout.setSpacing(20)
         scroll.setWidget(self.grid_container)
         self.layout.addWidget(scroll)
+        self.empty_label = QLabel("")
+        self.layout.addWidget(self.empty_label)
         
         self.set_category("movies")
 
@@ -176,7 +212,14 @@ class NativeDashboard(QWidget):
                         continue
                     name = item.get("title") or item.get("name") or "Unknown"
                     media_type = "music" if self.current_category == "music" else "video"
-                    card = MediaCard(name, path, media_type)
+                    card = MediaCard(
+                        title=name,
+                        path=path,
+                        api_url=self.api_url,
+                        token=self.token,
+                        media_type=media_type,
+                        poster=item.get("poster"),
+                    )
                     card.clicked.connect(self.parent().play_media)
                     self.grid_layout.addWidget(card, row, col)
 
@@ -184,14 +227,163 @@ class NativeDashboard(QWidget):
                     if col >= max_cols:
                         col = 0
                         row += 1
+                self.empty_label.setText(
+                    "" if items else f"No items in {self.current_category.title()} library"
+                )
             else:
                 QMessageBox.warning(
                     self,
                     "Library Error",
                     f"Failed to load {self.current_category} library\nHTTP {resp.status_code}: {resp.text[:180]}",
                 )
+                self.empty_label.setText("Failed to load library")
         except Exception as e:
             QMessageBox.warning(self, "Library Error", f"Failed to load library: {e}")
+            self.empty_label.setText("Failed to load library")
+
+
+class UploadPanel(QWidget):
+    def __init__(self, api_url, token, parent=None):
+        super().__init__(parent)
+        self.api_url = api_url
+        self.token = token
+        self.files = []
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Upload Files")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        row = QHBoxLayout()
+        self.category = QComboBox()
+        self.category.addItems(["movies", "shows", "music", "books", "gallery", "files"])
+        row.addWidget(self.category)
+
+        choose_btn = QPushButton("Choose Files")
+        choose_btn.clicked.connect(self.choose_files)
+        row.addWidget(choose_btn)
+
+        upload_btn = QPushButton("Upload")
+        upload_btn.clicked.connect(self.upload_files)
+        row.addWidget(upload_btn)
+
+        layout.addLayout(row)
+        self.file_list = QListWidget()
+        layout.addWidget(self.file_list)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(120)
+        layout.addWidget(self.log)
+
+    def choose_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Files to Upload")
+        if not files:
+            return
+        self.files = files
+        self.file_list.clear()
+        for f in files:
+            self.file_list.addItem(f)
+
+    def upload_files(self):
+        if not self.files:
+            self.log.append("No files selected.")
+            return
+
+        category = self.category.currentText()
+        headers = {"Authorization": f"Bearer {self.token}"}
+        self.log.append(f"Uploading {len(self.files)} file(s) to {category}...")
+        for file_path in self.files:
+            try:
+                with open(file_path, "rb") as fh:
+                    files = {"files": (file_path.split("\\")[-1], fh)}
+                    resp = requests.post(
+                        f"{self.api_url}/api/media/upload/{category}",
+                        headers=headers,
+                        files=files,
+                        timeout=120,
+                    )
+                if resp.status_code == 200:
+                    self.log.append(f"✓ {file_path}")
+                else:
+                    self.log.append(f"✗ {file_path} -> HTTP {resp.status_code}: {resp.text[:120]}")
+            except Exception as e:
+                self.log.append(f"✗ {file_path} -> {e}")
+
+
+class SettingsPanel(QWidget):
+    def __init__(self, api_url, token, parent=None):
+        super().__init__(parent)
+        self.api_url = api_url
+        self.token = token
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Settings")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        omdb_row = QHBoxLayout()
+        omdb_row.addWidget(QLabel("OMDb API Key:"))
+        self.omdb_input = QLineEdit()
+        self.omdb_input.setPlaceholderText("Enter OMDb key")
+        omdb_row.addWidget(self.omdb_input)
+        save_btn = QPushButton("Save OMDb")
+        save_btn.clicked.connect(self.save_omdb)
+        omdb_row.addWidget(save_btn)
+        layout.addLayout(omdb_row)
+
+        actions = QHBoxLayout()
+        update_btn = QPushButton("Run Update")
+        update_btn.clicked.connect(lambda: self.control("update"))
+        actions.addWidget(update_btn)
+        restart_btn = QPushButton("Restart App")
+        restart_btn.clicked.connect(lambda: self.control("restart"))
+        actions.addWidget(restart_btn)
+        actions.addStretch()
+        layout.addLayout(actions)
+
+        self.status = QTextEdit()
+        self.status.setReadOnly(True)
+        self.status.setMinimumHeight(140)
+        layout.addWidget(self.status)
+
+        self.load_omdb()
+
+    def load_omdb(self):
+        try:
+            resp = requests.get(f"{self.api_url}/api/system/settings/omdb", timeout=6)
+            if resp.status_code == 200:
+                self.omdb_input.setText((resp.json() or {}).get("key", ""))
+        except Exception:
+            pass
+
+    def save_omdb(self):
+        try:
+            resp = requests.post(
+                f"{self.api_url}/api/system/settings/omdb",
+                json={"key": self.omdb_input.text().strip()},
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                self.status.append("OMDb key saved.")
+            else:
+                self.status.append(f"Failed to save OMDb key: {resp.status_code}")
+        except Exception as e:
+            self.status.append(f"Failed to save OMDb key: {e}")
+
+    def control(self, action):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            resp = requests.post(
+                f"{self.api_url}/api/system/control/{action}",
+                headers=headers,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                self.status.append(f"{action.title()} requested successfully.")
+            else:
+                self.status.append(f"{action.title()} failed: {resp.status_code} {resp.text[:120]}")
+        except Exception as e:
+            self.status.append(f"{action.title()} failed: {e}")
 
 class NomadApp(QMainWindow):
     def __init__(self):
@@ -265,9 +457,36 @@ class NomadApp(QMainWindow):
         tb_layout.addStretch()
         layout.addWidget(toolbar)
         
-        # Native Content Area
+        nav_row = QHBoxLayout()
+        library_btn = QPushButton("Library")
+        upload_btn = QPushButton("Upload")
+        settings_btn = QPushButton("Settings")
+        nav_row.addWidget(library_btn)
+        nav_row.addWidget(upload_btn)
+        nav_row.addWidget(settings_btn)
+        nav_row.addStretch()
+        layout.addLayout(nav_row)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.page_stack = QStackedWidget()
         self.dashboard = NativeDashboard(url, self.current_token, self)
-        layout.addWidget(self.dashboard)
+        self.upload_panel = UploadPanel(url, self.current_token, self)
+        self.settings_panel = SettingsPanel(url, self.current_token, self)
+        self.page_stack.addWidget(self.dashboard)
+        self.page_stack.addWidget(self.upload_panel)
+        self.page_stack.addWidget(self.settings_panel)
+        splitter.addWidget(self.page_stack)
+
+        from player import VideoPlayer
+        self.embedded_player = VideoPlayer(self, embedded=True)
+        splitter.addWidget(self.embedded_player)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter)
+
+        library_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.dashboard))
+        upload_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.upload_panel))
+        settings_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.settings_panel))
 
         self.dashboard_page = page
         self.central_widget.addWidget(page)
@@ -360,11 +579,7 @@ class NomadApp(QMainWindow):
     def play_media(self, path):
         encoded_path = quote_plus(path)
         stream_url = f"{self.current_api_url}/api/media/stream?path={encoded_path}&token={self.current_token}"
-        from player import VideoPlayer
-
-        self.player_window = VideoPlayer()
-        self.player_window.load_media(stream_url)
-        self.player_window.show()
+        self.embedded_player.load_media(stream_url)
 
     def closeEvent(self, event):
         if self.discovery_thread.isRunning():
