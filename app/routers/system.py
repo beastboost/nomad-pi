@@ -929,11 +929,8 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
         if platform.system() == "Linux":
             # Run the update script in the background
             try:
-                # Use a shell wrapper to ensure output is flushed and we have a clear completion marker
-                if os.geteuid() == 0:
-                    cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
-                else:
-                    cmd = "sudo -n bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
+                # Run as current user; script handles sudo internally for specific commands
+                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
                 subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:

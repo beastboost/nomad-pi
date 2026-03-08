@@ -320,15 +320,16 @@ if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/de
     TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
 
     # Write to temp file first and validate before installing
+    # GRANT FULL PASSWORDLESS SUDO ACCESS to ensure updates and system control work from Web UI
     SUDOERS_TMP=$(mktemp)
     cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: $MOUNT_PATH, $UMOUNT_PATH, $SHUTDOWN_PATH, $REBOOT_PATH, $CHOWN_PATH, $CHMOD_PATH, $SYSTEMCTL_PATH restart nomad-pi.service, $SYSTEMCTL_PATH stop nomad-pi.service, $SYSTEMCTL_PATH start nomad-pi.service, $SYSTEMCTL_PATH status nomad-pi.service, $SYSTEMCTL_PATH restart nomad-pi, $NMCLI_PATH, $SYSTEMCTL_PATH restart minidlna, $SYSTEMCTL_PATH restart minidlna.service, $MINIDLNAD_PATH, $TAILSCALE_PATH status*, $TAILSCALE_PATH ip *, $TAILSCALE_PATH up *, $TAILSCALE_PATH down
+$REAL_USER ALL=(ALL) NOPASSWD: ALL
 EOL
     # Validate sudoers syntax before installing - a malformed file can lock out sudo access
     if sudo visudo -cf "$SUDOERS_TMP"; then
         sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
         sudo chmod 0440 "$SUDOERS_FILE"
-        echo "Sudoers permissions restored." >> update.log
+        echo "Sudoers permissions restored (Full Access)." >> update.log
     else
         echo "ERROR: Generated sudoers file failed syntax validation. Not installing." >> update.log
     fi

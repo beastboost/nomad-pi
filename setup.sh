@@ -830,6 +830,24 @@ if [ "${NOMADPI_OVERCLOCK:-1}" = "1" ] && [ "${NOMAD_PI_OVERCLOCK:-1}" = "1" ]; 
     fi
 fi
 
+# 10. Sudoers Configuration (For Web UI Updates)
+echo "[10/10] Configuring sudo permissions for web updates..."
+SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
+# We grant full passwordless sudo to ensure the web interface can perform system updates,
+# restart services, manage Wi-Fi, and mount drives without interruption.
+SUDOERS_TMP=$(mktemp)
+cat > "$SUDOERS_TMP" <<EOL
+$REAL_USER ALL=(ALL) NOPASSWD: ALL
+EOL
+
+if sudo visudo -cf "$SUDOERS_TMP"; then
+    sudo cp "$SUDOERS_TMP" "$SUDOERS_FILE"
+    sudo chmod 0440 "$SUDOERS_FILE"
+    echo "Sudo permissions configured."
+else
+    echo "WARNING: Failed to configure sudo permissions. Web updates may fail."
+fi
+
 echo "=========================================="
 echo "      Installation Complete!              "
 echo "=========================================="
