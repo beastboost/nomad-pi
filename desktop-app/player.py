@@ -62,7 +62,8 @@ class VideoPlayer(QWidget):
         self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
         
     def load_media(self, url):
-        self.media_player.setSource(QUrl(url))
+        self.media_player.stop()
+        self.media_player.setSource(QUrl.fromEncoded(url.encode("utf-8")))
         self.play_btn.setEnabled(True)
         self.media_player.play()
         

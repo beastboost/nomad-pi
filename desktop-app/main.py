@@ -2,7 +2,7 @@ import sys
 import socket
 import zeroconf
 import requests
-from urllib.parse import quote_plus
+from urllib.parse import quote
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -577,7 +577,7 @@ class NomadApp(QMainWindow):
         self.init_dashboard_page(self.current_api_url)
 
     def play_media(self, path):
-        encoded_path = quote_plus(path)
+        encoded_path = quote(path, safe="/")
         stream_url = f"{self.current_api_url}/api/media/stream?path={encoded_path}&token={self.current_token}"
         self.embedded_player.load_media(stream_url)
 
@@ -601,8 +601,12 @@ class DiscoveryThread(QThread):
             )
 
         self.try_common_hosts()
+        tick = 0
 
         while not self.isInterruptionRequested():
+            tick += 1
+            if tick % 20 == 0:
+                self.try_common_hosts()
             self.msleep(500)
         zc.close()
 
