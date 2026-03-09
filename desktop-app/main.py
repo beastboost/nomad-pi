@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QComboBox,
     QFileDialog,
-    QSplitter,
     QTextEdit,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -88,8 +87,8 @@ class MediaCard(QWidget):
         self.token = token
         self.poster = poster
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(160)
-        self.setFixedHeight(200)
+        self.setFixedWidth(175)
+        self.setFixedHeight(240)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -98,7 +97,7 @@ class MediaCard(QWidget):
         self.icon_label = QLabel()
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setStyleSheet("background-color: #2d2d30; border-radius: 8px;")
-        self.icon_label.setFixedHeight(140)
+        self.icon_label.setFixedHeight(170)
         self.icon_label.setText("🎬" if media_type == "video" else "🎵")
         self.icon_label.setFont(QFont("Segoe UI Emoji", 48))
         self._try_load_poster()
@@ -125,7 +124,8 @@ class MediaCard(QWidget):
             else:
                 poster_url = str(self.poster)
 
-            response = requests.get(poster_url, timeout=4)
+            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+            response = requests.get(poster_url, headers=headers, timeout=5)
             if response.status_code == 200 and response.content:
                 pix = QPixmap()
                 if pix.loadFromData(response.content):
@@ -188,7 +188,7 @@ class NativeDashboard(QWidget):
         
     def load_library(self):
         while self.grid_layout.count():
-            item = self.grid_layout.itemAt(0)
+            item = self.grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
@@ -212,13 +212,14 @@ class NativeDashboard(QWidget):
                         continue
                     name = item.get("title") or item.get("name") or "Unknown"
                     media_type = "music" if self.current_category == "music" else "video"
+                    poster = item.get("poster") or self._infer_local_poster(path)
                     card = MediaCard(
                         title=name,
                         path=path,
                         api_url=self.api_url,
                         token=self.token,
                         media_type=media_type,
-                        poster=item.get("poster"),
+                        poster=poster,
                     )
                     card.clicked.connect(self.parent().play_media)
                     self.grid_layout.addWidget(card, row, col)
@@ -240,6 +241,12 @@ class NativeDashboard(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Library Error", f"Failed to load library: {e}")
             self.empty_label.setText("Failed to load library")
+
+    def _infer_local_poster(self, media_path):
+        if not isinstance(media_path, str) or not media_path.startswith("/data/"):
+            return None
+        folder = media_path.rsplit("/", 1)[0]
+        return f"{folder}/poster.jpg"
 
 
 class UploadPanel(QWidget):
@@ -338,6 +345,15 @@ class SettingsPanel(QWidget):
         restart_btn = QPushButton("Restart App")
         restart_btn.clicked.connect(lambda: self.control("restart"))
         actions.addWidget(restart_btn)
+        reboot_btn = QPushButton("Reboot Device")
+        reboot_btn.clicked.connect(lambda: self.control("reboot"))
+        actions.addWidget(reboot_btn)
+        shutdown_btn = QPushButton("Shutdown Device")
+        shutdown_btn.clicked.connect(lambda: self.control("shutdown"))
+        actions.addWidget(shutdown_btn)
+        refresh_btn = QPushButton("Refresh System Info")
+        refresh_btn.clicked.connect(self.refresh_info)
+        actions.addWidget(refresh_btn)
         actions.addStretch()
         layout.addLayout(actions)
 
@@ -347,6 +363,7 @@ class SettingsPanel(QWidget):
         layout.addWidget(self.status)
 
         self.load_omdb()
+        self.refresh_info()
 
     def load_omdb(self):
         try:
@@ -384,6 +401,24 @@ class SettingsPanel(QWidget):
                 self.status.append(f"{action.title()} failed: {resp.status_code} {resp.text[:120]}")
         except Exception as e:
             self.status.append(f"{action.title()} failed: {e}")
+
+    def refresh_info(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            s = requests.get(f"{self.api_url}/api/system/status", headers=headers, timeout=6)
+            st = requests.get(f"{self.api_url}/api/system/storage", headers=headers, timeout=6)
+            if s.status_code == 200:
+                payload = s.json() or {}
+                self.status.append(
+                    f"System: CPU {payload.get('cpu', '?')}% | RAM {payload.get('ram', '?')}% | Temp {payload.get('temp', '?')}"
+                )
+            if st.status_code == 200:
+                payload = st.json() or {}
+                self.status.append(
+                    f"Storage: {payload.get('used', 0)} / {payload.get('total', 0)} bytes ({payload.get('percent', '?')}%)"
+                )
+        except Exception as e:
+            self.status.append(f"Refresh info failed: {e}")
 
 class NomadApp(QMainWindow):
     def __init__(self):
@@ -461,13 +496,14 @@ class NomadApp(QMainWindow):
         library_btn = QPushButton("Library")
         upload_btn = QPushButton("Upload")
         settings_btn = QPushButton("Settings")
+        player_btn = QPushButton("Player")
         nav_row.addWidget(library_btn)
         nav_row.addWidget(upload_btn)
         nav_row.addWidget(settings_btn)
+        nav_row.addWidget(player_btn)
         nav_row.addStretch()
         layout.addLayout(nav_row)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
         self.page_stack = QStackedWidget()
         self.dashboard = NativeDashboard(url, self.current_token, self)
         self.upload_panel = UploadPanel(url, self.current_token, self)
@@ -475,18 +511,29 @@ class NomadApp(QMainWindow):
         self.page_stack.addWidget(self.dashboard)
         self.page_stack.addWidget(self.upload_panel)
         self.page_stack.addWidget(self.settings_panel)
-        splitter.addWidget(self.page_stack)
+        layout.addWidget(self.page_stack, 1)
 
         from player import VideoPlayer
+        self.player_section = QWidget()
+        player_layout = QVBoxLayout(self.player_section)
+        player_layout.setContentsMargins(8, 8, 8, 8)
+        player_head = QHBoxLayout()
+        player_head.addWidget(QLabel("Now Playing"))
+        hide_player_btn = QPushButton("Hide")
+        hide_player_btn.clicked.connect(lambda: self.player_section.hide())
+        player_head.addWidget(hide_player_btn)
+        player_head.addStretch()
+        player_layout.addLayout(player_head)
         self.embedded_player = VideoPlayer(self, embedded=True)
-        splitter.addWidget(self.embedded_player)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter)
+        player_layout.addWidget(self.embedded_player)
+        self.player_section.setMaximumHeight(360)
+        self.player_section.hide()
+        layout.addWidget(self.player_section)
 
         library_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.dashboard))
         upload_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.upload_panel))
         settings_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.settings_panel))
+        player_btn.clicked.connect(lambda: self.player_section.setVisible(not self.player_section.isVisible()))
 
         self.dashboard_page = page
         self.central_widget.addWidget(page)
@@ -495,6 +542,8 @@ class NomadApp(QMainWindow):
     def disconnect(self):
         self.current_api_url = None
         self.current_token = None
+        if hasattr(self, "player_section"):
+            self.player_section.hide()
         self.central_widget.setCurrentIndex(0)
 
     def add_server(self, name, ip, url):
@@ -579,6 +628,7 @@ class NomadApp(QMainWindow):
     def play_media(self, path):
         encoded_path = quote(path, safe="/")
         stream_url = f"{self.current_api_url}/api/media/stream?path={encoded_path}&token={self.current_token}"
+        self.player_section.show()
         self.embedded_player.load_media(stream_url)
 
     def closeEvent(self, event):
