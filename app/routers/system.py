@@ -8,7 +8,7 @@ import json
 import logging
 import shutil
 import re
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from app import database
 from app.routers.auth import get_current_user_id
@@ -1540,6 +1540,42 @@ def get_saved_wifi(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Tailscale VPN Management
+def _run_tailscale(args: List[str], timeout: int = 10) -> subprocess.CompletedProcess:
+    """Run tailscale command with sudo -n first, then fallback to direct invocation."""
+    sudo_cmd = ["sudo", "-n", "tailscale", *args]
+    result = subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode == 0:
+        return result
+
+    direct_cmd = ["tailscale", *args]
+    direct = subprocess.run(direct_cmd, capture_output=True, text=True, timeout=timeout)
+    if direct.returncode == 0:
+        return direct
+    return result
+
+
+def _tailscaled_state() -> str:
+    """Return systemd active state for tailscaled."""
+    result = subprocess.run(
+        ["systemctl", "is-active", "tailscaled"],
+        capture_output=True,
+        text=True
+    )
+    return (result.stdout or "").strip()
+
+
+def _ensure_tailscaled_started() -> Optional[str]:
+    """Start tailscaled if it is not active. Returns error string if failed."""
+    if _tailscaled_state() == "active":
+        return None
+
+    cmd = ["sudo", "-n", "systemctl", "enable", "--now", "tailscaled"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    if result.returncode == 0:
+        return None
+    return (result.stderr or result.stdout or "Failed to start tailscaled").strip()
+
+
 @router.get("/tailscale/status")
 def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
     """Get Tailscale connection status"""
@@ -1547,98 +1583,84 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
 
     try:
-        # Check if Tailscale is installed (check multiple paths)
-        paths_to_check = ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]
         tailscale_path = shutil.which("tailscale")
-        
         if not tailscale_path:
-            # Fallback check
-            for path in paths_to_check:
+            for path in ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]:
                 if os.path.exists(path):
                     tailscale_path = path
                     break
-        
+
         if not tailscale_path:
-            return {"installed": False, "connected": False, "message": "Tailscale not found in PATH"}
+            return {"installed": False, "connected": False, "service_running": False, "message": "Tailscale not found"}
 
-        # Check if tailscaled service is running
-        service_result = subprocess.run(
-            ["systemctl", "is-active", "tailscaled"],
-            capture_output=True,
-            text=True
-        )
-        service_running = service_result.stdout.strip() == "active"
+        service_state = _tailscaled_state()
+        service_running = service_state == "active"
 
-        if not service_running:
-            return {
-                "installed": True,
-                "connected": False,
-                "service_running": False,
-                "message": "Tailscale service not running"
-            }
-
-        # Get connection status
-        status_result = subprocess.run(
-            ["sudo", "-n", "tailscale", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-
+        status_result = _run_tailscale(["status", "--json"], timeout=8)
         if status_result.returncode == 0:
-            status_data = json.loads(status_result.stdout)
+            status_data = json.loads(status_result.stdout or "{}")
             backend_state = status_data.get("BackendState", "")
-
-            # Get simple status for quick checks
-            status_simple = subprocess.run(
-                ["sudo", "-n", "tailscale", "status"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-
-            # Get IP and other details
-            self_node = status_data.get("Self", {})
-            tailscale_ips = self_node.get("TailscaleIPs", [])
+            self_node = status_data.get("Self", {}) if isinstance(status_data, dict) else {}
+            tailscale_ips = self_node.get("TailscaleIPs", []) if isinstance(self_node, dict) else []
             ipv4 = next((ip for ip in tailscale_ips if "." in ip), None)
-            
+
+            simple = _run_tailscale(["status"], timeout=6)
             return {
                 "installed": True,
                 "connected": backend_state == "Running",
-                "service_running": True,
-                "backend_state": backend_state,
+                "service_running": service_running or backend_state == "Running",
+                "service_state": service_state or "unknown",
+                "backend_state": backend_state or "Unknown",
                 "self": self_node,
                 "ipv4": ipv4,
-                "magic_dns": status_data.get("MagicDNSSuffix", ""),
-                "peer_count": len(status_data.get("Peer", {})),
-                "status_output": status_simple.stdout
-            }
-        else:
-            return {
-                "installed": True,
-                "connected": False,
-                "service_running": True,
-                "message": "Unable to get status"
+                "magic_dns": status_data.get("MagicDNSSuffix", "") if isinstance(status_data, dict) else "",
+                "peer_count": len(status_data.get("Peer", {})) if isinstance(status_data, dict) else 0,
+                "status_output": simple.stdout or "",
             }
 
+        message = (status_result.stderr or status_result.stdout or "Unable to get status").strip()
+        if not service_running and "failed to connect to local tailscaled" in message.lower():
+            message = "Tailscale service is stopped"
+        return {
+            "installed": True,
+            "connected": False,
+            "service_running": service_running,
+            "service_state": service_state or "unknown",
+            "backend_state": "Unknown",
+            "message": message,
+        }
     except subprocess.TimeoutExpired:
-        return {"installed": True, "connected": False, "error": "Status check timed out"}
+        return {"installed": True, "connected": False, "service_running": False, "error": "Status check timed out"}
     except Exception as e:
-        return {"installed": True, "connected": False, "error": str(e)}
+        return {"installed": True, "connected": False, "service_running": False, "error": str(e)}
 
 @router.post("/tailscale/service/{action}")
 def tailscale_service_control(action: str, user_id: int = Depends(get_current_user_id)):
-    """Start or stop the Tailscale system service"""
+    """Control tailscaled service."""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Tailscale service control only available on Linux")
         
-    if action not in ["start", "stop", "restart"]:
+    if action not in ["start", "stop", "restart", "status"]:
         raise HTTPException(status_code=400, detail="Invalid action")
 
     try:
-        cmd = ["sudo", "-n", "systemctl", action, "tailscaled"]
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=10)
-        return {"status": "success", "message": f"Service {action}ed successfully"}
+        if action == "status":
+            state = _tailscaled_state() or "unknown"
+            return {"status": "success", "service_state": state, "service_running": state == "active"}
+
+        if action == "start":
+            cmd = ["sudo", "-n", "systemctl", "enable", "--now", "tailscaled"]
+        else:
+            cmd = ["sudo", "-n", "systemctl", action, "tailscaled"]
+
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=15)
+        state = _tailscaled_state() or "unknown"
+        return {
+            "status": "success",
+            "message": f"Service {action} successful",
+            "service_state": state,
+            "output": (result.stdout or "").strip()
+        }
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Failed to {action} service: {e.stderr or str(e)}")
     except Exception as e:
@@ -1651,29 +1673,14 @@ def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
         return {"ip": None, "message": "Tailscale only available on Linux"}
 
     try:
-        result = subprocess.run(
-            ["sudo", "-n", "tailscale", "ip", "-4"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-
+        result = _run_tailscale(["ip", "-4"], timeout=6)
         if result.returncode == 0:
             ip = result.stdout.strip()
             return {"ip": ip if ip else None}
         else:
-            return {"ip": None, "message": "Not connected to Tailscale"}
+            return {"ip": None, "message": (result.stderr or "Not connected to Tailscale").strip()}
     except Exception as e:
         return {"ip": None, "error": str(e)}
-
-class TailscaleKeyRequest(BaseModel):
-    auth_key: str
-
-@router.post("/tailscale/set-auth-key")
-def set_tailscale_key(request: TailscaleKeyRequest, user_id: int = Depends(get_current_user_id)):
-    """Save Tailscale Auth Key to database"""
-    database.set_setting("tailscale_auth_key", request.auth_key)
-    return {"status": "success", "message": "Auth key saved"}
 
 @router.post("/tailscale/up")
 def tailscale_up(user_id: int = Depends(get_current_user_id)):
@@ -1682,40 +1689,23 @@ def tailscale_up(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
 
     try:
-        # Check if already connected
-        status_result = subprocess.run(
-            ["sudo", "-n", "tailscale", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        start_error = _ensure_tailscaled_started()
+        if start_error:
+            raise HTTPException(status_code=500, detail=f"Could not start tailscaled: {start_error}")
 
+        status_result = _run_tailscale(["status", "--json"], timeout=8)
         if status_result.returncode == 0:
-            status_data = json.loads(status_result.stdout)
+            status_data = json.loads(status_result.stdout or "{}")
             if status_data.get("BackendState") == "Running":
                 return {"status": "success", "message": "Already connected to Tailscale"}
 
-        # Get auth key from database if available
         auth_key = database.get_setting("tailscale_auth_key")
+        if not auth_key:
+            raise HTTPException(status_code=400, detail="No Tailscale auth key saved")
 
-        # Build tailscale up command
-        cmd = ["sudo", "-n", "tailscale", "up"]
-
-        # Add auth key if available
-        if auth_key:
-            cmd.extend(["--authkey", auth_key])
-
-        # Add recommended flags for server/always-on use
-        cmd.extend([
-            "--accept-routes",  # Accept subnet routes from exit nodes
-            "--ssh"  # Enable Tailscale SSH
-        ])
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
+        result = _run_tailscale(
+            ["up", "--authkey", auth_key, "--accept-routes", "--ssh"],
+            timeout=45
         )
 
         if result.returncode == 0:
@@ -1725,15 +1715,15 @@ def tailscale_up(user_id: int = Depends(get_current_user_id)):
                 "output": result.stdout
             }
         else:
-            # Check if it's an auth issue
-            if "authenticate" in result.stderr.lower() or "login" in result.stderr.lower():
+            err = (result.stderr or result.stdout or "").lower()
+            if "authenticate" in err or "login" in err:
                 return {
                     "status": "needs_auth",
                     "message": "Please authenticate via the provided URL",
-                    "output": result.stderr
+                    "output": result.stderr or result.stdout
                 }
             else:
-                raise HTTPException(status_code=500, detail=result.stderr or "Failed to connect")
+                raise HTTPException(status_code=500, detail=result.stderr or result.stdout or "Failed to connect")
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Connection attempt timed out")
@@ -1747,12 +1737,7 @@ def tailscale_down(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
 
     try:
-        result = subprocess.run(
-            ["sudo", "-n", "tailscale", "down"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        result = _run_tailscale(["down"], timeout=12)
 
         if result.returncode == 0:
             return {"status": "success", "message": "Disconnected from Tailscale"}
@@ -1771,12 +1756,7 @@ def get_tailscale_peers(user_id: int = Depends(get_current_user_id)):
         return {"peers": [], "message": "Tailscale only available on Linux"}
 
     try:
-        result = subprocess.run(
-            ["sudo", "-n", "tailscale", "status", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        result = _run_tailscale(["status", "--json"], timeout=8)
 
         if result.returncode == 0:
             status_data = json.loads(result.stdout)
@@ -1800,6 +1780,62 @@ def get_tailscale_peers(user_id: int = Depends(get_current_user_id)):
 
     except Exception as e:
         return {"peers": [], "error": str(e)}
+
+
+@router.get("/tailscale/diagnostics")
+def tailscale_diagnostics(user_id: int = Depends(get_current_user_id)):
+    if platform.system() != "Linux":
+        return {"supported": False, "message": "Diagnostics only available on Linux"}
+
+    tailscale_path = shutil.which("tailscale")
+    if not tailscale_path:
+        for path in ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]:
+            if os.path.exists(path):
+                tailscale_path = path
+                break
+
+    service_state = _tailscaled_state() or "unknown"
+    sudo_check = subprocess.run(
+        ["sudo", "-n", "true"],
+        capture_output=True,
+        text=True,
+        timeout=5
+    )
+
+    status_json = _run_tailscale(["status", "--json"], timeout=8)
+    status_text = _run_tailscale(["status"], timeout=8)
+
+    systemctl_status = subprocess.run(
+        ["systemctl", "status", "tailscaled", "--no-pager", "--lines", "40"],
+        capture_output=True,
+        text=True,
+        timeout=8
+    )
+
+    journal = subprocess.run(
+        ["journalctl", "-u", "tailscaled", "--no-pager", "-n", "60"],
+        capture_output=True,
+        text=True,
+        timeout=8
+    )
+
+    return {
+        "supported": True,
+        "tailscale_path": tailscale_path,
+        "service_state": service_state,
+        "sudo_noninteractive_ok": sudo_check.returncode == 0,
+        "sudo_error": (sudo_check.stderr or "").strip(),
+        "status_json_rc": status_json.returncode,
+        "status_json_stdout": (status_json.stdout or "")[:4000],
+        "status_json_stderr": (status_json.stderr or "")[:2000],
+        "status_text_rc": status_text.returncode,
+        "status_text_stdout": (status_text.stdout or "")[:2000],
+        "status_text_stderr": (status_text.stderr or "")[:2000],
+        "systemctl_status_rc": systemctl_status.returncode,
+        "systemctl_status": (systemctl_status.stdout or systemctl_status.stderr or "")[:7000],
+        "journal_rc": journal.returncode,
+        "journal_tail": (journal.stdout or journal.stderr or "")[:7000],
+    }
 
 class TailscaleAuthKeyRequest(BaseModel):
     auth_key: str

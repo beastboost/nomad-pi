@@ -80,12 +80,12 @@ QScrollArea > QWidget > QWidget {
 class MediaCard(QWidget):
     clicked = pyqtSignal(str)  # Emits file path
 
-    def __init__(self, title, path, api_url, token, media_type="video", poster=None):
+    def __init__(self, title, path, api_url, token, media_type="video", poster_candidates=None):
         super().__init__()
         self.path = path
         self.api_url = api_url
         self.token = token
-        self.poster = poster
+        self.poster_candidates = poster_candidates or []
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedWidth(175)
         self.setFixedHeight(240)
@@ -115,31 +115,33 @@ class MediaCard(QWidget):
             self.clicked.emit(self.path)
 
     def _try_load_poster(self):
-        if not self.poster:
+        if not self.poster_candidates:
             return
 
-        try:
-            if isinstance(self.poster, str) and self.poster.startswith("/"):
-                poster_url = f"{self.api_url}{self.poster}"
-            else:
-                poster_url = str(self.poster)
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        for candidate in self.poster_candidates:
+            try:
+                if isinstance(candidate, str) and candidate.startswith("/"):
+                    poster_url = f"{self.api_url}{candidate}"
+                else:
+                    poster_url = str(candidate)
 
-            headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-            response = requests.get(poster_url, headers=headers, timeout=5)
-            if response.status_code == 200 and response.content:
-                pix = QPixmap()
-                if pix.loadFromData(response.content):
-                    self.icon_label.setPixmap(
-                        pix.scaled(
-                            self.icon_label.width(),
-                            self.icon_label.height(),
-                            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                            Qt.TransformationMode.SmoothTransformation,
+                response = requests.get(poster_url, headers=headers, timeout=5)
+                if response.status_code == 200 and response.content:
+                    pix = QPixmap()
+                    if pix.loadFromData(response.content):
+                        self.icon_label.setPixmap(
+                            pix.scaled(
+                                self.icon_label.width(),
+                                self.icon_label.height(),
+                                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                Qt.TransformationMode.SmoothTransformation,
+                            )
                         )
-                    )
-                    self.icon_label.setText("")
-        except Exception:
-            pass
+                        self.icon_label.setText("")
+                        return
+            except Exception:
+                continue
 
 class NativeDashboard(QWidget):
     def __init__(self, api_url, token, parent=None):
@@ -212,14 +214,14 @@ class NativeDashboard(QWidget):
                         continue
                     name = item.get("title") or item.get("name") or "Unknown"
                     media_type = "music" if self.current_category == "music" else "video"
-                    poster = item.get("poster") or self._infer_local_poster(path)
+                    poster_candidates = self._build_poster_candidates(item, path)
                     card = MediaCard(
                         title=name,
                         path=path,
                         api_url=self.api_url,
                         token=self.token,
                         media_type=media_type,
-                        poster=poster,
+                        poster_candidates=poster_candidates,
                     )
                     card.clicked.connect(self.parent().play_media)
                     self.grid_layout.addWidget(card, row, col)
@@ -242,11 +244,34 @@ class NativeDashboard(QWidget):
             QMessageBox.warning(self, "Library Error", f"Failed to load library: {e}")
             self.empty_label.setText("Failed to load library")
 
+    def _build_poster_candidates(self, item, media_path):
+        candidates = []
+        poster = (item or {}).get("poster")
+        if poster:
+            candidates.append(poster)
+
+        inferred = self._infer_local_poster(media_path)
+        for candidate in inferred:
+            if candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
+
     def _infer_local_poster(self, media_path):
         if not isinstance(media_path, str) or not media_path.startswith("/data/"):
-            return None
+            return []
         folder = media_path.rsplit("/", 1)[0]
-        return f"{folder}/poster.jpg"
+        filename = media_path.rsplit("/", 1)[-1]
+        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        return [
+            f"{folder}/poster.jpg",
+            f"{folder}/poster.png",
+            f"{folder}/Poster.jpg",
+            f"{folder}/folder.jpg",
+            f"{folder}/Folder.jpg",
+            f"{folder}/cover.jpg",
+            f"{folder}/{stem}.jpg",
+            f"{folder}/{stem}.png",
+        ]
 
 
 class UploadPanel(QWidget):
@@ -357,6 +382,38 @@ class SettingsPanel(QWidget):
         actions.addStretch()
         layout.addLayout(actions)
 
+        wifi_row = QHBoxLayout()
+        wifi_status_btn = QPushButton("Wi-Fi Status")
+        wifi_status_btn.clicked.connect(self.wifi_status)
+        wifi_row.addWidget(wifi_status_btn)
+        hotspot_on_btn = QPushButton("Hotspot On")
+        hotspot_on_btn.clicked.connect(lambda: self.toggle_hotspot(True))
+        wifi_row.addWidget(hotspot_on_btn)
+        hotspot_off_btn = QPushButton("Hotspot Off")
+        hotspot_off_btn.clicked.connect(lambda: self.toggle_hotspot(False))
+        wifi_row.addWidget(hotspot_off_btn)
+        wifi_restart_btn = QPushButton("Restart Wi-Fi")
+        wifi_restart_btn.clicked.connect(self.restart_wifi)
+        wifi_row.addWidget(wifi_restart_btn)
+        wifi_row.addStretch()
+        layout.addLayout(wifi_row)
+
+        ts_row = QHBoxLayout()
+        tailscale_status_btn = QPushButton("Tailscale Status")
+        tailscale_status_btn.clicked.connect(self.tailscale_status)
+        ts_row.addWidget(tailscale_status_btn)
+        tailscale_up_btn = QPushButton("Tailscale Up")
+        tailscale_up_btn.clicked.connect(lambda: self.tailscale_action("up"))
+        ts_row.addWidget(tailscale_up_btn)
+        tailscale_down_btn = QPushButton("Tailscale Down")
+        tailscale_down_btn.clicked.connect(lambda: self.tailscale_action("down"))
+        ts_row.addWidget(tailscale_down_btn)
+        update_log_btn = QPushButton("Update Log")
+        update_log_btn.clicked.connect(self.fetch_update_log)
+        ts_row.addWidget(update_log_btn)
+        ts_row.addStretch()
+        layout.addLayout(ts_row)
+
         self.status = QTextEdit()
         self.status.setReadOnly(True)
         self.status.setMinimumHeight(140)
@@ -419,6 +476,68 @@ class SettingsPanel(QWidget):
                 )
         except Exception as e:
             self.status.append(f"Refresh info failed: {e}")
+
+    def wifi_status(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.get(f"{self.api_url}/api/system/wifi/status", headers=headers, timeout=6)
+            self.status.append(f"Wi-Fi: {r.status_code} {r.text[:280]}")
+        except Exception as e:
+            self.status.append(f"Wi-Fi status failed: {e}")
+
+    def toggle_hotspot(self, enable):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.post(
+                f"{self.api_url}/api/system/wifi/toggle-hotspot?enable={'true' if enable else 'false'}",
+                headers=headers,
+                timeout=15,
+            )
+            self.status.append(f"Hotspot {'on' if enable else 'off'}: {r.status_code} {r.text[:220]}")
+        except Exception as e:
+            self.status.append(f"Hotspot toggle failed: {e}")
+
+    def restart_wifi(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.post(f"{self.api_url}/api/system/wifi/restart", headers=headers, timeout=12)
+            self.status.append(f"Wi-Fi restart: {r.status_code} {r.text[:220]}")
+        except Exception as e:
+            self.status.append(f"Wi-Fi restart failed: {e}")
+
+    def tailscale_status(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.get(f"{self.api_url}/api/system/tailscale/status", headers=headers, timeout=8)
+            self.status.append(f"Tailscale: {r.status_code} {r.text[:320]}")
+        except Exception as e:
+            self.status.append(f"Tailscale status failed: {e}")
+
+    def tailscale_action(self, action):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.post(f"{self.api_url}/api/system/tailscale/{action}", headers=headers, timeout=20)
+            self.status.append(f"Tailscale {action}: {r.status_code} {r.text[:220]}")
+        except Exception as e:
+            self.status.append(f"Tailscale {action} failed: {e}")
+
+    def fetch_update_log(self):
+        headers = {"Authorization": f"Bearer {self.token}"}
+        try:
+            r = requests.get(f"{self.api_url}/api/system/update/log", headers=headers, timeout=8)
+            if r.status_code == 200:
+                payload = r.json() or {}
+                logs = payload.get("logs") or []
+                if isinstance(logs, list):
+                    self.status.append("---- Update Log ----")
+                    for line in logs[-30:]:
+                        self.status.append(str(line))
+                else:
+                    self.status.append(str(payload)[:600])
+            else:
+                self.status.append(f"Update log failed: {r.status_code} {r.text[:220]}")
+        except Exception as e:
+            self.status.append(f"Update log failed: {e}")
 
 class NomadApp(QMainWindow):
     def __init__(self):
@@ -496,11 +615,9 @@ class NomadApp(QMainWindow):
         library_btn = QPushButton("Library")
         upload_btn = QPushButton("Upload")
         settings_btn = QPushButton("Settings")
-        player_btn = QPushButton("Player")
         nav_row.addWidget(library_btn)
         nav_row.addWidget(upload_btn)
         nav_row.addWidget(settings_btn)
-        nav_row.addWidget(player_btn)
         nav_row.addStretch()
         layout.addLayout(nav_row)
 
@@ -513,37 +630,18 @@ class NomadApp(QMainWindow):
         self.page_stack.addWidget(self.settings_panel)
         layout.addWidget(self.page_stack, 1)
 
-        from player import VideoPlayer
-        self.player_section = QWidget()
-        player_layout = QVBoxLayout(self.player_section)
-        player_layout.setContentsMargins(8, 8, 8, 8)
-        player_head = QHBoxLayout()
-        player_head.addWidget(QLabel("Now Playing"))
-        hide_player_btn = QPushButton("Hide")
-        hide_player_btn.clicked.connect(lambda: self.player_section.hide())
-        player_head.addWidget(hide_player_btn)
-        player_head.addStretch()
-        player_layout.addLayout(player_head)
-        self.embedded_player = VideoPlayer(self, embedded=True)
-        player_layout.addWidget(self.embedded_player)
-        self.player_section.setMaximumHeight(360)
-        self.player_section.hide()
-        layout.addWidget(self.player_section)
-
         library_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.dashboard))
         upload_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.upload_panel))
         settings_btn.clicked.connect(lambda: self.page_stack.setCurrentWidget(self.settings_panel))
-        player_btn.clicked.connect(lambda: self.player_section.setVisible(not self.player_section.isVisible()))
 
         self.dashboard_page = page
+        self._init_player_page()
         self.central_widget.addWidget(page)
         self.central_widget.setCurrentWidget(page)
 
     def disconnect(self):
         self.current_api_url = None
         self.current_token = None
-        if hasattr(self, "player_section"):
-            self.player_section.hide()
         self.central_widget.setCurrentIndex(0)
 
     def add_server(self, name, ip, url):
@@ -628,8 +726,39 @@ class NomadApp(QMainWindow):
     def play_media(self, path):
         encoded_path = quote(path, safe="/")
         stream_url = f"{self.current_api_url}/api/media/stream?path={encoded_path}&token={self.current_token}"
-        self.player_section.show()
         self.embedded_player.load_media(stream_url)
+        self.central_widget.setCurrentWidget(self.player_page)
+
+    def _init_player_page(self):
+        if hasattr(self, "player_page") and self.player_page is not None:
+            self.central_widget.removeWidget(self.player_page)
+            self.player_page.deleteLater()
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        bar = QHBoxLayout()
+        back_btn = QPushButton("Back to Library")
+        back_btn.clicked.connect(lambda: self.central_widget.setCurrentWidget(self.dashboard_page))
+        bar.addWidget(back_btn)
+        fullscreen_btn = QPushButton("Toggle Fullscreen")
+        fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+        bar.addWidget(fullscreen_btn)
+        bar.addStretch()
+        layout.addLayout(bar)
+
+        from player import VideoPlayer
+        self.embedded_player = VideoPlayer(page, embedded=True)
+        layout.addWidget(self.embedded_player, 1)
+        self.player_page = page
+        self.central_widget.addWidget(page)
+
+    def _toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
 
     def closeEvent(self, event):
         if self.discovery_thread.isRunning():
