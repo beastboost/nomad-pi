@@ -810,7 +810,7 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_pad_all(np_card, 18, 0);
     lv_obj_set_style_pad_row(np_card, 14, 0);
     lv_obj_set_style_shadow_width(np_card, 20, 0);
-    lv_obj_set_style_shadow_opa(np_card, LV_OPA_25, 0);
+    lv_obj_set_style_shadow_opa(np_card, LV_OPA_20, 0);
     lv_obj_set_style_shadow_ofs_y(np_card, 6, 0);
     lv_obj_set_style_shadow_spread(np_card, 0, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
@@ -920,7 +920,7 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xDC2626), 0);
     lv_obj_set_style_radius(np_btn_stop, 12, 0);
     lv_obj_set_style_shadow_width(np_btn_stop, 6, 0);
-    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_25, 0);
+    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_20, 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
     lv_label_set_text(lbl_stop, "Stop");
     lv_obj_set_style_text_font(lbl_stop, &lv_font_montserrat_14, 0);
@@ -931,7 +931,7 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xD97706), 0);
     lv_obj_set_style_radius(np_btn_pause, 12, 0);
     lv_obj_set_style_shadow_width(np_btn_pause, 6, 0);
-    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_25, 0);
+    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_20, 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "Pause");
     lv_obj_set_style_text_font(lbl_pause, &lv_font_montserrat_14, 0);
