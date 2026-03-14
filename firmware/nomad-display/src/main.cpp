@@ -114,6 +114,7 @@ lv_obj_t * screensaver_date;
 
 // Now Playing Widgets
 lv_obj_t * cont_now_playing_list;
+lv_obj_t * np_header_label;  // "NOW PLAYING" section header
 lv_obj_t * np_card;
 lv_obj_t * np_img;
 lv_obj_t * np_title;
@@ -126,6 +127,7 @@ lv_obj_t * np_btn_stop;
 lv_obj_t * np_btn_pause;
 lv_obj_t * np_empty_label;
 lv_obj_t * np_loading_spinner;
+lv_obj_t * np_placeholder_label;  // "No poster" when session has no image
 char np_session_id[64] = "";
 bool np_is_paused = false;
 bool np_poster_loading = false;
@@ -621,7 +623,11 @@ void applyTheme() {
     if (np_title) lv_obj_set_style_text_color(np_title, text, 0);
     if (np_sub) lv_obj_set_style_text_color(np_sub, muted, 0);
     if (np_meta) lv_obj_set_style_text_color(np_meta, muted, 0);
+    if (np_quality) lv_obj_set_style_text_color(np_quality, muted, 0);
+    if (np_time_remain) lv_obj_set_style_text_color(np_time_remain, theme_dark ? lv_color_hex(0x10B981) : lv_color_hex(0x059669), 0);
+    if (np_header_label) lv_obj_set_style_text_color(np_header_label, muted, 0);
     if (np_empty_label) lv_obj_set_style_text_color(np_empty_label, muted, 0);
+    if (np_placeholder_label) lv_obj_set_style_text_color(np_placeholder_label, muted, 0);
     if (label_cpu) lv_obj_set_style_text_color(label_cpu, text, 0);
     if (label_ram) lv_obj_set_style_text_color(label_ram, text, 0);
     if (label_stats) lv_obj_set_style_text_color(label_stats, muted, 0);
@@ -781,8 +787,15 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     cont_now_playing_list = lv_obj_create(parent);
     lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont_now_playing_list, 12, 0);
-    lv_obj_set_style_pad_row(cont_now_playing_list, 12, 0);
+    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
+    lv_obj_set_style_pad_row(cont_now_playing_list, 10, 0);
+    lv_obj_set_style_pad_column(cont_now_playing_list, 0, 0);
+
+    np_header_label = lv_label_create(cont_now_playing_list);
+    lv_label_set_text(np_header_label, "NOW PLAYING");
+    lv_obj_set_style_text_font(np_header_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(np_header_label, lv_color_hex(0x64748B), 0);
+    lv_obj_set_style_text_letter_space(np_header_label, 2, 0);
 
     np_empty_label = lv_label_create(cont_now_playing_list);
     lv_label_set_text(np_empty_label, "No active sessions");
@@ -792,16 +805,16 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     np_card = lv_obj_create(cont_now_playing_list);
     lv_obj_set_size(np_card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(np_card, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(np_card, 16, 0);
+    lv_obj_set_style_radius(np_card, 20, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
-    lv_obj_set_style_pad_all(np_card, 16, 0);
-    lv_obj_set_style_shadow_width(np_card, 12, 0);
-    lv_obj_set_style_shadow_opa(np_card, LV_OPA_20, 0);
-    lv_obj_set_style_shadow_ofs_y(np_card, 4, 0);
-    lv_obj_set_style_shadow_spread(np_card, 2, 0);
+    lv_obj_set_style_pad_all(np_card, 18, 0);
+    lv_obj_set_style_pad_row(np_card, 14, 0);
+    lv_obj_set_style_shadow_width(np_card, 20, 0);
+    lv_obj_set_style_shadow_opa(np_card, LV_OPA_25, 0);
+    lv_obj_set_style_shadow_ofs_y(np_card, 6, 0);
+    lv_obj_set_style_shadow_spread(np_card, 0, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(np_card, 12, 0);
 
     lv_obj_t * top = lv_obj_create(np_card);
     lv_obj_set_width(top, LV_PCT(100));
@@ -809,16 +822,16 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_border_width(top, 0, 0);
     lv_obj_set_style_pad_all(top, 0, 0);
     lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(top, 16, 0);
+    lv_obj_set_style_pad_column(top, 18, 0);
 
-    // Poster container with rounded corners and border
+    // Poster container
     lv_obj_t * poster_cont = lv_obj_create(top);
     lv_obj_set_size(poster_cont, POSTER_W, POSTER_H);
-    lv_obj_set_style_bg_opa(poster_cont, 0, 0);
-    lv_obj_set_style_border_width(poster_cont, 2, 0);
-    lv_obj_set_style_border_color(poster_cont, lv_color_hex(0x475569), 0);
-    lv_obj_set_style_border_opa(poster_cont, LV_OPA_40, 0);
-    lv_obj_set_style_radius(poster_cont, 12, 0);
+    lv_obj_set_style_bg_opa(poster_cont, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(poster_cont, lv_color_hex(0x1E293B), 0);
+    lv_obj_set_style_border_width(poster_cont, 1, 0);
+    lv_obj_set_style_border_color(poster_cont, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_radius(poster_cont, 14, 0);
     lv_obj_set_style_pad_all(poster_cont, 0, 0);
     lv_obj_set_style_clip_corner(poster_cont, true, 0);
 
@@ -827,19 +840,25 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_size(np_img, POSTER_W, POSTER_H);
     lv_obj_align(np_img, LV_ALIGN_CENTER, 0, 0);
 
-    // Loading spinner (hidden by default)
     np_loading_spinner = lv_spinner_create(poster_cont, 1000, 60);
-    lv_obj_set_size(np_loading_spinner, 50, 50);
+    lv_obj_set_size(np_loading_spinner, 48, 48);
     lv_obj_center(np_loading_spinner);
     lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
+
+    np_placeholder_label = lv_label_create(poster_cont);
+    lv_label_set_text(np_placeholder_label, "No poster");
+    lv_obj_set_style_text_font(np_placeholder_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(np_placeholder_label, lv_color_hex(0x64748B), 0);
+    lv_obj_center(np_placeholder_label);
+    lv_obj_add_flag(np_placeholder_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(info, 0, 0);
-    lv_obj_set_style_pad_row(info, 8, 0);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 60, POSTER_H);
+    lv_obj_set_style_pad_row(info, 6, 0);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 70, POSTER_H);
     lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     np_title = lv_label_create(info);
@@ -850,11 +869,9 @@ void buildNowPlayingTab(lv_obj_t * parent) {
 
     np_sub = lv_label_create(info);
     lv_obj_set_width(np_sub, LV_PCT(100));
-    lv_obj_set_style_text_color(np_sub, lv_color_hex(0x94A3B8), 0);
     lv_obj_set_style_text_font(np_sub, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_sub, "");
 
-    // Add spacer
     lv_obj_t * spacer = lv_obj_create(info);
     lv_obj_set_flex_grow(spacer, 1);
     lv_obj_set_style_bg_opa(spacer, 0, 0);
@@ -868,57 +885,55 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     np_quality = lv_label_create(info);
     lv_obj_set_width(np_quality, LV_PCT(100));
     lv_obj_set_style_text_font(np_quality, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(np_quality, lv_color_hex(0x64748B), 0);
     lv_label_set_text(np_quality, "");
 
     np_time_remain = lv_label_create(info);
     lv_obj_set_width(np_time_remain, LV_PCT(100));
     lv_obj_set_style_text_font(np_time_remain, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(np_time_remain, lv_color_hex(0x10B981), 0);
     lv_label_set_text(np_time_remain, "");
 
+    // Progress bar
     np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 8);
+    lv_obj_set_height(np_bar, 10);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1F2937), 0);
+    lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_bg_opa(np_bar, 255, 0);
+    lv_obj_set_style_radius(np_bar, 5, 0);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(np_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(np_bar, 4, 0);
-    lv_obj_set_style_radius(np_bar, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(np_bar, 5, LV_PART_INDICATOR);
 
+    // Control buttons
     lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
     lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(ctrls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_size(ctrls, LV_PCT(100), 50);
-    lv_obj_set_style_pad_column(ctrls, 12, 0);
+    lv_obj_set_size(ctrls, LV_PCT(100), 48);
+    lv_obj_set_style_pad_column(ctrls, 14, 0);
 
     np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 120, 44);
-    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xEF4444), 0);
-    lv_obj_set_style_radius(np_btn_stop, 10, 0);
-    lv_obj_set_style_shadow_width(np_btn_stop, 8, 0);
-    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_30, 0);
-    lv_obj_set_style_shadow_ofs_y(np_btn_stop, 2, 0);
+    lv_obj_set_size(np_btn_stop, 110, 44);
+    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xDC2626), 0);
+    lv_obj_set_style_radius(np_btn_stop, 12, 0);
+    lv_obj_set_style_shadow_width(np_btn_stop, 6, 0);
+    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_25, 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
-    lv_label_set_text(lbl_stop, "STOP");
+    lv_label_set_text(lbl_stop, "Stop");
     lv_obj_set_style_text_font(lbl_stop, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_stop);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 140, 44);
-    lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xF59E0B), 0);
-    lv_obj_set_style_radius(np_btn_pause, 10, 0);
-    lv_obj_set_style_shadow_width(np_btn_pause, 8, 0);
-    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_30, 0);
-    lv_obj_set_style_shadow_ofs_y(np_btn_pause, 2, 0);
+    lv_obj_set_size(np_btn_pause, 130, 44);
+    lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xD97706), 0);
+    lv_obj_set_style_radius(np_btn_pause, 12, 0);
+    lv_obj_set_style_shadow_width(np_btn_pause, 6, 0);
+    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_25, 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
-    lv_label_set_text(lbl_pause, "PAUSE");
+    lv_label_set_text(lbl_pause, "Pause");
     lv_obj_set_style_text_font(lbl_pause, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_pause);
 
@@ -1542,11 +1557,12 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
 
     const char* poster_url = s["poster_thumb"];
     if (!poster_url) poster_url = s["poster_url"];
-    if (poster_url) {
+    if (poster_url && poster_url[0] != '\0') {
         bool url_changed = (strcmp(current_poster_url, poster_url) != 0);
         bool retry_due = (!url_changed) && (millis() - last_poster_fetch_ms > 30000);
         bool time_ok = (millis() - last_poster_fetch_ms > 15000);
-        if (time_ok && (url_changed || retry_due)) {
+        bool can_fetch = (poster_url[0] != '/') || (server_ip.length() > 0);
+        if (can_fetch && time_ok && (url_changed || retry_due)) {
             last_poster_fetch_ms = millis();
             String full_url;
             if (poster_url[0] == '/') {
@@ -1555,7 +1571,6 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
                 full_url = String(poster_url);
             }
 
-            // Show loading spinner
             if (np_loading_spinner && url_changed) {
                 lv_obj_clear_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
                 np_poster_loading = true;
@@ -1564,22 +1579,30 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
             if (downloadPoster(full_url.c_str())) {
                 strncpy(current_poster_url, poster_url, 255);
                 current_poster_url[255] = '\0';
-                // Update image descriptor data pointer to current sprite buffer
                 img_poster_dsc.data = (const uint8_t*)sprite_poster.getBuffer();
                 img_poster_dsc.data_size = POSTER_W * POSTER_H * 2;
                 lv_img_set_src(np_img, &img_poster_dsc);
                 lv_obj_invalidate(np_img);
+                if (np_placeholder_label) lv_obj_add_flag(np_placeholder_label, LV_OBJ_FLAG_HIDDEN);
                 Serial.printf("Poster updated: %s\n", poster_url);
             } else {
                 Serial.printf("Poster download failed: %s\n", full_url.c_str());
             }
 
-            // Hide loading spinner
             if (np_loading_spinner) {
                 lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
                 np_poster_loading = false;
             }
         }
+    } else {
+        // No poster URL: show placeholder so we don't show stale/black image
+        current_poster_url[0] = '\0';
+        sprite_poster.fillSprite(tft.color565(45, 55, 72));
+        img_poster_dsc.data = (const uint8_t*)sprite_poster.getBuffer();
+        img_poster_dsc.data_size = POSTER_W * POSTER_H * 2;
+        lv_img_set_src(np_img, &img_poster_dsc);
+        lv_obj_invalidate(np_img);
+        if (np_placeholder_label) lv_obj_clear_flag(np_placeholder_label, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

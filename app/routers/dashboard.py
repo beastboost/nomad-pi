@@ -17,7 +17,7 @@ import logging
 import hashlib
 from datetime import datetime
 from app.routers.auth import get_current_user_id
-from app.routers.media import cache_remote_poster, POSTER_CACHE_DIR, BASE_DIR
+from app.routers.media import cache_remote_poster, find_file_poster, POSTER_CACHE_DIR, BASE_DIR
 
 logger = logging.getLogger("nomad")
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -143,6 +143,22 @@ def _session_to_payload(session_id: str, session: Dict, now: float) -> Dict:
     else:
         progress_percent = session.get("progress_percent", 0) or 0
 
+    # Derive poster from path when client didn't send poster_url (e.g. ESP32 / public displays)
+    poster_url = session.get("poster_url")
+    poster_thumb = session.get("poster_thumb")
+    if (not poster_url or not poster_thumb) and session.get("path"):
+        try:
+            path_poster = find_file_poster(session["path"])
+            if path_poster:
+                dashboard_poster = _public_poster_url_for_data_path(path_poster)
+                if dashboard_poster:
+                    if not poster_url:
+                        poster_url = dashboard_poster
+                    if not poster_thumb:
+                        poster_thumb = dashboard_poster
+        except Exception:
+            pass
+
     return {
         "session_id": session_id,
         "user_id": session.get("user_id"),
@@ -150,8 +166,8 @@ def _session_to_payload(session_id: str, session: Dict, now: float) -> Dict:
         "avatar_url": session.get("avatar_url"),
         "media_type": session.get("media_type", "unknown"),
         "title": session.get("title", "Unknown"),
-        "poster_url": session.get("poster_url"),
-        "poster_thumb": session.get("poster_thumb"),
+        "poster_url": poster_url,
+        "poster_thumb": poster_thumb,
         "progress_percent": progress_percent,
         "current_time": cur,
         "duration": dur,
