@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.8] - 2026-03-14
+
+### Added
+- **PWA Install**: Install button now works; captures `beforeinstallprompt` on Android and shows "Add to Home Screen" on iOS with in-app instructions modal.
+- **iOS Add to Home Screen**: Dedicated modal with step-by-step instructions (Share → Add to Home Screen) when using the app on iPhone/iPad.
+
+### Changed
+- **README**: Documented Radxa/Cubie and other SBCs; noted that Tailscale requires systemd on non-RPi boards.
+
+### Fixed
+- **Tailscale VPN status**: Status now displays correctly when the API returns an error or non-Linux response.
+  - Front-end checks `res.ok` and shows API error message (e.g. "Tailscale only available on Linux", "Status check timed out") instead of a broken/undefined state.
+  - Backend error and exception responses now include a `message` field for consistent UI display.
+  - Admin panel shows Tailscale API error messages and displays `status.message` when present.
+- **Interface**: Critical fetch calls now check `res.ok` before parsing JSON (post-update check, changelog, stats, Tailscale connect) to avoid rendering error bodies as data.
+- **Admin API errors**: `apiCall` now parses error response body and throws with `detail`/`message` so notifications show the real API error.
+
+### Technical
+- Removed obsolete `RELEASE_NOTES_v1.7.0.md`.
+- Added `logs/` to `.gitignore`.
+
 ## [1.1.7] - 2026-02-01
 
 ### Added

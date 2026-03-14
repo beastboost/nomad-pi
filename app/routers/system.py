@@ -1580,7 +1580,7 @@ def _ensure_tailscaled_started() -> Optional[str]:
 def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
     """Get Tailscale connection status"""
     if platform.system() != "Linux":
-        return {"installed": False, "connected": False, "message": "Tailscale only available on Linux"}
+        return {"installed": False, "connected": False, "backend_state": "Unavailable", "message": "Tailscale only available on Linux"}
 
     try:
         tailscale_path = shutil.which("tailscale")
@@ -1630,9 +1630,9 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
             "message": message,
         }
     except subprocess.TimeoutExpired:
-        return {"installed": True, "connected": False, "service_running": False, "error": "Status check timed out"}
+        return {"installed": True, "connected": False, "service_running": False, "message": "Status check timed out", "error": "Status check timed out"}
     except Exception as e:
-        return {"installed": True, "connected": False, "service_running": False, "error": str(e)}
+        return {"installed": True, "connected": False, "service_running": False, "message": str(e), "error": str(e)}
 
 @router.post("/tailscale/service/{action}")
 def tailscale_service_control(action: str, user_id: int = Depends(get_current_user_id)):

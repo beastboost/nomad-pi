@@ -23,8 +23,8 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 
 Nomad Pi is designed to run on a variety of Single Board Computers:
 - **Raspberry Pi**: Zero 2W, 3B/3B+, 4B, 5.
-- **Radxa**: Rock 4, Rock 5 series.
-- **Other SBCs**: Any Debian-based Linux distribution (Ubuntu, Armbian, etc.).
+- **Radxa**: Rock 4, Rock 5 series (and other Radxa boards).
+- **Other SBCs**: Any Debian-based Linux distribution (Ubuntu, Armbian, Cubie, etc.). On non-Raspberry Pi boards, the installer skips RPi-specific tuning; Tailscale VPN requires **systemd** (the default on most distros).
 
 ## 📥 Installation
 

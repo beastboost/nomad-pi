@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.1.7-tailscale';
+const CACHE_NAME = 'nomad-pi-v1.1.8-tailscale';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

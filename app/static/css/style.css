@@ -1404,20 +1404,29 @@ button.primary:active {
     letter-spacing: 1px;
 }
 
-input[type="text"], input[type="password"], select {
-    background: #1a1a1a !important; /* Force dark background */
+/* Dark inputs: default and dark-theme (not light-theme) */
+body:not(.light-theme) input[type="text"],
+body:not(.light-theme) input[type="password"],
+body:not(.light-theme) input[type="search"],
+body:not(.light-theme) select,
+body:not(.light-theme) textarea,
+.login-container input[type="text"],
+.login-container input[type="password"],
+.login-container select {
+    background: #1a1a1a !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
     color: white !important;
     padding: 12px 20px;
     border-radius: 8px;
     outline: none;
     transition: all 0.3s ease;
-    appearance: none; /* Remove default browser styling */
+    appearance: none;
     -webkit-appearance: none;
-    color-scheme: dark; /* Force browser to use dark-themed controls */
+    color-scheme: dark;
 }
 
-select {
+body:not(.light-theme) select,
+.login-container select {
     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
     background-repeat: no-repeat;
     background-position: right 1rem center;
@@ -1425,15 +1434,51 @@ select {
     padding-right: 2.5rem;
 }
 
-select option {
+body:not(.light-theme) select option,
+.login-container select option {
     background: #1a1a1a !important;
     color: white !important;
 }
 
-input[type="text"]:focus, input[type="password"]:focus, select:focus {
+body:not(.light-theme) input[type="text"]:focus,
+body:not(.light-theme) input[type="password"]:focus,
+body:not(.light-theme) select:focus,
+.login-container input:focus,
+.login-container select:focus {
     background: #252525 !important;
     border-color: var(--accent-color) !important;
-    box-shadow: 0 0 0 2px rgba(229, 9, 20, 0.2) !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Light theme: inputs with light background so they are readable */
+body.light-theme input[type="text"],
+body.light-theme input[type="password"],
+body.light-theme input[type="search"],
+body.light-theme select,
+body.light-theme textarea {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    color: #1e293b !important;
+    color-scheme: light;
+}
+
+body.light-theme select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231e293b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+}
+
+body.light-theme select option {
+    background: #ffffff !important;
+    color: #1e293b !important;
+}
+
+body.light-theme input[type="text"]:focus,
+body.light-theme input[type="password"]:focus,
+body.light-theme input[type="search"]:focus,
+body.light-theme select:focus,
+body.light-theme textarea:focus {
+    background: #ffffff !important;
+    border-color: var(--accent-color) !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
 }
 
 button.primary {

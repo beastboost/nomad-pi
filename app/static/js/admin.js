@@ -571,8 +571,10 @@ createApp({
                 this.tailscale.status = {
                     installed: false,
                     connected: false,
-                    service_running: false
+                    service_running: false,
+                    message: error.message || 'Failed to load Tailscale status'
                 };
+                this.showNotification(error.message || 'Failed to load Tailscale status', 'error');
             } finally {
                 this.tailscale.loading = false;
             }
@@ -974,7 +976,13 @@ createApp({
                         this.isAuthenticated = false;
                         this.redirectToLogin();
                     }
-                    throw new Error(`API Error: ${response.status}`);
+                    let errMsg = `Request failed (${response.status})`;
+                    try {
+                        const body = await response.json();
+                        errMsg = body.detail || body.message || body.error || errMsg;
+                        if (Array.isArray(errMsg)) errMsg = errMsg[0] || errMsg;
+                    } catch (_) { /* ignore parse error */ }
+                    throw new Error(errMsg);
                 }
                 return await response.json();
             } catch (error) {

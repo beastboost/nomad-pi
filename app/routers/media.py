@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 public_router = APIRouter()
 _progress_log_next_at = {}
+_scan_state = {"in_progress": False, "category": None, "count": 0, "message": "", "running": 0}
+_scan_lock = threading.Lock()
 
 BASE_DIR = os.path.abspath("data")
 POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
@@ -1166,8 +1168,25 @@ def get_media_stats(user_id: int = Depends(get_current_user_id)):
             
     return stats
 
+@router.get("/scan/status")
+def get_scan_status(user_id: int = Depends(get_current_user_id)):
+    """Return current library scan progress for UI polling."""
+    with _scan_lock:
+        return {
+            "in_progress": _scan_state["in_progress"],
+            "category": _scan_state["category"],
+            "count": _scan_state["count"],
+            "message": _scan_state["message"] or (f"Scanning {_scan_state['category']}… {_scan_state['count']} files" if _scan_state["category"] else ""),
+        }
+
 @router.post("/rebuild")
-def rebuild_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+def rebuild_library(background_tasks: BackgroundTasks, admin: dict = Depends(get_current_admin)):
+    with _scan_lock:
+        _scan_state["in_progress"] = True
+        _scan_state["category"] = "movies"
+        _scan_state["count"] = 0
+        _scan_state["message"] = "Starting library scan…"
+        _scan_state["running"] = 4
     for category in ["movies", "shows", "music", "books"]:
         background_tasks.add_task(build_library_index, category)
     # Also trigger MiniDLNA rescan and auto-organization
@@ -1179,6 +1198,11 @@ def build_library_index(category: str):
     paths_to_scan = get_scan_paths(category)
     count = 0
     batch = []
+
+    with _scan_lock:
+        _scan_state["category"] = category
+        _scan_state["count"] = 0
+        _scan_state["message"] = f"Scanning {category}…"
 
     database.clear_library_index_category(category)
 
@@ -1315,10 +1339,21 @@ def build_library_index(category: str):
                     database.upsert_library_index_items(batch)
                     batch = []
                 count += 1
+                if count % 100 == 0:
+                    with _scan_lock:
+                        _scan_state["count"] = count
+                        _scan_state["message"] = f"Scanning {category}… {count} files"
 
     if batch:
         database.upsert_library_index_items(batch)
     database.set_library_index_state(category, count)
+    with _scan_lock:
+        if _scan_state["running"] > 0:
+            _scan_state["running"] = _scan_state["running"] - 1
+            if _scan_state["running"] <= 0:
+                _scan_state["in_progress"] = False
+                _scan_state["category"] = None
+                _scan_state["message"] = "Scan complete"
 
 def maybe_start_index_build(category: str, force: bool = False):
     state = database.get_library_index_state(category)
@@ -2436,16 +2471,21 @@ def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user
         return {"status": "error", "message": str(e)}
 
 @router.post("/rename")
-def rename_media(data: Dict = Body(...), background_tasks: BackgroundTasks = None, user_id: int = Depends(get_current_user_id)):
+def rename_media(data: Dict = Body(...), background_tasks: BackgroundTasks = None, admin: dict = Depends(get_current_admin)):
     old_path = data.get("old_path") or data.get("path")
     new_path = data.get("new_path") or data.get("dest_path")
     if not isinstance(old_path, str) or not old_path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid old_path")
     if not isinstance(new_path, str) or not new_path.startswith("/data/"):
         raise HTTPException(status_code=400, detail="Invalid new_path")
+    if ".." in new_path or ".." in old_path:
+        raise HTTPException(status_code=400, detail="Path must not contain ..")
 
     old_fs = safe_fs_path_from_web_path(old_path)
     new_fs = safe_fs_path_from_web_path(new_path)
+    # Rename only within the same parent directory
+    if os.path.dirname(old_fs) != os.path.dirname(new_fs):
+        raise HTTPException(status_code=400, detail="Rename only allowed within the same folder")
 
     if not os.path.exists(old_fs):
         raise HTTPException(status_code=404, detail="Path not found")
@@ -2657,7 +2697,7 @@ def _cleanup_empty_folders(bases: List[str]):
                 logger.error(f"Error cleaning up folder {root}: {e}")
 
 @router.post("/organize/shows")
-async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=False), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
+async def organize_shows(dry_run: bool = Query(default=True), rename_files: bool = Query(default=False), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), admin: dict = Depends(get_current_admin)):
     return await _organize_shows_internal(dry_run, rename_files, use_omdb, write_poster, limit)
 
 def _get_similarity(a: str, b: str) -> float:
@@ -2916,7 +2956,7 @@ async def _organize_shows_internal(dry_run: bool = True, rename_files: bool = Tr
     return {"status": "ok", "dry_run": bool(dry_run), "rename_files": bool(rename_files), "use_omdb": bool(use_omdb), "write_poster": bool(write_poster), "moved": moved, "skipped": skipped, "errors": errors, "shows_metadata_fetched": len(shows_processed), "planned": planned[: min(len(planned), 1000)]}
 
 @router.post("/organize/movies")
-async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), user_id: int = Depends(get_current_user_id)):
+async def organize_movies(dry_run: bool = Query(default=True), use_omdb: bool = Query(default=True), write_poster: bool = Query(default=True), limit: int = Query(default=250), admin: dict = Depends(get_current_admin)):
     return await _organize_movies_internal(dry_run, use_omdb, write_poster, limit)
 
 async def _organize_movies_internal(dry_run: bool = True, use_omdb: bool = True, write_poster: bool = True, limit: int = 250):
@@ -3373,7 +3413,7 @@ class BatchDeleteRequest(BaseModel):
     paths: List[str]
 
 @router.post("/delete/batch")
-def delete_media_batch(req: BatchDeleteRequest, background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+def delete_media_batch(req: BatchDeleteRequest, background_tasks: BackgroundTasks, admin: dict = Depends(get_current_admin)):
     raw_paths = req.paths if isinstance(req, BatchDeleteRequest) else None
     paths = [p for p in (raw_paths or []) if isinstance(p, str) and p.startswith("/data/")]
     if not paths:
@@ -3435,7 +3475,7 @@ def delete_media_batch(req: BatchDeleteRequest, background_tasks: BackgroundTask
     return {"status": "ok", "deleted": deleted, "failed": failed}
 
 @router.post("/system/prepare_drive")
-def prepare_drive(path: str, user_id: int = Depends(get_current_user_id)):
+def prepare_drive(path: str, admin: dict = Depends(get_current_admin)):
     """Create standard media folders on the specified drive path."""
     if not os.path.exists(path):
          raise HTTPException(status_code=404, detail="Drive path not found")
@@ -3453,13 +3493,13 @@ def prepare_drive(path: str, user_id: int = Depends(get_current_user_id)):
     return {"status": "ok", "created": created, "message": f"Created {len(created)} folders on drive."}
 
 @router.post("/organize")
-def manual_organize(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+def manual_organize(background_tasks: BackgroundTasks, admin: dict = Depends(get_current_admin)):
     """Manually trigger automated media organization"""
     background_tasks.add_task(trigger_auto_organize)
     return {"status": "ok", "message": "Automated organization started in background"}
 
 @router.post("/scan")
-def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+def scan_library(background_tasks: BackgroundTasks, admin: dict = Depends(get_current_admin)):
     async def run_scan():
         # Scan all categories
         for cat in ["movies", "shows", "music", "books", "gallery", "files"]:
@@ -3475,7 +3515,7 @@ def scan_library(background_tasks: BackgroundTasks, user_id: int = Depends(get_c
     return {"status": "ok", "message": "Library scan and organization started in background."}
 
 @router.post("/fix_duplicates")
-def fix_duplicates(background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
+def fix_duplicates(background_tasks: BackgroundTasks, admin: dict = Depends(get_current_admin)):
     """Find and delete duplicate files/content across the library."""
     def run_fix():
         logger.info("Starting mass duplicate fix...")

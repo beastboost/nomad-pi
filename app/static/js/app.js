@@ -11,6 +11,7 @@ async function checkPostUpdate() {
         const res = await fetch(`${API_BASE}/system/status`, {
             headers: getAuthHeaders()
         });
+        if (!res.ok) return;
         const data = await res.json();
 
         if (!data.version) return;
@@ -37,6 +38,7 @@ async function checkPostUpdate() {
             const logRes = await fetch(`${API_BASE}/system/changelog`, {
                 headers: getAuthHeaders()
             });
+            if (!logRes.ok) return;
             const logData = await logRes.json();
 
             const list = document.getElementById('changelog-list');
@@ -65,6 +67,49 @@ function closeWhatIsNew() {
     localStorage.removeItem('nomadpi_pre_update_version');
 }
 
+function closePWAiOSModal() {
+    const modal = document.getElementById('pwa-ios-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function installPWA() {
+    if (window.deferredInstallPrompt) {
+        window.deferredInstallPrompt.prompt();
+        window.deferredInstallPrompt.userChoice.then((choice) => {
+            if (choice.outcome === 'accepted') {
+                const btn = document.getElementById('install-pwa-btn');
+                if (btn) btn.classList.add('hidden');
+            }
+            window.deferredInstallPrompt = null;
+        });
+        return;
+    }
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+        const modal = document.getElementById('pwa-ios-modal');
+        if (modal) modal.classList.remove('hidden');
+        return;
+    }
+    showToast('Install is not available in this browser or the app is already installed.', 'info');
+}
+
+function initPWAInstallPrompt() {
+    const installBtn = document.getElementById('install-pwa-btn');
+    if (!installBtn) return;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.deferredInstallPrompt = e;
+        installBtn.classList.remove('hidden');
+    });
+    window.addEventListener('appinstalled', () => {
+        window.deferredInstallPrompt = null;
+        installBtn.classList.add('hidden');
+    });
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+        installBtn.classList.remove('hidden');
+        installBtn.innerHTML = '<i class="fas fa-plus-square"></i> Add to Home Screen';
+    }
+}
+
 function getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
@@ -88,6 +133,10 @@ function initTheme() {
     }
 
     applyTheme(savedTheme, false);
+
+    // Apply glass preference (applyTheme already does this; ensure it runs if theme was not applied)
+    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
+    document.body.classList.toggle('no-glass', noGlass);
 
     // Listen for system theme changes (if user hasn't manually set a theme)
     if (window.matchMedia) {
@@ -140,6 +189,17 @@ function applyTheme(theme, animate = false) {
             icon.className = 'fas fa-adjust';
         }
     }
+
+    // Re-apply glass effect preference so it persists across theme changes
+    const noGlass = localStorage.getItem('nomadpi.noGlass') === 'true';
+    document.body.classList.toggle('no-glass', noGlass);
+}
+
+function toggleGlassEffect() {
+    const noGlass = localStorage.getItem('nomadpi.noGlass') !== 'true';
+    localStorage.setItem('nomadpi.noGlass', noGlass ? 'true' : 'false');
+    document.body.classList.toggle('no-glass', noGlass);
+    showToast(noGlass ? 'Glass effects disabled' : 'Glass effects enabled', 'info');
 }
 
 let currentMedia = null;
@@ -332,6 +392,23 @@ function restoreShowsState() {
     }
 }
 
+// Current user (set on login and checkAuth); used to hide admin-only UI for non-admins
+let currentUser = { is_admin: false };
+
+function canEditLibrary() {
+    return !!(currentUser && currentUser.is_admin);
+}
+
+function updateAdminVisibility() {
+    const isAdmin = currentUser && currentUser.is_admin;
+    const navAdmin = document.querySelector('#main-nav button[onclick*="showSection(\'admin\')"]');
+    const homeAdminCard = document.querySelector('.menu-grid .card[onclick="showSection(\'admin\')"]');
+    const mobNav = document.getElementById('btn-more-mob');
+    if (navAdmin) navAdmin.style.display = isAdmin ? '' : 'none';
+    if (homeAdminCard) homeAdminCard.style.display = isAdmin ? '' : 'none';
+    if (mobNav) mobNav.style.display = ''; // "More" stays; admin is inside the menu
+}
+
 // Auth Functions
 async function login() {
     const usernameInput = document.getElementById('username-input');
@@ -358,6 +435,10 @@ async function login() {
             const data = await res.json();
             if (data.token) {
                 localStorage.setItem('nomad_auth_token', data.token);
+            }
+            if (data.user) {
+                currentUser = { is_admin: !!data.user.is_admin, id: data.user.id, username: data.user.username };
+                updateAdminVisibility();
             }
             if (errorMsg) {
                 errorMsg.style.display = 'none';
@@ -418,6 +499,10 @@ async function checkAuth() {
         });
         const data = await res.json();
         if (data.authenticated) {
+            if (data.user) {
+                currentUser = { is_admin: !!data.user.is_admin, id: data.user.id, username: data.user.username };
+                updateAdminVisibility();
+            }
             document.getElementById('login-screen').style.display = 'none';
             document.getElementById('app').classList.remove('hidden');
             loadStorageStats();
@@ -713,6 +798,10 @@ function toggleMobileMenu() {
 }
 
 function showSection(id) {
+    if (id === 'admin' && !(currentUser && currentUser.is_admin)) {
+        showToast('Admin access required', 'warning');
+        id = 'home';
+    }
     // Close mobile menu when navigating
     const nav = document.getElementById('main-nav');
     if (nav && nav.classList.contains('mobile-menu-open')) {
@@ -819,6 +908,16 @@ async function refreshTailscaleStatus() {
         const res = await fetch(`${API_BASE}/system/tailscale/status`, { headers: getAuthHeaders() });
         const status = await res.json();
 
+        if (!res.ok) {
+            const errMsg = status.message || status.detail || status.error || (typeof status.detail === 'string' ? status.detail : `Request failed (${res.status})`);
+            statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.9em;">${escapeHtml(errMsg)}</p>
+            <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" style="margin-top:8px;">Try Again</button>`;
+            if (controlsDiv) controlsDiv.innerHTML = '';
+            if (authDiv) authDiv.style.display = 'none';
+            return;
+        }
+
+        const errorMsg = status.message || status.error;
         let html = '';
         let controlsHtml = '';
         let showAuth = false;
@@ -828,12 +927,15 @@ async function refreshTailscaleStatus() {
         const stateIcon = status.connected ? 'check-circle' : (status.backend_state === 'NeedsLogin' ? 'key' : 'circle');
         
         html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <div class="badge badge-${stateClass}"><i class="fas fa-${stateIcon}"></i> ${status.backend_state || 'Unknown'}</div>
+            <div class="badge badge-${stateClass}"><i class="fas fa-${stateIcon}"></i> ${escapeHtml(status.backend_state || 'Unknown')}</div>
             <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" title="Refresh"><i class="fas fa-sync-alt"></i></button>
         </div>`;
 
         if (!status.installed) {
-            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> Tailscale is not installed on this system.</p>`;
+            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> ${errorMsg ? escapeHtml(errorMsg) : 'Tailscale is not installed on this system.'}</p>`;
+        } else if (errorMsg && !status.service_running && status.backend_state === 'Unknown') {
+            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--text-muted);">${escapeHtml(errorMsg)}</p>`;
+            controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
         } else if (!status.service_running) {
             html += `<p style="margin-top:10px; color:var(--text-muted);">The Tailscale system service is stopped.</p>`;
             controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
@@ -876,7 +978,7 @@ async function refreshTailscaleStatus() {
 
     } catch (e) {
         console.error('Tailscale status error:', e);
-        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.8em;">${e.message}</p>
+        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.8em;">${escapeHtml(e.message || 'Network error')}</p>
         <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" style="margin-top:8px;">Try Again</button>`;
     }
 }
@@ -889,6 +991,10 @@ async function connectTailscale() {
             headers: getAuthHeaders() 
         });
         const data = await res.json();
+        if (!res.ok) {
+            showToast(data.detail || data.message || 'Connection failed', 'error');
+            return;
+        }
 
         if (data.status === 'success') {
             showToast('Connected to Tailscale!', 'success');
@@ -1357,8 +1463,9 @@ function renderMediaList(category, files) {
             }
         }
         
-        const deleteBtn = `<button class="delete-btn" style="background:none;border:none;cursor:pointer;font-size:1.2em;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">🗑️</button>`;
-        const cardDeleteBtn = `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">×</button>`;
+        const deleteBtn = canEditLibrary() ? `<button class="delete-btn" style="background:none;border:none;cursor:pointer;font-size:1.2em;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">🗑️</button>` : '';
+        const cardDeleteBtn = canEditLibrary() ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">×</button>` : '';
+        const renameBtnHtmlFile = canEditLibrary() ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>` : '';
 
         if (category === 'music') {
             const title = escapeHtml(cleanTitle(file.name));
@@ -1368,7 +1475,7 @@ function renderMediaList(category, files) {
                     <span>${title}</span>
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
-                    <button class="modal-close rename-btn" title="Rename">✏️</button>
+                    ${renameBtnHtmlFile ? '<button class="modal-close rename-btn" title="Rename">✏️</button>' : ''}
                     <button class="modal-close music-play">Play</button>
                     ${deleteBtn}
                 </div>
@@ -1392,7 +1499,7 @@ function renderMediaList(category, files) {
                     <span>${file.name}</span>
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
-                    <button class="modal-close rename-btn" title="Rename">✏️</button>
+                    ${renameBtnHtmlFile ? '<button class="modal-close rename-btn" title="Rename">✏️</button>' : ''}
                     <a href="${file.path}" target="_blank" class="download-btn">Open</a>
                     ${deleteBtn}
                 </div>
@@ -1404,11 +1511,10 @@ function renderMediaList(category, files) {
                 });
             }
         } else if (category === 'gallery') {
-            const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
             if (file.name.match(/\.(jpg|jpeg|png|gif)$/i)) {
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtml}
+                    ${renameBtnHtmlFile}
                     ${folderHtml}
                     <img src="${file.path}" loading="lazy" alt="${file.name}" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(file.name)}')">
                     <div class="caption">${file.name}</div>
@@ -1416,7 +1522,7 @@ function renderMediaList(category, files) {
             } else {
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtml}
+                    ${renameBtnHtmlFile}
                     ${folderHtml}
                     <video controls preload="metadata" src="${file.path}"></video>
                     <div class="caption">${file.name}</div>
@@ -1437,11 +1543,10 @@ function renderMediaList(category, files) {
             const folder = file.folder && file.folder !== '.' ? `<div style="color:#aaa;font-size:0.85em;">${escapeHtml(file.folder)}</div>` : '';
             const canView = isPdf || isCbz || isCbr;
             const viewBtn = canView ? `<button class="modal-close view-btn">View</button>` : '';
-            const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
 
             div.innerHTML = `
                 ${cardDeleteBtn}
-                ${renameBtnHtml}
+                ${renameBtnHtmlFile}
                 ${folder}
                 <h3>${title}</h3>
                 <div style="display:flex; gap:10px; padding: 0 10px 12px 10px; align-items:center; justify-content:space-between;">
@@ -1541,12 +1646,11 @@ function renderMediaList(category, files) {
                     ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : (metaPoster ? `<img class="poster-img" src="${metaPoster}" loading="lazy" alt="${escapeHtml(file.name)}">` : `<div class="poster-placeholder"></div>`);
                 
-                const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
                 const playLabel = Number(file?.progress?.current_time || 0) > 10 ? 'Resume' : 'Play';
 
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtml}
+                    ${renameBtnHtmlFile}
                     <div class="poster-shell">
                         ${poster}
                         <div class="media-info">
@@ -1628,56 +1732,102 @@ function renderMediaList(category, files) {
     });
 }
 
-async function promptRename(oldPath, oldName, refreshCallback) {
-    const dotIdx = oldName.lastIndexOf('.');
-    const isFile = dotIdx !== -1 && dotIdx > oldName.lastIndexOf('/');
-    const ext = isFile ? oldName.substring(dotIdx) : '';
-    const base = isFile ? oldName.substring(0, dotIdx) : oldName;
-    
-    const newBase = prompt(`Rename ${isFile ? 'File' : 'Folder'} (extension will be preserved):`, base);
-    if (!newBase || newBase === base) return;
-    
+let renameModalState = { oldPath: '', oldName: '', ext: '', refreshCallback: null, isShowPart: false };
+
+function getRenameBaseAndExt(name, path) {
+    const slashIdx = name.lastIndexOf('/');
+    const dotIdx = name.lastIndexOf('.');
+    const isFile = dotIdx !== -1 && (slashIdx === -1 || dotIdx > slashIdx);
+    const ext = isFile ? name.substring(dotIdx) : '';
+    const base = isFile ? name.substring(0, dotIdx) : name;
+    return { base, ext, isFile };
+}
+
+function openRenameModal(oldPath, oldName, refreshCallback, isShowPart) {
+    const { base, ext, isFile } = getRenameBaseAndExt(oldName, oldPath);
+    renameModalState = { oldPath, oldName, ext, refreshCallback: refreshCallback || null, isShowPart: !!isShowPart };
+    const modal = document.getElementById('rename-modal');
+    const title = document.getElementById('rename-modal-title');
+    const hint = document.getElementById('rename-modal-hint');
+    const input = document.getElementById('rename-modal-input');
+    const errEl = document.getElementById('rename-modal-error');
+    if (title) title.textContent = `Rename ${isFile ? 'File' : 'Folder'}`;
+    if (hint) hint.textContent = isFile ? 'Extension will be preserved.' : 'Enter the new folder name.';
+    if (input) {
+        input.value = base;
+        input.focus();
+        input.select();
+    }
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeRenameModal() {
+    const modal = document.getElementById('rename-modal');
+    if (modal) modal.classList.add('hidden');
+    renameModalState = { oldPath: '', oldName: '', ext: '', refreshCallback: null, isShowPart: false };
+}
+
+async function confirmRenameModal() {
+    const input = document.getElementById('rename-modal-input');
+    const errEl = document.getElementById('rename-modal-error');
+    if (!input || !renameModalState.oldPath) return;
+    const newBase = (input.value || '').trim();
+    const { base, ext } = getRenameBaseAndExt(renameModalState.oldName, renameModalState.oldPath);
+    if (!newBase) {
+        if (errEl) { errEl.textContent = 'Please enter a name.'; errEl.style.display = 'block'; }
+        return;
+    }
+    if (newBase === base) {
+        closeRenameModal();
+        return;
+    }
     const newName = newBase + ext;
-    const parts = oldPath.split('/');
+    const parts = renameModalState.oldPath.split('/');
     parts.pop();
-    const newPath = `${parts.join('/')}/${newName}`.replaceAll('//', '/');
-    
+    const newPath = parts.join('/').replace(/\/+/g, '/') + '/' + newName;
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    const submitBtn = document.getElementById('rename-modal-submit');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Renaming…'; }
     try {
-        await renameMediaPath(oldPath, newPath);
-        if (refreshCallback) refreshCallback();
+        await renameMediaPath(renameModalState.oldPath, newPath);
+        closeRenameModal();
+        if (renameModalState.refreshCallback) renameModalState.refreshCallback();
+        if (renameModalState.isShowPart) {
+            if (showsState.level !== 'shows' && showsState.showName === renameModalState.oldName) {
+                showsState.showName = newBase;
+            } else if (showsState.level === 'episodes' && showsState.seasonName === renameModalState.oldName) {
+                showsState.seasonName = newBase;
+            }
+            await loadShowsLibrary();
+        }
+        showToast('Renamed successfully', 'success');
     } catch (err) {
-        alert(err.message);
+        if (errEl) { errEl.textContent = err.message || 'Rename failed'; errEl.style.display = 'block'; }
+        showToast(err.message || 'Rename failed', 'error');
+    } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Rename'; }
     }
 }
 
-async function promptRenameShowPart(oldPath, oldName) {
-    const dotIdx = oldName.lastIndexOf('.');
-    const isFile = dotIdx !== -1 && dotIdx > oldName.lastIndexOf('/');
-    const ext = isFile ? oldName.substring(dotIdx) : '';
-    const base = isFile ? oldName.substring(0, dotIdx) : oldName;
-    
-    const newBase = prompt(`Rename ${isFile ? 'File' : 'Folder'} (extension will be preserved):`, base);
-    if (!newBase || newBase === base) return;
-    
-    const newName = newBase + ext;
-    const parts = oldPath.split('/');
-    parts.pop();
-    const newPath = `${parts.join('/')}/${newName}`.replaceAll('//', '/');
-    
-    try {
-        await renameMediaPath(oldPath, newPath);
-        
-        // If we renamed the current show or season, update the state
-        if (showsState.level !== 'shows' && showsState.showName === oldName) {
-            showsState.showName = newBase;
-        } else if (showsState.level === 'episodes' && showsState.seasonName === oldName) {
-            showsState.seasonName = newBase;
-        }
-        
-        await loadShowsLibrary();
-    } catch (err) {
-        alert(err.message);
+function initRenameModal() {
+    const input = document.getElementById('rename-modal-input');
+    const submitBtn = document.getElementById('rename-modal-submit');
+    if (input) {
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmRenameModal();
+            if (e.key === 'Escape') closeRenameModal();
+        });
     }
+    if (submitBtn) submitBtn.addEventListener('click', confirmRenameModal);
+}
+
+async function promptRename(oldPath, oldName, refreshCallback) {
+    openRenameModal(oldPath, oldName, refreshCallback, false);
+}
+
+async function promptRenameShowPart(oldPath, oldName) {
+    openRenameModal(oldPath, oldName, () => loadShowsLibrary(), true);
 }
 
 async function renameMediaPath(oldPath, newPath) {
@@ -2431,8 +2581,8 @@ function renderShows() {
     container.innerHTML = '';
     if (continueEl) continueEl.innerHTML = '';
 
-    const getDelBtn = (path) => path ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="event.stopPropagation(); deleteItem('${escapeHtml(path)}')">×</button>` : '';
-    const getRenameBtn = (path, name) => path ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename" onclick="event.stopPropagation(); promptRenameShowPart('${escapeHtml(path)}', '${escapeHtml(name)}')">✏️</button>` : '';
+    const getDelBtn = (path) => (canEditLibrary() && path) ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="event.stopPropagation(); deleteItem('${escapeHtml(path)}')">×</button>` : '';
+    const getRenameBtn = (path, name) => (canEditLibrary() && path) ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename" onclick="event.stopPropagation(); promptRenameShowPart('${escapeHtml(path)}', '${escapeHtml(name)}')">✏️</button>` : '';
 
     if (!showsLibraryCache || showsLibraryCache.length === 0) {
         container.innerHTML = '<p>No shows found.</p>';
@@ -2939,7 +3089,7 @@ async function loadResume() {
                     ? `<img class="poster-img" src="${file.poster}" loading="lazy" alt="${escapeHtml(file.name)}">`
                     : `<div class="poster-placeholder"></div>`;
 
-                 const renameBtnHtml = `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>`;
+                 const resumeRenameBtn = canEditLibrary() ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>` : '';
 
                  let progressHtml = '';
                  if (file.progress && file.progress.duration) {
@@ -2948,7 +3098,7 @@ async function loadResume() {
                  }
 
                  div.innerHTML = `
-                    ${renameBtnHtml}
+                    ${resumeRenameBtn}
                     <div class="poster-shell">
                         ${posterHtml}
                         <div class="media-info">
@@ -3354,6 +3504,8 @@ function cancelUpload() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initTheme(); // Initialize theme before anything else
+    initPWAInstallPrompt();
+    initRenameModal();
 
     // Ensure all sections except home are hidden on page load
     document.querySelectorAll('main > section').forEach(section => {
@@ -3855,6 +4007,7 @@ async function uploadFiles() {
 }
 
 async function deleteItem(path) {
+    if (!canEditLibrary()) { showToast('Admin access required', 'warning'); return; }
     if (!confirm('Are you sure you want to delete this item? This cannot be undone.')) return;
     try {
         const res = await fetch(`${API_BASE}/media/delete?path=${encodeURIComponent(path)}`, { 
@@ -3888,29 +4041,62 @@ function getAuthHeaders() {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+let scanProgressInterval = null;
+
+async function pollScanProgress() {
+    const progEl = document.getElementById('scan-progress');
+    const msgEl = document.getElementById('scan-progress-message');
+    const barEl = document.getElementById('scan-progress-bar');
+    try {
+        const res = await fetch(`${API_BASE}/media/scan/status`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (msgEl) msgEl.textContent = data.message || `Scanning ${data.category || 'library'}… ${data.count || 0} files`;
+        if (barEl) barEl.style.width = data.in_progress ? '100%' : '0%';
+        if (!data.in_progress) {
+            if (scanProgressInterval) {
+                clearInterval(scanProgressInterval);
+                scanProgressInterval = null;
+            }
+            if (progEl) progEl.classList.add('hidden');
+            showToast('Library scan complete', 'success');
+            const active = document.querySelector('main > section.active')?.id;
+            if (active === 'shows') loadShowsLibrary();
+            else if (active && ['movies', 'music', 'books', 'gallery'].includes(active)) loadMedia(active);
+        }
+    } catch (_) {}
+}
+
 async function rescanLibrary() {
     if (!confirm('Rescan all libraries? This may take a while.')) return;
+    const progEl = document.getElementById('scan-progress');
+    const msgEl = document.getElementById('scan-progress-message');
+    const barEl = document.getElementById('scan-progress-bar');
     try {
-        const res = await fetch(`${API_BASE}/media/scan`, { 
+        const res = await fetch(`${API_BASE}/media/rebuild`, {
             method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                ...getAuthHeaders()
-            }
+            headers: { 'Accept': 'application/json', ...getAuthHeaders() }
         });
-        
         if (res.status === 401) {
             showToast('Session expired. Please log in again.', 'warning');
             logout();
             return;
         }
-
-        const data = await res.json();
+        if (res.status === 403) {
+            showToast('Admin access required', 'warning');
+            return;
+        }
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Scan failed');
-        showToast(data.message, 'success');
+        if (progEl) progEl.classList.remove('hidden');
+        if (msgEl) msgEl.textContent = 'Starting scan…';
+        if (barEl) barEl.style.width = '100%';
+        if (scanProgressInterval) clearInterval(scanProgressInterval);
+        scanProgressInterval = setInterval(pollScanProgress, 1500);
+        pollScanProgress();
     } catch (e) {
         console.error('Scan error:', e);
-        showToast(e.message, 'error');
+        showToast(e.message || 'Scan failed', 'error');
     }
 }
 
@@ -3949,6 +4135,7 @@ async function loadStorageStats() {
             headers: getAuthHeaders()
         });
         if (res.status === 401) return;
+        if (!res.ok) throw new Error('Stats unavailable');
         const data = await res.json();
         statsFailureCount = 0;
         statsNextAllowedAt = 0;

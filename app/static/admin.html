@@ -625,6 +625,8 @@
                                         </div>
 
                                         <!-- Not Installed Message -->
+                                        <p v-if="tailscale.status.message" style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--text-muted);">{{ tailscale.status.message }}</p>
+
                                         <div v-if="!tailscale.status.installed" style="margin-top: 1rem; padding: 1rem; background: rgba(251, 191, 36, 0.1); border-radius: 8px; border-left: 3px solid #fbbf24;">
                                             <p style="margin: 0;"><strong>Tailscale is not installed.</strong></p>
                                             <p style="margin: 0.5rem 0 0 0; font-size: 0.875rem;">Run the setup script or install manually:</p>

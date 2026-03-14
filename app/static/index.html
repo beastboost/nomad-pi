@@ -429,39 +429,35 @@
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-tools"></i> Library Tools</h3>
+                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:16px;">Scan refreshes the media index; organize moves and renames files and fetches metadata.</p>
+                    <h4 style="margin:0 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Scan library</h4>
                     <div class="button-grid" style="margin-bottom: 16px;">
-                        <button onclick="rescanLibrary()" class="secondary">
-                            <i class="fas fa-sync"></i> Rescan Library
+                        <button onclick="rescanLibrary()" class="primary">
+                            <i class="fas fa-sync"></i> Scan Library
                         </button>
-                        <button onclick="organizeShows(true)" class="secondary">
-                            <i class="fas fa-eye"></i> Preview Show Organize
-                        </button>
-                        <button onclick="organizeShows(false)" class="warning">
-                            <i class="fas fa-check"></i> Apply Show Organize
-                        </button>
-                        <button onclick="organizeMovies(true)" class="secondary">
-                            <i class="fas fa-eye"></i> Preview Movie Organize
-                        </button>
-                        <button onclick="organizeMovies(false)" class="warning">
-                            <i class="fas fa-check"></i> Apply Movie Organize
-                        </button>
+                    </div>
+                    <div id="scan-progress" class="hidden" style="margin-top:12px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <div class="spinner-small"></div>
+                            <span id="scan-progress-message">Scanning…</span>
+                        </div>
+                        <div class="progress-container" style="height:8px;"><div id="scan-progress-bar" class="progress-bar" style="width:0%;"></div></div>
+                    </div>
+                    <h4 style="margin:20px 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Organize media</h4>
+                    <div class="button-grid" style="margin-bottom: 8px;">
+                        <button onclick="organizeShows(true)" class="secondary"><i class="fas fa-eye"></i> Preview Shows</button>
+                        <button onclick="organizeShows(false)" class="warning"><i class="fas fa-check"></i> Apply Shows</button>
+                        <button onclick="organizeMovies(true)" class="secondary"><i class="fas fa-eye"></i> Preview Movies</button>
+                        <button onclick="organizeMovies(false)" class="warning"><i class="fas fa-check"></i> Apply Movies</button>
                     </div>
                     <label style="display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:0.9rem;">
                         <input type="checkbox" id="show-organize-rename-files">
-                        <span><i class="fas fa-tag"></i> Rename episodes to SxxEyy format (optional)</span>
+                        <span><i class="fas fa-tag"></i> Rename episodes to SxxEyy (optional)</span>
                     </label>
-                    <div id="organize-status" style="margin-top:16px;"></div>
-                </div>
-
-                <div class="admin-panel">
-                    <h3><i class="fas fa-clone"></i> Smart Media Management</h3>
-                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:16px; line-height: 1.6;">
-                        <i class="fas fa-info-circle"></i> Identify duplicate files and content across your library to save space and keep your media organized.
-                    </p>
-                    <button onclick="findDuplicates()" class="primary">
-                        <i class="fas fa-search"></i> Find Duplicates
-                    </button>
-                    <div id="duplicates-status" style="margin-top:16px;"></div>
+                    <div id="organize-status" style="margin-top:12px;"></div>
+                    <h4 style="margin:20px 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Find duplicates</h4>
+                    <button onclick="findDuplicates()" class="secondary"><i class="fas fa-search"></i> Find Duplicates</button>
+                    <div id="duplicates-status" style="margin-top:12px;"></div>
                 </div>
             </section>
 
@@ -636,6 +632,29 @@
         </div>
     </div>
 
+    <!-- Rename modal -->
+    <div id="rename-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeRenameModal()"></div>
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <div class="modal-title" id="rename-modal-title">Rename</div>
+                <button class="modal-close" onclick="closeRenameModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="rename-modal-hint" style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 12px;">Extension will be preserved.</p>
+                <div class="form-group">
+                    <label for="rename-modal-input">New name</label>
+                    <input type="text" id="rename-modal-input" placeholder="Enter new name" autocomplete="off">
+                </div>
+                <p id="rename-modal-error" style="color: var(--danger-color); font-size: 0.9rem; margin: 8px 0; display: none;"></p>
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px;">
+                    <button type="button" onclick="closeRenameModal()" class="secondary">Cancel</button>
+                    <button type="button" id="rename-modal-submit" class="primary">Rename</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Welcome Screen Modal -->
     <div id="welcome-modal" class="modal hidden">
         <div class="modal-backdrop"></div>
@@ -714,6 +733,27 @@
                 <div style="margin-top: 30px; text-align: center;">
                     <button onclick="closeWelcome()" class="primary" style="padding: 14px 40px; font-size: 1.05rem;">Let's Get Started! 🎉</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- iOS Add to Home Screen instructions modal -->
+    <div id="pwa-ios-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closePWAiOSModal()"></div>
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <div class="modal-title">Add to Home Screen</div>
+                <button class="modal-close" onclick="closePWAiOSModal()">×</button>
+            </div>
+            <div class="modal-body" style="padding: 20px;">
+                <p style="margin-bottom: 16px;">Install Nomad Pi on your iPhone or iPad:</p>
+                <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                    <li>Tap the <strong>Share</strong> button <span style="font-size: 1.2em;">⎋</span> in Safari’s menu bar (bottom on iPhone).</li>
+                    <li>Scroll and tap <strong>Add to Home Screen</strong>.</li>
+                    <li>Tap <strong>Add</strong> in the top-right corner.</li>
+                </ol>
+                <p style="margin-top: 16px; font-size: 0.9em; color: var(--text-muted);">You can then open Nomad Pi like an app from your home screen.</p>
+                <button onclick="closePWAiOSModal()" class="primary" style="margin-top: 16px; width: 100%;">Got it</button>
             </div>
         </div>
     </div>
