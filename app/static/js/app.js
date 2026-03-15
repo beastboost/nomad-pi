@@ -224,6 +224,11 @@ const mediaState = { path: '/data' };
 let activeVideoProgressInterval = null;
 let activeVideoEl = null;
 let activeVideoPath = null;
+let activeVideoTitle = null;
+let activeVideoPoster = null;
+let activeDashboardSessionId = null;
+let lastDashboardSessionUpdate = 0;
+const DASHBOARD_SESSION_UPDATE_INTERVAL_MS = 5000;
 let playbackHeartbeatInstalled = false;
 const progressDebugSent = new Set();
 
@@ -2065,6 +2070,12 @@ function closeViewer() {
         clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
     }
+    if (activeDashboardSessionId && activeVideoPath) {
+        updateDashboardSession(activeDashboardSessionId, activeVideoPath, activeVideoTitle || 'Video', 'stopped', activeVideoEl?.currentTime ?? 0, activeVideoEl?.duration ?? 0, activeVideoPoster);
+        activeDashboardSessionId = null;
+        activeVideoTitle = null;
+        activeVideoPoster = null;
+    }
     try { updateProgress(activeVideoEl, activeVideoPath, true, { keepalive: true }); } catch (e) {}
     activeVideoEl = null;
     activeVideoPath = null;
@@ -2181,7 +2192,7 @@ async function openMovieDetails(file) {
     });
 }
 
-function openVideoViewer(path, title, startSeconds = 0) {
+function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
     const heading = document.getElementById('viewer-title');
@@ -2189,6 +2200,10 @@ function openVideoViewer(path, title, startSeconds = 0) {
         window.open(path, '_blank');
         return;
     }
+
+    activeDashboardSessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    activeVideoTitle = title || 'Video';
+    activeVideoPoster = posterUrl || null;
 
     const token = getCookie('auth_token');
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
@@ -2232,18 +2247,37 @@ function openVideoViewer(path, title, startSeconds = 0) {
     video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     video.src = streamUrl;
-    video.addEventListener('timeupdate', () => updateProgress(video, path));
-    video.addEventListener('pause', () => { try { updateProgress(video, path, true); } catch (e) {} });
+    video.addEventListener('timeupdate', () => {
+        updateProgress(video, path);
+        if (activeDashboardSessionId && !video.paused) {
+            updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'playing', video.currentTime, video.duration, activeVideoPoster);
+        }
+    });
+    video.addEventListener('pause', () => {
+        try { updateProgress(video, path, true); } catch (e) {}
+        if (activeDashboardSessionId) {
+            updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'paused', video.currentTime, video.duration, activeVideoPoster);
+        }
+    });
     video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} });
     video.addEventListener('play', () => {
+        if (activeDashboardSessionId) {
+            updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'playing', video.currentTime, video.duration, activeVideoPoster);
+        }
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = setInterval(() => {
             try { updateProgress(video, path); } catch (e) {}
+            if (activeDashboardSessionId && !video.paused) {
+                updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'playing', video.currentTime, video.duration, activeVideoPoster);
+            }
         }, 5000);
     });
     video.addEventListener('ended', () => {
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
+        if (activeDashboardSessionId) {
+            updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'stopped', video.currentTime, video.duration, activeVideoPoster);
+        }
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
 
@@ -2255,7 +2289,7 @@ function openVideoViewer(path, title, startSeconds = 0) {
     // Auto-play next episode when current one ends
     video.addEventListener('ended', async () => {
         try { await updateProgress(video, path, true); } catch (e) {}
-        await handleVideoEnded(path, title);
+        await handleVideoEnded(path, activeVideoTitle);
     });
 
     activeVideoEl = video;
@@ -2914,6 +2948,37 @@ function escapeHtml(str) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#039;');
+}
+
+async function updateDashboardSession(sessionId, path, title, state, currentTime, duration, posterUrl) {
+    if (!sessionId || !path) return;
+    const headers = getAuthHeaders();
+    if (!headers.Authorization && !headers['X-Auth-Token']) return;
+    const now = Date.now();
+    if (state === 'playing' && now - lastDashboardSessionUpdate < DASHBOARD_SESSION_UPDATE_INTERVAL_MS) return;
+    lastDashboardSessionUpdate = now;
+    const mediaType = (path.indexOf('/shows/') !== -1) ? 'episode' : (path.indexOf('/movies/') !== -1) ? 'movie' : 'video';
+    const payload = {
+        session_id: sessionId,
+        path: path,
+        title: title || 'Unknown',
+        media_type: mediaType,
+        current_time: Number(currentTime) || 0,
+        duration: Number(duration) || 0,
+        state: state || 'playing',
+        username: (currentUser && currentUser.username) ? currentUser.username : 'Unknown'
+    };
+    if (posterUrl) payload.poster_url = posterUrl;
+    try {
+        const res = await fetch(`${API_BASE}/dashboard/session/update`, {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.status === 401) logout();
+    } catch (e) {
+        console.warn('[Dashboard] Session update failed:', e);
+    }
 }
 
 async function updateProgress(mediaElement, filePath, force = false, opts = null) {
@@ -5264,7 +5329,7 @@ async function handleVideoEnded(currentPath, currentTitle) {
         showNextEpisodeCountdown(nextEpisode, () => {
             closeViewer();
             setTimeout(() => {
-                openVideoViewer(nextEpisode.path, nextEpisode.name, 0);
+                openVideoViewer(nextEpisode.path, nextEpisode.name, 0, nextEpisode.poster || null);
             }, 100);
         });
     } else {

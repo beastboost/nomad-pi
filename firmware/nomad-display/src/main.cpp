@@ -114,7 +114,9 @@ lv_obj_t * screensaver_date;
 
 // Now Playing Widgets
 lv_obj_t * cont_now_playing_list;
-lv_obj_t * np_header_label;  // "NOW PLAYING" section header
+lv_obj_t * np_header_label;
+lv_obj_t * np_session_count_label;  // "1 of 3" when multiple sessions
+lv_obj_t * np_state_badge;          // "PLAYING" / "PAUSED"
 lv_obj_t * np_card;
 lv_obj_t * np_img;
 lv_obj_t * np_title;
@@ -626,8 +628,10 @@ void applyTheme() {
     if (np_quality) lv_obj_set_style_text_color(np_quality, muted, 0);
     if (np_time_remain) lv_obj_set_style_text_color(np_time_remain, theme_dark ? lv_color_hex(0x10B981) : lv_color_hex(0x059669), 0);
     if (np_header_label) lv_obj_set_style_text_color(np_header_label, muted, 0);
+    if (np_session_count_label) lv_obj_set_style_text_color(np_session_count_label, muted, 0);
     if (np_empty_label) lv_obj_set_style_text_color(np_empty_label, muted, 0);
     if (np_placeholder_label) lv_obj_set_style_text_color(np_placeholder_label, muted, 0);
+    if (np_state_badge) lv_obj_set_style_text_color(np_state_badge, theme_dark ? lv_color_hex(0x22C55E) : lv_color_hex(0x059669), 0);
     if (label_cpu) lv_obj_set_style_text_color(label_cpu, text, 0);
     if (label_ram) lv_obj_set_style_text_color(label_ram, text, 0);
     if (label_stats) lv_obj_set_style_text_color(label_stats, muted, 0);
@@ -787,32 +791,46 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     cont_now_playing_list = lv_obj_create(parent);
     lv_obj_set_size(cont_now_playing_list, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(cont_now_playing_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(cont_now_playing_list, 10, 0);
-    lv_obj_set_style_pad_row(cont_now_playing_list, 10, 0);
-    lv_obj_set_style_pad_column(cont_now_playing_list, 0, 0);
+    lv_obj_set_style_pad_all(cont_now_playing_list, 8, 0);
+    lv_obj_set_style_pad_row(cont_now_playing_list, 8, 0);
 
-    np_header_label = lv_label_create(cont_now_playing_list);
+    // Top bar: "NOW PLAYING" + session count
+    lv_obj_t * top_bar = lv_obj_create(cont_now_playing_list);
+    lv_obj_set_width(top_bar, LV_PCT(100));
+    lv_obj_set_height(top_bar, 28);
+    lv_obj_set_style_bg_opa(top_bar, 0, 0);
+    lv_obj_set_style_border_width(top_bar, 0, 0);
+    lv_obj_set_style_pad_all(top_bar, 0, 0);
+    lv_obj_set_flex_flow(top_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    np_header_label = lv_label_create(top_bar);
     lv_label_set_text(np_header_label, "NOW PLAYING");
     lv_obj_set_style_text_font(np_header_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(np_header_label, lv_color_hex(0x64748B), 0);
     lv_obj_set_style_text_letter_space(np_header_label, 2, 0);
 
+    np_session_count_label = lv_label_create(top_bar);
+    lv_label_set_text(np_session_count_label, "");
+    lv_obj_set_style_text_font(np_session_count_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(np_session_count_label, lv_color_hex(0x64748B), 0);
+
     np_empty_label = lv_label_create(cont_now_playing_list);
-    lv_label_set_text(np_empty_label, "No active sessions");
+    lv_label_set_text(np_empty_label, "Nothing playing\nStart something on the app");
     lv_obj_set_style_text_font(np_empty_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_align(np_empty_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(np_empty_label);
 
     np_card = lv_obj_create(cont_now_playing_list);
     lv_obj_set_size(np_card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(np_card, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(np_card, 20, 0);
+    lv_obj_set_style_radius(np_card, 24, 0);
     lv_obj_set_style_border_width(np_card, 0, 0);
-    lv_obj_set_style_pad_all(np_card, 18, 0);
-    lv_obj_set_style_pad_row(np_card, 14, 0);
-    lv_obj_set_style_shadow_width(np_card, 20, 0);
+    lv_obj_set_style_pad_all(np_card, 16, 0);
+    lv_obj_set_style_pad_row(np_card, 12, 0);
+    lv_obj_set_style_shadow_width(np_card, 24, 0);
     lv_obj_set_style_shadow_opa(np_card, LV_OPA_20, 0);
-    lv_obj_set_style_shadow_ofs_y(np_card, 6, 0);
-    lv_obj_set_style_shadow_spread(np_card, 0, 0);
+    lv_obj_set_style_shadow_ofs_y(np_card, 8, 0);
     lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
 
@@ -822,16 +840,16 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_border_width(top, 0, 0);
     lv_obj_set_style_pad_all(top, 0, 0);
     lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(top, 18, 0);
+    lv_obj_set_style_pad_column(top, 20, 0);
 
-    // Poster container
+    // Poster: rounded, subtle border
     lv_obj_t * poster_cont = lv_obj_create(top);
     lv_obj_set_size(poster_cont, POSTER_W, POSTER_H);
     lv_obj_set_style_bg_opa(poster_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(poster_cont, lv_color_hex(0x1E293B), 0);
-    lv_obj_set_style_border_width(poster_cont, 1, 0);
+    lv_obj_set_style_radius(poster_cont, 16, 0);
+    lv_obj_set_style_border_width(poster_cont, 2, 0);
     lv_obj_set_style_border_color(poster_cont, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_radius(poster_cont, 14, 0);
     lv_obj_set_style_pad_all(poster_cont, 0, 0);
     lv_obj_set_style_clip_corner(poster_cont, true, 0);
 
@@ -841,7 +859,7 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_align(np_img, LV_ALIGN_CENTER, 0, 0);
 
     np_loading_spinner = lv_spinner_create(poster_cont, 1000, 60);
-    lv_obj_set_size(np_loading_spinner, 48, 48);
+    lv_obj_set_size(np_loading_spinner, 44, 44);
     lv_obj_center(np_loading_spinner);
     lv_obj_add_flag(np_loading_spinner, LV_OBJ_FLAG_HIDDEN);
 
@@ -852,20 +870,28 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_center(np_placeholder_label);
     lv_obj_add_flag(np_placeholder_label, LV_OBJ_FLAG_HIDDEN);
 
+    // Right column: title, state badge, user/type, meta, progress
     lv_obj_t * info = lv_obj_create(top);
     lv_obj_set_style_bg_opa(info, 0, 0);
     lv_obj_set_style_border_width(info, 0, 0);
     lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(info, 0, 0);
-    lv_obj_set_style_pad_row(info, 6, 0);
-    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 70, POSTER_H);
+    lv_obj_set_style_pad_row(info, 4, 0);
+    lv_obj_set_size(info, SCREEN_WIDTH - POSTER_W - 56, POSTER_H);
     lv_obj_set_flex_align(info, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     np_title = lv_label_create(info);
     lv_obj_set_width(np_title, LV_PCT(100));
-    lv_label_set_long_mode(np_title, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(np_title, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(np_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_line_space(np_title, 2, 0);
     lv_label_set_text(np_title, "");
+    lv_obj_set_style_text_color(np_title, lv_color_hex(0xF1F5F9), 0);
+
+    np_state_badge = lv_label_create(info);
+    lv_label_set_text(np_state_badge, "PLAYING");
+    lv_obj_set_style_text_font(np_state_badge, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(np_state_badge, lv_color_hex(0x22C55E), 0);
 
     np_sub = lv_label_create(info);
     lv_obj_set_width(np_sub, LV_PCT(100));
@@ -892,46 +918,42 @@ void buildNowPlayingTab(lv_obj_t * parent) {
     lv_obj_set_style_text_font(np_time_remain, &lv_font_montserrat_14, 0);
     lv_label_set_text(np_time_remain, "");
 
-    // Progress bar
+    // Progress bar: full width, pill style
     np_bar = lv_bar_create(np_card);
     lv_obj_set_width(np_bar, LV_PCT(100));
-    lv_obj_set_height(np_bar, 10);
+    lv_obj_set_height(np_bar, 12);
     lv_bar_set_range(np_bar, 0, 100);
     lv_bar_set_value(np_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x1E293B), 0);
     lv_obj_set_style_bg_opa(np_bar, 255, 0);
-    lv_obj_set_style_radius(np_bar, 5, 0);
+    lv_obj_set_style_radius(np_bar, 6, 0);
     lv_obj_set_style_bg_color(np_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(np_bar, 255, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(np_bar, 5, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(np_bar, 6, LV_PART_INDICATOR);
 
-    // Control buttons
+    // Controls: pill buttons
     lv_obj_t * ctrls = lv_obj_create(np_card);
     lv_obj_set_style_bg_opa(ctrls, 0, 0);
     lv_obj_set_style_border_width(ctrls, 0, 0);
     lv_obj_set_style_pad_all(ctrls, 0, 0);
     lv_obj_set_flex_flow(ctrls, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(ctrls, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_size(ctrls, LV_PCT(100), 48);
-    lv_obj_set_style_pad_column(ctrls, 14, 0);
+    lv_obj_set_size(ctrls, LV_PCT(100), 52);
+    lv_obj_set_style_pad_column(ctrls, 16, 0);
 
     np_btn_stop = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_stop, 110, 44);
-    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xDC2626), 0);
-    lv_obj_set_style_radius(np_btn_stop, 12, 0);
-    lv_obj_set_style_shadow_width(np_btn_stop, 6, 0);
-    lv_obj_set_style_shadow_opa(np_btn_stop, LV_OPA_20, 0);
+    lv_obj_set_size(np_btn_stop, 100, 44);
+    lv_obj_set_style_bg_color(np_btn_stop, lv_color_hex(0xB91C1C), 0);
+    lv_obj_set_style_radius(np_btn_stop, 22, 0);
     lv_obj_t * lbl_stop = lv_label_create(np_btn_stop);
     lv_label_set_text(lbl_stop, "Stop");
     lv_obj_set_style_text_font(lbl_stop, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl_stop);
 
     np_btn_pause = lv_btn_create(ctrls);
-    lv_obj_set_size(np_btn_pause, 130, 44);
-    lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xD97706), 0);
-    lv_obj_set_style_radius(np_btn_pause, 12, 0);
-    lv_obj_set_style_shadow_width(np_btn_pause, 6, 0);
-    lv_obj_set_style_shadow_opa(np_btn_pause, LV_OPA_20, 0);
+    lv_obj_set_size(np_btn_pause, 120, 44);
+    lv_obj_set_style_bg_color(np_btn_pause, lv_color_hex(0xB45309), 0);
+    lv_obj_set_style_radius(np_btn_pause, 22, 0);
     lv_obj_t * lbl_pause = lv_label_create(np_btn_pause);
     lv_label_set_text(lbl_pause, "Pause");
     lv_obj_set_style_text_font(lbl_pause, &lv_font_montserrat_14, 0);
@@ -1476,6 +1498,7 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     if (sessions.size() == 0) {
         lv_obj_add_flag(np_card, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
+        if (np_session_count_label) lv_label_set_text(np_session_count_label, "");
         strcpy(np_session_id, "");
         strcpy(current_poster_url, "");
         return;
@@ -1483,6 +1506,14 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
 
     lv_obj_add_flag(np_empty_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(np_card, LV_OBJ_FLAG_HIDDEN);
+
+    if (np_session_count_label) {
+        if (total_sessions > 1) {
+            lv_label_set_text_fmt(np_session_count_label, "1 of %d", total_sessions);
+        } else {
+            lv_label_set_text(np_session_count_label, "");
+        }
+    }
 
     JsonObject s = sessions[0];
     const char* sid_src = s["session_id"] | "";
@@ -1492,9 +1523,18 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     lv_label_set_text(np_title, s["title"] | "Unknown");
     const char* user = s["username"] | "User";
     const char* type = s["media_type"] | "media";
-    lv_label_set_text_fmt(np_sub, "%s • %s", user, type);
+    lv_label_set_text_fmt(np_sub, "%s · %s", user, type);
 
     const char* state = s["state"] | "unknown";
+    if (np_state_badge) {
+        if (strcmp(state, "paused") == 0) {
+            lv_label_set_text(np_state_badge, "PAUSED");
+            lv_obj_set_style_text_color(np_state_badge, lv_color_hex(0xF59E0B), 0);
+        } else {
+            lv_label_set_text(np_state_badge, "PLAYING");
+            lv_obj_set_style_text_color(np_state_badge, lv_color_hex(0x22C55E), 0);
+        }
+    }
     double cur_f = (double)(s["current_time"] | 0.0);
     double dur_f = (double)(s["duration"] | 0.0);
     if (cur_f < 0) cur_f = 0;
@@ -1552,8 +1592,8 @@ void updateDashboardUI(JsonArray sessions, JsonObject system) {
     }
 
     np_is_paused = strcmp((const char*)(s["state"] | ""), "paused") == 0;
-    lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x10B981) : lv_color_hex(0xF59E0B), 0);
-    lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "PLAY" : "PAUSE");
+    lv_obj_set_style_bg_color(np_btn_pause, np_is_paused ? lv_color_hex(0x059669) : lv_color_hex(0xB45309), 0);
+    lv_label_set_text(lv_obj_get_child(np_btn_pause, 0), np_is_paused ? "Play" : "Pause");
 
     const char* poster_url = s["poster_thumb"];
     if (!poster_url) poster_url = s["poster_url"];
