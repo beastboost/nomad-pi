@@ -770,8 +770,10 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         if fstype == "ext4":
             mkfs_cmd.append("-F")
         mkfs_cmd.append(device)
-            
-        subprocess.run(mkfs_cmd, check=True, input="y\n", text=True)
+
+        mkfs_result = subprocess.run(mkfs_cmd, capture_output=True, text=True, input="y\n")
+        if mkfs_result.returncode != 0:
+            raise Exception(mkfs_result.stderr or mkfs_result.stdout or "mkfs failed")
         
         clean_name = "".join(c for c in (label or "drive") if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name: clean_name = "usb_drive"
@@ -858,6 +860,7 @@ def restart_wifi(user_id: int = Depends(get_current_user_id)):
 @router.get("/logs")
 def get_logs(lines: int = 100, user_id: int = Depends(get_current_user_id)):
     """Retrieve the last N lines of the application log"""
+    lines = max(1, min(lines, 500))  # Cap to prevent memory exhaustion on Pi
     # Try the configured log file first
     log_file = os.environ.get("NOMAD_LOG_FILE", "data/app.log")
     if os.path.exists(log_file):
@@ -1540,18 +1543,32 @@ def get_saved_wifi(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Tailscale VPN Management
+_TAILSCALE_SEARCH_PATHS = ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]
+
+def _get_tailscale_path() -> Optional[str]:
+    """Find the tailscale binary, returning its path or None."""
+    path = shutil.which("tailscale")
+    if path:
+        return path
+    for p in _TAILSCALE_SEARCH_PATHS:
+        if os.path.exists(p):
+            return p
+    return None
+
+
 def _run_tailscale(args: List[str], timeout: int = 10) -> subprocess.CompletedProcess:
-    """Run tailscale command with sudo -n first, then fallback to direct invocation."""
+    """Run tailscale command with sudo -n first, then fallback to direct invocation.
+    Returns the result of whichever attempt ran last (direct preferred when sudo fails)."""
     sudo_cmd = ["sudo", "-n", "tailscale", *args]
-    result = subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=timeout)
-    if result.returncode == 0:
-        return result
+    sudo_result = subprocess.run(sudo_cmd, capture_output=True, text=True, timeout=timeout)
+    if sudo_result.returncode == 0:
+        return sudo_result
 
     direct_cmd = ["tailscale", *args]
-    direct = subprocess.run(direct_cmd, capture_output=True, text=True, timeout=timeout)
-    if direct.returncode == 0:
-        return direct
-    return result
+    direct_result = subprocess.run(direct_cmd, capture_output=True, text=True, timeout=timeout)
+    # Prefer the direct result so error messages reflect what tailscale itself says,
+    # not "sudo: tailscale: command not found"
+    return direct_result
 
 
 def _tailscaled_state() -> str:
@@ -1583,13 +1600,7 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": False, "connected": False, "backend_state": "Unavailable", "message": "Tailscale only available on Linux"}
 
     try:
-        tailscale_path = shutil.which("tailscale")
-        if not tailscale_path:
-            for path in ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]:
-                if os.path.exists(path):
-                    tailscale_path = path
-                    break
-
+        tailscale_path = _get_tailscale_path()
         if not tailscale_path:
             return {"installed": False, "connected": False, "service_running": False, "message": "Tailscale not found"}
 
@@ -1704,7 +1715,7 @@ def tailscale_up(user_id: int = Depends(get_current_user_id)):
             raise HTTPException(status_code=400, detail="No Tailscale auth key saved")
 
         result = _run_tailscale(
-            ["up", "--authkey", auth_key, "--accept-routes", "--ssh"],
+            ["up", "--authkey", auth_key, "--accept-routes", "--accept-dns", "--ssh"],
             timeout=45
         )
 
@@ -1787,13 +1798,7 @@ def tailscale_diagnostics(user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         return {"supported": False, "message": "Diagnostics only available on Linux"}
 
-    tailscale_path = shutil.which("tailscale")
-    if not tailscale_path:
-        for path in ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/bin/tailscale"]:
-            if os.path.exists(path):
-                tailscale_path = path
-                break
-
+    tailscale_path = _get_tailscale_path()
     service_state = _tailscaled_state() or "unknown"
     sudo_check = subprocess.run(
         ["sudo", "-n", "true"],
