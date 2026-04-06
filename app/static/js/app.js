@@ -1455,7 +1455,9 @@ function renderMediaList(category, files) {
     }
 
     if (!files || files.length === 0) {
-        container.innerHTML = '<p>No media found.</p>';
+        const icons = { movies:'🎬', shows:'📺', music:'🎵', books:'📖', gallery:'🖼️', files:'📁' };
+        const labels = { movies:'No movies found', shows:'No shows found', music:'No music found', books:'No books found', gallery:'No gallery items', files:'No files found' };
+        container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icons[category] || '📂'}</div><div class="empty-state-title">${labels[category] || 'Nothing here yet'}</div><div class="empty-state-subtitle">Upload files in the Admin section to get started.</div></div>`;
         return;
     }
 
@@ -1468,81 +1470,80 @@ function renderMediaList(category, files) {
 
     files.forEach(file => {
         const div = document.createElement('div');
-        div.className = (category === 'music' || category === 'files') ? 'list-item' : 'media-item';
+        const isListCategory = (category === 'music' || category === 'files' || category === 'books');
+        div.className = isListCategory ? 'list-item' : 'media-item';
         div.style.position = 'relative';
 
         let folderHtml = '';
         if (file.folder && file.folder !== '.') {
-            if (category === 'music' || category === 'files') {
-                folderHtml = `<div style="color:#aaa;font-size:0.85em;">${file.folder}</div>`;
+            if (isListCategory) {
+                folderHtml = `<div class="track-artist">${escapeHtml(file.folder)}</div>`;
             } else {
-                folderHtml = `<div class="folder-tag">${file.folder}</div>`;
+                folderHtml = `<div class="folder-tag">${escapeHtml(file.folder)}</div>`;
             }
         }
-        
-        const deleteBtn = canEditLibrary() ? `<button class="delete-btn" style="background:none;border:none;cursor:pointer;font-size:1.2em;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">🗑️</button>` : '';
-        const cardDeleteBtn = canEditLibrary() ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="deleteItem('${escapeHtml(file.path)}')">×</button>` : '';
-        const renameBtnHtmlFile = canEditLibrary() ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:10;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename">✏️</button>` : '';
+
+        const canEdit = canEditLibrary();
+        const cardDeleteBtn = canEdit ? `<button class="card-action-btn card-delete-btn" title="Delete" onclick="event.stopPropagation();deleteItem(${JSON.stringify(file.path)})">×</button>` : '';
+        const cardRenameBtn = canEdit ? `<button class="card-action-btn card-rename-btn rename-btn-card" title="Rename">✏</button>` : '';
 
         if (category === 'music') {
             const title = escapeHtml(cleanTitle(file.name));
+            const artist = file.folder && file.folder !== '.' ? escapeHtml(file.folder) : '';
             div.innerHTML = `
-                <div style="flex-grow:1;">
-                    ${folderHtml}
-                    <span>${title}</span>
+                <div class="track-art">🎵</div>
+                <div class="track-info">
+                    <div class="track-title">${title}</div>
+                    ${artist ? `<div class="track-artist">${artist}</div>` : ''}
                 </div>
-                <div style="display:flex;gap:10px;align-items:center;">
-                    ${renameBtnHtmlFile ? '<button class="modal-close rename-btn" title="Rename">✏️</button>' : ''}
-                    <button class="modal-close music-play">Play</button>
-                    ${deleteBtn}
+                <div class="track-actions">
+                    ${canEdit ? '<button class="icon-btn rename-btn" title="Rename">✏</button>' : ''}
+                    <button class="btn-play-track music-play" title="Play">▶</button>
+                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
                 </div>
             `;
             const playBtn = div.querySelector('.music-play');
             if (playBtn) {
-                playBtn.addEventListener('click', () => {
-                    startMusicQueue(files, files.indexOf(file));
-                });
+                playBtn.addEventListener('click', () => startMusicQueue(files, files.indexOf(file)));
             }
             const renameBtn = div.querySelector('.rename-btn');
             if (renameBtn) {
-                renameBtn.addEventListener('click', () => {
-                    promptRename(file.path, file.name, () => loadMediaPage('music', true));
-                });
+                renameBtn.addEventListener('click', () => promptRename(file.path, file.name, () => loadMediaPage('music', true)));
             }
         } else if (category === 'files') {
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            const fileIcon = { pdf:'📄', mp4:'🎬', mkv:'🎬', avi:'🎬', mov:'🎬', mp3:'🎵', flac:'🎵', ogg:'🎵', jpg:'🖼️', jpeg:'🖼️', png:'🖼️', gif:'🖼️', zip:'📦', rar:'📦', txt:'📝', doc:'📝', docx:'📝' }[ext] || '📁';
             div.innerHTML = `
-                <div style="flex-grow:1;">
-                    ${folderHtml}
-                    <span>${file.name}</span>
+                <div class="file-icon">${fileIcon}</div>
+                <div class="file-info">
+                    <div class="file-name">${escapeHtml(file.name)}</div>
+                    ${file.folder && file.folder !== '.' ? `<div class="file-folder">${escapeHtml(file.folder)}</div>` : ''}
                 </div>
-                <div style="display:flex;gap:10px;align-items:center;">
-                    ${renameBtnHtmlFile ? '<button class="modal-close rename-btn" title="Rename">✏️</button>' : ''}
-                    <a href="${file.path}" target="_blank" class="download-btn">Open</a>
-                    ${deleteBtn}
+                <div class="file-actions">
+                    ${canEdit ? '<button class="icon-btn rename-btn" title="Rename">✏</button>' : ''}
+                    <a href="${escapeHtml(file.path)}" target="_blank" class="btn-open-file">Open</a>
+                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
                 </div>
             `;
             const renameBtn = div.querySelector('.rename-btn');
             if (renameBtn) {
-                renameBtn.addEventListener('click', () => {
-                    promptRename(file.path, file.name, () => loadMediaPage('files', true));
-                });
+                renameBtn.addEventListener('click', () => promptRename(file.path, file.name, () => loadMediaPage('files', true)));
             }
         } else if (category === 'gallery') {
-            if (file.name.match(/\.(jpg|jpeg|png|gif)$/i)) {
+            if (file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtmlFile}
-                    ${folderHtml}
-                    <img src="${file.path}" loading="lazy" alt="${file.name}" onclick="openImageViewer('${escapeHtml(file.path)}', '${escapeHtml(file.name)}')">
-                    <div class="caption">${file.name}</div>
+                    ${cardRenameBtn}
+                    <img src="${escapeHtml(file.path)}" loading="lazy" alt="${escapeHtml(file.name)}">
+                    <div class="caption">${escapeHtml(file.name)}</div>
                 `;
+                div.querySelector('img')?.addEventListener('click', () => openImageViewer(file.path, file.name));
             } else {
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtmlFile}
-                    ${folderHtml}
-                    <video controls preload="metadata" src="${file.path}"></video>
-                    <div class="caption">${file.name}</div>
+                    ${cardRenameBtn}
+                    <video controls preload="metadata" src="${escapeHtml(file.path)}"></video>
+                    <div class="caption">${escapeHtml(file.name)}</div>
                 `;
             }
             const renameBtn = div.querySelector('.rename-btn-card');
@@ -1556,19 +1557,21 @@ function renderMediaList(category, files) {
             const isPdf = /\.pdf$/i.test(file.name || '');
             const isCbz = /\.cbz$/i.test(file.name || '');
             const isCbr = /\.cbr$/i.test(file.name || '');
+            const isEpub = /\.epub$/i.test(file.name || '');
             const title = escapeHtml(cleanTitle(file.name));
-            const folder = file.folder && file.folder !== '.' ? `<div style="color:#aaa;font-size:0.85em;">${escapeHtml(file.folder)}</div>` : '';
+            const bookIcon = isPdf ? '📄' : (isCbz || isCbr) ? '📚' : isEpub ? '📖' : '📖';
             const canView = isPdf || isCbz || isCbr;
-            const viewBtn = canView ? `<button class="modal-close view-btn">View</button>` : '';
-
             div.innerHTML = `
-                ${cardDeleteBtn}
-                ${renameBtnHtmlFile}
-                ${folder}
-                <h3>${title}</h3>
-                <div style="display:flex; gap:10px; padding: 0 10px 12px 10px; align-items:center; justify-content:space-between;">
-                    <a href="${file.path}" target="_blank" class="download-btn">Open</a>
-                    ${viewBtn}
+                <div class="book-cover">${bookIcon}</div>
+                <div class="book-info">
+                    <div class="book-title">${title}</div>
+                    ${file.folder && file.folder !== '.' ? `<div class="book-folder">${escapeHtml(file.folder)}</div>` : ''}
+                </div>
+                <div class="book-actions">
+                    ${canEdit ? '<button class="icon-btn rename-btn-card" title="Rename">✏</button>' : ''}
+                    ${canView ? '<button class="icon-btn view-btn" title="View">👁</button>' : ''}
+                    <a href="${escapeHtml(file.path)}" target="_blank" class="btn-open-file">Open</a>
+                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
                 </div>
             `;
 
@@ -2004,6 +2007,10 @@ function playMusicAt(idx) {
     const track = musicQueue[musicIndex];
     if (titleEl) titleEl.textContent = cleanTitle(track.name);
     if (playBtn) playBtn.textContent = '⏳';
+    const artistEl = document.getElementById('player-artist');
+    if (artistEl) artistEl.textContent = (track.folder && track.folder !== '.') ? track.folder : '';
+    const artEl = document.getElementById('player-art');
+    if (artEl) artEl.textContent = '🎵';
     
     const token = getCookie('auth_token');
     
