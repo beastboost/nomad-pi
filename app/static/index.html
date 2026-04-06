@@ -173,16 +173,21 @@
 
 
             <section id="movies" class="hidden">
-                <h2>Movies</h2>
+                <div class="section-header">
+                    <h2><i class="fas fa-film"></i> Movies</h2>
+                </div>
                 <div id="movies-filter-bar" class="filter-bar">
-                    <input id="movies-search" type="text" placeholder="Search movies..." style="flex: 1; min-width: 200px;">
+                    <div class="search-wrap">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="movies-search" type="text" placeholder="Search movies...">
+                    </div>
                     <select id="movies-sort" onchange="loadMovies(true)">
-                        <option value="name">Sort: Name (A-Z)</option>
-                        <option value="newest">Sort: Recently Added</option>
-                        <option value="year_desc">Sort: Year (Newest)</option>
-                        <option value="year_asc">Sort: Year (Oldest)</option>
-                        <option value="top_watched">Sort: Most Watched</option>
-                        <option value="recently_played">Sort: Recently Played</option>
+                        <option value="name">Name (A–Z)</option>
+                        <option value="newest">Recently Added</option>
+                        <option value="year_desc">Year (Newest)</option>
+                        <option value="year_asc">Year (Oldest)</option>
+                        <option value="top_watched">Most Watched</option>
+                        <option value="recently_played">Recently Played</option>
                     </select>
                     <select id="movies-genre" onchange="loadMovies(true)">
                         <option value="">All Genres</option>
@@ -195,14 +200,19 @@
             </section>
 
             <section id="shows" class="hidden">
-                <h2>TV Shows</h2>
+                <div class="section-header">
+                    <h2><i class="fas fa-tv"></i> TV Shows</h2>
+                </div>
                 <div id="shows-filter-bar" class="filter-bar">
-                    <input id="shows-search" type="text" placeholder="Search shows..." style="flex: 1; min-width: 200px;">
+                    <div class="search-wrap">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="shows-search" type="text" placeholder="Search shows...">
+                    </div>
                     <select id="shows-sort" onchange="loadShows(true)">
-                        <option value="name">Sort: Name (A-Z)</option>
-                        <option value="newest">Sort: Recently Added</option>
-                        <option value="top_watched">Sort: Most Watched</option>
-                        <option value="recently_played">Sort: Recently Played</option>
+                        <option value="name">Name (A–Z)</option>
+                        <option value="newest">Recently Added</option>
+                        <option value="top_watched">Most Watched</option>
+                        <option value="recently_played">Recently Played</option>
                     </select>
                     <select id="shows-genre" onchange="loadShows(true)">
                         <option value="">All Genres</option>
@@ -211,37 +221,67 @@
                         <option value="">All Years</option>
                     </select>
                 </div>
-                <div id="shows-breadcrumb" style="margin:8px 0;color:#aaa;font-size:0.9em;"></div>
+                <div id="shows-breadcrumb" class="breadcrumb"></div>
                 <div id="shows-continue"></div>
                 <div id="shows-list" class="media-grid"></div>
             </section>
 
             <section id="music" class="hidden">
-                <h2>Music</h2>
-                <input id="music-search" type="text" placeholder="Search music..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="section-header">
+                    <h2><i class="fas fa-music"></i> Music</h2>
+                </div>
+                <div class="filter-bar">
+                    <div class="search-wrap search-wrap--full">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="music-search" type="text" placeholder="Search music...">
+                    </div>
+                </div>
                 <div id="music-list" class="list-view"></div>
             </section>
 
             <section id="books" class="hidden">
-                <h2>Books</h2>
-                <input id="books-search" type="text" placeholder="Search books..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="section-header">
+                    <h2><i class="fas fa-book"></i> Books</h2>
+                </div>
+                <div class="filter-bar">
+                    <div class="search-wrap search-wrap--full">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="books-search" type="text" placeholder="Search books...">
+                    </div>
+                </div>
                 <div id="books-list" class="media-grid"></div>
             </section>
 
             <section id="gallery" class="hidden">
-                <h2>Gallery</h2>
-                <input id="gallery-search" type="text" placeholder="Search gallery..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="section-header">
+                    <h2><i class="fas fa-image"></i> Gallery</h2>
+                </div>
+                <div class="filter-bar">
+                    <div class="search-wrap search-wrap--full">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="gallery-search" type="text" placeholder="Search gallery...">
+                    </div>
+                </div>
                 <div id="gallery-list" class="gallery-grid"></div>
             </section>
 
             <section id="files" class="hidden">
-                <h2>Files</h2>
-                <input id="files-search" type="text" placeholder="Search files..." style="width:100%;margin:10px 0;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:rgba(0,0,0,0.2);color:var(--text-color);">
+                <div class="section-header">
+                    <h2><i class="fas fa-folder-open"></i> Files</h2>
+                </div>
+                <div class="filter-bar">
+                    <div class="search-wrap search-wrap--full">
+                        <i class="fas fa-search search-icon"></i>
+                        <input id="files-search" type="text" placeholder="Search files...">
+                    </div>
+                </div>
                 <div id="files-list" class="list-view"></div>
             </section>
 
             <section id="admin" class="hidden">
-                <h2><i class="fas fa-user-shield"></i> Admin Dashboard</h2>
+                <div class="section-header">
+                    <h2><i class="fas fa-user-shield"></i> Admin Dashboard</h2>
+                </div>
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-cogs"></i> System Control</h3>
@@ -276,11 +316,11 @@
                         </button>
                     </div>
                     
-                    <div id="wifi-status-info" class="glass" style="padding:12px 20px; border-radius:12px; margin-bottom:15px; display:flex; align-items:center; gap:12px;">
-                        <div id="wifi-status-icon" style="font-size:1.5em;">📡</div>
+                    <div id="wifi-status-info" class="glass wifi-status-info">
+                        <div id="wifi-status-icon" class="wifi-status-icon">📡</div>
                         <div>
-                            <div id="wifi-status-text" style="font-weight:bold;">Status: Unknown</div>
-                            <div id="wifi-connection-details" style="font-size:0.85em; color:var(--text-muted);">Initializing...</div>
+                            <div id="wifi-status-text" class="wifi-status-text">Status: Unknown</div>
+                            <div id="wifi-connection-details" class="wifi-connection-details">Initializing...</div>
                         </div>
                     </div>
 
@@ -361,7 +401,7 @@
                             <p>or choose files to upload</p>
                             <input type="file" id="file-input" multiple style="display: none;">
                             <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none">
-                            <div style="display: flex; gap: 12px; justify-content: center; margin-top: 16px;">
+                            <div class="upload-file-btns">
                                 <label for="file-input" class="button secondary">
                                     <i class="fas fa-file"></i> Select Files
                                 </label>
@@ -371,9 +411,9 @@
                             </div>
                         </div>
 
-                        <div id="upload-queue" style="margin-top:16px; max-height: 200px; overflow-y: auto;"></div>
+                        <div id="upload-queue" class="upload-queue"></div>
 
-                        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-top: 16px;">
+                        <div class="upload-action-row">
                             <button id="start-upload-btn" onclick="uploadFiles()" class="primary large">
                                 <i class="fas fa-upload"></i> Start Upload
                             </button>
@@ -386,7 +426,7 @@
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-users"></i> User Management</h3>
-                    <div id="user-management-list" class="list-view" style="margin-bottom: 24px;">
+                    <div id="user-management-list" class="list-view user-list">
                         <!-- Users will be listed here -->
                         <div class="loading">
                             <i class="fas fa-spinner fa-spin"></i> Loading users...
@@ -394,21 +434,21 @@
                     </div>
 
                     <h4><i class="fas fa-user-plus"></i> Add New User</h4>
-                    <div class="form-grid" style="grid-template-columns: 1fr 1fr auto 1fr; gap: 12px; align-items: end;">
-                        <div class="form-group" style="margin-bottom: 0;">
+                    <div class="form-grid user-form-grid">
+                        <div class="form-group mb-0">
                             <label for="new-user-username">
                                 <i class="fas fa-user"></i> Username
                             </label>
                             <input type="text" id="new-user-username" placeholder="Enter username">
                         </div>
-                        <div class="form-group" style="margin-bottom: 0;">
+                        <div class="form-group mb-0">
                             <label for="new-user-password">
                                 <i class="fas fa-lock"></i> Password
                             </label>
                             <input type="password" id="new-user-password" placeholder="Enter password">
                         </div>
-                        <div class="form-group" style="margin-bottom: 0; text-align: center;">
-                            <label for="new-user-is-admin" style="margin-bottom: 12px;">
+                        <div class="form-group mb-0 text-center">
+                            <label for="new-user-is-admin" class="admin-check-label">
                                 <i class="fas fa-shield-alt"></i> Admin
                             </label>
                             <input type="checkbox" id="new-user-is-admin">
@@ -424,45 +464,47 @@
                     <button onclick="loadDrives()" class="secondary">
                         <i class="fas fa-search"></i> Scan Drives
                     </button>
-                    <div id="drive-list" style="margin-top: 16px;"></div>
+                    <div id="drive-list" class="drive-list"></div>
                 </div>
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-tools"></i> Library Tools</h3>
-                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:16px;">Scan refreshes the media index; organize moves and renames files and fetches metadata.</p>
-                    <h4 style="margin:0 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Scan library</h4>
-                    <div class="button-grid" style="margin-bottom: 16px;">
+                    <p class="section-desc">Scan refreshes the media index; organize moves and renames files and fetches metadata.</p>
+                    <h4 class="section-subheading">Scan library</h4>
+                    <div class="button-grid">
                         <button onclick="rescanLibrary()" class="primary">
                             <i class="fas fa-sync"></i> Scan Library
                         </button>
                     </div>
-                    <div id="scan-progress" class="hidden" style="margin-top:12px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
-                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                    <div id="scan-progress" class="hidden scan-progress">
+                        <div class="scan-progress-inner">
                             <div class="spinner-small"></div>
                             <span id="scan-progress-message">Scanning…</span>
                         </div>
-                        <div class="progress-container" style="height:8px;"><div id="scan-progress-bar" class="progress-bar" style="width:0%;"></div></div>
+                        <div class="progress-container"><div id="scan-progress-bar" class="progress-bar" style="width:0%;"></div></div>
                     </div>
-                    <h4 style="margin:20px 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Organize media</h4>
-                    <div class="button-grid" style="margin-bottom: 8px;">
+                    <h4 class="section-subheading">Organize media</h4>
+                    <div class="button-grid">
                         <button onclick="organizeShows(true)" class="secondary"><i class="fas fa-eye"></i> Preview Shows</button>
                         <button onclick="organizeShows(false)" class="warning"><i class="fas fa-check"></i> Apply Shows</button>
                         <button onclick="organizeMovies(true)" class="secondary"><i class="fas fa-eye"></i> Preview Movies</button>
                         <button onclick="organizeMovies(false)" class="warning"><i class="fas fa-check"></i> Apply Movies</button>
                     </div>
-                    <label style="display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:0.9rem;">
+                    <label class="checkbox-label">
                         <input type="checkbox" id="show-organize-rename-files">
                         <span><i class="fas fa-tag"></i> Rename episodes to SxxEyy (optional)</span>
                     </label>
-                    <div id="organize-status" style="margin-top:12px;"></div>
-                    <h4 style="margin:20px 0 8px 0; font-size:0.95rem; color:var(--text-muted);">Find duplicates</h4>
+                    <div id="organize-status" class="tool-status"></div>
+                    <h4 class="section-subheading">Find duplicates</h4>
                     <button onclick="findDuplicates()" class="secondary"><i class="fas fa-search"></i> Find Duplicates</button>
-                    <div id="duplicates-status" style="margin-top:12px;"></div>
+                    <div id="duplicates-status" class="tool-status"></div>
                 </div>
             </section>
 
             <section id="settings" class="hidden">
-                <h2><i class="fas fa-cog"></i> Settings</h2>
+                <div class="section-header">
+                    <h2><i class="fas fa-cog"></i> Settings</h2>
+                </div>
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-user"></i> Your Profile</h3>
@@ -518,7 +560,7 @@
                             <input type="password" id="change-pw-confirm" placeholder="Confirm new password">
                         </div>
                     </div>
-                    <p id="change-pw-status" style="margin: 12px 0; font-size: 0.9em;"></p>
+                    <p id="change-pw-status" class="form-status"></p>
                     <button onclick="changePassword()" class="primary">
                         <i class="fas fa-save"></i> Update Password
                     </button>
@@ -530,7 +572,7 @@
                         <label for="omdb-api-key">
                             <i class="fas fa-film"></i> OMDb API Key
                         </label>
-                        <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px;">
+                        <div class="input-action-row">
                             <input type="text" id="omdb-api-key" placeholder="Enter OMDb API Key">
                             <button onclick="saveOmdbKey()" class="primary">
                                 <i class="fas fa-save"></i> Save Key
