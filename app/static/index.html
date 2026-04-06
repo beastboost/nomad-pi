@@ -81,38 +81,38 @@
 
         <main>
             <section id="home" class="active">
-                <h1>Welcome Home</h1>
+                <h1 class="section-welcome">Welcome Home</h1>
                 <div class="stats-grid">
-                    <div class="stat-card glass-hover">
+                    <div class="stat-card glass-hover" data-stat="storage">
                         <div class="stat-header">
-                            <span class="stat-icon"><i class="fas fa-hdd"></i></span>
+                            <span class="stat-icon stat-icon--blue"><i class="fas fa-hdd"></i></span>
                             <span class="stat-label">Storage</span>
                         </div>
                         <div id="storage-stats" class="stat-value">Loading...</div>
                         <div class="progress-container"><div id="disk-progress" class="progress-bar"></div></div>
                         <div id="disk-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card glass-hover">
+                    <div class="stat-card glass-hover" data-stat="cpu">
                         <div class="stat-header">
-                            <span class="stat-icon"><i class="fas fa-microchip"></i></span>
+                            <span class="stat-icon stat-icon--green"><i class="fas fa-microchip"></i></span>
                             <span class="stat-label">CPU</span>
                         </div>
                         <div id="cpu-stats" class="stat-value">Loading...</div>
                         <div class="progress-container"><div id="cpu-progress" class="progress-bar"></div></div>
                         <div id="cpu-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card glass-hover">
+                    <div class="stat-card glass-hover" data-stat="ram">
                         <div class="stat-header">
-                            <span class="stat-icon"><i class="fas fa-memory"></i></span>
+                            <span class="stat-icon stat-icon--purple"><i class="fas fa-memory"></i></span>
                             <span class="stat-label">RAM</span>
                         </div>
                         <div id="ram-stats" class="stat-value">Loading...</div>
                         <div class="progress-container"><div id="mem-progress" class="progress-bar"></div></div>
                         <div id="mem-details" class="stat-details">Initializing...</div>
                     </div>
-                    <div class="stat-card glass-hover">
+                    <div class="stat-card glass-hover" data-stat="temp">
                         <div class="stat-header">
-                            <span class="stat-icon"><i class="fas fa-thermometer-half"></i></span>
+                            <span class="stat-icon stat-icon--orange"><i class="fas fa-thermometer-half"></i></span>
                             <span class="stat-label">Temp</span>
                         </div>
                         <div id="cpu-temp" class="stat-value">--°C</div>
@@ -121,35 +121,35 @@
                 </div>
                 
                 <div class="menu-grid">
-                    <div class="card glass-hover" onclick="showSection('movies')">
+                    <div class="card glass-hover" data-section="movies" onclick="showSection('movies')">
                         <div class="icon"><i class="fas fa-film"></i></div>
                         <h3>Movies</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('shows')">
+                    <div class="card glass-hover" data-section="shows" onclick="showSection('shows')">
                         <div class="icon"><i class="fas fa-tv"></i></div>
                         <h3>Shows</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('music')">
+                    <div class="card glass-hover" data-section="music" onclick="showSection('music')">
                         <div class="icon"><i class="fas fa-music"></i></div>
                         <h3>Music</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('books')">
-                         <div class="icon"><i class="fas fa-book"></i></div>
+                    <div class="card glass-hover" data-section="books" onclick="showSection('books')">
+                        <div class="icon"><i class="fas fa-book"></i></div>
                         <h3>Books</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('gallery')">
+                    <div class="card glass-hover" data-section="gallery" onclick="showSection('gallery')">
                         <div class="icon"><i class="fas fa-image"></i></div>
                         <h3>Gallery</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('files')">
+                    <div class="card glass-hover" data-section="files" onclick="showSection('files')">
                         <div class="icon"><i class="fas fa-folder-open"></i></div>
                         <h3>Files</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('admin')">
+                    <div class="card glass-hover" data-section="admin" onclick="showSection('admin')">
                         <div class="icon"><i class="fas fa-user-shield"></i></div>
                         <h3>Admin</h3>
                     </div>
-                    <div class="card glass-hover" onclick="showSection('settings')">
+                    <div class="card glass-hover" data-section="settings" onclick="showSection('settings')">
                         <div class="icon"><i class="fas fa-cog"></i></div>
                         <h3>Settings</h3>
                     </div>

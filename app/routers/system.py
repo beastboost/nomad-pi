@@ -1610,9 +1610,10 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         status_result = _run_tailscale(["status", "--json"], timeout=8)
         if status_result.returncode == 0:
             status_data = json.loads(status_result.stdout or "{}")
-            backend_state = status_data.get("BackendState", "")
-            self_node = status_data.get("Self", {}) if isinstance(status_data, dict) else {}
-            tailscale_ips = self_node.get("TailscaleIPs", []) if isinstance(self_node, dict) else []
+            backend_state = status_data.get("BackendState", "") if isinstance(status_data, dict) else ""
+            self_node = status_data.get("Self") or {} if isinstance(status_data, dict) else {}
+            # TailscaleIPs can be null (not just absent) when service is stopped — use `or []`
+            tailscale_ips = (self_node.get("TailscaleIPs") or []) if isinstance(self_node, dict) else []
             ipv4 = next((ip for ip in tailscale_ips if "." in ip), None)
 
             simple = _run_tailscale(["status"], timeout=6)
@@ -1624,8 +1625,9 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
                 "backend_state": backend_state or "Unknown",
                 "self": self_node,
                 "ipv4": ipv4,
-                "magic_dns": status_data.get("MagicDNSSuffix", "") if isinstance(status_data, dict) else "",
-                "peer_count": len(status_data.get("Peer", {})) if isinstance(status_data, dict) else 0,
+                # MagicDNSSuffix and Peer can also be null in JSON
+                "magic_dns": (status_data.get("MagicDNSSuffix") or "") if isinstance(status_data, dict) else "",
+                "peer_count": len(status_data.get("Peer") or {}) if isinstance(status_data, dict) else 0,
                 "status_output": simple.stdout or "",
             }
 

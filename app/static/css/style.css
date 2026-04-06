@@ -867,7 +867,7 @@ button.primary:active {
     padding: 20px;
     border-radius: 20px;
     background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     transition: all 0.3s ease;
     display: flex;
     flex-direction: column;
@@ -876,11 +876,22 @@ button.primary:active {
     overflow: hidden;
 }
 
+/* Subtle shimmer line across the top of each stat card */
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+}
+
 .stat-card:hover {
-    transform: translateY(-5px);
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: var(--shadow-md);
+    transform: translateY(-4px);
+    background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
 .stat-header {
@@ -1970,28 +1981,40 @@ h1, h2, h3 {
 .card {
     background: rgba(255, 255, 255, 0.03);
     border: var(--glass-border);
-    border-radius: 16px;
-    padding: 30px;
+    border-radius: 18px;
+    padding: 24px 16px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+    transition: all 0.35s cubic-bezier(0.165, 0.84, 0.44, 1);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    background: radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.06) 0%, transparent 70%);
+}
+
+.card:hover::before {
+    opacity: 1;
 }
 
 .card:hover {
-    transform: translateY(-8px) scale(1.02);
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-6px) scale(1.03);
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.4);
 }
 
-.card .icon {
-    font-size: 3rem;
-    margin-bottom: 15px;
-}
+/* .card .icon styles live at the bottom of the file (UI enhancements section) */
 
 .filter-bar {
     display: flex;
@@ -2308,12 +2331,10 @@ h1, h2, h3 {
 }
 
 .admin-panel h3 {
-    margin: 0 0 20px 0;
-    font-size: 1.25rem;
-    font-weight: 600;
+    margin: 0 0 0 0;
+    font-size: 1.15rem;
+    font-weight: 700;
     color: var(--text-color);
-    border-bottom: 2px solid var(--accent-color);
-    padding-bottom: 10px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -3195,4 +3216,196 @@ button i, .button i {
 
 .ts-controls button + button {
     margin-left: 8px;
+}
+
+/* =====================================================
+   GENERAL UI ENHANCEMENTS
+   ===================================================== */
+
+/* Welcome header on home page */
+.section-welcome {
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    background: linear-gradient(135deg, #f1f3f5 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.25rem;
+}
+
+/* Section h2 headings — accent underline */
+main section > h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    position: relative;
+    padding-bottom: 10px;
+    margin-bottom: 1.25rem;
+}
+
+main section > h2::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 36px;
+    height: 3px;
+    border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent-color), transparent);
+}
+
+/* =====================================================
+   COLORED STAT CARD ICONS
+   ===================================================== */
+.stat-icon--blue  { color: #60a5fa; background: rgba(59,130,246,0.12); }
+.stat-icon--green { color: #34d399; background: rgba(16,185,129,0.12); }
+.stat-icon--purple{ color: #a78bfa; background: rgba(139,92,246,0.12); }
+.stat-icon--orange{ color: #fb923c; background: rgba(249,115,22,0.12); }
+
+.stat-icon--blue,
+.stat-icon--green,
+.stat-icon--purple,
+.stat-icon--orange {
+    padding: 10px;
+    border-radius: var(--radius-md);
+    font-size: 1.3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+}
+
+/* Stat card: color-matched progress bars */
+[data-stat="storage"] .progress-bar { background: linear-gradient(90deg,#3b82f6,#60a5fa); }
+[data-stat="cpu"]     .progress-bar { background: linear-gradient(90deg,#10b981,#34d399); }
+[data-stat="ram"]     .progress-bar { background: linear-gradient(90deg,#8b5cf6,#a78bfa); }
+
+/* =====================================================
+   HOME MENU GRID — COLORED ICONS
+   ===================================================== */
+.card .icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    margin-bottom: 4px;
+    transition: transform 0.3s ease;
+}
+
+.card:hover .icon {
+    transform: scale(1.15) rotate(-4deg);
+}
+
+/* Per-section icon color */
+[data-section="movies"]   .icon { background: rgba(239,68,68,0.15);  color: #f87171; }
+[data-section="shows"]    .icon { background: rgba(59,130,246,0.15); color: #60a5fa; }
+[data-section="music"]    .icon { background: rgba(168,85,247,0.15); color: #c084fc; }
+[data-section="books"]    .icon { background: rgba(245,158,11,0.15); color: #fbbf24; }
+[data-section="gallery"]  .icon { background: rgba(20,184,166,0.15); color: #2dd4bf; }
+[data-section="files"]    .icon { background: rgba(99,102,241,0.15); color: #818cf8; }
+[data-section="admin"]    .icon { background: rgba(239,68,68,0.15);  color: #f87171; }
+[data-section="settings"] .icon { background: rgba(148,163,184,0.15);color: #94a3b8; }
+
+/* Card hover — tint border to match icon */
+[data-section="movies"]:hover   { border-color: rgba(239,68,68,0.35); }
+[data-section="shows"]:hover    { border-color: rgba(59,130,246,0.35); }
+[data-section="music"]:hover    { border-color: rgba(168,85,247,0.35); }
+[data-section="books"]:hover    { border-color: rgba(245,158,11,0.35); }
+[data-section="gallery"]:hover  { border-color: rgba(20,184,166,0.35); }
+[data-section="files"]:hover    { border-color: rgba(99,102,241,0.35); }
+[data-section="admin"]:hover    { border-color: rgba(239,68,68,0.35); }
+[data-section="settings"]:hover { border-color: rgba(148,163,184,0.35); }
+
+.card h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-color);
+}
+
+/* =====================================================
+   ADMIN PANEL — POLISHED HEADER
+   ===================================================== */
+.admin-panel h3 {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 16px;
+    position: relative;
+}
+
+/* Accent gradient rule under panel header */
+.admin-panel h3::after {
+    content: '';
+    display: block;
+    height: 2px;
+    width: 100%;
+    margin-top: 10px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, rgba(59,130,246,0.7) 0%, transparent 70%);
+}
+
+/* =====================================================
+   TAILSCALE PANEL — ENHANCED
+   ===================================================== */
+.ts-auth-section {
+    background: rgba(59, 130, 246, 0.05);
+    border: 1px solid rgba(59, 130, 246, 0.15);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 14px;
+}
+
+.ts-ip-box {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-top: 10px;
+}
+
+.ts-ip-value {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 1.15em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--accent-color);
+}
+
+/* =====================================================
+   MOBILE MENU GRID ADJUSTMENTS
+   ===================================================== */
+@media (max-width: 768px) {
+    .menu-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 24px;
+    }
+
+    .card {
+        padding: 16px 8px;
+        gap: 8px;
+    }
+
+    .card .icon {
+        width: 44px;
+        height: 44px;
+        font-size: 1.3rem;
+        border-radius: 12px;
+    }
+
+    .card h3 {
+        font-size: 0.75rem;
+    }
+}
+
+@media (max-width: 400px) {
+    .menu-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+    }
 }
