@@ -1138,10 +1138,10 @@ async function loadFileBrowser(path) {
                 const div = document.createElement('div');
                 div.className = 'media-item folder';
                 div.innerHTML = `
-                    <div class="media-card glass" onclick="loadFileBrowser('${d.mountpoint.replaceAll('\\', '\\\\')}')">
+                    <div class="media-card glass" onclick="loadFileBrowser(${JSON.stringify(d.mountpoint)})">
                         <div class="media-info">
-                            <h3>💽 Drive ${d.name} (${formatBytes(d.free)} free)</h3>
-                            <p>${d.fstype} - ${d.mountpoint}</p>
+                            <h3>💽 Drive ${escapeHtml(d.name)} (${formatBytes(d.free)} free)</h3>
+                            <p>${escapeHtml(d.fstype)} - ${escapeHtml(d.mountpoint)}</p>
                         </div>
                     </div>
                 `;
@@ -1183,7 +1183,7 @@ async function loadFileBrowser(path) {
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('${(parentPath || '/data').replaceAll('\\', '\\\\')}')">
+                <div class="media-card glass" onclick="loadFileBrowser(${JSON.stringify(parentPath || '/data')})">
                     <div class="media-info">
                         <h3>📁 .. (Back)</h3>
                     </div>
@@ -1222,11 +1222,12 @@ async function loadFileBrowser(path) {
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
-                const itemPath = item.path.replaceAll('\\', '\\\\');
+                // Use JSON.stringify to safely embed paths with quotes/special chars
+                const safePathJson = JSON.stringify(item.path);
 
                 if (item.is_dir) {
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="loadFileBrowser('${itemPath}')">
+                        <div class="media-card glass" onclick="loadFileBrowser(${safePathJson})">
                             <div class="media-info">
                                 <h3>📁 ${escapeHtml(item.name)}</h3>
                             </div>
@@ -1241,7 +1242,7 @@ async function loadFileBrowser(path) {
                     if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
 
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="openFile('${itemPath}')">
+                        <div class="media-card glass" onclick="openFile(${safePathJson})">
                             <div class="media-info">
                                 <h3>${icon} ${escapeHtml(item.name)}</h3>
                                 <p>${formatBytes(item.size)}</p>
@@ -1256,7 +1257,7 @@ async function loadFileBrowser(path) {
         mediaState.path = path;
     } catch (e) {
         console.error('Error in loadFileBrowser:', e);
-        container.innerHTML = `<p>Error loading directory: ${e.message}</p>`;
+        container.innerHTML = `<p>Error loading directory: ${escapeHtml(e.message || String(e))}</p>`;
     }
 }
 
@@ -2231,9 +2232,9 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
     heading.innerHTML = `
-        <div style="display:flex; align-items:center; gap:12px; width:100%;">
-            <span style="flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</span>
-            <div class="external-player-btns" style="display:flex; gap:8px;">
+        <div class="viewer-title-row">
+            <span class="viewer-title-text">${safeTitle}</span>
+            <div class="external-player-btns">
                 <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
                 </a>
@@ -3534,12 +3535,12 @@ async function toggleWifiUI() {
         if (res.ok) {
             await loadWifiStatus();
         } else {
-            const data = await res.json();
-            alert(`Error: ${data.detail || 'Failed to toggle Wi-Fi'}`);
+            const data = await res.json().catch(() => ({}));
+            showToast(data.detail || 'Failed to toggle Wi-Fi', 'error');
             await loadWifiStatus();
         }
     } catch (e) {
-        alert(`Error: ${e.message}`);
+        showToast(e.message || 'Wi-Fi toggle failed', 'error');
         await loadWifiStatus();
     } finally {
         btn.disabled = false;

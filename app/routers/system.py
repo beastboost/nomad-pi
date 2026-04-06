@@ -770,8 +770,10 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
         if fstype == "ext4":
             mkfs_cmd.append("-F")
         mkfs_cmd.append(device)
-            
-        subprocess.run(mkfs_cmd, check=True, input="y\n", text=True)
+
+        mkfs_result = subprocess.run(mkfs_cmd, capture_output=True, text=True, input="y\n")
+        if mkfs_result.returncode != 0:
+            raise Exception(mkfs_result.stderr or mkfs_result.stdout or "mkfs failed")
         
         clean_name = "".join(c for c in (label or "drive") if c.isalnum() or c in ('-', '_')).strip()
         if not clean_name: clean_name = "usb_drive"
@@ -858,6 +860,7 @@ def restart_wifi(user_id: int = Depends(get_current_user_id)):
 @router.get("/logs")
 def get_logs(lines: int = 100, user_id: int = Depends(get_current_user_id)):
     """Retrieve the last N lines of the application log"""
+    lines = max(1, min(lines, 500))  # Cap to prevent memory exhaustion on Pi
     # Try the configured log file first
     log_file = os.environ.get("NOMAD_LOG_FILE", "data/app.log")
     if os.path.exists(log_file):
