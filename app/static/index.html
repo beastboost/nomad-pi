@@ -26,11 +26,11 @@
         <div class="login-box">
             <div class="logo">Nomad Pi ✨</div>
             <p>Sign in to access your media</p>
-            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)" style="margin-bottom: 10px;">
+            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)">
             <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
             <button onclick="login()" class="primary">Enter</button>
-            <p id="login-error" style="color: var(--danger-color); display:none;">Incorrect username or password</p>
-            <p id="setup-hint" style="color: var(--text-muted); font-size: 0.9em; margin-top: 10px; display:none;"></p>
+            <p id="login-error" class="login-error" style="display:none;">Incorrect username or password</p>
+            <p id="setup-hint" class="login-hint" style="display:none;"></p>
         </div>
     </div>
 
@@ -544,16 +544,16 @@
 
                 <div class="admin-panel">
                     <h3><i class="fas fa-network-wired"></i> Tailscale VPN</h3>
-                    <div id="tailscale-status" style="margin-bottom:12px;">Checking status...</div>
-                    <div id="tailscale-controls" style="margin-bottom:12px;"></div>
-                    <div id="tailscale-auth-section" style="display:none; background:rgba(0,0,0,0.2); padding:12px; border-radius:8px; margin-top:12px;">
-                        <label for="tailscale-auth-key" style="display:block; margin-bottom:8px;">Auth Key (Optional)</label>
-                        <div style="display:flex; gap:8px;">
-                            <input type="password" id="tailscale-auth-key" placeholder="tskey-auth-..." style="flex:1;">
+                    <div id="tailscale-status" class="ts-status">Checking status...</div>
+                    <div id="tailscale-controls" class="ts-controls"></div>
+                    <div id="tailscale-auth-section" class="ts-auth-section hidden">
+                        <label for="tailscale-auth-key">Auth Key <span class="ts-ip-label">(optional)</span></label>
+                        <div class="input-row">
+                            <input type="password" id="tailscale-auth-key" placeholder="tskey-auth-...">
                             <button onclick="saveTailscaleKey()" class="secondary">Save</button>
                         </div>
-                        <p style="font-size:0.8em; color:var(--text-muted); margin-top:8px;">
-                            Or authenticate via URL after clicking Connect.
+                        <p class="ts-auth-hint">
+                            <i class="fas fa-info-circle"></i> Or authenticate via the URL shown after clicking Connect.
                         </p>
                     </div>
                 </div>

@@ -904,7 +904,7 @@ async function refreshTailscaleStatus() {
     const statusDiv = document.getElementById('tailscale-status');
     const controlsDiv = document.getElementById('tailscale-controls');
     const authDiv = document.getElementById('tailscale-auth-section');
-    
+
     if (!statusDiv) return;
 
     statusDiv.innerHTML = '<div class="spinner-small"></div> Checking status...';
@@ -914,96 +914,98 @@ async function refreshTailscaleStatus() {
         const status = await res.json();
 
         if (!res.ok) {
-            const errMsg = status.message || status.detail || status.error || (typeof status.detail === 'string' ? status.detail : `Request failed (${res.status})`);
-            statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.9em;">${escapeHtml(errMsg)}</p>
-            <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" style="margin-top:8px;">Try Again</button>`;
+            const errMsg = status.message || status.detail || status.error || `Request failed (${res.status})`;
+            statusDiv.innerHTML = `
+                <div class="ts-status-row">
+                    <div class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> Error</div>
+                    <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" title="Retry"><i class="fas fa-sync-alt"></i></button>
+                </div>
+                <p class="ts-auth-hint">${escapeHtml(errMsg)}</p>`;
             if (controlsDiv) controlsDiv.innerHTML = '';
-            if (authDiv) authDiv.style.display = 'none';
+            if (authDiv) authDiv.classList.add('hidden');
             return;
         }
 
         const errorMsg = status.message || status.error;
         let html = '';
         let controlsHtml = '';
-        let showAuth = false;
+        let showAuth = !status.connected;
 
-        // Header with state and refresh button
-        const stateClass = status.connected ? 'success' : (status.backend_state === 'NeedsLogin' ? 'warning' : 'secondary');
+        const stateClass = status.connected ? 'success' : (status.backend_state === 'NeedsLogin' ? 'warning' : 'muted');
         const stateIcon = status.connected ? 'check-circle' : (status.backend_state === 'NeedsLogin' ? 'key' : 'circle');
-        
-        html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+
+        html += `<div class="ts-status-row">
             <div class="badge badge-${stateClass}"><i class="fas fa-${stateIcon}"></i> ${escapeHtml(status.backend_state || 'Unknown')}</div>
             <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" title="Refresh"><i class="fas fa-sync-alt"></i></button>
         </div>`;
 
         if (!status.installed) {
-            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> ${errorMsg ? escapeHtml(errorMsg) : 'Tailscale is not installed on this system.'}</p>`;
-        } else if (errorMsg && !status.service_running && status.backend_state === 'Unknown') {
-            html += `<p style="margin-top:10px; font-size:0.9em; color:var(--text-muted);">${escapeHtml(errorMsg)}</p>`;
-            controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
+            html += `<p class="ts-auth-hint" style="color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> ${escapeHtml(errorMsg || 'Tailscale is not installed on this system.')}</p>`;
         } else if (!status.service_running) {
-            html += `<p style="margin-top:10px; color:var(--text-muted);">The Tailscale system service is stopped.</p>`;
+            if (errorMsg) html += `<p class="ts-auth-hint">${escapeHtml(errorMsg)}</p>`;
+            else html += `<p class="ts-auth-hint">The Tailscale system service is stopped.</p>`;
             controlsHtml = `<button onclick="controlTailscaleService('start')" class="success"><i class="fas fa-play"></i> Start Service</button>`;
         } else {
-            // Service is running, show details
             if (status.ipv4) {
-                 html += `<div style="margin-top:10px; font-family:monospace; background:rgba(0,0,0,0.2); padding:10px; border-radius:6px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="color:var(--text-muted); font-size:0.8em;">Tailscale IP</span>
-                        <button onclick="copyToClipboard('${status.ipv4}')" class="secondary btn-sm" style="padding:2px 6px; font-size:0.7em;"><i class="fas fa-copy"></i></button>
+                html += `<div class="ts-ip-box">
+                    <div class="ts-ip-box-header">
+                        <span class="ts-ip-label">Tailscale IP</span>
+                        <button onclick="copyToClipboard('${escapeHtml(status.ipv4)}')" class="secondary btn-sm" title="Copy IP"><i class="fas fa-copy"></i></button>
                     </div>
-                    <div style="font-size:1.1em; font-weight:bold; letter-spacing:0.5px;">${status.ipv4}</div>
-                    ${status.magic_dns ? `<div style="font-size:0.8em; color:var(--text-muted); margin-top:4px;">${status.magic_dns}</div>` : ''}
+                    <div class="ts-ip-value">${escapeHtml(status.ipv4)}</div>
+                    ${status.magic_dns ? `<div class="ts-ip-label" style="margin-top:4px;">${escapeHtml(status.magic_dns)}</div>` : ''}
                 </div>`;
             }
-
             if (status.peer_count > 0) {
-                 html += `<div style="margin-top:8px; font-size:0.9em; color:var(--text-muted);"><i class="fas fa-network-wired"></i> ${status.peer_count} Peer${status.peer_count === 1 ? '' : 's'} Connected</div>`;
+                html += `<p class="ts-auth-hint" style="margin-top:8px;"><i class="fas fa-network-wired"></i> ${status.peer_count} peer${status.peer_count === 1 ? '' : 's'} connected</p>`;
             }
 
             if (status.connected) {
                 controlsHtml = `<button onclick="disconnectTailscale()" class="warning"><i class="fas fa-unlink"></i> Disconnect</button>
-                               <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
+                    <button onclick="controlTailscaleService('stop')" class="danger btn-sm" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
             } else {
                 controlsHtml = `<button onclick="connectTailscale()" class="primary"><i class="fas fa-plug"></i> Connect</button>
-                               <button onclick="controlTailscaleService('stop')" class="danger btn-sm" style="margin-left:8px;" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
-                showAuth = true;
+                    <button onclick="controlTailscaleService('stop')" class="danger btn-sm" title="Stop Service"><i class="fas fa-power-off"></i></button>`;
             }
-        }
-        
-        // Always allow showing auth key input if not connected (even if service stopped)
-        // or if explicitly toggled (we could add a toggle later)
-        if (!status.connected) {
-            showAuth = true;
         }
 
         statusDiv.innerHTML = html;
         if (controlsDiv) controlsDiv.innerHTML = controlsHtml;
-        if (authDiv) authDiv.style.display = showAuth ? 'block' : 'none';
+        if (authDiv) {
+            if (showAuth) authDiv.classList.remove('hidden');
+            else authDiv.classList.add('hidden');
+        }
 
     } catch (e) {
         console.error('Tailscale status error:', e);
-        statusDiv.innerHTML = `<div class="badge badge-danger">Error</div><p style="margin-top:8px; font-size:0.8em;">${escapeHtml(e.message || 'Network error')}</p>
-        <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" style="margin-top:8px;">Try Again</button>`;
+        statusDiv.innerHTML = `
+            <div class="ts-status-row">
+                <div class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> Error</div>
+                <button onclick="refreshTailscaleStatus()" class="secondary btn-sm" title="Retry"><i class="fas fa-sync-alt"></i></button>
+            </div>
+            <p class="ts-auth-hint">${escapeHtml(e.message || 'Network error')}</p>`;
     }
 }
 
 async function connectTailscale() {
     showToast('Connecting to Tailscale...', 'info');
     try {
-        const res = await fetch(`${API_BASE}/system/tailscale/up`, { 
+        const res = await fetch(`${API_BASE}/system/tailscale/up`, {
             method: 'POST',
-            headers: getAuthHeaders() 
+            headers: getAuthHeaders()
         });
         const data = await res.json();
         if (!res.ok) {
             showToast(data.detail || data.message || 'Connection failed', 'error');
+            refreshTailscaleStatus();
             return;
         }
 
         if (data.status === 'success') {
             showToast('Connected to Tailscale!', 'success');
-            refreshTailscaleStatus();
+            // Poll a couple of times to let the daemon update
+            setTimeout(refreshTailscaleStatus, 1500);
+            setTimeout(refreshTailscaleStatus, 4000);
         } else if (data.status === 'needs_auth') {
             const urlMatch = data.output && data.output.match(/https:\/\/[^\s]+/);
             if (urlMatch) {
@@ -1011,24 +1013,32 @@ async function connectTailscale() {
                     window.open(urlMatch[0], '_blank');
                 }
             } else {
-                showToast('Authentication required. Check logs.', 'warning');
+                showToast('Authentication required. Check Tailscale logs.', 'warning');
             }
+            refreshTailscaleStatus();
         } else {
             showToast('Connection failed: ' + (data.detail || 'Unknown error'), 'error');
+            refreshTailscaleStatus();
         }
     } catch (e) {
         showToast('Connection failed', 'error');
+        refreshTailscaleStatus();
     }
 }
 
 async function disconnectTailscale() {
     if (!confirm('Disconnect from Tailscale VPN?')) return;
     try {
-        await fetch(`${API_BASE}/system/tailscale/down`, { 
+        const res = await fetch(`${API_BASE}/system/tailscale/down`, {
             method: 'POST',
-            headers: getAuthHeaders() 
+            headers: getAuthHeaders()
         });
-        showToast('Disconnected', 'info');
+        if (res.ok) {
+            showToast('Disconnected from Tailscale', 'info');
+        } else {
+            const data = await res.json().catch(() => ({}));
+            showToast(data.detail || 'Disconnect failed', 'error');
+        }
         refreshTailscaleStatus();
     } catch (e) {
         showToast('Disconnect failed', 'error');
@@ -1038,19 +1048,20 @@ async function disconnectTailscale() {
 async function controlTailscaleService(action) {
     if (!confirm(`${action === 'start' ? 'Start' : 'Stop'} Tailscale service?`)) return;
     showToast(`${action === 'start' ? 'Starting' : 'Stopping'} Tailscale service...`, 'info');
-    
+
     try {
-        const res = await fetch(`${API_BASE}/system/tailscale/service/${action}`, { 
+        const res = await fetch(`${API_BASE}/system/tailscale/service/${action}`, {
             method: 'POST',
-            headers: getAuthHeaders() 
+            headers: getAuthHeaders()
         });
-        
+
         if (res.ok) {
-            showToast(`Service ${action}ed`, 'success');
-            setTimeout(refreshTailscaleStatus, 2000); // Wait a bit for service to come up
+            showToast(`Service ${action === 'start' ? 'started' : 'stopped'}`, 'success');
+            // Give the daemon a moment to fully start/stop
+            setTimeout(refreshTailscaleStatus, 2000);
         } else {
-            const data = await res.json();
-            showToast(`Failed: ${data.detail}`, 'error');
+            const data = await res.json().catch(() => ({}));
+            showToast(`Failed: ${data.detail || 'Unknown error'}`, 'error');
         }
     } catch (e) {
         showToast('Service control failed', 'error');
