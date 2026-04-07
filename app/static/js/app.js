@@ -5676,14 +5676,16 @@ function renderHomeCard(item, type) {
 // --- Disk Space Warning ---
 async function checkDiskSpace() {
     try {
-        const res = await fetch(`${API_BASE}/system/status`, { headers: getAuthHeaders() });
+        const res = await fetch(`${API_BASE}/system/storage/info`, { headers: getAuthHeaders() });
         if (!res.ok) return;
         const data = await res.json();
-        if (!data.disks) return;
-        for (const disk of data.disks) {
-            const pct = disk.percent || 0;
+        const disks = data.disks || [];
+        for (const disk of disks) {
+            const total = disk.total || 0;
+            const used = disk.used || 0;
+            const pct = total > 0 ? Math.round((used / total) * 100) : 0;
             if (pct >= 90) {
-                showToast(`⚠️ Disk "${disk.mountpoint || disk.device || '/'}" is ${pct}% full — consider freeing up space.`, 'warning', 8000);
+                showToast(`⚠️ Disk "${disk.mountpoint || '/'}" is ${pct}% full — consider freeing up space.`, 'warning', 8000);
             }
         }
     } catch (e) { console.warn('checkDiskSpace failed:', e); }
@@ -5696,17 +5698,10 @@ async function checkAutoScan() {
         const now = Date.now();
         const hoursElapsed = (now - lastScan) / 3600000;
         if (hoursElapsed < 24) return;
-        const res = await fetch(`${API_BASE}/system/status`, { headers: getAuthHeaders() });
-        if (!res.ok) return;
-        const data = await res.json();
-        const lastScanServer = data.last_scan ? new Date(data.last_scan).getTime() : 0;
-        const serverHours = (now - lastScanServer) / 3600000;
-        if (serverHours >= 24) {
-            console.log('[AutoScan] Library stale, triggering background scan...');
-            await fetch(`${API_BASE}/media/scan`, { method: 'POST', headers: getAuthHeaders() });
-            localStorage.setItem('nomadpi_last_scan_ts', String(now));
-            showToast('Library scan started automatically (>24h since last scan)', 'info', 4000);
-        }
+        console.log('[AutoScan] Library stale (>24h), triggering background scan...');
+        await fetch(`${API_BASE}/media/scan`, { method: 'POST', headers: getAuthHeaders() });
+        localStorage.setItem('nomadpi_last_scan_ts', String(now));
+        showToast('Library scan started automatically (>24h since last scan)', 'info', 4000);
     } catch (e) { console.warn('checkAutoScan failed:', e); }
 }
 

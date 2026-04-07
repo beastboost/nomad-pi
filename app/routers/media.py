@@ -3891,3 +3891,31 @@ async def download_subtitle(data: Dict = Body(...), user_id: int = Depends(get_c
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/search")
+def search_library(q: str, limit: int = 40, user_id: int = Depends(get_current_user_id)):
+    """Global search across all library categories."""
+    if not q or len(q.strip()) < 2:
+        return {"results": []}
+    safe_q = database.sanitize_like_pattern(q.strip())
+    conn = database.get_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT li.path, li.category, li.name, li.folder, li.year,
+                   COALESCE(fm.custom_title, fm.title, li.name) AS title,
+                   COALESCE(fm.custom_poster, fm.poster, li.poster)  AS poster
+            FROM library_index li
+            LEFT JOIN file_metadata fm ON fm.path = li.path
+            WHERE li.name LIKE ? ESCAPE '\\'
+               OR fm.title LIKE ? ESCAPE '\\'
+               OR fm.custom_title LIKE ? ESCAPE '\\'
+            ORDER BY li.name COLLATE NATSORT
+            LIMIT ?
+            """,
+            (f"%{safe_q}%", f"%{safe_q}%", f"%{safe_q}%", int(limit))
+        ).fetchall()
+        results = [dict(r) for r in rows]
+        return {"results": results}
+    finally:
+        database.return_db(conn)

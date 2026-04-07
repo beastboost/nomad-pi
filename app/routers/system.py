@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, validator
 import psutil
 import os
@@ -2429,3 +2429,18 @@ def download_backup(user_id: int = Depends(get_current_user_id)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Settings (generic key/value save) ─────────────────────────────────────────
+@router.post("/settings")
+def save_setting_endpoint(data: dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    """Save a single settings key/value pair."""
+    key = data.get("key")
+    value = data.get("value", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    # Restrict which keys can be set via this generic endpoint
+    allowed_prefixes = ("opensubtitles_", "ui.", "player.", "dlna.", "theme")
+    if not any(str(key).startswith(p) for p in allowed_prefixes):
+        raise HTTPException(status_code=403, detail="Key not allowed via this endpoint")
+    database.set_setting(str(key), str(value))
+    return {"status": "ok", "key": key}
