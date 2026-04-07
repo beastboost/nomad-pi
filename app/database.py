@@ -189,6 +189,18 @@ def init_db():
                 expires_at TIMESTAMP
             )
         ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                path TEXT,
+                category TEXT,
+                title TEXT,
+                poster TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, path)
+            )
+        ''')
         
         # Migrations for existing tables
         try:
@@ -237,6 +249,22 @@ def init_db():
         # For library filtering and sorting
         c.execute("CREATE INDEX IF NOT EXISTS idx_library_category_year ON library_index(category, year)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_library_genre ON library_index(genre)")
+
+        # Migrations
+        try:
+            c.execute("ALTER TABLE progress ADD COLUMN watched INTEGER DEFAULT 0")
+        except sqlite3.OperationalError: pass
+        try:
+            c.execute("ALTER TABLE file_metadata ADD COLUMN imdb_rating TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            c.execute("ALTER TABLE file_metadata ADD COLUMN custom_title TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            c.execute("ALTER TABLE file_metadata ADD COLUMN custom_poster TEXT")
+        except sqlite3.OperationalError: pass
+
+        c.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_library_name ON library_index(name)")
 
         # For session lookups
@@ -1270,5 +1298,125 @@ def get_most_watched(user_id: int, limit: int = 20) -> List[Dict]:
                 'genre': row[11]
             })
         return results
+    finally:
+        return_db(conn)
+
+# ── Watchlist ────────────────────────────────────────────────────────────────
+def add_to_watchlist(user_id: int, path: str, category: str, title: str, poster: str = None):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute(
+            'INSERT OR IGNORE INTO watchlist (user_id, path, category, title, poster) VALUES (?,?,?,?,?)',
+            (user_id, path, category or '', title or '', poster or '')
+        )
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def remove_from_watchlist(user_id: int, path: str):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM watchlist WHERE user_id=? AND path=?', (user_id, path))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def get_watchlist(user_id: int) -> List[Dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute(
+            'SELECT path, category, title, poster, added_at FROM watchlist WHERE user_id=? ORDER BY added_at DESC',
+            (user_id,)
+        )
+        return [{'path': r[0], 'category': r[1], 'title': r[2], 'poster': r[3], 'added_at': r[4]} for r in c.fetchall()]
+    finally:
+        return_db(conn)
+
+def is_in_watchlist(user_id: int, path: str) -> bool:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT 1 FROM watchlist WHERE user_id=? AND path=?', (user_id, path))
+        return c.fetchone() is not None
+    finally:
+        return_db(conn)
+
+def get_watchlist_paths(user_id: int) -> set:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT path FROM watchlist WHERE user_id=?', (user_id,))
+        return {r[0] for r in c.fetchall()}
+    finally:
+        return_db(conn)
+
+# ── Mark as watched ──────────────────────────────────────────────────────────
+def mark_watched(user_id: int, path: str, watched: bool = True):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        if watched:
+            c.execute('''
+                INSERT INTO progress (user_id, path, current_time, duration, play_count, watched, last_played)
+                VALUES (?, ?, 0, 0, 1, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, path) DO UPDATE SET
+                    watched = 1,
+                    play_count = MAX(play_count, 1),
+                    last_played = CURRENT_TIMESTAMP
+            ''', (user_id, path))
+        else:
+            c.execute('''
+                UPDATE progress SET watched = 0, current_time = 0 WHERE user_id=? AND path=?
+            ''', (user_id, path))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+# ── Recently added ───────────────────────────────────────────────────────────
+def get_recently_added(limit: int = 20) -> List[Dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT li.path, li.category, li.name, li.folder, li.poster, li.genre, li.year,
+                   fm.title, fm.poster AS meta_poster, fm.imdb_rating
+            FROM library_index li
+            LEFT JOIN file_metadata fm ON li.path = fm.path
+            WHERE li.category IN ('movies','shows')
+            ORDER BY li.indexed_at DESC
+            LIMIT ?
+        ''', (limit,))
+        rows = c.fetchall()
+        results = []
+        for r in rows:
+            results.append({
+                'path': r[0], 'category': r[1], 'name': r[2], 'folder': r[3],
+                'poster': r[8] or r[4],
+                'genre': r[5], 'year': r[6],
+                'title': r[7] or r[2],
+                'imdb_rating': r[9],
+            })
+        return results
+    finally:
+        return_db(conn)
+
+# ── Metadata override ────────────────────────────────────────────────────────
+def save_metadata_override(path: str, custom_title: str = None, custom_poster: str = None, plot: str = None, year: str = None):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO file_metadata (path, custom_title, custom_poster, plot, year)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                custom_title = COALESCE(excluded.custom_title, file_metadata.custom_title),
+                custom_poster = COALESCE(excluded.custom_poster, file_metadata.custom_poster),
+                plot = COALESCE(excluded.plot, file_metadata.plot),
+                year = COALESCE(excluded.year, file_metadata.year)
+        ''', (path, custom_title, custom_poster, plot, year))
+        conn.commit()
     finally:
         return_db(conn)

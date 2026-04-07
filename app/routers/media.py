@@ -3755,3 +3755,167 @@ def comic_pages(path: str, user_id: int = Depends(get_current_user_id)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read comic: {e}")
+
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+@router.get("/watchlist")
+def get_watchlist(user_id: int = Depends(get_current_user_id)):
+    return {"items": database.get_watchlist(user_id)}
+
+@router.post("/watchlist")
+def add_to_watchlist(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    path = data.get("path")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    database.add_to_watchlist(user_id, path, data.get("category", ""), data.get("title", ""), data.get("poster"))
+    return {"status": "ok", "in_watchlist": True}
+
+@router.delete("/watchlist")
+def remove_from_watchlist(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    path = data.get("path")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    database.remove_from_watchlist(user_id, path)
+    return {"status": "ok", "in_watchlist": False}
+
+# ── Mark as watched ───────────────────────────────────────────────────────────
+@router.post("/mark_watched")
+def mark_watched_endpoint(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    path = data.get("path")
+    watched = data.get("watched", True)
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    database.mark_watched(user_id, path, watched)
+    return {"status": "ok", "watched": watched}
+
+# ── Recently added ────────────────────────────────────────────────────────────
+@router.get("/recently_added")
+def recently_added(limit: int = 20):
+    return {"items": database.get_recently_added(limit)}
+
+# ── Metadata override ─────────────────────────────────────────────────────────
+@router.post("/meta/override")
+def meta_override(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    path = data.get("path")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    database.save_metadata_override(
+        path,
+        custom_title=data.get("title"),
+        custom_poster=data.get("poster"),
+        plot=data.get("plot"),
+        year=data.get("year")
+    )
+    return {"status": "ok"}
+
+# ── Subtitle search (OpenSubtitles) ───────────────────────────────────────────
+@router.get("/subtitles/search")
+async def search_subtitles(title: str, year: str = None, lang: str = "en", imdb_id: str = None):
+    """Search OpenSubtitles.com for subtitles. Requires OPENSUBTITLES_KEY in settings."""
+    api_key = None
+    try:
+        api_key = database.get_setting("opensubtitles_key")
+    except Exception:
+        pass
+    if not api_key:
+        return {"results": [], "error": "No OpenSubtitles API key configured. Add one in Settings."}
+    params = {"query": title, "languages": lang}
+    if year:
+        params["year"] = year
+    if imdb_id:
+        params["imdb_id"] = imdb_id.lstrip("tt")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.opensubtitles.com/api/v1/subtitles",
+                params=params,
+                headers={"Api-Key": api_key, "User-Agent": "NomadPi v1.3"}
+            )
+            if r.status_code != 200:
+                return {"results": [], "error": f"OpenSubtitles API error {r.status_code}"}
+            data = r.json()
+            results = []
+            for item in (data.get("data") or [])[:15]:
+                attrs = item.get("attributes", {})
+                files = attrs.get("files", [{}])
+                results.append({
+                    "id": item.get("id"),
+                    "file_id": files[0].get("file_id") if files else None,
+                    "name": files[0].get("file_name", attrs.get("release", title)) if files else title,
+                    "lang": attrs.get("language"),
+                    "downloads": attrs.get("download_count", 0),
+                    "rating": attrs.get("ratings", 0),
+                    "hearing_impaired": attrs.get("hearing_impaired", False),
+                })
+            return {"results": results}
+    except Exception as e:
+        return {"results": [], "error": str(e)}
+
+@router.post("/subtitles/download")
+async def download_subtitle(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    """Download a subtitle from OpenSubtitles and save it next to the video file."""
+    file_id = data.get("file_id")
+    video_path = data.get("video_path")
+    if not file_id or not video_path:
+        raise HTTPException(status_code=400, detail="file_id and video_path required")
+    api_key = None
+    try:
+        api_key = database.get_setting("opensubtitles_key")
+    except Exception:
+        pass
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No OpenSubtitles API key configured")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                "https://api.opensubtitles.com/api/v1/download",
+                json={"file_id": file_id},
+                headers={"Api-Key": api_key, "User-Agent": "NomadPi v1.3", "Content-Type": "application/json"}
+            )
+            if r.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"Download failed: {r.status_code}")
+            link = r.json().get("link")
+            if not link:
+                raise HTTPException(status_code=502, detail="No download link returned")
+            sub_r = await client.get(link, timeout=30)
+            if sub_r.status_code != 200:
+                raise HTTPException(status_code=502, detail="Failed to fetch subtitle file")
+        # Save next to video file
+        video_fs = "/data" + video_path[5:] if video_path.startswith("/data/") else video_path
+        base = os.path.splitext(video_fs)[0]
+        sub_path = base + "." + (data.get("lang") or "en") + ".srt"
+        with open(sub_path, "wb") as f:
+            f.write(sub_r.content)
+        web_path = "/data" + sub_path.replace("/data", "", 1) if sub_path.startswith("/data") else sub_path
+        return {"status": "ok", "path": web_path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/search")
+def search_library(q: str, limit: int = 40, user_id: int = Depends(get_current_user_id)):
+    """Global search across all library categories."""
+    if not q or len(q.strip()) < 2:
+        return {"results": []}
+    safe_q = database.sanitize_like_pattern(q.strip())
+    conn = database.get_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT li.path, li.category, li.name, li.folder, li.year,
+                   COALESCE(fm.custom_title, fm.title, li.name) AS title,
+                   COALESCE(fm.custom_poster, fm.poster, li.poster)  AS poster
+            FROM library_index li
+            LEFT JOIN file_metadata fm ON fm.path = li.path
+            WHERE li.name LIKE ? ESCAPE '\\'
+               OR fm.title LIKE ? ESCAPE '\\'
+               OR fm.custom_title LIKE ? ESCAPE '\\'
+            ORDER BY li.name COLLATE NATSORT
+            LIMIT ?
+            """,
+            (f"%{safe_q}%", f"%{safe_q}%", f"%{safe_q}%", int(limit))
+        ).fetchall()
+        results = [dict(r) for r in rows]
+        return {"results": results}
+    finally:
+        database.return_db(conn)

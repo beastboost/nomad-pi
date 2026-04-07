@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, validator
 import psutil
 import os
@@ -2402,3 +2402,45 @@ def get_network_interfaces(user_id: int = Depends(get_current_user_id)):
         return {"interfaces": interfaces}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Backup ────────────────────────────────────────────────────────────────────
+@router.get("/backup")
+def download_backup(user_id: int = Depends(get_current_user_id)):
+    """Create and stream a ZIP backup of the database and settings."""
+    import zipfile, io, time
+    from fastapi.responses import StreamingResponse
+    buf = io.BytesIO()
+    try:
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            db_path = "/data/app.db"
+            if os.path.exists(db_path):
+                zf.write(db_path, "nomadpi/app.db")
+            # Include any .env or config files if they exist
+            for cfg in ["/app/config.json", "/data/settings.json"]:
+                if os.path.exists(cfg):
+                    zf.write(cfg, f"nomadpi/{os.path.basename(cfg)}")
+        buf.seek(0)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        fname = f"nomadpi-backup-{stamp}.zip"
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Settings (generic key/value save) ─────────────────────────────────────────
+@router.post("/settings")
+def save_setting_endpoint(data: dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    """Save a single settings key/value pair."""
+    key = data.get("key")
+    value = data.get("value", "")
+    if not key:
+        raise HTTPException(status_code=400, detail="key is required")
+    # Restrict which keys can be set via this generic endpoint
+    allowed_prefixes = ("opensubtitles_", "ui.", "player.", "dlna.", "theme")
+    if not any(str(key).startswith(p) for p in allowed_prefixes):
+        raise HTTPException(status_code=403, detail="Key not allowed via this endpoint")
+    database.set_setting(str(key), str(value))
+    return {"status": "ok", "key": key}

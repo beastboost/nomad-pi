@@ -1,4 +1,4 @@
-console.log("App v1.2 loaded - Plex-style UI & External Players");
+console.log("App v1.3 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -515,6 +515,9 @@ async function checkAuth() {
             loadUpNext();
             loadProfileUI();
             startStatsAutoRefresh();
+            loadHomeRows();
+            checkDiskSpace();
+            checkAutoScan();
             if (data.user && data.user.must_change_password) {
                 showToast('Please change your password', 'info');
                 showSection('settings');
@@ -896,6 +899,9 @@ function showSection(id) {
     }
     if (id === 'settings') {
         refreshTailscaleStatus();
+    }
+    if (id === 'watchlist') {
+        loadWatchlist();
     }
 }
 
@@ -2242,6 +2248,23 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         <div class="viewer-title-row">
             <span class="viewer-title-text">${safeTitle}</span>
             <div class="external-player-btns">
+                <button class="player-action-btn" id="pip-btn" title="Picture-in-Picture" onclick="togglePiP()">
+                    <span>⧉</span><span class="btn-text">PiP</span>
+                </button>
+                <select class="player-action-btn speed-select" id="speed-select" title="Playback speed" onchange="setPlaybackSpeed(this.value)">
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                </select>
+                <button class="player-action-btn" title="Subtitles" onclick="openSubtitleSearch('${escapeHtml(path)}', '${safeTitle}')">
+                    <span>💬</span><span class="btn-text">Subs</span>
+                </button>
+                <button class="player-action-btn" title="Mark as watched" onclick="markAsWatched('${escapeHtml(path)}', 1)">
+                    <span>✓</span><span class="btn-text">Watched</span>
+                </button>
                 <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
                 </a>
@@ -2463,6 +2486,17 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeViewer();
     if (e.key === 'ArrowLeft') comicPrev();
     if (e.key === 'ArrowRight') comicNext();
+    // Video keyboard shortcuts
+    const video = activeVideoEl;
+    if (!video) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+    if (e.key === 'ArrowLeft' && !e.altKey) { e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 10); }
+    if (e.key === 'ArrowRight' && !e.altKey) { e.preventDefault(); video.currentTime = Math.min(video.duration || 0, video.currentTime + 10); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); video.volume = Math.min(1, video.volume + 0.1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); video.volume = Math.max(0, video.volume - 0.1); }
+    if (e.key === 'f' || e.key === 'F') { if (document.fullscreenElement) document.exitFullscreen(); else video.requestFullscreen?.(); }
+    if (e.key === 'm' || e.key === 'M') { video.muted = !video.muted; }
 });
 
 async function loadShowsLibrary() {
@@ -5558,4 +5592,460 @@ async function fixDuplicates() {
         showToast(`Error: ${e.message}`, 'error');
         console.error('Failed to fix duplicates:', e);
     }
+}
+
+// =====================================================
+// NEW FEATURES v1.3.0
+// =====================================================
+
+// --- PiP & Playback Speed ---
+function togglePiP() {
+    const video = activeVideoEl;
+    if (!video) return;
+    if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+    } else if (document.pictureInPictureEnabled) {
+        video.requestPictureInPicture().catch(e => showToast('PiP not supported in this browser', 'info'));
+    } else {
+        showToast('Picture-in-Picture is not supported in this browser', 'info');
+    }
+}
+
+function setPlaybackSpeed(speed) {
+    const video = activeVideoEl;
+    if (video) video.playbackRate = parseFloat(speed);
+}
+
+// --- Home Rows: Continue Watching & Recently Added ---
+async function loadHomeRows() {
+    await Promise.all([loadContinueWatching(), loadRecentlyAdded()]);
+}
+
+async function loadContinueWatching() {
+    const section = document.getElementById('continue-watching-section');
+    const list = document.getElementById('continue-watching-list');
+    if (!section || !list) return;
+    try {
+        const res = await fetch(`${API_BASE}/media/resume?limit=12`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.items || data || [];
+        if (!items.length) { section.classList.add('hidden'); return; }
+        section.classList.remove('hidden');
+        list.innerHTML = items.map(item => renderHomeCard(item, 'continue')).join('');
+    } catch (e) { console.warn('loadContinueWatching failed:', e); }
+}
+
+async function loadRecentlyAdded() {
+    const section = document.getElementById('recently-added-section');
+    const list = document.getElementById('recently-added-list');
+    if (!section || !list) return;
+    try {
+        const res = await fetch(`${API_BASE}/media/recently_added?limit=20`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) { section.classList.add('hidden'); return; }
+        section.classList.remove('hidden');
+        list.innerHTML = items.map(item => renderHomeCard(item, 'recent')).join('');
+    } catch (e) { console.warn('loadRecentlyAdded failed:', e); }
+}
+
+function renderHomeCard(item, type) {
+    const poster = item.poster || item.poster_url || '';
+    const title = escapeHtml(item.title || item.name || 'Unknown');
+    const path = escapeHtml(item.path || '');
+    const pct = item.progress ? Math.round((item.progress.current_time / item.progress.duration) * 100) : 0;
+    const progressBar = (type === 'continue' && pct > 0 && pct < 100) ?
+        `<div class="home-card-progress"><div class="home-card-progress-fill" style="width:${pct}%"></div></div>` : '';
+    const watched = item.watched ? '<div class="watched-badge"><i class="fas fa-check"></i></div>' : '';
+    const yearLabel = item.year ? `<span class="home-card-year">${item.year}</span>` : '';
+    return `<div class="home-card" onclick="openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', ${item.progress?.current_time || 0})">
+        <div class="home-card-poster">
+            ${poster ? `<img src="${escapeHtml(poster)}" loading="lazy" onerror="this.style.display='none'">` : '<div class="home-card-no-poster"><i class="fas fa-film"></i></div>'}
+            <div class="home-card-play-icon"><i class="fas fa-play"></i></div>
+            ${watched}${progressBar}
+        </div>
+        <div class="home-card-info">
+            <div class="home-card-title">${title}</div>
+            ${yearLabel}
+        </div>
+    </div>`;
+}
+
+// --- Disk Space Warning ---
+async function checkDiskSpace() {
+    try {
+        const res = await fetch(`${API_BASE}/system/storage/info`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const disks = data.disks || [];
+        for (const disk of disks) {
+            const total = disk.total || 0;
+            const used = disk.used || 0;
+            const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+            if (pct >= 90) {
+                showToast(`⚠️ Disk "${disk.mountpoint || '/'}" is ${pct}% full — consider freeing up space.`, 'warning', 8000);
+            }
+        }
+    } catch (e) { console.warn('checkDiskSpace failed:', e); }
+}
+
+// --- Auto-scan on Startup ---
+async function checkAutoScan() {
+    try {
+        const lastScan = parseInt(localStorage.getItem('nomadpi_last_scan_ts') || '0');
+        const now = Date.now();
+        const hoursElapsed = (now - lastScan) / 3600000;
+        if (hoursElapsed < 24) return;
+        console.log('[AutoScan] Library stale (>24h), triggering background scan...');
+        await fetch(`${API_BASE}/media/scan`, { method: 'POST', headers: getAuthHeaders() });
+        localStorage.setItem('nomadpi_last_scan_ts', String(now));
+        showToast('Library scan started automatically (>24h since last scan)', 'info', 4000);
+    } catch (e) { console.warn('checkAutoScan failed:', e); }
+}
+
+// --- Watchlist ---
+async function loadWatchlist() {
+    const list = document.getElementById('watchlist-list');
+    if (!list) return;
+    list.innerHTML = '<div class="loading">Loading watchlist...</div>';
+    try {
+        const res = await fetch(`${API_BASE}/media/watchlist`, { headers: getAuthHeaders() });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        const items = data.items || [];
+        if (!items.length) {
+            list.innerHTML = '<div class="empty-state"><i class="fas fa-heart" style="font-size:3rem; opacity:0.2; margin-bottom:1rem;"></i><p>Your watchlist is empty.<br>Press the ♥ on any movie or show to add it.</p></div>';
+            return;
+        }
+        list.innerHTML = `<div class="media-grid">${items.map(item => renderWatchlistCard(item)).join('')}</div>`;
+    } catch (e) {
+        list.innerHTML = `<div class="empty-state"><p>Error loading watchlist: ${e.message}</p></div>`;
+    }
+}
+
+function renderWatchlistCard(item) {
+    const title = escapeHtml(item.title || 'Unknown');
+    const poster = item.poster ? escapeHtml(item.poster) : '';
+    const path = escapeHtml(item.path || '');
+    return `<div class="media-item" onclick="openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', 0)">
+        <div class="poster-shell">
+            ${poster ? `<img class="poster-img" src="${poster}" loading="lazy" onerror="this.style.display='none'">` : ''}
+            <div class="poster-play"><i class="fas fa-play"></i></div>
+            <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${path}', '${escapeHtml(item.category || '')}', '${title.replace(/'/g,"\\'")}', '${poster}')">
+                <i class="fas fa-heart"></i>
+            </button>
+        </div>
+        <div class="card-title">${title}</div>
+        <div class="card-subtitle">${escapeHtml(item.category || '')}</div>
+    </div>`;
+}
+
+async function toggleWatchlist(path, category, title, poster) {
+    try {
+        const checkRes = await fetch(`${API_BASE}/media/watchlist`, { headers: getAuthHeaders() });
+        const checkData = await checkRes.json();
+        const existing = (checkData.items || []).find(i => i.path === path);
+        if (existing) {
+            await fetch(`${API_BASE}/media/watchlist`, {
+                method: 'DELETE',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path })
+            });
+            showToast('Removed from watchlist', 'info');
+            updateWatchlistBtn(path, false);
+        } else {
+            await fetch(`${API_BASE}/media/watchlist`, {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path, category, title, poster })
+            });
+            showToast('Added to watchlist ♥', 'success');
+            updateWatchlistBtn(path, true);
+        }
+        if (document.getElementById('watchlist')?.classList.contains('active-section')) loadWatchlist();
+    } catch (e) { showToast('Failed to update watchlist', 'error'); }
+}
+
+function updateWatchlistBtn(path, active) {
+    document.querySelectorAll(`[data-watchlist-path="${CSS.escape(path)}"]`).forEach(btn => {
+        btn.classList.toggle('active', active);
+    });
+}
+
+// --- Mark as Watched ---
+async function markAsWatched(path, watched) {
+    try {
+        const res = await fetch(`${API_BASE}/media/mark_watched`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, watched: watched ? 1 : 0 })
+        });
+        if (!res.ok) throw new Error('Failed');
+        showToast(watched ? 'Marked as watched ✓' : 'Marked as unwatched', 'success');
+        // Update any visible cards
+        document.querySelectorAll(`[data-watched-path]`).forEach(el => {
+            if (el.dataset.watchedPath === path) el.classList.toggle('is-watched', !!watched);
+        });
+    } catch (e) { showToast('Failed to update watched status', 'error'); }
+}
+
+// --- View Mode Toggle ---
+const viewModes = { movies: 'grid', shows: 'grid' };
+
+function setViewMode(category, mode) {
+    viewModes[category] = mode;
+    const gridBtn = document.getElementById(`${category}-view-grid`);
+    const listBtn = document.getElementById(`${category}-view-list`);
+    if (gridBtn) gridBtn.classList.toggle('active', mode === 'grid');
+    if (listBtn) listBtn.classList.toggle('active', mode === 'list');
+    const container = document.getElementById(`${category}-list`);
+    if (container) {
+        container.classList.toggle('list-view', mode === 'list');
+        container.classList.toggle('grid-view', mode === 'grid');
+    }
+}
+
+// --- Global Search ---
+function openGlobalSearch() {
+    const overlay = document.getElementById('global-search-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    setTimeout(() => {
+        const input = document.getElementById('global-search-input');
+        if (input) input.focus();
+    }, 100);
+}
+
+function closeGlobalSearch() {
+    const overlay = document.getElementById('global-search-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+let globalSearchTimeout = null;
+function onGlobalSearchInput(value) {
+    clearTimeout(globalSearchTimeout);
+    if (!value || value.length < 2) {
+        const res = document.getElementById('global-search-results');
+        if (res) res.innerHTML = '';
+        return;
+    }
+    globalSearchTimeout = setTimeout(() => performGlobalSearch(value), 350);
+}
+
+async function performGlobalSearch(q) {
+    const resultsEl = document.getElementById('global-search-results');
+    if (!resultsEl) return;
+    resultsEl.innerHTML = '<div class="search-loading"><i class="fas fa-spinner fa-spin"></i> Searching...</div>';
+    try {
+        const res = await fetch(`${API_BASE}/media/search?q=${encodeURIComponent(q)}&limit=40`, { headers: getAuthHeaders() });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+        const items = data.results || data.items || data || [];
+        if (!items.length) {
+            resultsEl.innerHTML = `<div class="search-empty">No results for "<strong>${escapeHtml(q)}</strong>"</div>`;
+            return;
+        }
+        resultsEl.innerHTML = items.map(item => {
+            const title = escapeHtml(item.title || item.name || '');
+            const path = escapeHtml(item.path || '');
+            const cat = escapeHtml(item.category || item.type || '');
+            const poster = item.poster ? escapeHtml(item.poster) : '';
+            return `<div class="search-result-item" onclick="closeGlobalSearch(); openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', 0)">
+                ${poster ? `<img class="search-result-poster" src="${poster}" onerror="this.style.display='none'">` : '<div class="search-result-poster search-result-no-poster"><i class="fas fa-film"></i></div>'}
+                <div class="search-result-info">
+                    <div class="search-result-title">${title}</div>
+                    <div class="search-result-cat">${cat}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        resultsEl.innerHTML = `<div class="search-empty">Error: ${e.message}</div>`;
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openGlobalSearch(); }
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('global-search-overlay');
+        if (overlay && !overlay.classList.contains('hidden')) closeGlobalSearch();
+    }
+});
+
+// --- Backup Download ---
+function downloadBackup() {
+    showToast('Preparing backup...', 'info');
+    const a = document.createElement('a');
+    a.href = `${API_BASE}/system/backup?token=${getCookie('auth_token') || ''}`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// --- OpenSubtitles Key ---
+async function saveOpenSubtitlesKey() {
+    const input = document.getElementById('opensubtitles-key');
+    if (!input) return;
+    const key = input.value.trim();
+    try {
+        const res = await fetch(`${API_BASE}/system/settings`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'opensubtitles_key', value: key })
+        });
+        if (!res.ok) throw new Error('Failed');
+        showToast('OpenSubtitles API key saved', 'success');
+    } catch (e) { showToast('Failed to save API key', 'error'); }
+}
+
+// --- Metadata Editor ---
+let _metaEditorPath = null;
+
+function openMetaEditor(path, title, year, poster, plot) {
+    _metaEditorPath = path;
+    const modal = document.getElementById('meta-editor-modal');
+    if (!modal) return;
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    const pathEl = document.getElementById('meta-editor-path');
+    if (pathEl) pathEl.value = path;
+    setVal('meta-editor-title', title);
+    setVal('meta-editor-year', year);
+    setVal('meta-editor-poster', poster);
+    setVal('meta-editor-plot', plot);
+    modal.classList.remove('hidden');
+}
+
+function closeMetaEditor() {
+    const modal = document.getElementById('meta-editor-modal');
+    if (modal) modal.classList.add('hidden');
+    _metaEditorPath = null;
+}
+
+async function saveMetaEditor() {
+    if (!_metaEditorPath) return;
+    const getVal = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+    const payload = {
+        path: _metaEditorPath,
+        title: getVal('meta-editor-title'),
+        year: getVal('meta-editor-year'),
+        poster: getVal('meta-editor-poster'),
+        plot: getVal('meta-editor-plot')
+    };
+    try {
+        const res = await fetch(`${API_BASE}/media/meta/override`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Save failed');
+        showToast('Metadata saved', 'success');
+        closeMetaEditor();
+        // Invalidate caches
+        moviesLibraryCache = null;
+        showsLibraryCache = null;
+    } catch (e) { showToast(`Error: ${e.message}`, 'error'); }
+}
+
+// --- Subtitle Search & Download ---
+let _subtitleVideoPath = null;
+
+function openSubtitleSearch(path, title) {
+    _subtitleVideoPath = path;
+    const modal = document.getElementById('subtitle-modal');
+    if (!modal) {
+        // Build modal on-the-fly if not in HTML
+        _buildSubtitleModal();
+    }
+    const titleEl = document.getElementById('subtitle-search-title');
+    if (titleEl) titleEl.value = title || '';
+    const resultsEl = document.getElementById('subtitle-results');
+    if (resultsEl) resultsEl.innerHTML = '';
+    document.getElementById('subtitle-modal')?.classList.remove('hidden');
+}
+
+function _buildSubtitleModal() {
+    const modal = document.createElement('div');
+    modal.id = 'subtitle-modal';
+    modal.className = 'modal-overlay hidden';
+    modal.innerHTML = `
+        <div class="modal-box" style="max-width:560px">
+            <div class="modal-header">
+                <h3><i class="fas fa-closed-captioning"></i> Subtitle Search</h3>
+                <button class="modal-close-btn" onclick="closeSubtitleModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <input id="subtitle-search-title" class="settings-input" placeholder="Movie/show title..." style="flex:1">
+                    <button class="btn btn-primary" onclick="searchSubtitles()"><i class="fas fa-search"></i></button>
+                </div>
+                <div id="subtitle-results" style="max-height:320px; overflow-y:auto;"></div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+function closeSubtitleModal() {
+    document.getElementById('subtitle-modal')?.classList.add('hidden');
+}
+
+async function searchSubtitles() {
+    const titleInput = document.getElementById('subtitle-search-title');
+    const query = titleInput?.value?.trim();
+    if (!query) return;
+    const resultsEl = document.getElementById('subtitle-results');
+    if (resultsEl) resultsEl.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Searching OpenSubtitles...</div>';
+    try {
+        const res = await fetch(`${API_BASE}/media/subtitles/search?query=${encodeURIComponent(query)}`, { headers: getAuthHeaders() });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Search failed');
+        }
+        const data = await res.json();
+        const subs = data.subtitles || data.data || [];
+        if (!subs.length) {
+            if (resultsEl) resultsEl.innerHTML = '<div class="search-empty">No subtitles found</div>';
+            return;
+        }
+        if (resultsEl) {
+            resultsEl.innerHTML = subs.slice(0, 30).map(s => {
+                const attr = s.attributes || s;
+                const lang = attr.language || '?';
+                const title = escapeHtml(attr.feature_details?.movie_name || attr.release || 'Unknown');
+                const fileId = attr.files?.[0]?.file_id || s.file_id || '';
+                const dlCount = attr.download_count || 0;
+                return `<div class="subtitle-result-item" onclick="downloadSubtitle(${fileId}, '${lang}')">
+                    <div>
+                        <span class="sub-lang-badge">${lang.toUpperCase()}</span>
+                        <span>${title}</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--text-muted)">${dlCount} downloads</div>
+                </div>`;
+            }).join('');
+        }
+    } catch (e) {
+        if (resultsEl) resultsEl.innerHTML = `<div class="search-empty">Error: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function downloadSubtitle(fileId, lang) {
+    if (!fileId || !_subtitleVideoPath) { showToast('Missing subtitle info', 'error'); return; }
+    showToast('Downloading subtitle...', 'info');
+    try {
+        const res = await fetch(`${API_BASE}/media/subtitles/download`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, video_path: _subtitleVideoPath, language: lang })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Download failed');
+        }
+        const data = await res.json();
+        showToast(`Subtitle saved: ${data.path || 'success'}`, 'success');
+        closeSubtitleModal();
+        // Reload subtitles for active video
+        if (activeVideoEl) loadSubtitlesForVideo(activeVideoEl, _subtitleVideoPath);
+    } catch (e) { showToast(`Subtitle error: ${e.message}`, 'error'); }
 }

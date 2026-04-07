@@ -46,8 +46,10 @@
                 <button onclick="event.stopPropagation(); showSection('books')"><i class="fas fa-book"></i> Books</button>
                 <button onclick="event.stopPropagation(); showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
                 <button onclick="event.stopPropagation(); showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
+                <button onclick="event.stopPropagation(); showSection('watchlist')"><i class="fas fa-heart"></i> Watchlist</button>
                 <button onclick="event.stopPropagation(); showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
                 <button onclick="event.stopPropagation(); showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
+                <button onclick="event.stopPropagation(); openGlobalSearch()" class="search-nav-btn" title="Search everything"><i class="fas fa-search"></i></button>
                 <span id="header-stats" class="header-stats"></span>
                 <button onclick="event.stopPropagation(); toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme">
                     <i class="fas fa-moon" id="theme-icon"></i>
@@ -155,26 +157,47 @@
                     </div>
                 </div>
 
+                <div id="continue-watching-section" class="home-row hidden">
+                    <div class="home-row-header">
+                        <h2><i class="fas fa-play-circle"></i> Continue Watching</h2>
+                        <span class="home-row-see-all" onclick="showSection('movies')">See all →</span>
+                    </div>
+                    <div id="continue-watching-list" class="home-row-scroll"></div>
+                </div>
+
+                <div id="recently-added-section" class="home-row hidden">
+                    <div class="home-row-header">
+                        <h2><i class="fas fa-star"></i> Recently Added</h2>
+                    </div>
+                    <div id="recently-added-list" class="home-row-scroll"></div>
+                </div>
+
                 <div id="resume-section" class="hidden">
-                    <h2>Continue Watching</h2>
                     <div id="resume-list" class="media-grid"></div>
                 </div>
-
                 <div id="up-next-section" class="hidden">
-                    <h2>Up Next</h2>
                     <div id="up-next-list" class="media-grid"></div>
                 </div>
-
                 <div id="recent-section" class="hidden">
-                    <h2>Recently Added</h2>
                     <div id="recent-list" class="media-grid"></div>
                 </div>
             </section>
 
 
+            <section id="watchlist" class="hidden">
+                <div class="section-header">
+                    <h2><i class="fas fa-heart"></i> My Watchlist</h2>
+                </div>
+                <div id="watchlist-list" class="media-grid"></div>
+            </section>
+
             <section id="movies" class="hidden">
                 <div class="section-header">
                     <h2><i class="fas fa-film"></i> Movies</h2>
+                    <div class="view-mode-toggle">
+                        <button class="view-btn active" id="movies-view-grid" onclick="setViewMode('movies','grid')" title="Grid view"><i class="fas fa-th"></i></button>
+                        <button class="view-btn" id="movies-view-list" onclick="setViewMode('movies','list')" title="List view"><i class="fas fa-list"></i></button>
+                    </div>
                 </div>
                 <div id="movies-filter-bar" class="filter-bar">
                     <div class="search-wrap">
@@ -202,6 +225,10 @@
             <section id="shows" class="hidden">
                 <div class="section-header">
                     <h2><i class="fas fa-tv"></i> TV Shows</h2>
+                    <div class="view-mode-toggle">
+                        <button class="view-btn active" id="shows-view-grid" onclick="setViewMode('shows','grid')" title="Grid view"><i class="fas fa-th"></i></button>
+                        <button class="view-btn" id="shows-view-list" onclick="setViewMode('shows','list')" title="List view"><i class="fas fa-list"></i></button>
+                    </div>
                 </div>
                 <div id="shows-filter-bar" class="filter-bar">
                     <div class="search-wrap">
@@ -460,6 +487,14 @@
                 </div>
 
                 <div class="admin-panel">
+                    <h3><i class="fas fa-download"></i> Backup</h3>
+                    <p class="section-desc">Download a ZIP backup of your database and settings.</p>
+                    <button onclick="downloadBackup()" class="primary">
+                        <i class="fas fa-file-archive"></i> Download Backup
+                    </button>
+                </div>
+
+                <div class="admin-panel">
                     <h3><i class="fas fa-hdd"></i> Storage Management</h3>
                     <button onclick="loadDrives()" class="secondary">
                         <i class="fas fa-search"></i> Scan Drives
@@ -597,6 +632,24 @@
                         <p class="ts-auth-hint">
                             <i class="fas fa-info-circle"></i> Or authenticate via the URL shown after clicking Connect.
                         </p>
+                    </div>
+                </div>
+
+                <div class="admin-panel">
+                    <h3><i class="fas fa-closed-captioning"></i> OpenSubtitles</h3>
+                    <div class="form-group">
+                        <label for="opensubtitles-key">
+                            <i class="fas fa-key"></i> OpenSubtitles API Key
+                        </label>
+                        <div class="input-action-row">
+                            <input type="text" id="opensubtitles-key" placeholder="Get free key at opensubtitles.com">
+                            <button onclick="saveOpenSubtitlesKey()" class="primary">
+                                <i class="fas fa-save"></i> Save Key
+                            </button>
+                        </div>
+                        <div class="help-text">
+                            <i class="fas fa-info-circle"></i> Enables in-app subtitle search &amp; download. Free at <a href="https://www.opensubtitles.com" target="_blank" style="color:var(--accent-color);">opensubtitles.com</a>
+                        </div>
                     </div>
                 </div>
 
@@ -808,8 +861,54 @@
         </div>
     </div>
 
+    <!-- Global Search Overlay -->
+    <div id="global-search-overlay" class="global-search-overlay hidden">
+        <div class="global-search-box">
+            <div class="global-search-input-wrap">
+                <i class="fas fa-search"></i>
+                <input id="global-search-input" type="text" placeholder="Search movies, shows, music, books…" autocomplete="off" oninput="onGlobalSearchInput(this.value)">
+                <button class="global-search-close" onclick="closeGlobalSearch()"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="global-search-results" class="global-search-results"></div>
+        </div>
+    </div>
+
+    <!-- Metadata Editor Modal -->
+    <div id="meta-editor-modal" class="modal hidden">
+        <div class="modal-backdrop" onclick="closeMetaEditor()"></div>
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-edit"></i> Edit Metadata</div>
+                <button class="modal-close" onclick="closeMetaEditor()">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="meta-editor-path">
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="meta-editor-title" placeholder="Override title">
+                </div>
+                <div class="form-group">
+                    <label>Year</label>
+                    <input type="text" id="meta-editor-year" placeholder="e.g. 2023" maxlength="4">
+                </div>
+                <div class="form-group">
+                    <label>Poster URL</label>
+                    <input type="url" id="meta-editor-poster" placeholder="https://…">
+                </div>
+                <div class="form-group">
+                    <label>Plot / Synopsis</label>
+                    <textarea id="meta-editor-plot" rows="3" placeholder="Short description…" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border-color);border-radius:8px;padding:10px;color:var(--text-color);resize:vertical;"></textarea>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button onclick="closeMetaEditor()" class="secondary">Cancel</button>
+                    <button onclick="saveMetaEditor()" class="primary"><i class="fas fa-save"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast-container"></div>
-    <script src="js/app.js?v=1775509264"></script>
+    <script src="js/app.js?v=1775509265"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
