@@ -2402,3 +2402,30 @@ def get_network_interfaces(user_id: int = Depends(get_current_user_id)):
         return {"interfaces": interfaces}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Backup ────────────────────────────────────────────────────────────────────
+@router.get("/backup")
+def download_backup(user_id: int = Depends(get_current_user_id)):
+    """Create and stream a ZIP backup of the database and settings."""
+    import zipfile, io, time
+    from fastapi.responses import StreamingResponse
+    buf = io.BytesIO()
+    try:
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            db_path = "/data/app.db"
+            if os.path.exists(db_path):
+                zf.write(db_path, "nomadpi/app.db")
+            # Include any .env or config files if they exist
+            for cfg in ["/app/config.json", "/data/settings.json"]:
+                if os.path.exists(cfg):
+                    zf.write(cfg, f"nomadpi/{os.path.basename(cfg)}")
+        buf.seek(0)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        fname = f"nomadpi-backup-{stamp}.zip"
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
