@@ -1670,7 +1670,7 @@ function renderMediaList(category, files) {
 
                 div.innerHTML = `
                     ${cardDeleteBtn}
-                    ${renameBtnHtmlFile}
+                    ${cardRenameBtn}
                     <div class="poster-shell">
                         ${poster}
                         <div class="media-info">
