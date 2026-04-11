@@ -3750,7 +3750,35 @@ def comic_pages(path: str, user_id: int = Depends(get_current_user_id)):
                 pages.append({"name": f, "path": f"/data/{rel_from_data}"})
 
         pages.sort(key=lambda p: natural_sort_key(p["path"]))
-        return {"pages": pages}
+
+        # Fetch stored metadata (title, cover override) if available
+        meta = {}
+        try:
+            web_path = path  # The path param as passed in
+            row = database.get_db()
+            try:
+                r = row.execute(
+                    "SELECT COALESCE(custom_title, title) as title, "
+                    "COALESCE(custom_poster, poster) as poster, plot, year "
+                    "FROM file_metadata WHERE path = ?", (web_path,)
+                ).fetchone()
+                if r:
+                    meta = dict(r)
+            finally:
+                database.return_db(row)
+        except Exception:
+            pass
+
+        # Derive display title from filename if no DB metadata
+        display_title = meta.get("title") or os.path.splitext(os.path.basename(fs_path))[0]
+
+        return {
+            "pages": pages,
+            "total": len(pages),
+            "title": display_title,
+            "cover": pages[0]["path"] if pages else None,
+            "meta": meta,
+        }
     except HTTPException:
         raise
     except Exception as e:
