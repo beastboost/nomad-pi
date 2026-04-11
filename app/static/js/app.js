@@ -208,8 +208,13 @@ let driveScanInterval = null;
 let statsInterval = null;
 let comicPages = [];
 let comicIndex = 0;
-let comicZoom = 1;
-let comicFit = 'width'; // 'width' or 'height'
+let comicZoom = 100;          // percent (100 = fit-width)
+let comicFit = 'width';       // 'width' | 'height' | 'original'
+let comicDouble = false;
+let comicThumbsOpen = false;
+let comicPath = null;
+let _comicTouchStartX = null;
+let _comicTouchStartY = null;
 let lastNetSample = null;
 const mediaCache = {};
 let showsLibraryCache = null;
@@ -2352,22 +2357,36 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     modal.classList.remove('hidden');
 }
 
-async function openComicViewer(path, title) {
-    const modal = document.getElementById('viewer-modal');
-    const body = document.getElementById('viewer-body');
-    const heading = document.getElementById('viewer-title');
-    if (!modal || !body || !heading) {
-        window.open(path, '_blank');
-        return;
-    }
+// ═══════════════════════════════════════════════════════════
+//  COMIC READER — full revamp v1.3.0
+// ═══════════════════════════════════════════════════════════
 
-    heading.textContent = title ? String(title) : 'Comic';
-    body.innerHTML = `<div class="loading" style="padding:40px;">
-        <div class="logo animate-fade" style="font-size:1.5rem; margin-bottom:10px;">Loading Comic...</div>
-        <div class="progress-container" style="max-width:200px; margin:0 auto;"><div class="progress-fill" style="width:100%; animation: pulse 1.5s infinite;"></div></div>
-    </div>`;
-    modal.classList.remove('hidden');
-    comicZoom = 1;
+async function openComicViewer(path, title) {
+    comicPath = path;
+    comicPages = [];
+    comicIndex = 0;
+    comicZoom = 100;
+    comicFit = 'width';
+    comicDouble = false;
+
+    const overlay = document.getElementById('comic-overlay');
+    if (!overlay) return;
+
+    // Show overlay, set title, show loading
+    overlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    _comicSetTitle(title || 'Comic');
+    _comicShowLoading(true);
+    _comicUpdateFitBtn();
+    _comicUpdateZoomUI();
+
+    // Attach touch events once
+    const stage = document.getElementById('cr-stage');
+    if (stage && !stage._comicTouchBound) {
+        stage.addEventListener('touchstart', _comicTouchStart, { passive: true });
+        stage.addEventListener('touchend', _comicTouchEnd, { passive: true });
+        stage._comicTouchBound = true;
+    }
 
     try {
         const res = await fetch(`${API_BASE}/media/books/comic/pages?path=${encodeURIComponent(path)}`, {
@@ -2376,116 +2395,296 @@ async function openComicViewer(path, title) {
         if (res.status === 401) { logout(); return; }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            const msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || data || {});
-            body.innerHTML = `<div style="padding:40px; text-align:center;">
-                <div style="font-size:3rem; margin-bottom:20px;">⚠️</div>
-                <div style="color:#ddd; font-size:1.1rem;">${escapeHtml(msg || 'Failed to load comic.')}</div>
-            </div>`;
+            const msg = typeof data.detail === 'string' ? data.detail : 'Failed to load comic.';
+            _comicShowError(msg);
             return;
         }
         comicPages = Array.isArray(data.pages) ? data.pages : [];
-        comicIndex = 0;
+        if (comicPages.length === 0) { _comicShowError('No pages found in this comic.'); return; }
 
-        if (comicPages.length === 0) {
-            body.innerHTML = `<div style="padding:40px; text-align:center; color:#ddd;">No pages found in this comic.</div>`;
-            return;
-        }
+        // Use server-returned title if we have better data than the filename
+        if (data.title) _comicSetTitle(data.title);
 
-        renderComicPage();
+        _comicShowLoading(false);
+        _comicBuildThumbs();
+        _comicRender();
     } catch (e) {
-        body.innerHTML = `<div style="padding:40px; text-align:center; color:#ddd;">Failed to connect to server.</div>`;
+        _comicShowError('Connection error. Please try again.');
     }
 }
 
-function renderComicPage() {
-    const body = document.getElementById('viewer-body');
-    if (!body) return;
-    if (!comicPages || comicPages.length === 0) return;
+function closeComicOverlay() {
+    const overlay = document.getElementById('comic-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+    // Exit fullscreen if active
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    comicPages = [];
+    comicIndex = 0;
+}
+
+function _comicSetTitle(t) {
+    const el = document.getElementById('cr-title');
+    if (el) el.textContent = String(t);
+}
+
+function _comicShowLoading(show) {
+    document.getElementById('cr-loading')?.classList.toggle('hidden', !show);
+    document.getElementById('cr-pages')?.classList.toggle('hidden', show);
+    document.getElementById('cr-zoom-bar')?.classList.toggle('hidden', show);
+}
+
+function _comicShowError(msg) {
+    _comicShowLoading(false);
+    const pagesEl = document.getElementById('cr-pages');
+    if (pagesEl) pagesEl.innerHTML = `<div class="cr-error"><i class="fas fa-exclamation-triangle"></i><p>${escapeHtml(msg)}</p></div>`;
+    pagesEl?.classList.remove('hidden');
+}
+
+function _comicTokenUrl(url) {
+    if (!url) return '';
+    const token = getCookie('auth_token');
+    if (token && (url.startsWith('/data/') || url.startsWith('/api/'))) {
+        return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+    }
+    return url;
+}
+
+function _comicRender() {
+    const pagesEl = document.getElementById('cr-pages');
+    if (!pagesEl || !comicPages.length) return;
     comicIndex = Math.max(0, Math.min(comicIndex, comicPages.length - 1));
 
-    const page = comicPages[comicIndex];
-    let url = page?.path || page?.url || '';
-    const token = getCookie('auth_token');
-    if (token && url.startsWith('/data/')) {
-        url += (url.includes('?') ? '&' : '?') + 'token=' + token;
-    }
+    pagesEl.innerHTML = '';
+    pagesEl.className = 'cr-pages' + (comicDouble ? ' cr-pages--double' : '');
+
+    const showPages = comicDouble
+        ? [comicIndex, comicIndex + 1].filter(i => i < comicPages.length)
+        : [comicIndex];
+
+    showPages.forEach(i => {
+        const page = comicPages[i];
+        const url = _comicTokenUrl(page?.path || page?.url || '');
+        const img = document.createElement('img');
+        img.className = 'cr-page-img';
+        img.alt = `Page ${i + 1}`;
+        img.loading = 'eager';
+        img.src = url;
+        img.style.cssText = _comicImgStyle();
+        pagesEl.appendChild(img);
+    });
+
+    // Update controls
+    _comicUpdateNav();
+    _comicScrollToTop();
+    _comicPreload();
+    _comicUpdateThumbHighlight();
+}
+
+function _comicImgStyle() {
+    if (comicFit === 'width') return 'width:100%; height:auto; display:block;';
+    if (comicFit === 'height') return `width:auto; height:calc(100vh - 120px); display:block;`;
+    // 'zoom' mode — use comicZoom %
+    return `width:${comicZoom}%; height:auto; display:block;`;
+}
+
+function _comicUpdateNav() {
     const total = comicPages.length;
     const idx = comicIndex + 1;
-
-    body.innerHTML = `
-        <div class="comic-viewer">
-            <div class="comic-controls">
-                <button class="comic-btn" onclick="comicPrev()" ${comicIndex === 0 ? 'disabled' : ''}>
-                    <span>←</span> Previous
-                </button>
-                <div class="comic-indicator">${idx} / ${total}</div>
-                <button class="comic-btn primary" onclick="comicNext()" ${comicIndex >= total - 1 ? 'disabled' : ''}>
-                    Next <span>→</span>
-                </button>
-            </div>
-            <div class="comic-stage" id="comic-stage">
-                <div class="comic-page-wrapper" id="comic-wrapper" style="transform: scale(${comicZoom})">
-                    <img class="comic-page" src="${escapeHtml(url)}" alt="Page ${idx}" 
-                         style="max-width: ${comicFit === 'width' ? '100%' : 'none'}; 
-                                max-height: ${comicFit === 'height' ? '80vh' : 'none'};">
-                </div>
-                <div class="zoom-controls">
-                    <button class="zoom-btn" onclick="changeComicZoom(0.1)" title="Zoom In">+</button>
-                    <button class="zoom-btn" onclick="changeComicZoom(-0.1)" title="Zoom Out">-</button>
-                    <button class="zoom-btn" onclick="toggleComicFit()" title="Toggle Fit">
-                        ${comicFit === 'width' ? '↕️' : '↔️'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // Preload next page
-    if (comicIndex < total - 1) {
-        const nextImg = new Image();
-        let nextUrl = comicPages[comicIndex + 1].path || comicPages[comicIndex + 1].url;
-        if (token && nextUrl.startsWith('/data/')) {
-            nextUrl += (nextUrl.includes('?') ? '&' : '?') + 'token=' + token;
-        }
-        nextImg.src = nextUrl;
-    }
+    const indEl = document.getElementById('cr-page-indicator');
+    if (indEl) indEl.textContent = `${idx} / ${total}`;
+    const prevBtn = document.getElementById('cr-prev-btn');
+    const nextBtn = document.getElementById('cr-next-btn');
+    if (prevBtn) prevBtn.disabled = comicIndex === 0;
+    if (nextBtn) nextBtn.disabled = comicIndex >= total - (comicDouble ? 2 : 1);
 }
 
-function changeComicZoom(delta) {
-    comicZoom = Math.max(0.5, Math.min(3, comicZoom + delta));
-    const wrapper = document.getElementById('comic-wrapper');
-    if (wrapper) wrapper.style.transform = `scale(${comicZoom})`;
+function _comicScrollToTop() {
+    const stage = document.getElementById('cr-stage');
+    if (stage) stage.scrollTo({ top: 0, behavior: 'instant' });
 }
 
-function toggleComicFit() {
-    comicFit = comicFit === 'width' ? 'height' : 'width';
-    renderComicPage();
+function _comicPreload() {
+    const token = getCookie('auth_token');
+    [-1, 1, 2].forEach(offset => {
+        const i = comicIndex + offset;
+        if (i < 0 || i >= comicPages.length) return;
+        const url = _comicTokenUrl(comicPages[i]?.path || comicPages[i]?.url || '');
+        if (url) { const img = new Image(); img.src = url; }
+    });
 }
 
+// ── Navigation ───────────────────────────────────────────
 function comicPrev() {
-    if (comicIndex > 0) {
-        comicIndex -= 1;
-        comicZoom = 1;
-        renderComicPage();
-        document.getElementById('comic-stage')?.scrollTo(0, 0);
-    }
+    if (comicIndex <= 0) return;
+    comicIndex = Math.max(0, comicIndex - (comicDouble ? 2 : 1));
+    _comicRender();
 }
 
 function comicNext() {
-    if (comicPages && comicIndex < comicPages.length - 1) {
-        comicIndex += 1;
-        comicZoom = 1;
-        renderComicPage();
-        document.getElementById('comic-stage')?.scrollTo(0, 0);
+    if (!comicPages.length) return;
+    const max = comicPages.length - (comicDouble ? 2 : 1);
+    if (comicIndex >= max) return;
+    comicIndex = Math.min(comicPages.length - 1, comicIndex + (comicDouble ? 2 : 1));
+    _comicRender();
+}
+
+function comicGoTo(index) {
+    comicIndex = Math.max(0, Math.min(index, comicPages.length - 1));
+    _comicRender();
+    // Close thumbs on mobile
+    if (window.innerWidth < 600) comicThumbsOpen = false, _comicApplyThumbs();
+}
+
+// ── Fit / Zoom ───────────────────────────────────────────
+function comicCycleFit() {
+    const modes = ['width', 'height', 'zoom'];
+    comicFit = modes[(modes.indexOf(comicFit) + 1) % modes.length];
+    if (comicFit === 'zoom') comicZoom = 100;
+    _comicUpdateFitBtn();
+    _comicApplyImgStyles();
+}
+
+function _comicUpdateFitBtn() {
+    const icons = { width: 'fa-arrows-alt-h', height: 'fa-arrows-alt-v', zoom: 'fa-search' };
+    const titles = { width: 'Fit width', height: 'Fit height', zoom: 'Manual zoom' };
+    const iconEl = document.getElementById('cr-fit-icon');
+    const btn = document.getElementById('cr-fit-btn');
+    if (iconEl) iconEl.className = `fas ${icons[comicFit] || 'fa-expand-arrows-alt'}`;
+    if (btn) btn.title = titles[comicFit] || 'Fit';
+    const zoomBar = document.getElementById('cr-zoom-bar');
+    if (zoomBar) zoomBar.classList.toggle('cr-zoom-bar--active', comicFit === 'zoom');
+}
+
+function comicZoomIn() { comicSetZoom(Math.min(300, comicZoom + 10)); }
+function comicZoomOut() { comicSetZoom(Math.max(50, comicZoom - 10)); }
+function comicResetZoom() { comicSetZoom(100); }
+
+function comicSetZoom(val) {
+    comicZoom = Math.max(50, Math.min(300, parseInt(val)));
+    comicFit = 'zoom';
+    _comicUpdateFitBtn();
+    _comicUpdateZoomUI();
+    _comicApplyImgStyles();
+}
+
+function _comicUpdateZoomUI() {
+    const slider = document.getElementById('cr-zoom-slider');
+    const pct = document.getElementById('cr-zoom-pct');
+    if (slider) slider.value = comicZoom;
+    if (pct) pct.textContent = `${comicZoom}%`;
+}
+
+function _comicApplyImgStyles() {
+    document.querySelectorAll('#cr-pages .cr-page-img').forEach(img => {
+        img.style.cssText = _comicImgStyle();
+    });
+}
+
+// ── Double page mode ─────────────────────────────────────
+function comicToggleDouble() {
+    comicDouble = !comicDouble;
+    const btn = document.getElementById('cr-double-btn');
+    if (btn) btn.classList.toggle('cr-btn--active', comicDouble);
+    _comicRender();
+}
+
+// ── Thumbnails ───────────────────────────────────────────
+function _comicBuildThumbs() {
+    const scroll = document.getElementById('cr-thumbs-scroll');
+    if (!scroll) return;
+    scroll.innerHTML = comicPages.map((page, i) => {
+        const url = _comicTokenUrl(page?.path || page?.url || '');
+        return `<div class="cr-thumb ${i === comicIndex ? 'cr-thumb--active' : ''}"
+                     data-idx="${i}" onclick="comicGoTo(${i})" title="Page ${i+1}">
+            <img src="${escapeHtml(url)}" loading="lazy" alt="Page ${i+1}">
+            <span>${i+1}</span>
+        </div>`;
+    }).join('');
+}
+
+function comicToggleThumbs() {
+    comicThumbsOpen = !comicThumbsOpen;
+    _comicApplyThumbs();
+}
+
+function _comicApplyThumbs() {
+    const panel = document.getElementById('cr-thumbs-panel');
+    const btn = document.getElementById('cr-thumbs-btn');
+    if (panel) panel.classList.toggle('hidden', !comicThumbsOpen);
+    if (btn) btn.classList.toggle('cr-btn--active', comicThumbsOpen);
+}
+
+function _comicUpdateThumbHighlight() {
+    document.querySelectorAll('#cr-thumbs-scroll .cr-thumb').forEach(el => {
+        const active = parseInt(el.dataset.idx) === comicIndex;
+        el.classList.toggle('cr-thumb--active', active);
+        if (active) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+}
+
+// ── Fullscreen ───────────────────────────────────────────
+function comicToggleFullscreen() {
+    const overlay = document.getElementById('comic-overlay');
+    if (!overlay) return;
+    if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+    } else {
+        overlay.requestFullscreen?.().catch(() => {
+            // Fallback: toggle CSS fullscreen class
+            overlay.classList.toggle('cr-css-fullscreen');
+        });
     }
 }
 
+document.addEventListener('fullscreenchange', () => {
+    const icon = document.getElementById('cr-fs-icon');
+    if (!icon) return;
+    if (document.fullscreenElement) {
+        icon.className = 'fas fa-compress';
+    } else {
+        icon.className = 'fas fa-expand';
+    }
+});
+
+// ── Touch / Swipe ────────────────────────────────────────
+function _comicTouchStart(e) {
+    if (e.touches.length === 1) {
+        _comicTouchStartX = e.touches[0].clientX;
+        _comicTouchStartY = e.touches[0].clientY;
+    }
+}
+
+function _comicTouchEnd(e) {
+    if (_comicTouchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - _comicTouchStartX;
+    const dy = e.changedTouches[0].clientY - _comicTouchStartY;
+    _comicTouchStartX = null;
+    _comicTouchStartY = null;
+    // Only horizontal swipes >50px that aren't primarily vertical
+    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx) * 0.8) return;
+    if (dx < 0) comicNext(); else comicPrev();
+}
+
 document.addEventListener('keydown', (e) => {
+    // Comic overlay keyboard shortcuts (checked first)
+    const comicOverlay = document.getElementById('comic-overlay');
+    if (comicOverlay && !comicOverlay.classList.contains('hidden')) {
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
+        if (e.key === 'Escape') { closeComicOverlay(); return; }
+        if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); comicPrev(); return; }
+        if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); comicNext(); return; }
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); comicZoomIn(); return; }
+        if (e.key === '-') { e.preventDefault(); comicZoomOut(); return; }
+        if (e.key === '0') { e.preventDefault(); comicResetZoom(); return; }
+        if (e.key === 'f' || e.key === 'F') { e.preventDefault(); comicToggleFullscreen(); return; }
+        if (e.key === 'd' || e.key === 'D') { e.preventDefault(); comicToggleDouble(); return; }
+        return; // Don't propagate to video shortcuts when comic is open
+    }
+    // Video modal keyboard shortcuts
     const modal = document.getElementById('viewer-modal');
     if (!modal || modal.classList.contains('hidden')) return;
     if (e.key === 'Escape') closeViewer();
-    if (e.key === 'ArrowLeft') comicPrev();
-    if (e.key === 'ArrowRight') comicNext();
     // Video keyboard shortcuts
     const video = activeVideoEl;
     if (!video) return;

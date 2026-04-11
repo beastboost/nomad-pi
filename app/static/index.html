@@ -908,7 +908,89 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="js/app.js?v=1775509265"></script>
+
+    <!-- ═══════════════════════════════════════════════
+         DEDICATED COMIC READER OVERLAY
+         ═══════════════════════════════════════════════ -->
+    <div id="comic-overlay" class="comic-overlay hidden" role="dialog" aria-label="Comic Reader">
+
+        <!-- Top toolbar -->
+        <div class="cr-toolbar" id="cr-toolbar">
+            <div class="cr-toolbar-left">
+                <button class="cr-btn" onclick="closeComicOverlay()" title="Close (Esc)">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="cr-title" id="cr-title">Comic</div>
+            </div>
+            <div class="cr-toolbar-center">
+                <button class="cr-btn" onclick="comicPrev()" id="cr-prev-btn" title="Previous page (←)">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <div class="cr-page-indicator" id="cr-page-indicator">1 / 1</div>
+                <button class="cr-btn" onclick="comicNext()" id="cr-next-btn" title="Next page (→)">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div class="cr-toolbar-right">
+                <button class="cr-btn cr-btn--active" id="cr-fit-btn" onclick="comicCycleFit()" title="Cycle fit mode">
+                    <i class="fas fa-expand-arrows-alt" id="cr-fit-icon"></i>
+                </button>
+                <button class="cr-btn" id="cr-double-btn" onclick="comicToggleDouble()" title="Double page">
+                    <i class="fas fa-columns"></i>
+                </button>
+                <button class="cr-btn" id="cr-thumbs-btn" onclick="comicToggleThumbs()" title="Page thumbnails">
+                    <i class="fas fa-th"></i>
+                </button>
+                <button class="cr-btn" id="cr-fs-btn" onclick="comicToggleFullscreen()" title="Fullscreen (F)">
+                    <i class="fas fa-expand" id="cr-fs-icon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Main content area -->
+        <div class="cr-body" id="cr-body">
+
+            <!-- Thumbnail sidebar -->
+            <div class="cr-thumbs-panel hidden" id="cr-thumbs-panel">
+                <div class="cr-thumbs-scroll" id="cr-thumbs-scroll"></div>
+            </div>
+
+            <!-- Page stage -->
+            <div class="cr-stage" id="cr-stage">
+
+                <!-- Loading state -->
+                <div class="cr-loading" id="cr-loading">
+                    <div class="cr-loading-inner">
+                        <i class="fas fa-book-open" style="font-size:3rem; margin-bottom:1rem; opacity:0.4;"></i>
+                        <div id="cr-loading-text">Opening comic…</div>
+                        <div class="cr-loading-bar"><div class="cr-loading-fill"></div></div>
+                    </div>
+                </div>
+
+                <!-- Pages -->
+                <div class="cr-pages" id="cr-pages"></div>
+
+                <!-- Tap zones (mobile) -->
+                <div class="cr-tap-prev" onclick="comicPrev()" title="Previous page"></div>
+                <div class="cr-tap-next" onclick="comicNext()" title="Next page"></div>
+
+            </div>
+        </div>
+
+        <!-- Bottom zoom bar -->
+        <div class="cr-zoom-bar" id="cr-zoom-bar">
+            <button class="cr-btn cr-sm" onclick="comicZoomOut()" title="Zoom out (-)"><i class="fas fa-search-minus"></i></button>
+            <input type="range" class="cr-zoom-slider" id="cr-zoom-slider"
+                   min="50" max="300" value="100" step="5"
+                   oninput="comicSetZoom(this.value)">
+            <button class="cr-btn cr-sm" onclick="comicZoomIn()" title="Zoom in (+)"><i class="fas fa-search-plus"></i></button>
+            <span class="cr-zoom-pct" id="cr-zoom-pct">100%</span>
+            <button class="cr-btn cr-sm" onclick="comicResetZoom()" title="Reset zoom">1:1</button>
+        </div>
+
+    </div><!-- /#comic-overlay -->
+
+
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
