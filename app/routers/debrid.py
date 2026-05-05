@@ -123,8 +123,8 @@ def search_torrents(
         omdb_key = database.get_setting("omdb_api_key")
         if omdb_key:
             try:
-                import requests as req
-                r = req.get(
+                import httpx
+                r = httpx.get(
                     "https://www.omdbapi.com/",
                     params={"apikey": omdb_key, "s": query, "type": media_type},
                     timeout=10,
