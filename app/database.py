@@ -710,6 +710,21 @@ def clear_library_index_category(category: str):
     finally:
         return_db(conn)
 
+def remove_stale_library_entries(category: str, current_paths: set):
+    """Remove library index entries whose paths are no longer on disk."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT path FROM library_index WHERE category = ?', (category,))
+        rows = c.fetchall()
+        stale = [r['path'] for r in rows if r['path'] not in current_paths]
+        if stale:
+            placeholders = ','.join('?' for _ in stale)
+            c.execute(f'DELETE FROM library_index WHERE category = ? AND path IN ({placeholders})', [category] + stale)
+            conn.commit()
+    finally:
+        return_db(conn)
+
 def set_library_index_state(category: str, item_count: int):
     conn = get_db()
     try:
@@ -1153,6 +1168,16 @@ def delete_session(token: str):
     try:
         c = conn.cursor()
         c.execute('DELETE FROM sessions WHERE token = ?', (token,))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def delete_user_sessions(user_id: int):
+    """Delete all sessions for a user (used during session rotation on login)."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
         conn.commit()
     finally:
         return_db(conn)

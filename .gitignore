@@ -18,6 +18,8 @@ publish/
 *.user
 *.txt
 !requirements.txt
+!.env.example
+!app/static/robots.txt
 !setup.sh
 
 # Debug scripts

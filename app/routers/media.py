@@ -1202,13 +1202,12 @@ def build_library_index(category: str):
     paths_to_scan = get_scan_paths(category)
     count = 0
     batch = []
+    seen_paths = set()
 
     with _scan_lock:
         _scan_state["category"] = category
         _scan_state["count"] = 0
         _scan_state["message"] = f"Scanning {category}…"
-
-    database.clear_library_index_category(category)
 
     allowed = None
     if category in ['movies', 'shows']:
@@ -1309,12 +1308,11 @@ def build_library_index(category: str):
                             p_url = find_local_poster(parent)
 
                 # Priority 4: Database-cached poster (from previous OMDb fetches)
-                if not p_url:
-                    meta = database.get_file_metadata(web_path)
-                    if meta and meta.get("poster"):
+                meta = database.get_file_metadata(web_path)
+                if not p_url and meta:
+                    if meta.get("poster"):
                         p_url = meta.get("poster")
-                    elif meta and meta.get("meta"):
-                        # Check nested OMDB data if available
+                    elif meta.get("meta"):
                         m_data = meta.get("meta")
                         if isinstance(m_data, dict) and m_data.get("Poster") and m_data["Poster"] != "N/A":
                             p_url = m_data["Poster"]
@@ -1328,16 +1326,11 @@ def build_library_index(category: str):
                     "poster": p_url,
                     "mtime": float(getattr(st, "st_mtime", 0.0) or 0.0),
                     "size": int(getattr(st, "st_size", 0) or 0),
-                    "genre": None,
-                    "year": None
+                    "genre": meta.get("genre") if meta else None,
+                    "year": meta.get("year") if meta else None
                 }
                 
-                # Try to get genre and year from cached metadata
-                meta = database.get_file_metadata(web_path)
-                if meta:
-                    item["genre"] = meta.get("genre")
-                    item["year"] = meta.get("year")
-                
+                seen_paths.add(web_path)
                 batch.append(item)
                 if len(batch) >= 500:
                     database.upsert_library_index_items(batch)
@@ -1350,6 +1343,8 @@ def build_library_index(category: str):
 
     if batch:
         database.upsert_library_index_items(batch)
+    # Remove stale entries (files that were indexed before but no longer exist on disk)
+    database.remove_stale_library_entries(category, seen_paths)
     database.set_library_index_state(category, count)
     with _scan_lock:
         if _scan_state["running"] > 0:

@@ -179,6 +179,8 @@ def login(request: LoginRequest, request_obj: Request):
     if user and verified:
         # Clear attempts on success
         clear_attempts(login_attempts, client_ip)
+        # Rotate session: invalidate any existing sessions for this user
+        database.delete_user_sessions(user['id'])
         token = str(uuid.uuid4())
         database.create_session(token, user['id'])
 
