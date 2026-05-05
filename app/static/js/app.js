@@ -6253,6 +6253,124 @@ async function downloadSubtitle(fileId, lang) {
 }
 
 // ============================================================================
+// Keyboard Shortcuts
+// ============================================================================
+
+document.addEventListener('keydown', (e) => {
+    // Skip if user is typing in an input/textarea
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+    const playerOverlay = document.getElementById('player-overlay');
+    const videoEl = document.getElementById('main-video');
+    const isPlayerOpen = playerOverlay && playerOverlay.style.display !== 'none';
+
+    // Player shortcuts (when video player is open)
+    if (isPlayerOpen && videoEl) {
+        switch (e.key) {
+            case ' ':
+            case 'k':
+                e.preventDefault();
+                videoEl.paused ? videoEl.play() : videoEl.pause();
+                return;
+            case 'f':
+                e.preventDefault();
+                if (document.fullscreenElement) document.exitFullscreen();
+                else playerOverlay.requestFullscreen?.();
+                return;
+            case 'Escape':
+                e.preventDefault();
+                const closeBtn = playerOverlay.querySelector('.close-player, [onclick*="closePlayer"]');
+                if (closeBtn) closeBtn.click();
+                return;
+            case 'm':
+                e.preventDefault();
+                videoEl.muted = !videoEl.muted;
+                return;
+            case 'ArrowLeft':
+                e.preventDefault();
+                videoEl.currentTime = Math.max(0, videoEl.currentTime - (e.shiftKey ? 30 : 10));
+                return;
+            case 'ArrowRight':
+                e.preventDefault();
+                videoEl.currentTime = Math.min(videoEl.duration || Infinity, videoEl.currentTime + (e.shiftKey ? 30 : 10));
+                return;
+            case 'ArrowUp':
+                e.preventDefault();
+                videoEl.volume = Math.min(1, videoEl.volume + 0.1);
+                return;
+            case 'ArrowDown':
+                e.preventDefault();
+                videoEl.volume = Math.max(0, videoEl.volume - 0.1);
+                return;
+            case ',':
+                if (videoEl.paused) { videoEl.currentTime -= 1/30; }
+                return;
+            case '.':
+                if (videoEl.paused) { videoEl.currentTime += 1/30; }
+                return;
+        }
+        return;
+    }
+
+    // Global navigation shortcuts
+    if (e.key === '/' || (e.key === 'k' && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        openGlobalSearch();
+        return;
+    }
+
+    // Navigation: 1-9 for sections
+    const sectionMap = { '1': 'home', '2': 'movies', '3': 'shows', '4': 'music', '5': 'books', '6': 'gallery', '7': 'files', '8': 'debrid', '9': 'admin' };
+    if (sectionMap[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        showSection(sectionMap[e.key]);
+        return;
+    }
+
+    // ? to show shortcuts help
+    if (e.key === '?' && !e.ctrlKey) {
+        showKeyboardShortcutsHelp();
+    }
+});
+
+function showKeyboardShortcutsHelp() {
+    const existing = document.getElementById('shortcuts-modal');
+    if (existing) { existing.remove(); return; }
+
+    const modal = document.createElement('div');
+    modal.id = 'shortcuts-modal';
+    modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.7)';
+    modal.innerHTML = `
+        <div class="glass-card" style="padding:2rem;max-width:500px;width:90%;max-height:80vh;overflow-y:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+                <h3><i class="fas fa-keyboard"></i> Keyboard Shortcuts</h3>
+                <button onclick="this.closest('#shortcuts-modal').remove()" class="secondary small"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="font-size:.9rem">
+                <h4 style="color:var(--accent);margin:.75rem 0 .5rem">Navigation</h4>
+                <div style="display:grid;grid-template-columns:80px 1fr;gap:.25rem .75rem">
+                    <kbd>/</kbd><span>Search</span>
+                    <kbd>1-9</kbd><span>Switch sections</span>
+                    <kbd>?</kbd><span>Show this help</span>
+                </div>
+                <h4 style="color:var(--accent);margin:.75rem 0 .5rem">Video Player</h4>
+                <div style="display:grid;grid-template-columns:80px 1fr;gap:.25rem .75rem">
+                    <kbd>Space/K</kbd><span>Play / Pause</span>
+                    <kbd>F</kbd><span>Fullscreen</span>
+                    <kbd>M</kbd><span>Mute</span>
+                    <kbd>Esc</kbd><span>Close player</span>
+                    <kbd>&larr; / &rarr;</kbd><span>Seek &plusmn;10s (Shift: &plusmn;30s)</span>
+                    <kbd>&uarr; / &darr;</kbd><span>Volume up / down</span>
+                    <kbd>, / .</kbd><span>Frame step (paused)</span>
+                </div>
+            </div>
+        </div>
+    `;
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+}
+
+// ============================================================================
 // Real-Debrid Integration
 // ============================================================================
 

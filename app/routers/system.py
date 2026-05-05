@@ -11,7 +11,7 @@ import re
 from typing import List, Optional
 from datetime import datetime
 from app import database
-from app.routers.auth import get_current_user_id
+from app.routers.auth import get_current_user_id, get_current_admin
 
 logger = logging.getLogger(__name__)
 
@@ -2450,3 +2450,102 @@ def save_setting_endpoint(data: dict = Body(...), user_id: int = Depends(get_cur
         raise HTTPException(status_code=403, detail="Key not allowed via this endpoint")
     database.set_setting(str(key), str(value))
     return {"status": "ok", "key": key}
+
+
+# ---------------------------------------------------------------------------
+# Backup & Restore
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import FileResponse
+import zipfile
+import tempfile
+import sqlite3
+
+@router.post("/backup")
+def create_backup(admin: dict = Depends(get_current_admin)):
+    """Create a backup ZIP of the database and settings."""
+    backup_dir = os.path.join("data", "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(backup_dir, f"nomadpi_backup_{timestamp}.zip")
+
+    db_path = os.path.join("data", "nomad.db")
+    mounts_path = os.path.join("data", "mounts.json")
+
+    try:
+        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Backup database (safe copy via SQLite backup API)
+            temp_db = os.path.join(backup_dir, f"_temp_backup_{timestamp}.db")
+            try:
+                src = sqlite3.connect(db_path)
+                dst = sqlite3.connect(temp_db)
+                src.backup(dst)
+                dst.close()
+                src.close()
+                zf.write(temp_db, "nomad.db")
+            finally:
+                if os.path.exists(temp_db):
+                    os.remove(temp_db)
+
+            # Backup mounts.json if exists
+            if os.path.exists(mounts_path):
+                zf.write(mounts_path, "mounts.json")
+
+            # Backup .env if exists
+            env_path = ".env"
+            if os.path.exists(env_path):
+                zf.write(env_path, ".env")
+
+            # Add manifest
+            manifest = {
+                "version": VERSION,
+                "created_at": datetime.now().isoformat(),
+                "platform": platform.system(),
+                "hostname": platform.node(),
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+        return FileResponse(
+            backup_path,
+            filename=f"nomadpi_backup_{timestamp}.zip",
+            media_type="application/zip",
+        )
+    except Exception as e:
+        logger.error(f"Backup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/backups")
+def list_backups(admin: dict = Depends(get_current_admin)):
+    """List available backups."""
+    backup_dir = os.path.join("data", "backups")
+    if not os.path.exists(backup_dir):
+        return {"backups": []}
+
+    backups = []
+    for f in sorted(os.listdir(backup_dir), reverse=True):
+        if f.startswith("nomadpi_backup_") and f.endswith(".zip"):
+            fpath = os.path.join(backup_dir, f)
+            st = os.stat(fpath)
+            backups.append({
+                "filename": f,
+                "size": st.st_size,
+                "created": datetime.fromtimestamp(st.st_mtime).isoformat(),
+            })
+
+    return {"backups": backups}
+
+
+@router.delete("/backups/{filename}")
+def delete_backup(filename: str, admin: dict = Depends(get_current_admin)):
+    """Delete a backup file."""
+    if not filename.startswith("nomadpi_backup_") or not filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Invalid backup filename")
+
+    backup_path = os.path.join("data", "backups", filename)
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup not found")
+
+    os.remove(backup_path)
+    return {"status": "ok"}

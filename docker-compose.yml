@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  nomadpi:
+    build: .
+    container_name: nomadpi
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "8001:8001/udp"  # Discovery service
+    volumes:
+      - ./data:/app/data
+      - /media:/media:ro  # Mount external drives (read-only)
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    # For Raspberry Pi, limit memory to prevent OOM
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 256M
