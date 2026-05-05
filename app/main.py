@@ -18,7 +18,7 @@ try:
     auth.ensure_admin_user()
 
     from app.services import ingest
-    from app.routers import media, system, uploads, dashboard
+    from app.routers import media, system, uploads, dashboard, debrid
 except Exception as e:
     print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
@@ -376,6 +376,7 @@ app.include_router(media.router, prefix="/api/media", tags=["media"], dependenci
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(dashboard.router)  # Dashboard has its own prefix and auth where needed
+app.include_router(debrid.router)  # Real-Debrid integration (has its own auth)
 
 @app.middleware("http")
 async def protect_data(request: Request, call_next):

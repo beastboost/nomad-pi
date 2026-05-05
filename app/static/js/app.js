@@ -902,6 +902,9 @@ function showSection(id) {
             }
         }, 5000);
     }
+    if (id === 'debrid') {
+        initDebrid();
+    }
     if (id === 'settings') {
         refreshTailscaleStatus();
     }
@@ -6247,4 +6250,465 @@ async function downloadSubtitle(fileId, lang) {
         // Reload subtitles for active video
         if (activeVideoEl) loadSubtitlesForVideo(activeVideoEl, _subtitleVideoPath);
     } catch (e) { showToast(`Subtitle error: ${e.message}`, 'error'); }
+}
+
+// ============================================================================
+// Real-Debrid Integration
+// ============================================================================
+
+let _debridDownloadInterval = null;
+let _debridSelectedImdb = null;
+let _debridSelectedTitle = null;
+
+function debridShowType() {
+    const t = document.getElementById('debrid-type');
+    const se = document.getElementById('debrid-season-ep');
+    if (t && se) se.style.display = t.value === 'series' ? 'flex' : 'none';
+}
+
+async function initDebrid() {
+    const typeSelect = document.getElementById('debrid-type');
+    if (typeSelect) typeSelect.addEventListener('change', debridShowType);
+
+    try {
+        const res = await fetch(`${API_BASE}/debrid/settings/key`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.configured && data.user) {
+            document.getElementById('debrid-setup').style.display = 'none';
+            document.getElementById('debrid-main').style.display = 'block';
+            document.getElementById('rd-account-info').style.display = 'block';
+            document.getElementById('rd-username').textContent = data.user.username || 'Connected';
+            if (!data.user.premium) {
+                const badge = document.getElementById('rd-premium-badge');
+                if (badge) badge.style.display = 'none';
+            }
+        } else {
+            document.getElementById('debrid-setup').style.display = 'block';
+            document.getElementById('debrid-main').style.display = 'none';
+        }
+    } catch (e) {
+        document.getElementById('debrid-setup').style.display = 'block';
+        document.getElementById('debrid-main').style.display = 'none';
+    }
+
+    refreshDebridDownloads();
+}
+
+async function saveRDKey() {
+    const input = document.getElementById('rd-api-key-input');
+    const key = input ? input.value.trim() : '';
+    if (!key) { showToast('Please enter an API key', 'warning'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/debrid/settings/key`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: key }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to save key');
+        }
+        showToast('Real-Debrid connected!', 'success');
+        initDebrid();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function removeRDKey() {
+    if (!confirm('Remove Real-Debrid API key?')) return;
+    try {
+        await fetch(`${API_BASE}/debrid/settings/key`, { method: 'DELETE', headers: getAuthHeaders() });
+        showToast('API key removed', 'info');
+        initDebrid();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function debridSearch() {
+    const query = document.getElementById('debrid-search').value.trim();
+    const mediaType = document.getElementById('debrid-type').value;
+    if (!query) { showToast('Enter a search term', 'warning'); return; }
+
+    const season = document.getElementById('debrid-season')?.value || '';
+    const episode = document.getElementById('debrid-episode')?.value || '';
+
+    const resultsDiv = document.getElementById('debrid-results');
+    const resultsList = document.getElementById('debrid-results-list');
+    const torrentsDiv = document.getElementById('debrid-torrents');
+
+    resultsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
+    resultsDiv.style.display = 'block';
+    torrentsDiv.style.display = 'none';
+
+    try {
+        let params = `query=${encodeURIComponent(query)}&media_type=${mediaType}`;
+        if (season) params += `&season=${season}`;
+        if (episode) params += `&episode=${episode}`;
+
+        const res = await fetch(`${API_BASE}/debrid/search?${params}`, { headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('Search failed');
+        const data = await res.json();
+
+        if (data.type === 'search_results') {
+            if (!data.results || data.results.length === 0) {
+                resultsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No results found</p>';
+                return;
+            }
+            resultsList.innerHTML = data.results.map(r => `
+                <div class="glass-card" style="padding:1rem;margin-bottom:.5rem;cursor:pointer;display:flex;gap:1rem;align-items:center"
+                     onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title)}','${mediaType}')">
+                    ${r.poster ? `<img src="${r.poster}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
+                    <div>
+                        <strong>${escapeHtml(r.title)}</strong> <span style="color:var(--text-secondary)">(${r.year || '?'})</span>
+                        <div style="font-size:.8rem;color:var(--text-secondary)">${r.imdb_id} &middot; ${r.type || mediaType}</div>
+                    </div>
+                </div>
+            `).join('');
+        } else if (data.type === 'torrents') {
+            resultsDiv.style.display = 'none';
+            renderTorrentResults(data.results, data.imdb_id);
+        }
+    } catch (e) {
+        resultsList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
+    }
+}
+
+async function debridSelectTitle(imdbId, title, mediaType) {
+    _debridSelectedImdb = imdbId;
+    _debridSelectedTitle = title;
+
+    const season = document.getElementById('debrid-season')?.value || '';
+    const episode = document.getElementById('debrid-episode')?.value || '';
+
+    const torrentsDiv = document.getElementById('debrid-torrents');
+    const torrentsList = document.getElementById('debrid-torrents-list');
+
+    torrentsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i> Finding torrents...</p>';
+    torrentsDiv.style.display = 'block';
+
+    try {
+        let params = `imdb_id=${imdbId}&media_type=${mediaType}`;
+        if (season) params += `&season=${season}`;
+        if (episode) params += `&episode=${episode}`;
+
+        const res = await fetch(`${API_BASE}/debrid/search?${params}`, { headers: getAuthHeaders() });
+        if (!res.ok) throw new Error('Torrent search failed');
+        const data = await res.json();
+
+        renderTorrentResults(data.results || [], imdbId);
+    } catch (e) {
+        torrentsList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
+    }
+}
+
+function renderTorrentResults(results, imdbId) {
+    const torrentsDiv = document.getElementById('debrid-torrents');
+    const torrentsList = document.getElementById('debrid-torrents-list');
+    torrentsDiv.style.display = 'block';
+
+    if (!results || results.length === 0) {
+        torrentsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No torrents found for this title</p>';
+        return;
+    }
+
+    const qualityColors = { '2160p': '#e6c619', '4K': '#e6c619', '1080p': '#4CAF50', '720p': '#2196F3', '480p': '#9E9E9E' };
+
+    torrentsList.innerHTML = results.map((t, i) => {
+        const qColor = qualityColors[t.quality] || 'var(--text-secondary)';
+        return `
+            <div class="glass-card" style="padding:1rem;margin-bottom:.5rem">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+                    <div style="flex:1;min-width:200px">
+                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}</div>
+                        <div style="font-size:.85rem;color:var(--text-secondary)">
+                            <span style="color:${qColor};font-weight:600">${t.quality}</span>
+                            ${t.size ? ` &middot; ${t.size}` : ''}
+                            ${t.source ? ` &middot; ${t.source}` : ''}
+                            ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:.5rem;flex-shrink:0">
+                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapeHtml(t.name)}')" class="primary small" title="Send to Real-Debrid">
+                            <i class="fas fa-magnet"></i> Add
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function debridAddMagnet(infoHash, fileIdx, name) {
+    showToast('Adding to Real-Debrid...', 'info');
+    try {
+        const body = { info_hash: infoHash };
+        if (fileIdx != null) body.file_idx = fileIdx;
+
+        const res = await fetch(`${API_BASE}/debrid/magnet`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to add magnet');
+        }
+        const data = await res.json();
+
+        if (data.torrent_status === 'downloaded' && data.links && data.links.length > 0) {
+            showToast('Cached! Getting download link...', 'success');
+            debridHandleLinks(data.links, data.filename || name);
+        } else if (data.torrent_status === 'waiting_files_selection') {
+            showToast('Select files to download', 'info');
+            debridShowFiles(data);
+        } else {
+            showToast(`Status: ${data.torrent_status} (${data.progress || 0}%)`, 'info');
+            if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
+        }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function debridHandleLinks(links, filename) {
+    for (const link of links) {
+        try {
+            const res = await fetch(`${API_BASE}/debrid/unrestrict?link=${encodeURIComponent(link)}`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+            });
+            if (!res.ok) continue;
+            const data = await res.json();
+
+            if (data.download && data.filename) {
+                // Show action dialog
+                const action = await debridActionDialog(data.filename, data.download, data.filesize);
+                if (action === 'stream') {
+                    debridStreamFile(data.download, data.filename);
+                } else if (action === 'download') {
+                    debridDownloadToPi(data.download, data.filename);
+                }
+            }
+        } catch (e) {
+            logger.error('Unrestrict failed:', e);
+        }
+    }
+}
+
+function debridActionDialog(filename, downloadUrl, filesize) {
+    return new Promise((resolve) => {
+        const sizeStr = filesize ? `(${(filesize / 1073741824).toFixed(2)} GB)` : '';
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.7)';
+        modal.innerHTML = `
+            <div class="glass-card" style="padding:2rem;max-width:500px;width:90%">
+                <h3 style="margin-bottom:1rem"><i class="fas fa-check-circle" style="color:var(--accent)"></i> Ready!</h3>
+                <p style="word-break:break-word;margin-bottom:.5rem"><strong>${escapeHtml(filename)}</strong></p>
+                <p style="color:var(--text-secondary);margin-bottom:1.5rem;font-size:.9rem">${sizeStr}</p>
+                <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+                    <button class="primary" onclick="this.closest('.modal-overlay')._resolve('stream')">
+                        <i class="fas fa-play"></i> Stream Now
+                    </button>
+                    <button class="secondary" onclick="this.closest('.modal-overlay')._resolve('download')">
+                        <i class="fas fa-download"></i> Download to Pi
+                    </button>
+                    <button class="danger" onclick="this.closest('.modal-overlay')._resolve('cancel')">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        `;
+        modal._resolve = (val) => { modal.remove(); resolve(val); };
+        modal.addEventListener('click', (e) => { if (e.target === modal) { modal.remove(); resolve('cancel'); } });
+        document.body.appendChild(modal);
+    });
+}
+
+function debridStreamFile(url, filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const videoExts = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts'];
+
+    if (videoExts.includes(ext)) {
+        // Use the existing video player
+        const playerOverlay = document.getElementById('player-overlay');
+        const videoEl = document.getElementById('main-video');
+        if (playerOverlay && videoEl) {
+            videoEl.src = url;
+            playerOverlay.style.display = 'flex';
+            document.getElementById('player-title').textContent = filename;
+            videoEl.play().catch(() => {});
+            showToast('Streaming from Real-Debrid', 'success');
+        }
+    } else {
+        // Open in new tab for non-video files
+        window.open(url, '_blank');
+    }
+}
+
+async function debridDownloadToPi(url, filename) {
+    const isShow = document.getElementById('debrid-type')?.value === 'series';
+    try {
+        const res = await fetch(`${API_BASE}/debrid/download`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ download_url: url, filename, category: 'auto', is_show: isShow }),
+        });
+        if (!res.ok) throw new Error('Download request failed');
+        showToast(`Downloading ${filename} to Pi...`, 'success');
+        refreshDebridDownloads();
+
+        // Start polling
+        if (!_debridDownloadInterval) {
+            _debridDownloadInterval = setInterval(refreshDebridDownloads, 3000);
+        }
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function refreshDebridDownloads() {
+    try {
+        const res = await fetch(`${API_BASE}/debrid/downloads`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = document.getElementById('debrid-downloads-list');
+        if (!list) return;
+
+        const downloads = data.downloads || [];
+        if (downloads.length === 0) {
+            list.innerHTML = '<p style="color:var(--text-secondary);text-align:center">No active downloads</p>';
+            if (_debridDownloadInterval) { clearInterval(_debridDownloadInterval); _debridDownloadInterval = null; }
+            return;
+        }
+
+        const hasActive = downloads.some(d => d.status === 'downloading');
+        if (!hasActive && _debridDownloadInterval) {
+            clearInterval(_debridDownloadInterval);
+            _debridDownloadInterval = null;
+        }
+
+        list.innerHTML = downloads.map(d => {
+            const pct = d.progress || 0;
+            const speed = d.speed ? `${(d.speed / 1048576).toFixed(1)} MB/s` : '';
+            const total = d.size_total ? `${(d.size_total / 1073741824).toFixed(2)} GB` : '';
+
+            let statusIcon = '';
+            let statusColor = '';
+            if (d.status === 'downloading') { statusIcon = 'fa-spinner fa-spin'; statusColor = 'var(--accent)'; }
+            else if (d.status === 'completed') { statusIcon = 'fa-check-circle'; statusColor = 'var(--success, #4CAF50)'; }
+            else if (d.status === 'failed') { statusIcon = 'fa-exclamation-circle'; statusColor = 'var(--danger, #f44336)'; }
+            else if (d.status === 'cancelled') { statusIcon = 'fa-times-circle'; statusColor = 'var(--text-secondary)'; }
+
+            return `
+                <div class="glass-card" style="padding:.75rem;margin-bottom:.5rem">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.25rem">
+                        <span style="font-weight:600;font-size:.9rem"><i class="fas ${statusIcon}" style="color:${statusColor}"></i> ${escapeHtml(d.filename)}</span>
+                        ${d.status === 'downloading' ? `<button onclick="cancelDebridDownload('${d.id}')" class="danger small" title="Cancel"><i class="fas fa-times"></i></button>` : ''}
+                    </div>
+                    <div style="background:var(--glass-bg);border-radius:4px;height:6px;overflow:hidden;margin:.5rem 0">
+                        <div style="background:var(--accent);height:100%;width:${pct}%;transition:width .3s"></div>
+                    </div>
+                    <div style="font-size:.8rem;color:var(--text-secondary);display:flex;justify-content:space-between">
+                        <span>${pct.toFixed(1)}% ${speed ? '&middot; ' + speed : ''}</span>
+                        <span>${total} &middot; ${d.category || ''}</span>
+                    </div>
+                    ${d.error ? `<div style="font-size:.8rem;color:var(--danger);margin-top:.25rem">${escapeHtml(d.error)}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+    } catch (e) { /* silently fail */ }
+}
+
+async function cancelDebridDownload(id) {
+    try {
+        await fetch(`${API_BASE}/debrid/downloads/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        refreshDebridDownloads();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function clearCompletedDownloads() {
+    try {
+        await fetch(`${API_BASE}/debrid/downloads/clear`, { method: 'POST', headers: getAuthHeaders() });
+        refreshDebridDownloads();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function debridPollTorrent(torrentId, filename) {
+    showToast('Waiting for Real-Debrid to process...', 'info');
+    let attempts = 0;
+    const maxAttempts = 60; // 5 minutes
+
+    const poll = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/debrid/torrent/${torrentId}`, { headers: getAuthHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+
+            if (data.status === 'downloaded' && data.links && data.links.length > 0) {
+                showToast('Download ready!', 'success');
+                debridHandleLinks(data.links, filename);
+                return;
+            }
+
+            if (data.status === 'error' || data.status === 'dead') {
+                showToast(`Torrent failed: ${data.status}`, 'error');
+                return;
+            }
+
+            attempts++;
+            if (attempts < maxAttempts) {
+                showToast(`Processing: ${data.progress || 0}%`, 'info');
+                setTimeout(poll, 5000);
+            } else {
+                showToast('Torrent taking too long, check RD dashboard', 'warning');
+            }
+        } catch (e) { showToast(e.message, 'error'); }
+    };
+
+    setTimeout(poll, 3000);
+}
+
+function debridShowFiles(data) {
+    const files = data.files || [];
+    if (files.length === 0) return;
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.7)';
+    modal.innerHTML = `
+        <div class="glass-card" style="padding:2rem;max-width:600px;width:90%;max-height:80vh;overflow-y:auto">
+            <h3 style="margin-bottom:1rem">Select Files</h3>
+            <div style="margin-bottom:1rem">
+                ${files.map(f => `
+                    <label style="display:flex;gap:.5rem;align-items:center;padding:.5rem;cursor:pointer;border-bottom:1px solid var(--glass-border)">
+                        <input type="checkbox" value="${f.id}" checked>
+                        <span style="flex:1;font-size:.9rem">${escapeHtml(f.path)}</span>
+                        <span style="color:var(--text-secondary);font-size:.8rem">${f.bytes ? (f.bytes / 1073741824).toFixed(2) + ' GB' : ''}</span>
+                    </label>
+                `).join('')}
+            </div>
+            <div style="display:flex;gap:.5rem">
+                <button class="primary" onclick="debridConfirmFiles(this,'${data.torrent_id}','${escapeHtml(data.filename || '')}')">
+                    <i class="fas fa-check"></i> Select & Download
+                </button>
+                <button class="secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+async function debridConfirmFiles(btn, torrentId, filename) {
+    const modal = btn.closest('.modal-overlay');
+    const checked = Array.from(modal.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+    modal.remove();
+
+    if (checked.length === 0) { showToast('No files selected', 'warning'); return; }
+
+    try {
+        await fetch(`${API_BASE}/debrid/select-files`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ torrent_id: torrentId, file_ids: checked.join(',') }),
+        });
+        debridPollTorrent(torrentId, filename);
+    } catch (e) { showToast(e.message, 'error'); }
 }

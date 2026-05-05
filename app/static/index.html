@@ -48,6 +48,7 @@
                 <button onclick="event.stopPropagation(); showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
                 <button onclick="event.stopPropagation(); showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
                 <button onclick="event.stopPropagation(); showSection('watchlist')"><i class="fas fa-heart"></i> Watchlist</button>
+                <button onclick="event.stopPropagation(); showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Debrid</button>
                 <button onclick="event.stopPropagation(); showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
                 <button onclick="event.stopPropagation(); showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
                 <button onclick="event.stopPropagation(); openGlobalSearch()" class="search-nav-btn" title="Search everything"><i class="fas fa-search"></i></button>
@@ -147,6 +148,10 @@
                     <div class="card glass-hover" data-section="files" onclick="showSection('files')">
                         <div class="icon"><i class="fas fa-folder-open"></i></div>
                         <h3>Files</h3>
+                    </div>
+                    <div class="card glass-hover" data-section="debrid" onclick="showSection('debrid')">
+                        <div class="icon"><i class="fas fa-cloud-download-alt"></i></div>
+                        <h3>Debrid</h3>
                     </div>
                     <div class="card glass-hover" data-section="admin" onclick="showSection('admin')">
                         <div class="icon"><i class="fas fa-user-shield"></i></div>
@@ -304,6 +309,68 @@
                     </div>
                 </div>
                 <div id="files-list" class="list-view"></div>
+            </section>
+
+            <section id="debrid" class="hidden">
+                <div class="section-header">
+                    <h2><i class="fas fa-cloud-download-alt"></i> Real-Debrid</h2>
+                </div>
+
+                <div id="debrid-setup" class="glass-card" style="margin-bottom:1rem;padding:1.5rem;display:none">
+                    <h3>Setup Real-Debrid</h3>
+                    <p style="color:var(--text-secondary);margin:.5rem 0">Enter your Real-Debrid API key to enable torrent search, streaming, and downloading.</p>
+                    <p style="font-size:.85rem;color:var(--text-secondary)">Get your API key from <a href="https://real-debrid.com/apitoken" target="_blank" rel="noopener" style="color:var(--accent)">real-debrid.com/apitoken</a></p>
+                    <div style="display:flex;gap:.5rem;margin-top:1rem">
+                        <input id="rd-api-key-input" type="password" placeholder="Paste your API key..." style="flex:1">
+                        <button onclick="saveRDKey()" class="primary">Save Key</button>
+                    </div>
+                </div>
+
+                <div id="debrid-main" style="display:none">
+                    <div id="rd-account-info" class="glass-card" style="margin-bottom:1rem;padding:1rem;display:none">
+                        <div style="display:flex;justify-content:space-between;align-items:center">
+                            <span><i class="fas fa-user-check" style="color:var(--accent)"></i> <span id="rd-username"></span> <span id="rd-premium-badge" class="badge" style="background:var(--accent);color:#000;font-size:.7rem;padding:2px 6px;border-radius:4px;margin-left:.5rem">PREMIUM</span></span>
+                            <button onclick="removeRDKey()" class="danger small">Remove Key</button>
+                        </div>
+                    </div>
+
+                    <!-- Search -->
+                    <div class="glass-card" style="padding:1.5rem;margin-bottom:1rem">
+                        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                            <input id="debrid-search" type="text" placeholder="Search movies & shows..." style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')debridSearch()">
+                            <select id="debrid-type" style="width:auto">
+                                <option value="movie">Movie</option>
+                                <option value="series">Series</option>
+                            </select>
+                            <button onclick="debridSearch()" class="primary"><i class="fas fa-search"></i> Search</button>
+                        </div>
+                        <div id="debrid-season-ep" style="display:none;margin-top:.5rem;gap:.5rem;flex-wrap:wrap">
+                            <input id="debrid-season" type="number" placeholder="Season" min="1" style="width:80px">
+                            <input id="debrid-episode" type="number" placeholder="Episode" min="1" style="width:80px">
+                        </div>
+                    </div>
+
+                    <!-- Search Results -->
+                    <div id="debrid-results" style="display:none">
+                        <h3 style="margin-bottom:.75rem"><i class="fas fa-list"></i> Results</h3>
+                        <div id="debrid-results-list"></div>
+                    </div>
+
+                    <!-- Torrent Results -->
+                    <div id="debrid-torrents" style="display:none">
+                        <h3 style="margin-bottom:.75rem"><i class="fas fa-magnet"></i> Available Torrents</h3>
+                        <div id="debrid-torrents-list"></div>
+                    </div>
+
+                    <!-- Active Downloads to Pi -->
+                    <div id="debrid-downloads" class="glass-card" style="padding:1.5rem;margin-top:1rem">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+                            <h3><i class="fas fa-download"></i> Downloads to Pi</h3>
+                            <button onclick="clearCompletedDownloads()" class="secondary small">Clear Completed</button>
+                        </div>
+                        <div id="debrid-downloads-list"><p style="color:var(--text-secondary);text-align:center">No active downloads</p></div>
+                    </div>
+                </div>
             </section>
 
             <section id="admin" class="hidden">
