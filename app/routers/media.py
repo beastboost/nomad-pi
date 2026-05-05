@@ -98,10 +98,14 @@ def pick_effective_storage_root_fs(category: str) -> str:
     os.makedirs(fs_root, exist_ok=True)
     return fs_root
 
+import copy as _copy
+
 @lru_cache(maxsize=100)
 def _get_paged_data_cached(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, user_id: int):
-    """Internal cached version of paged data retrieval"""
-    return _get_paged_data(category, q, offset, limit, sort, genre, year, False, user_id)
+    """Internal cached version of paged data retrieval.
+    Returns a deep copy to prevent callers from mutating the cached data."""
+    result = _get_paged_data(category, q, offset, limit, sort, genre, year, False, user_id)
+    return _copy.deepcopy(result)
 
 def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, genre: str, year: str, rebuild: bool, user_id: int):
     idx_info = maybe_start_index_build(category, force=bool(rebuild))
@@ -2327,7 +2331,7 @@ def extract_archive_to_dir(archive_path: str, out_dir: str):
             "If you recently ran a system update, they may have been removed by apt autoremove.\n\n"
             "💡 Tip: CBZ (ZIP) files work without these tools. Only CBR (RAR) files require them."
         )
-        print("CBR Extraction Error: No extractor tools found (checked 7zz, 7z, 7zr, unrar, unar, bsdtar, and standard Windows paths).")
+        logger.error("CBR Extraction Error: No extractor tools found (checked 7zz, 7z, 7zr, unrar, unar, bsdtar, and standard Windows paths).")
         raise HTTPException(status_code=500, detail=error_msg)
 
     last_err = None
@@ -3488,7 +3492,7 @@ def prepare_drive(path: str, admin: dict = Depends(get_current_admin)):
                 os.makedirs(target, exist_ok=True)
                 created.append(folder)
             except Exception as e:
-                print(f"Failed to create {folder} on {path}: {e}")
+                logger.error(f"Failed to create {folder} on {path}: {e}")
     
     return {"status": "ok", "created": created, "message": f"Created {len(created)} folders on drive."}
 
@@ -3506,7 +3510,7 @@ def scan_library(background_tasks: BackgroundTasks, admin: dict = Depends(get_cu
              try:
                  build_library_index(cat)
              except Exception as e:
-                 print(f"Scan error {cat}: {e}")
+                 logger.error(f"Scan error {cat}: {e}")
         # Also trigger MiniDLNA rescan and auto-organization
         trigger_dlna_rescan()
         await trigger_auto_organize()

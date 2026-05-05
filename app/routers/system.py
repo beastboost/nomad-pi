@@ -40,13 +40,13 @@ class FormatDriveRequest(BaseModel):
     label: str
     fstype: str = "ext4"
 
-@public_router.get("/settings/omdb")
-def get_omdb_key():
+@router.get("/settings/omdb")
+def get_omdb_key(user_id: int = Depends(get_current_user_id)):
     key = database.get_setting("omdb_api_key")
     return {"key": key or ""}
 
-@public_router.post("/settings/omdb")
-def save_omdb_key(request: OmdbKeyRequest):
+@router.post("/settings/omdb")
+def save_omdb_key(request: OmdbKeyRequest, user_id: int = Depends(get_current_user_id)):
     logger.info(f"Saving OMDb key: {request.key[:4]}... (len={len(request.key)})")
     try:
         database.set_setting("omdb_api_key", request.key)
@@ -112,14 +112,14 @@ def get_setup_status():
 
     admin_must_change_password = bool(admin_user.get("must_change_password", 0)) if admin_user else False
 
-    password_hint = None
-    if admin_must_change_password and allow_insecure_default and not admin_password and not admin_password_hash:
-        password_hint = "nomad"
+    # Indicate that a default password is in use without revealing what it is.
+    # The actual default password is printed to the console during first setup.
+    has_default_password = admin_must_change_password and allow_insecure_default and not admin_password and not admin_password_hash
 
     return {
         "users_exist": bool(users),
         "default_username": "admin",
-        "password_hint": password_hint,
+        "has_default_password": has_default_password,
         "admin_must_change_password": admin_must_change_password,
         "omdb_configured": bool(database.get_setting("omdb_api_key") or os.environ.get("OMDB_API_KEY") or os.environ.get("OMDB_KEY")),
     }
@@ -127,7 +127,7 @@ def get_setup_status():
 @public_router.get("/samba/config")
 def get_samba_config():
     """Get Samba configuration for NomadTransferTool auto-setup"""
-    user = "beastboost" # Default fallback
+    user = "pi"  # Default fallback for Raspberry Pi
     if platform.system() == "Linux":
         try:
             import getpass
@@ -931,8 +931,14 @@ def system_control(action: str, user_id: int = Depends(get_current_user_id)):
             # Run the update script in the background
             try:
                 # Run as current user; script handles sudo internally for specific commands
-                cmd = "bash ./update.sh >> update.log 2>&1 && echo '\nUpdate complete!' >> update.log || echo '\nUpdate failed!' >> update.log"
-                subprocess.Popen(cmd, shell=True, cwd=os.getcwd())
+                update_script = os.path.join(os.getcwd(), "update.sh")
+                with open(log_file, "a") as lf:
+                    subprocess.Popen(
+                        ["bash", update_script],
+                        stdout=lf,
+                        stderr=subprocess.STDOUT,
+                        cwd=os.getcwd(),
+                    )
                 return {"status": "Update initiated. System will restart shortly."}
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))

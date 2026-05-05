@@ -212,8 +212,6 @@ def login(request: LoginRequest, request_obj: Request):
 def get_current_user_id(request: Request):
     token = request.cookies.get("auth_token")
     if not token:
-        token = request.query_params.get("token")
-    if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
@@ -338,10 +336,8 @@ def get_me(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/check")
 def check_auth(request: Request):
-    # Try all possible token sources (cookie, query, header)
+    # Try token sources (cookie or Authorization header)
     token = request.cookies.get("auth_token")
-    if not token:
-        token = request.query_params.get("token")
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):

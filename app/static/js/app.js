@@ -3841,10 +3841,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
                 if (!data) return;
-                if (data.admin_must_change_password && data.password_hint) {
-                    setupHintEl.textContent = `First-time setup: default password is "${data.password_hint}". Please change it after login.`;
+                if (data.admin_must_change_password && data.has_default_password) {
+                    setupHintEl.textContent = 'First-time setup: check your terminal for the default password. Please change it after login.';
                     setupHintEl.style.display = 'block';
-                    passwordInput.placeholder = `Password (default: ${data.password_hint})`;
+                    passwordInput.placeholder = 'Password (see terminal)';
                 } else {
                     setupHintEl.style.display = 'none';
                     setupHintEl.textContent = '';

@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 import re
+import logging
 import threading
 from queue import Queue, Empty, Full
 from typing import List, Dict, Optional
@@ -63,7 +64,7 @@ def get_db():
         pass
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    print(f"DEBUG: Connecting to database at {DB_PATH}")
+    logging.getLogger(__name__).debug(f"Connecting to database at {DB_PATH}")
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.create_collation("NATSORT", natural_compare)
@@ -91,11 +92,11 @@ def return_db(conn):
             pass
 
 def init_db():
-    print("DEBUG: Starting database initialization...")
+    logging.getLogger(__name__).debug("Starting database initialization...")
     conn = get_db()
     try:
         c = conn.cursor()
-        print("DEBUG: Creating tables...")
+        logging.getLogger(__name__).debug("Creating tables...")
         c.execute('''
             CREATE TABLE IF NOT EXISTS progress (
                 user_id INTEGER,
@@ -1167,7 +1168,7 @@ def cleanup_sessions():
         ''', (SESSION_MAX_AGE_DAYS,))
         conn.commit()
     except Exception as e:
-        print(f"Error cleaning up sessions: {e}")
+        logging.getLogger(__name__).error(f"Error cleaning up sessions: {e}")
     finally:
         return_db(conn)
 
@@ -1221,7 +1222,7 @@ def cleanup_expired_omdb_cache():
         c.execute("DELETE FROM omdb_cache WHERE expires_at < datetime('now')")
         conn.commit()
     except Exception as e:
-        print(f"Error cleaning up OMDb cache: {e}")
+        logging.getLogger(__name__).error(f"Error cleaning up OMDb cache: {e}")
     finally:
         return_db(conn)
 
