@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 import re
+import logging
 import threading
 from queue import Queue, Empty, Full
 from typing import List, Dict, Optional
@@ -63,7 +64,7 @@ def get_db():
         pass
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    print(f"DEBUG: Connecting to database at {DB_PATH}")
+    logging.getLogger(__name__).debug(f"Connecting to database at {DB_PATH}")
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.create_collation("NATSORT", natural_compare)
@@ -91,11 +92,11 @@ def return_db(conn):
             pass
 
 def init_db():
-    print("DEBUG: Starting database initialization...")
+    logging.getLogger(__name__).debug("Starting database initialization...")
     conn = get_db()
     try:
         c = conn.cursor()
-        print("DEBUG: Creating tables...")
+        logging.getLogger(__name__).debug("Creating tables...")
         c.execute('''
             CREATE TABLE IF NOT EXISTS progress (
                 user_id INTEGER,
@@ -270,6 +271,46 @@ def init_db():
         # For session lookups
         c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at)")
+
+        # Playlists
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS playlist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                title TEXT,
+                position INTEGER DEFAULT 0,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_playlist_user ON playlists(user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_playlist_items_pl ON playlist_items(playlist_id, position)")
+
+        # Ratings & Reviews
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS ratings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                rating INTEGER CHECK(rating >= 1 AND rating <= 5),
+                review TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, path)
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ratings_path ON ratings(path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ratings_user ON ratings(user_id)")
 
         conn.commit()
     finally:
@@ -706,6 +747,21 @@ def clear_library_index_category(category: str):
         c.execute('DELETE FROM library_index WHERE category = ?', (category,))
         c.execute('DELETE FROM library_index_state WHERE category = ?', (category,))
         conn.commit()
+    finally:
+        return_db(conn)
+
+def remove_stale_library_entries(category: str, current_paths: set):
+    """Remove library index entries whose paths are no longer on disk."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT path FROM library_index WHERE category = ?', (category,))
+        rows = c.fetchall()
+        stale = [r['path'] for r in rows if r['path'] not in current_paths]
+        if stale:
+            placeholders = ','.join('?' for _ in stale)
+            c.execute(f'DELETE FROM library_index WHERE category = ? AND path IN ({placeholders})', [category] + stale)
+            conn.commit()
     finally:
         return_db(conn)
 
@@ -1156,6 +1212,16 @@ def delete_session(token: str):
     finally:
         return_db(conn)
 
+def delete_user_sessions(user_id: int):
+    """Delete all sessions for a user (used during session rotation on login)."""
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+        conn.commit()
+    finally:
+        return_db(conn)
+
 def cleanup_sessions():
     """Remove sessions older than the configured max_age."""
     conn = get_db()
@@ -1167,7 +1233,7 @@ def cleanup_sessions():
         ''', (SESSION_MAX_AGE_DAYS,))
         conn.commit()
     except Exception as e:
-        print(f"Error cleaning up sessions: {e}")
+        logging.getLogger(__name__).error(f"Error cleaning up sessions: {e}")
     finally:
         return_db(conn)
 
@@ -1221,7 +1287,7 @@ def cleanup_expired_omdb_cache():
         c.execute("DELETE FROM omdb_cache WHERE expires_at < datetime('now')")
         conn.commit()
     except Exception as e:
-        print(f"Error cleaning up OMDb cache: {e}")
+        logging.getLogger(__name__).error(f"Error cleaning up OMDb cache: {e}")
     finally:
         return_db(conn)
 
@@ -1417,6 +1483,135 @@ def save_metadata_override(path: str, custom_title: str = None, custom_poster: s
                 plot = COALESCE(excluded.plot, file_metadata.plot),
                 year = COALESCE(excluded.year, file_metadata.year)
         ''', (path, custom_title, custom_poster, plot, year))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+
+# ── Playlists ─────────────────────────────────────────────────────────────────
+
+def create_playlist(user_id: int, name: str, description: str = "") -> int:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('INSERT INTO playlists (user_id, name, description) VALUES (?, ?, ?)',
+                  (user_id, name, description))
+        conn.commit()
+        return c.lastrowid
+    finally:
+        return_db(conn)
+
+def get_playlists(user_id: int) -> List[Dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            SELECT p.*, COUNT(pi.id) AS item_count
+            FROM playlists p
+            LEFT JOIN playlist_items pi ON pi.playlist_id = p.id
+            WHERE p.user_id = ?
+            GROUP BY p.id
+            ORDER BY p.updated_at DESC
+        ''', (user_id,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        return_db(conn)
+
+def get_playlist(playlist_id: int, user_id: int) -> Optional[Dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT * FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, user_id))
+        row = c.fetchone()
+        if not row:
+            return None
+        playlist = dict(row)
+        c.execute('SELECT * FROM playlist_items WHERE playlist_id = ? ORDER BY position', (playlist_id,))
+        playlist['items'] = [dict(r) for r in c.fetchall()]
+        return playlist
+    finally:
+        return_db(conn)
+
+def add_to_playlist(playlist_id: int, path: str, title: str = "") -> int:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?', (playlist_id,))
+        max_pos = c.fetchone()[0] or 0
+        c.execute('INSERT INTO playlist_items (playlist_id, path, title, position) VALUES (?, ?, ?, ?)',
+                  (playlist_id, path, title, max_pos + 1))
+        c.execute('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (playlist_id,))
+        conn.commit()
+        return c.lastrowid
+    finally:
+        return_db(conn)
+
+def remove_from_playlist(playlist_id: int, item_id: int):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM playlist_items WHERE id = ? AND playlist_id = ?', (item_id, playlist_id))
+        c.execute('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (playlist_id,))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def delete_playlist(playlist_id: int, user_id: int):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM playlist_items WHERE playlist_id = ?', (playlist_id,))
+        c.execute('DELETE FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, user_id))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+
+# ── Ratings & Reviews ─────────────────────────────────────────────────────────
+
+def set_rating(user_id: int, path: str, rating: int, review: str = "") -> None:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO ratings (user_id, path, rating, review) VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, path) DO UPDATE SET rating = ?, review = ?, created_at = CURRENT_TIMESTAMP
+        ''', (user_id, path, rating, review, rating, review))
+        conn.commit()
+    finally:
+        return_db(conn)
+
+def get_rating(user_id: int, path: str) -> Optional[Dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT * FROM ratings WHERE user_id = ? AND path = ?', (user_id, path))
+        row = c.fetchone()
+        return dict(row) if row else None
+    finally:
+        return_db(conn)
+
+def get_ratings_for_path(path: str) -> Dict:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT AVG(rating) AS avg_rating, COUNT(*) AS count FROM ratings WHERE path = ?', (path,))
+        row = c.fetchone()
+        c.execute('SELECT r.*, u.username FROM ratings r JOIN users u ON r.user_id = u.id WHERE r.path = ? ORDER BY r.created_at DESC', (path,))
+        reviews = [dict(r) for r in c.fetchall()]
+        return {
+            "avg_rating": round(row['avg_rating'], 1) if row['avg_rating'] else None,
+            "count": row['count'] or 0,
+            "reviews": reviews,
+        }
+    finally:
+        return_db(conn)
+
+def delete_rating(user_id: int, path: str):
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('DELETE FROM ratings WHERE user_id = ? AND path = ?', (user_id, path))
         conn.commit()
     finally:
         return_db(conn)

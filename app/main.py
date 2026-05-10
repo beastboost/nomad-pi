@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,7 @@ try:
     auth.ensure_admin_user()
 
     from app.services import ingest
-    from app.routers import media, system, uploads, dashboard
+    from app.routers import media, system, uploads, dashboard, debrid, playlists, tmdb
 except Exception as e:
     print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
@@ -155,7 +156,125 @@ mimetypes.add_type('image/png', '.png')
 mimetypes.add_type('image/gif', '.gif')
 mimetypes.add_type('application/pdf', '.pdf')
 
-app = FastAPI(title="Nomad Pi")
+def _run_startup_tasks():
+    """Startup tasks: mount restoration, discovery, indexing, ingest."""
+    # Restore persistent mounts
+    try:
+        import json as _json
+        import subprocess
+        import platform
+
+        if platform.system() == "Linux":
+            mounts_file = "data/mounts.json"
+            if os.path.exists(mounts_file):
+                logger.info("Restoring persistent mounts...")
+                try:
+                    with open(mounts_file, "r") as f:
+                        mounts = _json.load(f)
+
+                    for device, target in mounts.items():
+                        try:
+                            if not os.path.exists(device):
+                                logger.warning(f"Skipping mount: device {device} not found")
+                                continue
+                            if os.path.ismount(target):
+                                logger.info(f"Drive {device} already mounted at {target}")
+                                continue
+                            os.makedirs(target, exist_ok=True)
+                            from app.routers.system import mount_with_permissions
+                            mount_with_permissions(device, target)
+                            logger.info(f"Restored mount: {device} -> {target}")
+                        except Exception as e:
+                            logger.error(f"Failed to restore mount {device}: {e}")
+                except Exception as e:
+                    logger.error(f"Failed to load persistent mounts: {e}")
+    except Exception as e:
+        logger.error(f"Error during mount restoration: {e}")
+
+    try:
+        import platform
+        if platform.system() == "Linux":
+            media.refresh_external_links()
+    except Exception as e:
+        logger.warning(f"Failed to refresh external drive links: {e}")
+
+    # Start scheduler
+    scheduler.add_job(cleanup_old_uploads, 'interval', hours=12)
+    scheduler.start()
+    logger.info("Background scheduler started")
+
+    # Start Discovery Service
+    try:
+        from app.services import discovery
+        discovery.service.start()
+    except Exception as e:
+        logger.error(f"Failed to start discovery service: {e}")
+
+    # Staggered background tasks to prevent OOM on SBCs
+    def run_staggered():
+        time.sleep(10)
+        try:
+            media.database.cleanup_sessions()
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to cleanup sessions: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during session cleanup: {e}")
+
+        cleanup_old_uploads()
+
+        def needs_build(category: str):
+            try:
+                state = media.database.get_library_index_state(category)
+            except Exception:
+                return True
+            if not state:
+                return True
+            scanned_at = state.get("scanned_at")
+            if not isinstance(scanned_at, str) or not scanned_at:
+                return True
+            try:
+                ts = datetime.fromisoformat(scanned_at)
+            except Exception:
+                return True
+            return (datetime.now() - ts) >= media.INDEX_TTL
+
+        for category in ["movies", "shows", "music", "books"]:
+            if needs_build(category):
+                try:
+                    logger.info(f"Startup: Indexing {category}...")
+                    media.build_library_index(category)
+                    time.sleep(5)
+                except MemoryError as e:
+                    logger.error(f"Memory error while indexing {category}: {e}")
+                    logger.warning("Skipping remaining indexing to prevent crash")
+                    break
+                except (OSError, IOError) as e:
+                    logger.warning(f"File system error while indexing {category}: {e}")
+                except Exception as e:
+                    logger.error(f"Error indexing {category}: {e}")
+                    continue
+
+        try:
+            ingest.start_ingest_service()
+        except MemoryError as e:
+            logger.error(f"Memory error starting ingest service: {e}")
+            logger.warning("Ingest service may not be available")
+        except (OSError, IOError) as e:
+            logger.error(f"File system error starting ingest service: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start ingest service: {e}")
+
+    threading.Thread(target=run_staggered, daemon=True).start()
+
+
+@asynccontextmanager
+async def lifespan(app):
+    _run_startup_tasks()
+    yield
+    ingest.stop_ingest_service()
+
+
+app = FastAPI(title="Nomad Pi", lifespan=lifespan)
 
 # Global Scheduler
 scheduler = BackgroundScheduler()
@@ -202,9 +321,6 @@ async def not_found_handler(request: Request, exc: Exception):
         status_code=404,
         content={"detail": "Resource not found"}
     )
-
-# Initialize Database immediately
-database.init_db()
 
 # CORS - Restrict origins for security
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '').split(',') if os.getenv('ALLOWED_ORIGINS') else ['*']
@@ -260,127 +376,10 @@ app.include_router(media.router, prefix="/api/media", tags=["media"], dependenci
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(dashboard.router)  # Dashboard has its own prefix and auth where needed
-
-@app.on_event("startup")
-def _startup_tasks():
-    # Restore persistent mounts
-    try:
-        import json
-        import subprocess
-        import platform
-        
-        if platform.system() == "Linux":
-            mounts_file = "data/mounts.json"
-            if os.path.exists(mounts_file):
-                logger.info("Restoring persistent mounts...")
-                try:
-                    with open(mounts_file, "r") as f:
-                        mounts = json.load(f)
-                        
-                    for device, target in mounts.items():
-                        try:
-                            if not os.path.exists(device):
-                                logger.warning(f"Skipping mount: device {device} not found")
-                                continue
-                                
-                            if os.path.ismount(target):
-                                logger.info(f"Drive {device} already mounted at {target}")
-                                continue
-                                
-                            os.makedirs(target, exist_ok=True)
-                            from app.routers.system import mount_with_permissions
-                            mount_with_permissions(device, target)
-                            logger.info(f"Restored mount: {device} -> {target}")
-                        except Exception as e:
-                            logger.error(f"Failed to restore mount {device}: {e}")
-                except Exception as e:
-                    logger.error(f"Failed to load persistent mounts: {e}")
-    except Exception as e:
-        logger.error(f"Error during mount restoration: {e}")
-
-    try:
-        import platform
-
-        if platform.system() == "Linux":
-            media.refresh_external_links()
-    except Exception as e:
-        logger.warning(f"Failed to refresh external drive links: {e}")
-
-    # Start scheduler
-    scheduler.add_job(cleanup_old_uploads, 'interval', hours=12) # Reduced frequency for SBCs
-    scheduler.start()
-    logger.info("Background scheduler started")
-    
-    # 1. Start Discovery Service
-    try:
-        from app.services import discovery
-        discovery.service.start()
-    except Exception as e:
-        logger.error(f"Failed to start discovery service: {e}")
-
-    # 2. Staggered background tasks to prevent OOM on SBCs
-    def run_staggered():
-        # Wait a bit for the main web server to settle
-        time.sleep(10)
-        
-        # Clean up stale sessions
-        try:
-            media.database.cleanup_sessions()
-        except (OSError, IOError) as e:
-            logger.warning(f"Failed to cleanup sessions: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error during session cleanup: {e}")
-        
-        # Run cleanup task once
-        cleanup_old_uploads()
-        
-        # 2. Delayed Indexer logic
-        def needs_build(category: str):
-            try:
-                state = media.database.get_library_index_state(category)
-            except Exception: return True
-            if not state: return True
-            scanned_at = state.get("scanned_at")
-            if not isinstance(scanned_at, str) or not scanned_at: return True
-            try:
-                ts = datetime.fromisoformat(scanned_at)
-            except Exception: return True
-            return (datetime.now() - ts) >= media.INDEX_TTL
-
-        # Only index one category at a time with delays
-        for category in ["movies", "shows", "music", "books"]:
-            if needs_build(category):
-                try:
-                    logger.info(f"Startup: Indexing {category}...")
-                    media.build_library_index(category)
-                    # Small breath between categories
-                    time.sleep(5)
-                except MemoryError as e:
-                    logger.error(f"Memory error while indexing {category}: {e}")
-                    logger.warning("Skipping remaining indexing to prevent crash")
-                    break  # Stop indexing if we run out of memory
-                except (OSError, IOError) as e:
-                    logger.warning(f"File system error while indexing {category}: {e}")
-                except Exception as e:
-                    logger.error(f"Error indexing {category}: {e}")
-                    continue  # Continue with next category on other errors
-
-        # 3. Start ingest service LAST
-        try:
-            ingest.start_ingest_service()
-        except MemoryError as e:
-            logger.error(f"Memory error starting ingest service: {e}")
-            logger.warning("Ingest service may not be available")
-        except (OSError, IOError) as e:
-            logger.error(f"File system error starting ingest service: {e}")
-        except Exception as e:
-            logger.error(f"Failed to start ingest service: {e}")
-
-    threading.Thread(target=run_staggered, daemon=True).start()
-
-@app.on_event("shutdown")
-def _shutdown_tasks():
-    ingest.stop_ingest_service()
+app.include_router(debrid.router)  # Real-Debrid integration (has its own auth)
+app.include_router(playlists.router)  # Playlists (has its own auth)
+app.include_router(playlists.ratings_router)  # Ratings & reviews (has its own auth)
+app.include_router(tmdb.router)  # TMDB integration (has its own auth)
 
 @app.middleware("http")
 async def protect_data(request: Request, call_next):
@@ -392,14 +391,14 @@ async def protect_data(request: Request, call_next):
         token = request.cookies.get("auth_token") or request.query_params.get("token")
         
         if not token:
-            print(f"Unauthorized access attempt (no token): {request.url.path}")
+            logger.warning(f"Unauthorized access attempt (no token): {request.url.path}")
             return Response(status_code=401)
         
         session = database.get_session(token)
         if not session:
             # Mask token for logging
             masked_token = (token[:4] + "...") if token and len(token) > 4 else "****"
-            print(f"Unauthorized access attempt (invalid session): {request.url.path} | Token: {masked_token}")
+            logger.warning(f"Unauthorized access attempt (invalid session): {request.url.path} | Token: {masked_token}")
             return Response(status_code=401)
     
     response = await call_next(request)

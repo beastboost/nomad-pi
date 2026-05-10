@@ -179,6 +179,8 @@ def login(request: LoginRequest, request_obj: Request):
     if user and verified:
         # Clear attempts on success
         clear_attempts(login_attempts, client_ip)
+        # Rotate session: invalidate any existing sessions for this user
+        database.delete_user_sessions(user['id'])
         token = str(uuid.uuid4())
         database.create_session(token, user['id'])
 
@@ -211,8 +213,6 @@ def login(request: LoginRequest, request_obj: Request):
 # Dependency for protecting routes
 def get_current_user_id(request: Request):
     token = request.cookies.get("auth_token")
-    if not token:
-        token = request.query_params.get("token")
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
@@ -338,10 +338,8 @@ def get_me(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/check")
 def check_auth(request: Request):
-    # Try all possible token sources (cookie, query, header)
+    # Try token sources (cookie or Authorization header)
     token = request.cookies.get("auth_token")
-    if not token:
-        token = request.query_params.get("token")
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
