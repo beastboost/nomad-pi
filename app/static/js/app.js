@@ -907,6 +907,7 @@ function showSection(id) {
     }
     if (id === 'settings') {
         refreshTailscaleStatus();
+        loadOmdbKey();
     }
     if (id === 'watchlist') {
         loadWatchlist();
@@ -6100,6 +6101,35 @@ async function saveOpenSubtitlesKey() {
         if (!res.ok) throw new Error('Failed');
         showToast('OpenSubtitles API key saved', 'success');
     } catch (e) { showToast('Failed to save API key', 'error'); }
+}
+
+// --- OMDb API Key ---
+async function loadOmdbKey() {
+    try {
+        const res = await fetch(`${API_BASE}/system/settings/omdb`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const input = document.getElementById('omdb-api-key');
+        if (input && data.key) input.placeholder = data.key.slice(0, 4) + '****';
+    } catch (e) { /* ignore */ }
+}
+
+async function saveOmdbKey() {
+    const input = document.getElementById('omdb-api-key');
+    if (!input) return;
+    const key = input.value.trim();
+    if (!key) { showToast('Please enter an OMDb API key', 'warning'); return; }
+    try {
+        const res = await fetch(`${API_BASE}/system/settings/omdb`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key }),
+        });
+        if (!res.ok) throw new Error('Failed');
+        showToast('OMDb API key saved', 'success');
+        input.value = '';
+        input.placeholder = key.slice(0, 4) + '****';
+    } catch (e) { showToast('Failed to save OMDb key', 'error'); }
 }
 
 // --- Metadata Editor ---
