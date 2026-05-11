@@ -365,14 +365,32 @@ def get_torrent_status(torrent_id: str, user_id: int = Depends(get_current_user_
 
 
 @router.post("/unrestrict")
-def unrestrict(link: str = Query(...), user_id: int = Depends(get_current_user_id)):
+def unrestrict(
+    link: str = Query(...),
+    title: str = Query(""),
+    year: str = Query(""),
+    media_type: str = Query("movie"),
+    season: Optional[int] = Query(None),
+    episode: Optional[int] = Query(None),
+    user_id: int = Depends(get_current_user_id),
+):
     """Unrestrict a Real-Debrid link to get a direct download/stream URL."""
     api_key = _require_rd_key()
     try:
         result = debrid.unrestrict_link(api_key, link)
+        raw_filename = result.get("filename", "")
+        clean_filename = debrid.clean_media_filename(
+            raw_filename,
+            title=title,
+            year=year,
+            media_type=media_type,
+            season=season or 0,
+            episode=episode or 0,
+        )
         return {
             "download": result.get("download"),
-            "filename": result.get("filename"),
+            "filename": clean_filename,
+            "raw_filename": raw_filename,
             "filesize": result.get("filesize"),
             "host": result.get("host"),
             "streaming": result.get("streaming"),

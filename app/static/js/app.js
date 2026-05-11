@@ -6377,6 +6377,7 @@ function showKeyboardShortcutsHelp() {
 let _debridDownloadInterval = null;
 let _debridSelectedImdb = null;
 let _debridSelectedTitle = null;
+let _debridSelectedYear = null;
 
 function debridShowType() {
     const t = document.getElementById('debrid-type');
@@ -6482,7 +6483,7 @@ async function debridSearch() {
             }
             resultsList.innerHTML = data.results.map(r => `
                 <div class="glass-card" style="padding:1rem;margin-bottom:.5rem;cursor:pointer;display:flex;gap:1rem;align-items:center"
-                     onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title)}','${mediaType}')">
+                     onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title).replace(/'/g, "\\'") }','${mediaType}','${r.year || ''}')">
                     ${r.poster ? `<img src="${r.poster}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
                     <div>
                         <strong>${escapeHtml(r.title)}</strong> <span style="color:var(--text-secondary)">(${r.year || '?'})</span>
@@ -6499,9 +6500,10 @@ async function debridSearch() {
     }
 }
 
-async function debridSelectTitle(imdbId, title, mediaType) {
+async function debridSelectTitle(imdbId, title, mediaType, year) {
     _debridSelectedImdb = imdbId;
     _debridSelectedTitle = title;
+    _debridSelectedYear = year || '';
 
     const season = document.getElementById('debrid-season')?.value || '';
     const episode = document.getElementById('debrid-episode')?.value || '';
@@ -6669,11 +6671,22 @@ async function debridHandleLinks(links, filename) {
         return;
     }
 
+    // Build metadata query params for clean filename generation
+    const mediaType = document.getElementById('debrid-type')?.value || 'movie';
+    const season = document.getElementById('debrid-season')?.value || '';
+    const episode = document.getElementById('debrid-episode')?.value || '';
+    let metaParams = '';
+    if (_debridSelectedTitle) metaParams += `&title=${encodeURIComponent(_debridSelectedTitle)}`;
+    if (_debridSelectedYear) metaParams += `&year=${encodeURIComponent(_debridSelectedYear)}`;
+    metaParams += `&media_type=${mediaType}`;
+    if (season) metaParams += `&season=${season}`;
+    if (episode) metaParams += `&episode=${episode}`;
+
     let handled = false;
     for (const link of links) {
         try {
             debridUpdateProcessing('Unrestricting link...', 50);
-            const res = await fetch(`${API_BASE}/debrid/unrestrict?link=${encodeURIComponent(link)}`, {
+            const res = await fetch(`${API_BASE}/debrid/unrestrict?link=${encodeURIComponent(link)}${metaParams}`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
             });
