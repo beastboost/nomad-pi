@@ -130,6 +130,53 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
 
 
 # ---------------------------------------------------------------------------
+# Real-Debrid instant availability
+# ---------------------------------------------------------------------------
+
+def check_instant_availability(api_key: str, hashes: list[str]) -> dict[str, bool]:
+    """Check which hashes are instantly available (cached) on Real-Debrid.
+
+    Returns a dict of {hash: True/False}.
+    """
+    if not hashes:
+        return {}
+
+    result = {}
+    # RD accepts up to ~100 hashes per request via path segments
+    batch_size = 50
+    for i in range(0, len(hashes), batch_size):
+        batch = hashes[i:i + batch_size]
+        hash_path = "/".join(batch)
+        try:
+            r = requests.get(
+                f"{RD_BASE}/torrents/instantAvailability/{hash_path}",
+                headers=_rd_headers(api_key),
+                timeout=15,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                for h in batch:
+                    # RD returns the hash as key with hosters as value
+                    entry = data.get(h) or data.get(h.lower()) or {}
+                    # If there are any cached file variants, it's instant
+                    if isinstance(entry, dict) and entry.get("rd"):
+                        result[h] = True
+                    elif isinstance(entry, list) and len(entry) > 0:
+                        result[h] = True
+                    else:
+                        result[h] = False
+            else:
+                for h in batch:
+                    result[h] = False
+        except Exception as e:
+            logger.warning(f"Instant availability check failed: {e}")
+            for h in batch:
+                result[h] = False
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Real-Debrid torrent / magnet operations
 # ---------------------------------------------------------------------------
 
