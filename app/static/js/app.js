@@ -6451,6 +6451,12 @@ async function debridSearch() {
     const season = document.getElementById('debrid-season')?.value || '';
     const episode = document.getElementById('debrid-episode')?.value || '';
 
+    // If the user entered an IMDB ID directly (e.g. tt0111161), skip title search
+    if (/^tt\d{5,}$/i.test(query)) {
+        debridSelectTitle(query, query, mediaType);
+        return;
+    }
+
     const resultsDiv = document.getElementById('debrid-results');
     const resultsList = document.getElementById('debrid-results-list');
     const torrentsDiv = document.getElementById('debrid-torrents');
@@ -6470,7 +6476,8 @@ async function debridSearch() {
 
         if (data.type === 'search_results') {
             if (!data.results || data.results.length === 0) {
-                resultsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No results found</p>';
+                const msg = data.message || 'No results found. Try a different search or enter an IMDB ID (e.g. tt0111161).';
+                resultsList.innerHTML = `<p style="text-align:center;color:var(--text-secondary)">${msg}</p>`;
                 return;
             }
             resultsList.innerHTML = data.results.map(r => `
@@ -6607,7 +6614,7 @@ async function debridHandleLinks(links, filename) {
                 }
             }
         } catch (e) {
-            logger.error('Unrestrict failed:', e);
+            console.error('Unrestrict failed:', e);
         }
     }
 }

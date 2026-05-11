@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
+# Torrentio blocks the default python-requests User-Agent
+_TORRENTIO_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; NomadPi/1.0)",
+}
+
 # Active downloads tracked in memory
 _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
@@ -64,7 +69,7 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
         else:
             url = f"{TORRENTIO_BASE}/stream/movie/{imdb_id}.json"
 
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, headers=_TORRENTIO_HEADERS, timeout=15)
         if r.status_code == 404:
             return []
         r.raise_for_status()
