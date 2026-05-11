@@ -313,9 +313,17 @@
 
             <section id="debrid" class="hidden">
                 <div class="section-header">
-                    <h2><i class="fas fa-cloud-download-alt"></i> Real-Debrid</h2>
+                    <h2><i class="fas fa-cloud-download-alt"></i> Debrid Manager</h2>
                 </div>
 
+                <!-- Provider Tabs -->
+                <div class="glass-card" style="margin-bottom:1rem;padding:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                    <span style="font-size:.85rem;color:var(--text-secondary);margin-right:.25rem">Provider:</span>
+                    <button id="debrid-tab-rd" onclick="debridSwitchProvider('rd')" class="small primary">Real-Debrid</button>
+                    <button id="debrid-tab-ad" onclick="debridSwitchProvider('ad')" class="small secondary">AllDebrid</button>
+                </div>
+
+                <!-- Real-Debrid Setup -->
                 <div id="debrid-setup" class="glass-card" style="margin-bottom:1rem;padding:1.5rem;display:none">
                     <h3>Setup Real-Debrid</h3>
                     <p style="color:var(--text-secondary);margin:.5rem 0">Enter your Real-Debrid API key to enable torrent search, streaming, and downloading.</p>
@@ -326,11 +334,22 @@
                     </div>
                 </div>
 
+                <!-- AllDebrid Setup -->
+                <div id="debrid-setup-ad" class="glass-card" style="margin-bottom:1rem;padding:1.5rem;display:none">
+                    <h3>Setup AllDebrid</h3>
+                    <p style="color:var(--text-secondary);margin:.5rem 0">Enter your AllDebrid API key to enable torrent search, streaming, and downloading.</p>
+                    <p style="font-size:.85rem;color:var(--text-secondary)">Get your API key from <a href="https://alldebrid.com/apikeys" target="_blank" rel="noopener" style="color:var(--accent)">alldebrid.com/apikeys</a></p>
+                    <div style="display:flex;gap:.5rem;margin-top:1rem">
+                        <input id="ad-api-key-input" type="password" placeholder="Paste your AllDebrid API key..." style="flex:1">
+                        <button onclick="saveADKey()" class="primary">Save Key</button>
+                    </div>
+                </div>
+
                 <div id="debrid-main" style="display:none">
                     <div id="rd-account-info" class="glass-card" style="margin-bottom:1rem;padding:1rem;display:none">
                         <div style="display:flex;justify-content:space-between;align-items:center">
                             <span><i class="fas fa-user-check" style="color:var(--accent)"></i> <span id="rd-username"></span> <span id="rd-premium-badge" class="badge" style="background:var(--accent);color:#000;font-size:.7rem;padding:2px 6px;border-radius:4px;margin-left:.5rem">PREMIUM</span></span>
-                            <button onclick="removeRDKey()" class="danger small">Remove Key</button>
+                            <button onclick="removeDebridKey()" class="danger small">Remove Key</button>
                         </div>
                     </div>
 
@@ -338,9 +357,15 @@
                     <div class="glass-card" style="padding:1.5rem;margin-bottom:1rem">
                         <div style="display:flex;gap:.5rem;flex-wrap:wrap">
                             <input id="debrid-search" type="text" placeholder="Search movies & shows or enter IMDB ID..." style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')debridSearch()">
-                            <select id="debrid-type" style="width:auto">
+                            <select id="debrid-type" style="width:auto" onchange="debridShowType()">
                                 <option value="movie">Movie</option>
                                 <option value="series">Series</option>
+                            </select>
+                            <select id="debrid-quality" style="width:auto" title="Max quality filter">
+                                <option value="">All Qualities</option>
+                                <option value="1080">Up to 1080p</option>
+                                <option value="720">Up to 720p</option>
+                                <option value="480">Up to 480p</option>
                             </select>
                             <button onclick="debridSearch()" class="primary"><i class="fas fa-search"></i> Search</button>
                         </div>

@@ -100,6 +100,90 @@ def remove_rd_key(admin: dict = Depends(get_current_admin)):
 
 
 # ---------------------------------------------------------------------------
+# AllDebrid Settings
+# ---------------------------------------------------------------------------
+
+@router.post("/settings/ad-key")
+def set_ad_key(req: RDKeyRequest, admin: dict = Depends(get_current_admin)):
+    """Save AllDebrid API key (admin only)."""
+    try:
+        user_info = debrid.ad_get_user(req.api_key)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid AllDebrid API key: {e}")
+
+    database.set_setting("ad_api_key", req.api_key)
+    return {
+        "status": "ok",
+        "user": {
+            "username": user_info.get("username"),
+            "premium": user_info.get("isPremium") or user_info.get("is_premium"),
+        }
+    }
+
+
+@router.get("/settings/ad-key")
+def get_ad_key_status(user_id: int = Depends(get_current_user_id)):
+    """Check if AllDebrid API key is configured."""
+    api_key = database.get_setting("ad_api_key")
+    if not api_key:
+        return {"configured": False}
+    try:
+        user_info = debrid.ad_get_user(api_key)
+        return {
+            "configured": True,
+            "user": {
+                "username": user_info.get("username"),
+                "premium": user_info.get("isPremium") or user_info.get("is_premium"),
+            }
+        }
+    except Exception:
+        return {"configured": True, "valid": False, "error": "AllDebrid key invalid or expired"}
+
+
+@router.delete("/settings/ad-key")
+def remove_ad_key(admin: dict = Depends(get_current_admin)):
+    """Remove stored AllDebrid API key."""
+    database.set_setting("ad_api_key", "")
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Provider detection helper
+# ---------------------------------------------------------------------------
+
+def _get_active_provider() -> tuple[str, str]:
+    """Return (provider, api_key). Prefers RD, falls back to AD."""
+    provider = database.get_setting("debrid_provider") or "rd"
+    if provider == "ad":
+        key = database.get_setting("ad_api_key")
+        if key:
+            return "ad", key
+    key = database.get_setting("rd_api_key")
+    if key:
+        return "rd", key
+    ad_key = database.get_setting("ad_api_key")
+    if ad_key:
+        return "ad", ad_key
+    return "rd", ""
+
+
+@router.post("/settings/provider")
+def set_provider(provider: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    """Switch active debrid provider (rd or ad)."""
+    if provider not in ("rd", "ad"):
+        raise HTTPException(status_code=400, detail="Invalid provider")
+    database.set_setting("debrid_provider", provider)
+    return {"status": "ok", "provider": provider}
+
+
+@router.get("/settings/provider")
+def get_provider(user_id: int = Depends(get_current_user_id)):
+    """Get active debrid provider."""
+    provider = database.get_setting("debrid_provider") or "rd"
+    return {"provider": provider}
+
+
+# ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 
@@ -242,8 +326,16 @@ def _search_titles(query: str, media_type: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Real-Debrid torrent operations
+# Debrid torrent operations (provider-aware)
 # ---------------------------------------------------------------------------
+
+def _require_debrid_key() -> tuple[str, str]:
+    """Return (provider, api_key) or raise."""
+    provider, api_key = _get_active_provider()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No debrid API key configured")
+    return provider, api_key
+
 
 def _require_rd_key() -> str:
     api_key = database.get_setting("rd_api_key")
@@ -258,10 +350,13 @@ class InstantCheckRequest(BaseModel):
 
 @router.post("/instant")
 def check_instant(req: InstantCheckRequest, user_id: int = Depends(get_current_user_id)):
-    """Check which hashes are instantly available (cached) on Real-Debrid."""
-    api_key = _require_rd_key()
+    """Check which hashes are instantly available (cached) on the active debrid provider."""
+    provider, api_key = _require_debrid_key()
     try:
-        result = debrid.check_instant_availability(api_key, req.hashes)
+        if provider == "ad":
+            result = debrid.ad_check_instant(api_key, req.hashes)
+        else:
+            result = debrid.check_instant_availability(api_key, req.hashes)
         return {"cached": result}
     except Exception as e:
         logger.warning(f"Instant availability check failed: {e}")
@@ -270,62 +365,15 @@ def check_instant(req: InstantCheckRequest, user_id: int = Depends(get_current_u
 
 @router.post("/magnet")
 def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
-    """Add a magnet to Real-Debrid and select files."""
+    """Add a magnet to the active debrid provider."""
     import time
 
-    api_key = _require_rd_key()
+    provider, api_key = _require_debrid_key()
 
     try:
-        result = debrid.add_magnet(api_key, req.info_hash)
-        torrent_id = result.get("id")
-
-        if not torrent_id:
-            raise HTTPException(status_code=500, detail="Failed to get torrent ID from Real-Debrid")
-
-        # Wait for magnet conversion before selecting files (up to 10s)
-        info = debrid.get_torrent_info(api_key, torrent_id)
-        for _ in range(10):
-            if info.get("status") != "magnet_conversion":
-                break
-            time.sleep(1)
-            info = debrid.get_torrent_info(api_key, torrent_id)
-
-        # Select all files if waiting for selection
-        if info.get("status") == "waiting_files_selection":
-            try:
-                debrid.select_files(api_key, torrent_id, "all")
-            except Exception as e:
-                logger.warning(f"selectFiles failed: {e}")
-
-            # Re-fetch info after selecting — wait briefly for cached torrents
-            time.sleep(1)
-            info = debrid.get_torrent_info(api_key, torrent_id)
-
-            # For cached torrents, status transitions quickly to 'downloaded'
-            for _ in range(5):
-                if info.get("status") == "downloaded":
-                    break
-                time.sleep(1)
-                info = debrid.get_torrent_info(api_key, torrent_id)
-
-        return {
-            "status": "ok",
-            "torrent_id": torrent_id,
-            "filename": info.get("filename"),
-            "filesize": info.get("bytes"),
-            "progress": info.get("progress"),
-            "torrent_status": info.get("status"),
-            "links": info.get("links", []),
-            "files": [
-                {
-                    "id": f.get("id"),
-                    "path": f.get("path"),
-                    "bytes": f.get("bytes"),
-                    "selected": f.get("selected"),
-                }
-                for f in info.get("files", [])
-            ],
-        }
+        if provider == "ad":
+            return _add_magnet_ad(api_key, req.info_hash)
+        return _add_magnet_rd(api_key, req.info_hash)
     except HTTPException:
         raise
     except Exception as e:
@@ -333,10 +381,98 @@ def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _add_magnet_rd(api_key: str, info_hash: str) -> dict:
+    import time
+
+    result = debrid.add_magnet(api_key, info_hash)
+    torrent_id = result.get("id")
+    if not torrent_id:
+        raise HTTPException(status_code=500, detail="Failed to get torrent ID")
+
+    info = debrid.get_torrent_info(api_key, torrent_id)
+    for _ in range(10):
+        if info.get("status") != "magnet_conversion":
+            break
+        time.sleep(1)
+        info = debrid.get_torrent_info(api_key, torrent_id)
+
+    if info.get("status") == "waiting_files_selection":
+        try:
+            debrid.select_files(api_key, torrent_id, "all")
+        except Exception as e:
+            logger.warning(f"selectFiles failed: {e}")
+
+        time.sleep(1)
+        info = debrid.get_torrent_info(api_key, torrent_id)
+
+        for _ in range(5):
+            if info.get("status") == "downloaded":
+                break
+            time.sleep(1)
+            info = debrid.get_torrent_info(api_key, torrent_id)
+
+    return {
+        "status": "ok",
+        "torrent_id": torrent_id,
+        "filename": info.get("filename"),
+        "filesize": info.get("bytes"),
+        "progress": info.get("progress"),
+        "torrent_status": info.get("status"),
+        "links": info.get("links", []),
+        "files": [
+            {"id": f.get("id"), "path": f.get("path"), "bytes": f.get("bytes"), "selected": f.get("selected")}
+            for f in info.get("files", [])
+        ],
+    }
+
+
+def _add_magnet_ad(api_key: str, info_hash: str) -> dict:
+    import time
+
+    result = debrid.ad_add_magnet(api_key, info_hash)
+    magnet_id = result.get("id")
+    if not magnet_id:
+        raise HTTPException(status_code=500, detail="Failed to add magnet to AllDebrid")
+
+    # Poll for ready status
+    for _ in range(15):
+        info = debrid.ad_get_magnet_status(api_key, str(magnet_id))
+        status_code = info.get("statusCode", 0)
+        # AD statusCode: 0=processing, 1=uploading, 2=uploading, 3=processing, 4=ready
+        if status_code >= 4:
+            break
+        time.sleep(1)
+
+    links = []
+    ad_links = info.get("links", [])
+    for lnk in ad_links:
+        if isinstance(lnk, dict):
+            links.append(lnk.get("link", ""))
+        elif isinstance(lnk, str):
+            links.append(lnk)
+
+    ad_status_map = {0: "magnet_conversion", 1: "downloading", 2: "downloading",
+                     3: "downloading", 4: "downloaded"}
+    torrent_status = ad_status_map.get(status_code, "downloading")
+
+    return {
+        "status": "ok",
+        "torrent_id": str(magnet_id),
+        "filename": info.get("filename"),
+        "filesize": info.get("size"),
+        "progress": 100 if status_code >= 4 else (info.get("downloadSpeed", 0) or 0),
+        "torrent_status": torrent_status,
+        "links": links,
+        "files": [],
+    }
+
+
 @router.post("/select-files")
 def select_torrent_files(req: SelectFilesRequest, user_id: int = Depends(get_current_user_id)):
-    """Select specific files from a torrent."""
-    api_key = _require_rd_key()
+    """Select specific files from a torrent (RD only, AllDebrid auto-selects)."""
+    provider, api_key = _require_debrid_key()
+    if provider == "ad":
+        return {"status": "ok"}
     try:
         debrid.select_files(api_key, req.torrent_id, req.file_ids)
         return {"status": "ok"}
@@ -347,19 +483,41 @@ def select_torrent_files(req: SelectFilesRequest, user_id: int = Depends(get_cur
 @router.get("/torrent/{torrent_id}")
 def get_torrent_status(torrent_id: str, user_id: int = Depends(get_current_user_id)):
     """Get torrent status and download links."""
-    api_key = _require_rd_key()
+    provider, api_key = _require_debrid_key()
     try:
-        info = debrid.get_torrent_info(api_key, torrent_id)
-        return {
-            "torrent_id": torrent_id,
-            "filename": info.get("filename"),
-            "bytes": info.get("bytes"),
-            "progress": info.get("progress"),
-            "status": info.get("status"),
-            "links": info.get("links", []),
-            "speed": info.get("speed"),
-            "seeders": info.get("seeders"),
-        }
+        if provider == "ad":
+            info = debrid.ad_get_magnet_status(api_key, torrent_id)
+            status_code = info.get("statusCode", 0)
+            ad_status_map = {0: "magnet_conversion", 1: "downloading", 2: "downloading",
+                             3: "downloading", 4: "downloaded"}
+            links = []
+            for lnk in info.get("links", []):
+                if isinstance(lnk, dict):
+                    links.append(lnk.get("link", ""))
+                elif isinstance(lnk, str):
+                    links.append(lnk)
+            return {
+                "torrent_id": torrent_id,
+                "filename": info.get("filename"),
+                "bytes": info.get("size"),
+                "progress": 100 if status_code >= 4 else 0,
+                "status": ad_status_map.get(status_code, "downloading"),
+                "links": links,
+                "speed": info.get("downloadSpeed"),
+                "seeders": info.get("seeders"),
+            }
+        else:
+            info = debrid.get_torrent_info(api_key, torrent_id)
+            return {
+                "torrent_id": torrent_id,
+                "filename": info.get("filename"),
+                "bytes": info.get("bytes"),
+                "progress": info.get("progress"),
+                "status": info.get("status"),
+                "links": info.get("links", []),
+                "speed": info.get("speed"),
+                "seeders": info.get("seeders"),
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -374,11 +532,18 @@ def unrestrict(
     episode: Optional[int] = Query(None),
     user_id: int = Depends(get_current_user_id),
 ):
-    """Unrestrict a Real-Debrid link to get a direct download/stream URL."""
-    api_key = _require_rd_key()
+    """Unrestrict a link via the active debrid provider."""
+    provider, api_key = _require_debrid_key()
     try:
-        result = debrid.unrestrict_link(api_key, link)
-        raw_filename = result.get("filename", "")
+        if provider == "ad":
+            result = debrid.ad_unrestrict_link(api_key, link)
+            raw_filename = result.get("filename", "")
+            download_url = result.get("link", "")
+        else:
+            result = debrid.unrestrict_link(api_key, link)
+            raw_filename = result.get("filename", "")
+            download_url = result.get("download", "")
+
         clean_filename = debrid.clean_media_filename(
             raw_filename,
             title=title,
@@ -388,10 +553,10 @@ def unrestrict(
             episode=episode or 0,
         )
         return {
-            "download": result.get("download"),
+            "download": download_url,
             "filename": clean_filename,
             "raw_filename": raw_filename,
-            "filesize": result.get("filesize"),
+            "filesize": result.get("filesize") or result.get("size"),
             "host": result.get("host"),
             "streaming": result.get("streaming"),
             "id": result.get("id"),
@@ -406,18 +571,23 @@ def unrestrict(
 
 @router.get("/stream-url")
 def get_stream_url(link: str = Query(...), user_id: int = Depends(get_current_user_id)):
-    """Get a direct streaming URL from a Real-Debrid link.
-
-    The frontend can use this URL directly in the video player.
-    """
-    api_key = _require_rd_key()
+    """Get a direct streaming URL from the active debrid provider."""
+    provider, api_key = _require_debrid_key()
     try:
-        result = debrid.unrestrict_link(api_key, link)
-        return {
-            "stream_url": result.get("download"),
-            "filename": result.get("filename"),
-            "filesize": result.get("filesize"),
-        }
+        if provider == "ad":
+            result = debrid.ad_unrestrict_link(api_key, link)
+            return {
+                "stream_url": result.get("link"),
+                "filename": result.get("filename"),
+                "filesize": result.get("size"),
+            }
+        else:
+            result = debrid.unrestrict_link(api_key, link)
+            return {
+                "stream_url": result.get("download"),
+                "filename": result.get("filename"),
+                "filesize": result.get("filesize"),
+            }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

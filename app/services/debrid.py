@@ -1,7 +1,7 @@
-"""Real-Debrid API client for Nomad Pi.
+"""Debrid API client for Nomad Pi.
 
-Handles torrent search via Torrentio, magnet submission to Real-Debrid,
-unrestricting download links, and downloading files to the Pi.
+Handles torrent search via Torrentio, magnet submission to Real-Debrid
+or AllDebrid, unrestricting download links, and downloading files to the Pi.
 """
 
 import logging
@@ -20,6 +20,7 @@ from app import database
 logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
+AD_BASE = "https://api.alldebrid.com/v4"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
@@ -262,7 +263,111 @@ def delete_rd_torrent(api_key: str, torrent_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Download management - download from RD to Pi
+# AllDebrid API functions
+# ---------------------------------------------------------------------------
+
+def _ad_params(api_key: str) -> dict:
+    return {"agent": "NomadPi", "apikey": api_key}
+
+
+def ad_get_user(api_key: str) -> dict:
+    """Get AllDebrid account info."""
+    r = requests.get(
+        f"{AD_BASE}/user",
+        params=_ad_params(api_key),
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") == "error":
+        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+    return data.get("data", {}).get("user", {})
+
+
+def ad_add_magnet(api_key: str, info_hash: str) -> dict:
+    """Add a magnet link to AllDebrid."""
+    magnet = f"magnet:?xt=urn:btih:{info_hash}"
+    r = requests.post(
+        f"{AD_BASE}/magnet/upload",
+        params=_ad_params(api_key),
+        data={"magnets[]": magnet},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") == "error":
+        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+    magnets = data.get("data", {}).get("magnets", [])
+    if magnets:
+        return magnets[0]
+    return {}
+
+
+def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
+    """Get AllDebrid magnet status."""
+    r = requests.get(
+        f"{AD_BASE}/magnet/status",
+        params={**_ad_params(api_key), "id": magnet_id},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") == "error":
+        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+    return data.get("data", {}).get("magnets", {})
+
+
+def ad_unrestrict_link(api_key: str, link: str) -> dict:
+    """Unrestrict a link via AllDebrid."""
+    r = requests.get(
+        f"{AD_BASE}/link/unlock",
+        params={**_ad_params(api_key), "link": link},
+        timeout=15,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if data.get("status") == "error":
+        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+    return data.get("data", {})
+
+
+def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
+    """Check AllDebrid instant availability."""
+    if not hashes:
+        return {}
+    result = {}
+    try:
+        params = _ad_params(api_key)
+        for i, h in enumerate(hashes):
+            params[f"magnets[{i}]"] = h
+        r = requests.get(
+            f"{AD_BASE}/magnet/instant",
+            params=params,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            magnets = data.get("data", {}).get("magnets", [])
+            for m in magnets:
+                h = m.get("hash", m.get("magnet", ""))
+                result[h] = m.get("instant", False)
+    except Exception as e:
+        logger.warning(f"AllDebrid instant check failed: {e}")
+    return result
+
+
+def ad_delete_magnet(api_key: str, magnet_id: str) -> None:
+    """Delete a magnet from AllDebrid."""
+    r = requests.get(
+        f"{AD_BASE}/magnet/delete",
+        params={**_ad_params(api_key), "id": magnet_id},
+        timeout=15,
+    )
+    r.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# Download management - download from debrid to Pi
 # ---------------------------------------------------------------------------
 
 def _get_category_from_filename(filename: str) -> str:

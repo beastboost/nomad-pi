@@ -6415,34 +6415,84 @@ function debridShowType() {
     if (t && se) se.style.display = t.value === 'series' ? 'flex' : 'none';
 }
 
+let _debridProvider = 'rd';
+
 async function initDebrid() {
     const typeSelect = document.getElementById('debrid-type');
     if (typeSelect) typeSelect.addEventListener('change', debridShowType);
 
+    // Load saved provider preference
     try {
-        const res = await fetch(`${API_BASE}/debrid/settings/key`, { headers: getAuthHeaders() });
-        if (!res.ok) return;
+        const provRes = await fetch(`${API_BASE}/debrid/settings/provider`, { headers: getAuthHeaders() });
+        if (provRes.ok) {
+            const provData = await provRes.json();
+            _debridProvider = provData.provider || 'rd';
+        }
+    } catch (e) { /* default rd */ }
+
+    _updateProviderTabs();
+    await _checkDebridKey();
+    refreshDebridDownloads();
+}
+
+function _updateProviderTabs() {
+    const rdTab = document.getElementById('debrid-tab-rd');
+    const adTab = document.getElementById('debrid-tab-ad');
+    if (rdTab) { rdTab.className = _debridProvider === 'rd' ? 'small primary' : 'small secondary'; }
+    if (adTab) { adTab.className = _debridProvider === 'ad' ? 'small primary' : 'small secondary'; }
+}
+
+async function debridSwitchProvider(provider) {
+    _debridProvider = provider;
+    _updateProviderTabs();
+    try {
+        await fetch(`${API_BASE}/debrid/settings/provider?provider=${provider}`, {
+            method: 'POST', headers: getAuthHeaders(),
+        });
+    } catch (e) { /* ignore */ }
+    await _checkDebridKey();
+}
+
+async function _checkDebridKey() {
+    const setupRd = document.getElementById('debrid-setup');
+    const setupAd = document.getElementById('debrid-setup-ad');
+    const main = document.getElementById('debrid-main');
+    const accountInfo = document.getElementById('rd-account-info');
+
+    // Hide both setups first
+    if (setupRd) setupRd.style.display = 'none';
+    if (setupAd) setupAd.style.display = 'none';
+
+    const endpoint = _debridProvider === 'ad' ? 'settings/ad-key' : 'settings/key';
+    try {
+        const res = await fetch(`${API_BASE}/debrid/${endpoint}`, { headers: getAuthHeaders() });
+        if (!res.ok) { _showDebridSetup(); return; }
         const data = await res.json();
 
-        if (data.configured && data.user) {
-            document.getElementById('debrid-setup').style.display = 'none';
-            document.getElementById('debrid-main').style.display = 'block';
-            document.getElementById('rd-account-info').style.display = 'block';
-            document.getElementById('rd-username').textContent = data.user.username || 'Connected';
-            if (!data.user.premium) {
+        if (data.configured && (data.user || data.valid !== false)) {
+            if (main) main.style.display = 'block';
+            if (accountInfo) {
+                accountInfo.style.display = 'block';
+                const usernameEl = document.getElementById('rd-username');
+                if (usernameEl) usernameEl.textContent = (data.user?.username || 'Connected');
                 const badge = document.getElementById('rd-premium-badge');
-                if (badge) badge.style.display = 'none';
+                if (badge) badge.style.display = (data.user?.premium) ? '' : 'none';
             }
         } else {
-            document.getElementById('debrid-setup').style.display = 'block';
-            document.getElementById('debrid-main').style.display = 'none';
+            _showDebridSetup();
         }
     } catch (e) {
-        document.getElementById('debrid-setup').style.display = 'block';
-        document.getElementById('debrid-main').style.display = 'none';
+        _showDebridSetup();
     }
+}
 
-    refreshDebridDownloads();
+function _showDebridSetup() {
+    const setupRd = document.getElementById('debrid-setup');
+    const setupAd = document.getElementById('debrid-setup-ad');
+    const main = document.getElementById('debrid-main');
+    if (setupRd) setupRd.style.display = _debridProvider === 'rd' ? 'block' : 'none';
+    if (setupAd) setupAd.style.display = _debridProvider === 'ad' ? 'block' : 'none';
+    if (main) main.style.display = 'none';
 }
 
 async function saveRDKey() {
@@ -6461,16 +6511,40 @@ async function saveRDKey() {
             throw new Error(err.detail || 'Failed to save key');
         }
         showToast('Real-Debrid connected!', 'success');
-        initDebrid();
+        _debridProvider = 'rd';
+        await debridSwitchProvider('rd');
     } catch (e) { showToast(e.message, 'error'); }
 }
 
-async function removeRDKey() {
-    if (!confirm('Remove Real-Debrid API key?')) return;
+async function saveADKey() {
+    const input = document.getElementById('ad-api-key-input');
+    const key = input ? input.value.trim() : '';
+    if (!key) { showToast('Please enter an AllDebrid API key', 'warning'); return; }
+
     try {
-        await fetch(`${API_BASE}/debrid/settings/key`, { method: 'DELETE', headers: getAuthHeaders() });
-        showToast('API key removed', 'info');
-        initDebrid();
+        const res = await fetch(`${API_BASE}/debrid/settings/ad-key`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: key }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to save key');
+        }
+        showToast('AllDebrid connected!', 'success');
+        _debridProvider = 'ad';
+        await debridSwitchProvider('ad');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function removeDebridKey() {
+    const label = _debridProvider === 'ad' ? 'AllDebrid' : 'Real-Debrid';
+    if (!confirm(`Remove ${label} API key?`)) return;
+    const endpoint = _debridProvider === 'ad' ? 'settings/ad-key' : 'settings/key';
+    try {
+        await fetch(`${API_BASE}/debrid/${endpoint}`, { method: 'DELETE', headers: getAuthHeaders() });
+        showToast(`${label} key removed`, 'info');
+        await _checkDebridKey();
     } catch (e) { showToast(e.message, 'error'); }
 }
 
@@ -6569,9 +6643,25 @@ async function renderTorrentResults(results, imdbId) {
         return;
     }
 
+    // Apply quality filter
+    const maxQuality = document.getElementById('debrid-quality')?.value;
+    if (maxQuality) {
+        const maxRes = parseInt(maxQuality);
+        const qualityValue = { '480p': 480, '720p': 720, '1080p': 1080, '2160p': 2160, '4K': 2160 };
+        results = results.filter(t => {
+            const qVal = qualityValue[t.quality] || 0;
+            return qVal === 0 || qVal <= maxRes;
+        });
+    }
+
+    if (results.length === 0) {
+        torrentsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No torrents match your quality filter</p>';
+        return;
+    }
+
     const qualityColors = { '2160p': '#e6c619', '4K': '#e6c619', '1080p': '#4CAF50', '720p': '#2196F3', '480p': '#9E9E9E' };
 
-    // Check which torrents are instantly available (cached) on RD
+    // Check which torrents are instantly available (cached) on the active debrid provider
     let cached = {};
     try {
         const hashes = results.map(t => t.info_hash).filter(Boolean);
@@ -6779,24 +6869,85 @@ function debridActionDialog(filename, downloadUrl, filesize) {
 }
 
 function debridStreamFile(url, filename) {
-    const ext = filename.split('.').pop().toLowerCase();
+    const ext = (filename.split('.').pop() || '').toLowerCase();
     const videoExts = ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts'];
 
-    if (videoExts.includes(ext)) {
-        // Use the existing video player
-        const playerOverlay = document.getElementById('player-overlay');
-        const videoEl = document.getElementById('main-video');
-        if (playerOverlay && videoEl) {
-            videoEl.src = url;
-            playerOverlay.style.display = 'flex';
-            document.getElementById('player-title').textContent = filename;
-            videoEl.play().catch(() => {});
-            showToast('Streaming from Real-Debrid', 'success');
-        }
-    } else {
-        // Open in new tab for non-video files
+    if (!videoExts.includes(ext)) {
         window.open(url, '_blank');
+        return;
     }
+
+    const modal = document.getElementById('viewer-modal');
+    const body = document.getElementById('viewer-body');
+    const heading = document.getElementById('viewer-title');
+
+    if (!modal || !body) {
+        window.open(url, '_blank');
+        return;
+    }
+
+    const safeTitle = escapeHtml(filename);
+
+    if (heading) {
+        heading.innerHTML = `
+            <div class="viewer-title-row">
+                <span class="viewer-title-text">${safeTitle}</span>
+                <div class="external-player-btns">
+                    <button class="player-action-btn" id="pip-btn" title="Picture-in-Picture" onclick="togglePiP()">
+                        <span>⧉</span><span class="btn-text">PiP</span>
+                    </button>
+                    <select class="player-action-btn speed-select" id="speed-select" title="Playback speed" onchange="setPlaybackSpeed(this.value)">
+                        <option value="0.5">0.5×</option>
+                        <option value="0.75">0.75×</option>
+                        <option value="1" selected>1×</option>
+                        <option value="1.25">1.25×</option>
+                        <option value="1.5">1.5×</option>
+                        <option value="2">2×</option>
+                    </select>
+                    <a href="${url}" download="${escapeHtml(filename)}" class="player-action-btn" title="Download file">
+                        <span>💾</span><span class="btn-text">Save</span>
+                    </a>
+                    <button class="player-action-btn" title="Copy link" onclick="navigator.clipboard.writeText('${url}');showToast('Link copied!','success')">
+                        <span>📋</span><span class="btn-text">Copy URL</span>
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    body.innerHTML = '';
+
+    const video = document.createElement('video');
+    video.className = 'video-frame';
+    video.controls = true;
+    video.preload = 'auto';
+    video.src = url;
+    video.style.width = '100%';
+    video.style.maxHeight = '80vh';
+
+    video.addEventListener('error', () => {
+        body.innerHTML = `
+            <div style="text-align:center;padding:2rem">
+                <p style="margin-bottom:1rem;color:var(--text-secondary)">
+                    <i class="fas fa-exclamation-triangle" style="color:var(--warning,#ff9800)"></i>
+                    Browser can't play this format directly (${ext.toUpperCase()})
+                </p>
+                <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+                    <a href="${url}" target="_blank" class="primary" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px;text-decoration:none">
+                        <i class="fas fa-external-link-alt"></i> Open in Browser
+                    </a>
+                    <button class="secondary" onclick="navigator.clipboard.writeText('${url}');showToast('Link copied — paste in VLC or another player','success')" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px">
+                        <i class="fas fa-copy"></i> Copy Link for VLC
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+
+    body.appendChild(video);
+    modal.classList.remove('hidden');
+    video.play().catch(() => {});
+    showToast('Streaming from Real-Debrid', 'success');
 }
 
 async function debridDownloadToPi(url, filename) {
