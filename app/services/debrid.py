@@ -286,6 +286,68 @@ def _sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', '_', name).strip('. ')
 
 
+def clean_media_filename(raw_filename: str, title: str = "",
+                         year: str = "", media_type: str = "movie",
+                         season: int = 0, episode: int = 0) -> str:
+    """Produce a clean filename from RD's raw release name and search metadata.
+
+    Movies  → "Title (Year).ext"
+    Series  → "Title S01E01.ext"
+
+    Falls back to basic cleanup if metadata is missing.
+    """
+    ext = os.path.splitext(raw_filename)[1].lower() or ".mkv"
+
+    # If we have title metadata, use it for a clean name
+    if title:
+        clean = title.strip()
+        if media_type == "series" and season and episode:
+            clean = f"{clean} S{int(season):02d}E{int(episode):02d}"
+        elif year:
+            clean = f"{clean} ({year})"
+        return _sanitize_filename(clean) + ext
+
+    # Fallback: extract title from the raw filename
+    name = os.path.splitext(raw_filename)[0]
+
+    # Remove common torrent tags
+    # Match year first to separate title from tags
+    year_match = re.search(r'[\.\s\-_\(]*((?:19|20)\d{2})[\.\s\-_\)]*', name)
+    if year_match:
+        title_part = name[:year_match.start()].strip()
+        found_year = year_match.group(1)
+    else:
+        # Try to remove everything after first quality/source tag
+        tag_match = re.search(
+            r'[\.\s\-_](?:2160p|1080p|720p|480p|4K|BluRay|WEB-DL|WEBRip|'
+            r'HDRip|BRRip|DVDRip|HDTV|RERIP|REMUX|x264|x265|h\.?264|'
+            r'h\.?265|HEVC|AAC|DTS|TrueHD|Atmos|HDR|DV|10bit|SDR)',
+            name, re.IGNORECASE
+        )
+        if tag_match:
+            title_part = name[:tag_match.start()].strip()
+        else:
+            title_part = name
+        found_year = ""
+
+    # Replace dots/underscores with spaces
+    title_part = re.sub(r'[\.\-_]+', ' ', title_part).strip()
+    # Remove any release group prefix like [GROUP]
+    title_part = re.sub(r'^\[.*?\]\s*', '', title_part).strip()
+    # Collapse multiple spaces
+    title_part = re.sub(r'\s{2,}', ' ', title_part).strip()
+
+    if not title_part:
+        return _sanitize_filename(raw_filename)
+
+    if found_year:
+        clean = f"{title_part} ({found_year})"
+    else:
+        clean = title_part
+
+    return _sanitize_filename(clean) + ext
+
+
 def download_to_pi(api_key: str, download_url: str, filename: str,
                    category: str = "auto", is_show: bool = False) -> str:
     """Download a file from Real-Debrid to the Pi's media library.
