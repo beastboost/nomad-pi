@@ -6527,7 +6527,7 @@ async function debridSelectTitle(imdbId, title, mediaType) {
     }
 }
 
-function renderTorrentResults(results, imdbId) {
+async function renderTorrentResults(results, imdbId) {
     const torrentsDiv = document.getElementById('debrid-torrents');
     const torrentsList = document.getElementById('debrid-torrents-list');
     torrentsDiv.style.display = 'block';
@@ -6539,13 +6539,35 @@ function renderTorrentResults(results, imdbId) {
 
     const qualityColors = { '2160p': '#e6c619', '4K': '#e6c619', '1080p': '#4CAF50', '720p': '#2196F3', '480p': '#9E9E9E' };
 
+    // Check which torrents are instantly available (cached) on RD
+    let cached = {};
+    try {
+        const hashes = results.map(t => t.info_hash).filter(Boolean);
+        if (hashes.length) {
+            const res = await fetch(`${API_BASE}/debrid/instant`, {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hashes }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                cached = data.cached || {};
+            }
+        }
+    } catch (e) { console.warn('Instant availability check failed:', e); }
+
     torrentsList.innerHTML = results.map((t, i) => {
         const qColor = qualityColors[t.quality] || 'var(--text-secondary)';
+        const isCached = cached[t.info_hash] || cached[t.info_hash?.toLowerCase()];
+        const cachedBadge = isCached
+            ? '<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD CACHED</span>'
+            : '';
+        const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
         return `
             <div class="glass-card" style="padding:1rem;margin-bottom:.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
                     <div style="flex:1;min-width:200px">
-                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}</div>
+                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}</div>
                         <div style="font-size:.85rem;color:var(--text-secondary)">
                             <span style="color:${qColor};font-weight:600">${t.quality}</span>
                             ${t.size ? ` &middot; ${t.size}` : ''}
@@ -6554,8 +6576,8 @@ function renderTorrentResults(results, imdbId) {
                         </div>
                     </div>
                     <div style="display:flex;gap:.5rem;flex-shrink:0">
-                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapeHtml(t.name)}')" class="primary small" title="Send to Real-Debrid">
-                            <i class="fas fa-magnet"></i> Add
+                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isCached ? 'Instantly available — stream or download' : 'Send to Real-Debrid'}">
+                            <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
                         </button>
                     </div>
                 </div>
@@ -6568,7 +6590,6 @@ async function debridAddMagnet(infoHash, fileIdx, name) {
     showToast('Adding to Real-Debrid...', 'info');
     try {
         const body = { info_hash: infoHash };
-        if (fileIdx != null) body.file_idx = fileIdx;
 
         const res = await fetch(`${API_BASE}/debrid/magnet`, {
             method: 'POST',
@@ -6587,8 +6608,16 @@ async function debridAddMagnet(infoHash, fileIdx, name) {
         } else if (data.torrent_status === 'waiting_files_selection') {
             showToast('Select files to download', 'info');
             debridShowFiles(data);
+        } else if (data.torrent_status === 'magnet_conversion') {
+            showToast('Converting magnet...', 'info');
+            if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
+        } else if (data.torrent_status === 'queued' || data.torrent_status === 'downloading' || data.torrent_status === 'compressing' || data.torrent_status === 'uploading') {
+            showToast(`${data.torrent_status}: ${data.progress || 0}%`, 'info');
+            if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
+        } else if (data.torrent_status === 'error' || data.torrent_status === 'dead' || data.torrent_status === 'virus') {
+            showToast(`Torrent failed: ${data.torrent_status}`, 'error');
         } else {
-            showToast(`Status: ${data.torrent_status} (${data.progress || 0}%)`, 'info');
+            showToast(`Status: ${data.torrent_status || 'unknown'}`, 'info');
             if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
         }
     } catch (e) { showToast(e.message, 'error'); }
@@ -6759,36 +6788,54 @@ async function clearCompletedDownloads() {
 async function debridPollTorrent(torrentId, filename) {
     showToast('Waiting for Real-Debrid to process...', 'info');
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutes
+    const maxAttempts = 120; // 10 minutes at 5s intervals
 
     const poll = async () => {
         try {
             const res = await fetch(`${API_BASE}/debrid/torrent/${torrentId}`, { headers: getAuthHeaders() });
-            if (!res.ok) return;
+            if (!res.ok) {
+                attempts++;
+                if (attempts < 3) { setTimeout(poll, 5000); return; }
+                showToast('Failed to check torrent status', 'error');
+                return;
+            }
             const data = await res.json();
 
             if (data.status === 'downloaded' && data.links && data.links.length > 0) {
-                showToast('Download ready!', 'success');
+                showToast('Ready!', 'success');
                 debridHandleLinks(data.links, filename);
                 return;
             }
 
-            if (data.status === 'error' || data.status === 'dead') {
+            if (data.status === 'error' || data.status === 'dead' || data.status === 'virus' || data.status === 'magnet_error') {
                 showToast(`Torrent failed: ${data.status}`, 'error');
                 return;
             }
 
+            // If waiting for file selection and we haven't selected yet, select all
+            if (data.status === 'waiting_files_selection') {
+                try {
+                    await fetch(`${API_BASE}/debrid/select-files`, {
+                        method: 'POST',
+                        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ torrent_id: torrentId, file_ids: 'all' }),
+                    });
+                } catch (e) { /* ignore, retry on next poll */ }
+            }
+
             attempts++;
             if (attempts < maxAttempts) {
-                showToast(`Processing: ${data.progress || 0}%`, 'info');
+                const pct = data.progress || 0;
+                const speed = data.speed ? ` @ ${(data.speed / 1048576).toFixed(1)} MB/s` : '';
+                showToast(`${data.status || 'Processing'}: ${pct}%${speed}`, 'info');
                 setTimeout(poll, 5000);
             } else {
-                showToast('Torrent taking too long, check RD dashboard', 'warning');
+                showToast('Torrent taking too long — check Real-Debrid dashboard', 'warning');
             }
         } catch (e) { showToast(e.message, 'error'); }
     };
 
-    setTimeout(poll, 3000);
+    setTimeout(poll, 2000);
 }
 
 function debridShowFiles(data) {

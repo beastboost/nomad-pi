@@ -252,6 +252,22 @@ def _require_rd_key() -> str:
     return api_key
 
 
+class InstantCheckRequest(BaseModel):
+    hashes: list[str]
+
+
+@router.post("/instant")
+def check_instant(req: InstantCheckRequest, user_id: int = Depends(get_current_user_id)):
+    """Check which hashes are instantly available (cached) on Real-Debrid."""
+    api_key = _require_rd_key()
+    try:
+        result = debrid.check_instant_availability(api_key, req.hashes)
+        return {"cached": result}
+    except Exception as e:
+        logger.warning(f"Instant availability check failed: {e}")
+        return {"cached": {}}
+
+
 @router.post("/magnet")
 def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
     """Add a magnet to Real-Debrid and select files."""
@@ -264,12 +280,9 @@ def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
         if not torrent_id:
             raise HTTPException(status_code=500, detail="Failed to get torrent ID from Real-Debrid")
 
-        # Select files (all by default, or specific file index)
-        file_ids = "all"
-        if req.file_idx is not None:
-            file_ids = str(req.file_idx)
-
-        debrid.select_files(api_key, torrent_id, file_ids)
+        # Always select all files — file_idx from Torrentio is a playback
+        # hint, not a Real-Debrid file ID
+        debrid.select_files(api_key, torrent_id, "all")
 
         # Get torrent info with links
         info = debrid.get_torrent_info(api_key, torrent_id)
