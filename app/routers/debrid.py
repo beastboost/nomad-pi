@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app import database
 from app.routers.auth import get_current_user_id, get_current_admin
 from app.services import debrid
+from app.services import tmdb as tmdb_service
 
 logger = logging.getLogger(__name__)
 
@@ -114,45 +115,22 @@ def search_torrents(
     """Search for torrents via Torrentio.
 
     Requires either an IMDB ID for direct lookup or a text query
-    (which will be searched via OMDb/TMDB first for the IMDB ID).
+    (which will be searched via TMDB/OMDb first for the IMDB ID).
     """
     actual_imdb_id = imdb_id
 
-    # If no IMDB ID but we have a text query, try to find via OMDb
     if not actual_imdb_id and query:
-        omdb_key = database.get_setting("omdb_api_key")
-        if omdb_key:
-            try:
-                import httpx
-                r = httpx.get(
-                    "https://www.omdbapi.com/",
-                    params={"apikey": omdb_key, "s": query, "type": media_type},
-                    timeout=10,
-                )
-                data = r.json()
-                if data.get("Response") == "True" and data.get("Search"):
-                    # Return search results for user to pick
-                    return {
-                        "type": "search_results",
-                        "results": [
-                            {
-                                "title": item.get("Title"),
-                                "year": item.get("Year"),
-                                "imdb_id": item.get("imdbID"),
-                                "poster": item.get("Poster") if item.get("Poster") != "N/A" else None,
-                                "type": item.get("Type"),
-                            }
-                            for item in data["Search"][:10]
-                        ],
-                    }
-            except Exception as e:
-                logger.warning(f"OMDb search failed: {e}")
-
-        if not actual_imdb_id:
-            return {"type": "search_results", "results": [], "message": "No results found. Try searching with an IMDB ID."}
+        search_results = _search_titles(query, media_type)
+        if search_results:
+            return {"type": "search_results", "results": search_results}
+        return {
+            "type": "search_results",
+            "results": [],
+            "message": "No results found. Try a different search term or use an IMDB ID directly.",
+        }
 
     if not actual_imdb_id:
-        raise HTTPException(status_code=400, detail="IMDB ID required for torrent search")
+        raise HTTPException(status_code=400, detail="Enter a search term or IMDB ID")
 
     results = debrid.search_torrentio(
         query=query,
@@ -163,6 +141,82 @@ def search_torrents(
     )
 
     return {"type": "torrents", "results": results, "imdb_id": actual_imdb_id}
+
+
+def _search_titles(query: str, media_type: str) -> list[dict]:
+    """Search for titles using TMDB (primary) or OMDb (fallback).
+
+    Returns a list of title results with IMDB IDs for the user to pick from.
+    """
+    # Try TMDB first (free, no key needed for basic use, returns IMDB IDs)
+    try:
+        if media_type == "series":
+            tmdb_data = tmdb_service.search_shows(query)
+        else:
+            tmdb_data = tmdb_service.search_movies(query)
+
+        if not tmdb_data.get("error") and tmdb_data.get("results"):
+            results = []
+            for item in tmdb_data["results"][:10]:
+                tmdb_id = item.get("id")
+                if not tmdb_id:
+                    continue
+
+                # Get IMDB ID from TMDB details
+                imdb_id = None
+                try:
+                    if media_type == "series":
+                        details = tmdb_service.get_show_details(tmdb_id)
+                    else:
+                        details = tmdb_service.get_movie_details(tmdb_id)
+                    if details:
+                        imdb_id = details.get("imdb_id")
+                except Exception:
+                    pass
+
+                if not imdb_id:
+                    continue
+
+                year = (item.get("release_date") or item.get("first_air_date") or "")[:4]
+                results.append({
+                    "title": item.get("title"),
+                    "year": year,
+                    "imdb_id": imdb_id,
+                    "poster": item.get("poster"),
+                    "type": media_type,
+                })
+
+            if results:
+                return results
+    except Exception as e:
+        logger.warning(f"TMDB search failed: {e}")
+
+    # Fallback to OMDb
+    omdb_key = database.get_setting("omdb_api_key")
+    if omdb_key:
+        try:
+            import httpx
+            r = httpx.get(
+                "https://www.omdbapi.com/",
+                params={"apikey": omdb_key, "s": query, "type": media_type},
+                timeout=10,
+            )
+            data = r.json()
+            if data.get("Response") == "True" and data.get("Search"):
+                return [
+                    {
+                        "title": item.get("Title"),
+                        "year": item.get("Year"),
+                        "imdb_id": item.get("imdbID"),
+                        "poster": item.get("Poster") if item.get("Poster") != "N/A" else None,
+                        "type": item.get("Type"),
+                    }
+                    for item in data["Search"][:10]
+                ]
+        except Exception as e:
+            logger.warning(f"OMDb search failed: {e}")
+
+    return []
 
 
 # ---------------------------------------------------------------------------
