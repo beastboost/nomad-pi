@@ -6588,6 +6588,7 @@ async function renderTorrentResults(results, imdbId) {
 
 async function debridAddMagnet(infoHash, fileIdx, name) {
     showToast('Adding to Real-Debrid...', 'info');
+    debridShowProcessing(name, 'Adding magnet...');
     try {
         const body = { info_hash: infoHash };
 
@@ -6603,48 +6604,104 @@ async function debridAddMagnet(infoHash, fileIdx, name) {
         const data = await res.json();
 
         if (data.torrent_status === 'downloaded' && data.links && data.links.length > 0) {
-            showToast('Cached! Getting download link...', 'success');
+            debridShowProcessing(name, 'Cached! Getting stream link...');
             debridHandleLinks(data.links, data.filename || name);
-        } else if (data.torrent_status === 'waiting_files_selection') {
+        } else if (data.torrent_status === 'waiting_files_selection' && data.files && data.files.length > 0) {
+            debridHideProcessing();
             showToast('Select files to download', 'info');
             debridShowFiles(data);
-        } else if (data.torrent_status === 'magnet_conversion') {
-            showToast('Converting magnet...', 'info');
-            if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
-        } else if (data.torrent_status === 'queued' || data.torrent_status === 'downloading' || data.torrent_status === 'compressing' || data.torrent_status === 'uploading') {
-            showToast(`${data.torrent_status}: ${data.progress || 0}%`, 'info');
-            if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
-        } else if (data.torrent_status === 'error' || data.torrent_status === 'dead' || data.torrent_status === 'virus') {
+        } else if (data.torrent_status === 'error' || data.torrent_status === 'dead' || data.torrent_status === 'virus' || data.torrent_status === 'magnet_error') {
+            debridHideProcessing();
             showToast(`Torrent failed: ${data.torrent_status}`, 'error');
         } else {
-            showToast(`Status: ${data.torrent_status || 'unknown'}`, 'info');
+            // Any other status — start polling with visible progress
+            debridShowProcessing(name, `${data.torrent_status || 'Processing'}...`);
             if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
         }
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) {
+        debridHideProcessing();
+        showToast(e.message, 'error');
+    }
+}
+
+function debridShowProcessing(name, statusText) {
+    let card = document.getElementById('debrid-processing-card');
+    if (!card) {
+        card = document.createElement('div');
+        card.id = 'debrid-processing-card';
+        card.className = 'glass-card';
+        card.style.cssText = 'padding:1rem;margin-bottom:1rem;border-left:3px solid var(--accent)';
+        const torrentsDiv = document.getElementById('debrid-torrents');
+        if (torrentsDiv) torrentsDiv.parentElement.insertBefore(card, torrentsDiv);
+        else document.querySelector('#debrid-tab .glass-card')?.after(card);
+    }
+    card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:.75rem">
+            <i class="fas fa-spinner fa-spin" style="color:var(--accent);font-size:1.2rem"></i>
+            <div style="flex:1">
+                <div style="font-weight:600;font-size:.9rem">${escapeHtml(name || 'Processing...')}</div>
+                <div id="debrid-processing-status" style="font-size:.85rem;color:var(--text-secondary)">${statusText || 'Working...'}</div>
+                <div style="background:var(--glass-bg);border-radius:4px;height:6px;overflow:hidden;margin-top:.5rem">
+                    <div id="debrid-processing-bar" style="background:var(--accent);height:100%;width:0%;transition:width .5s"></div>
+                </div>
+            </div>
+        </div>
+    `;
+    card.style.display = 'block';
+}
+
+function debridUpdateProcessing(statusText, progress) {
+    const statusEl = document.getElementById('debrid-processing-status');
+    const barEl = document.getElementById('debrid-processing-bar');
+    if (statusEl) statusEl.textContent = statusText;
+    if (barEl) barEl.style.width = `${progress || 0}%`;
+}
+
+function debridHideProcessing() {
+    const card = document.getElementById('debrid-processing-card');
+    if (card) card.style.display = 'none';
 }
 
 async function debridHandleLinks(links, filename) {
+    if (!links || links.length === 0) {
+        debridHideProcessing();
+        showToast('No download links available', 'warning');
+        return;
+    }
+
+    let handled = false;
     for (const link of links) {
         try {
+            debridUpdateProcessing('Unrestricting link...', 50);
             const res = await fetch(`${API_BASE}/debrid/unrestrict?link=${encodeURIComponent(link)}`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
             });
-            if (!res.ok) continue;
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.warn('Unrestrict failed:', err.detail || res.status);
+                continue;
+            }
             const data = await res.json();
 
             if (data.download && data.filename) {
-                // Show action dialog
+                debridHideProcessing();
                 const action = await debridActionDialog(data.filename, data.download, data.filesize);
                 if (action === 'stream') {
                     debridStreamFile(data.download, data.filename);
                 } else if (action === 'download') {
                     debridDownloadToPi(data.download, data.filename);
                 }
+                handled = true;
             }
         } catch (e) {
             console.error('Unrestrict failed:', e);
         }
+    }
+
+    if (!handled) {
+        debridHideProcessing();
+        showToast('Could not get download links — try again or choose a different torrent', 'error');
     }
 }
 
@@ -6786,33 +6843,34 @@ async function clearCompletedDownloads() {
 }
 
 async function debridPollTorrent(torrentId, filename) {
-    showToast('Waiting for Real-Debrid to process...', 'info');
     let attempts = 0;
-    const maxAttempts = 120; // 10 minutes at 5s intervals
+    const maxAttempts = 120;
 
     const poll = async () => {
         try {
             const res = await fetch(`${API_BASE}/debrid/torrent/${torrentId}`, { headers: getAuthHeaders() });
             if (!res.ok) {
                 attempts++;
-                if (attempts < 3) { setTimeout(poll, 5000); return; }
+                if (attempts < 5) { setTimeout(poll, 3000); return; }
+                debridHideProcessing();
                 showToast('Failed to check torrent status', 'error');
                 return;
             }
             const data = await res.json();
 
             if (data.status === 'downloaded' && data.links && data.links.length > 0) {
-                showToast('Ready!', 'success');
+                debridUpdateProcessing('Ready! Getting stream link...', 100);
                 debridHandleLinks(data.links, filename);
                 return;
             }
 
             if (data.status === 'error' || data.status === 'dead' || data.status === 'virus' || data.status === 'magnet_error') {
+                debridHideProcessing();
                 showToast(`Torrent failed: ${data.status}`, 'error');
                 return;
             }
 
-            // If waiting for file selection and we haven't selected yet, select all
+            // Auto-select files if stuck waiting
             if (data.status === 'waiting_files_selection') {
                 try {
                     await fetch(`${API_BASE}/debrid/select-files`, {
@@ -6820,19 +6878,31 @@ async function debridPollTorrent(torrentId, filename) {
                         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                         body: JSON.stringify({ torrent_id: torrentId, file_ids: 'all' }),
                     });
-                } catch (e) { /* ignore, retry on next poll */ }
+                } catch (e) { /* retry on next poll */ }
             }
 
             attempts++;
             if (attempts < maxAttempts) {
                 const pct = data.progress || 0;
                 const speed = data.speed ? ` @ ${(data.speed / 1048576).toFixed(1)} MB/s` : '';
-                showToast(`${data.status || 'Processing'}: ${pct}%${speed}`, 'info');
-                setTimeout(poll, 5000);
+                const statusLabel = {
+                    'magnet_conversion': 'Converting magnet',
+                    'waiting_files_selection': 'Selecting files',
+                    'queued': 'Queued on RD',
+                    'downloading': 'Downloading on RD',
+                    'compressing': 'Compressing',
+                    'uploading': 'Uploading to RD',
+                }[data.status] || data.status || 'Processing';
+                debridUpdateProcessing(`${statusLabel}: ${pct}%${speed}`, pct);
+                setTimeout(poll, 3000);
             } else {
+                debridHideProcessing();
                 showToast('Torrent taking too long — check Real-Debrid dashboard', 'warning');
             }
-        } catch (e) { showToast(e.message, 'error'); }
+        } catch (e) {
+            debridHideProcessing();
+            showToast(e.message, 'error');
+        }
     };
 
     setTimeout(poll, 2000);

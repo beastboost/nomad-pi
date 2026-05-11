@@ -271,6 +271,8 @@ def check_instant(req: InstantCheckRequest, user_id: int = Depends(get_current_u
 @router.post("/magnet")
 def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
     """Add a magnet to Real-Debrid and select files."""
+    import time
+
     api_key = _require_rd_key()
 
     try:
@@ -280,12 +282,31 @@ def add_magnet(req: MagnetRequest, user_id: int = Depends(get_current_user_id)):
         if not torrent_id:
             raise HTTPException(status_code=500, detail="Failed to get torrent ID from Real-Debrid")
 
-        # Always select all files — file_idx from Torrentio is a playback
-        # hint, not a Real-Debrid file ID
-        debrid.select_files(api_key, torrent_id, "all")
-
-        # Get torrent info with links
+        # Wait for magnet conversion before selecting files (up to 10s)
         info = debrid.get_torrent_info(api_key, torrent_id)
+        for _ in range(10):
+            if info.get("status") != "magnet_conversion":
+                break
+            time.sleep(1)
+            info = debrid.get_torrent_info(api_key, torrent_id)
+
+        # Select all files if waiting for selection
+        if info.get("status") == "waiting_files_selection":
+            try:
+                debrid.select_files(api_key, torrent_id, "all")
+            except Exception as e:
+                logger.warning(f"selectFiles failed: {e}")
+
+            # Re-fetch info after selecting — wait briefly for cached torrents
+            time.sleep(1)
+            info = debrid.get_torrent_info(api_key, torrent_id)
+
+            # For cached torrents, status transitions quickly to 'downloaded'
+            for _ in range(5):
+                if info.get("status") == "downloaded":
+                    break
+                time.sleep(1)
+                info = debrid.get_torrent_info(api_key, torrent_id)
 
         return {
             "status": "ok",
