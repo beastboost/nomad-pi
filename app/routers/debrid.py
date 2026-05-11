@@ -143,12 +143,39 @@ def search_torrents(
     return {"type": "torrents", "results": results, "imdb_id": actual_imdb_id}
 
 
-def _search_titles(query: str, media_type: str) -> list[dict]:
-    """Search for titles using TMDB (primary) or OMDb (fallback).
+CINEMETA_BASE = "https://v3-cinemeta.strem.io"
 
-    Returns a list of title results with IMDB IDs for the user to pick from.
+
+def _search_titles(query: str, media_type: str) -> list[dict]:
+    """Search for titles and return IMDB IDs.
+
+    Uses Cinemeta (Stremio catalog, no API key needed) as primary,
+    with TMDB and OMDb as fallbacks.
     """
-    # Try TMDB first (free, no key needed for basic use, returns IMDB IDs)
+    # Cinemeta — works without any API key, returns IMDB IDs directly
+    try:
+        import requests as _req
+        url = f"{CINEMETA_BASE}/catalog/{media_type}/top/search={_req.utils.quote(query)}.json"
+        r = _req.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            metas = data.get("metas", [])
+            if metas:
+                return [
+                    {
+                        "title": m.get("name"),
+                        "year": (m.get("releaseInfo") or "")[:4],
+                        "imdb_id": m.get("imdb_id") or m.get("id"),
+                        "poster": m.get("poster"),
+                        "type": m.get("type") or media_type,
+                    }
+                    for m in metas[:15]
+                    if m.get("imdb_id") or (m.get("id", "").startswith("tt"))
+                ]
+    except Exception as e:
+        logger.warning(f"Cinemeta search failed: {e}")
+
+    # Fallback: TMDB (requires API key)
     try:
         if media_type == "series":
             tmdb_data = tmdb_service.search_shows(query)
@@ -161,8 +188,6 @@ def _search_titles(query: str, media_type: str) -> list[dict]:
                 tmdb_id = item.get("id")
                 if not tmdb_id:
                     continue
-
-                # Get IMDB ID from TMDB details
                 imdb_id = None
                 try:
                     if media_type == "series":
@@ -173,10 +198,8 @@ def _search_titles(query: str, media_type: str) -> list[dict]:
                         imdb_id = details.get("imdb_id")
                 except Exception:
                     pass
-
                 if not imdb_id:
                     continue
-
                 year = (item.get("release_date") or item.get("first_air_date") or "")[:4]
                 results.append({
                     "title": item.get("title"),
@@ -185,13 +208,12 @@ def _search_titles(query: str, media_type: str) -> list[dict]:
                     "poster": item.get("poster"),
                     "type": media_type,
                 })
-
             if results:
                 return results
     except Exception as e:
         logger.warning(f"TMDB search failed: {e}")
 
-    # Fallback to OMDb
+    # Fallback: OMDb (requires API key)
     omdb_key = database.get_setting("omdb_api_key")
     if omdb_key:
         try:
