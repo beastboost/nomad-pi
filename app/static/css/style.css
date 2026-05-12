@@ -200,7 +200,48 @@ nav button.active {
     .mobile-bottom-nav {
         display: flex;
     }
+    
+    /* Better touch targets on mobile */
+    header nav#main-nav button,
+    .icon-btn,
+    .card-action-btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 10px;
+    }
+    
+    /* Ensure controls are easily tappable */
+    .player-controls button,
+    .modal-controls button,
+    .glass-controls button {
+        min-width: 48px;
+        min-height: 48px;
+    }
 
+/* Tablet/iPad optimization (768px - 1200px) */
+@media (min-width: 769px) and (max-width: 1200px) {
+    .media-card {
+        flex: 0 0 calc(33.333% - 16px);
+    }
+    
+    .list-item {
+        padding: 12px 16px;
+    }
+    
+    header nav#main-nav button {
+        padding: 12px;
+        font-size: 15px;
+    }
+    
+    .player-controls button,
+    .modal-controls button {
+        min-width: 52px;
+        min-height: 52px;
+        font-size: 18px;
+    }
+}
+
+@media (max-width: 768px) {
     header nav#main-nav {
         position: fixed !important;
         top: 0 !important;
