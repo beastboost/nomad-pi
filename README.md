@@ -4,6 +4,8 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 
 > **Note:** This project is a fork of [Jcorp Nomad](https://github.com/Jstudner/jcorp-nomad) by Jstudner, with significant enhancements and optimizations for mobile UX, PWA support, and additional features.
 
+> **Deprecation Notice:** AllDebrid's v4 API has been discontinued. Please migrate to the newest API. See [AllDebrid Documentation](https://docs.alldebrid.com) for details.
+
 ## 🚀 Key Features
 
 - **Modern Glassmorphism UI**: A stunning, responsive interface with dark mode and real-time glass effects.
