@@ -3830,6 +3830,29 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme(); // Initialize theme before anything else
     initPWAInstallPrompt();
     initRenameModal();
+    
+    // Network status monitoring - show banner when offline
+    function updateNetworkStatus() {
+        const isOnline = navigator.onLine;
+        let banner = document.getElementById('offline-banner');
+        if (!isOnline) {
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'offline-banner';
+                banner.innerHTML = '<i class="fas fa-wifi"></i> You are offline. Some features may be limited.';
+                banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:#fff;padding:8px;text-align:center;z-index:99999;font-size:14px;';
+                document.body.appendChild(banner);
+            }
+            banner.style.display = 'block';
+        } else {
+            if (banner) banner.style.display = 'none';
+        }
+    }
+    
+    // Listen for network status changes
+    window.addEventListener('online', updateNetworkStatus);
+    window.addEventListener('offline', updateNetworkStatus);
+    updateNetworkStatus(); // Check initial state
 
     // Ensure all sections except home are hidden on page load
     document.querySelectorAll('main > section').forEach(section => {
