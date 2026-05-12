@@ -1237,17 +1237,18 @@ async function loadFileBrowser(path) {
             data.items.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item' + (item.is_dir ? ' folder' : '');
-                // Use JSON.stringify to safely embed paths with quotes/special chars
-                const safePathJson = JSON.stringify(item.path);
+                const itemPath = item.path;
 
                 if (item.is_dir) {
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="loadFileBrowser(${safePathJson})">
+                        <div class="media-card glass">
                             <div class="media-info">
                                 <h3>📁 ${escapeHtml(item.name)}</h3>
                             </div>
                         </div>
                     `;
+                    // Use addEventListener instead of inline onclick for better reliability
+                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(itemPath));
                 } else {
                     const ext = item.name.split('.').pop().toLowerCase();
                     let icon = '📄';
@@ -1257,13 +1258,15 @@ async function loadFileBrowser(path) {
                     if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
 
                     div.innerHTML = `
-                        <div class="media-card glass" onclick="openFile(${safePathJson})">
+                        <div class="media-card glass">
                             <div class="media-info">
                                 <h3>${icon} ${escapeHtml(item.name)}</h3>
                                 <p>${formatBytes(item.size)}</p>
                             </div>
                         </div>
                     `;
+                    // Use addEventListener instead of inline onclick for better reliability
+                    div.querySelector('.media-card').addEventListener('click', () => openFile(itemPath));
                 }
                 container.appendChild(div);
             });
@@ -1499,7 +1502,7 @@ function renderMediaList(category, files) {
         }
 
         const canEdit = canEditLibrary();
-        const cardDeleteBtn = canEdit ? `<button class="card-action-btn card-delete-btn" title="Delete" onclick="event.stopPropagation();deleteItem(${JSON.stringify(file.path)})">×</button>` : '';
+        const cardDeleteBtn = canEdit ? `<button class="card-action-btn card-delete-btn" title="Delete" data-delete-path="${escapeHtml(file.path)}">×</button>` : '';
         const cardRenameBtn = canEdit ? `<button class="card-action-btn card-rename-btn rename-btn-card" title="Rename">✏</button>` : '';
 
         if (category === 'music') {
@@ -2871,8 +2874,8 @@ function renderShows() {
     container.innerHTML = '';
     if (continueEl) continueEl.innerHTML = '';
 
-    const getDelBtn = (path) => (canEditLibrary() && path) ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;" title="Delete" onclick="event.stopPropagation(); deleteItem('${escapeHtml(path)}')">×</button>` : '';
-    const getRenameBtn = (path, name) => (canEditLibrary() && path) ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;" title="Rename" onclick="event.stopPropagation(); promptRenameShowPart('${escapeHtml(path)}', '${escapeHtml(name)}')">✏️</button>` : '';
+    const getDelBtn = (path) => (canEditLibrary() && path) ? `<button class="delete-btn" style="position:absolute;top:5px;right:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1.2em;line-height:1;opacity:0.7;" title="Delete" data-delete-path="${escapeHtml(path)}">×</button>` : '';
+    const getRenameBtn = (path, name) => (canEditLibrary() && path) ? `<button class="rename-btn-card" style="position:absolute;top:5px;left:5px;z-index:20;background:rgba(0,0,0,0.6);border:none;color:#fff;cursor:pointer;border-radius:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:1em;opacity:0.7;" title="Rename" data-rename-path="${escapeHtml(path)}" data-rename-name="${escapeHtml(name)}">✏️</button>` : '';
 
     if (!showsLibraryCache || showsLibraryCache.length === 0) {
         container.innerHTML = '<p>No shows found.</p>';
@@ -7148,3 +7151,32 @@ async function debridConfirmFiles(btn, torrentId, filename) {
         debridPollTorrent(torrentId, filename);
     } catch (e) { showToast(e.message, 'error'); }
 }
+
+// Global event delegation for delete and rename buttons on media cards
+// This ensures click handlers work even when buttons are dynamically created
+document.addEventListener('click', function(e) {
+    // Handle delete buttons
+    const deleteBtn = e.target.closest('[data-delete-path]');
+    if (deleteBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        const path = deleteBtn.dataset.deletePath;
+        if (path) {
+            deleteItem(path);
+        }
+        return;
+    }
+    
+    // Handle rename buttons
+    const renameBtn = e.target.closest('[data-rename-path]');
+    if (renameBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        const path = renameBtn.dataset.renamePath;
+        const name = renameBtn.dataset.renameName;
+        if (path && name) {
+            promptRenameShowPart(path, name);
+        }
+        return;
+    }
+}, false);

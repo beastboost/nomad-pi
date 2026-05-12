@@ -263,24 +263,25 @@ def delete_rd_torrent(api_key: str, torrent_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AllDebrid API functions
+# AllDebrid API functions (updated to use Bearer token auth for v4.1 API)
 # ---------------------------------------------------------------------------
 
-def _ad_params(api_key: str) -> dict:
-    return {"agent": "NomadPi", "apikey": api_key}
+def _ad_headers(api_key: str) -> dict:
+    """Return headers for AllDebrid API v4.1 with Bearer token auth."""
+    return {"Authorization": f"Bearer {api_key}"}
 
 
 def ad_get_user(api_key: str) -> dict:
     """Get AllDebrid account info."""
     r = requests.get(
         f"{AD_BASE}/user",
-        params=_ad_params(api_key),
+        headers=_ad_headers(api_key),
         timeout=15,
     )
     r.raise_for_status()
     data = r.json()
     if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+        raise Exception(data.get("error", {}).get("message", data.get("error", "AllDebrid error")))
     return data.get("data", {}).get("user", {})
 
 
@@ -289,7 +290,7 @@ def ad_add_magnet(api_key: str, info_hash: str) -> dict:
     magnet = f"magnet:?xt=urn:btih:{info_hash}"
     r = requests.post(
         f"{AD_BASE}/magnet/upload",
-        params=_ad_params(api_key),
+        headers=_ad_headers(api_key),
         data={"magnets[]": magnet},
         timeout=15,
     )
@@ -307,7 +308,8 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     """Get AllDebrid magnet status."""
     r = requests.get(
         f"{AD_BASE}/magnet/status",
-        params={**_ad_params(api_key), "id": magnet_id},
+        headers=_ad_headers(api_key),
+        params={"id": magnet_id},
         timeout=15,
     )
     r.raise_for_status()
@@ -319,9 +321,10 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
 
 def ad_unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a link via AllDebrid."""
-    r = requests.get(
+    r = requests.post(
         f"{AD_BASE}/link/unlock",
-        params={**_ad_params(api_key), "link": link},
+        headers=_ad_headers(api_key),
+        data={"link": link},
         timeout=15,
     )
     r.raise_for_status()
@@ -337,12 +340,11 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
         return {}
     result = {}
     try:
-        params = _ad_params(api_key)
-        for i, h in enumerate(hashes):
-            params[f"magnets[{i}]"] = h
-        r = requests.get(
+        data = {"magnets": hashes}
+        r = requests.post(
             f"{AD_BASE}/magnet/instant",
-            params=params,
+            headers=_ad_headers(api_key),
+            data=data,
             timeout=15,
         )
         if r.status_code == 200:
@@ -358,9 +360,10 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
 
 def ad_delete_magnet(api_key: str, magnet_id: str) -> None:
     """Delete a magnet from AllDebrid."""
-    r = requests.get(
+    r = requests.post(
         f"{AD_BASE}/magnet/delete",
-        params={**_ad_params(api_key), "id": magnet_id},
+        headers=_ad_headers(api_key),
+        data={"id": magnet_id},
         timeout=15,
     )
     r.raise_for_status()
