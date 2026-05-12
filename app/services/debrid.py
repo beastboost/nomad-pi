@@ -20,7 +20,7 @@ from app import database
 logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
-AD_BASE = "https://api.alldebrid.com/v4"
+AD_BASE = "https://api.alldebrid.com/v4.1"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
