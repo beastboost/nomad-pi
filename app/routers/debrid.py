@@ -153,30 +153,17 @@ def remove_ad_key(admin: dict = Depends(get_current_admin)):
 
 def _get_active_provider() -> tuple[str, str]:
     """Return (provider, api_key). Prefers RD, falls back to AD."""
-    # First check explicit provider setting
-    provider = database.get_setting("debrid_provider") or ""
-    logger.info(f"Active debrid provider setting: {provider}")
-    
+    provider = database.get_setting("debrid_provider") or "rd"
     if provider == "ad":
         key = database.get_setting("ad_api_key")
-        logger.info(f"AllDebrid explicit provider, key exists: {bool(key)}")
         if key:
             return "ad", key
-        logger.warning("AllDebrid set as provider but no AD key found!")
-    
-    # Check RD key
-    rd_key = database.get_setting("rd_api_key")
-    if rd_key:
-        logger.info("Using Real-Debrid as provider")
-        return "rd", rd_key
-    
-    # Check AD key as fallback
+    key = database.get_setting("rd_api_key")
+    if key:
+        return "rd", key
     ad_key = database.get_setting("ad_api_key")
     if ad_key:
-        logger.info("Using AllDebrid as fallback provider")
         return "ad", ad_key
-    
-    logger.warning("No debrid provider found!")
     return "rd", ""
 
 
@@ -441,21 +428,11 @@ def _add_magnet_rd(api_key: str, info_hash: str) -> dict:
 
 def _add_magnet_ad(api_key: str, info_hash: str) -> dict:
     import time
-    import traceback
 
-    try:
-        result = debrid.ad_add_magnet(api_key, info_hash)
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"AllDebrid add magnet failed: {error_msg}\n{traceback.format_exc()}")
-        # Check for common errors
-        if "discontinued" in error_msg.lower():
-            raise HTTPException(status_code=410, detail="AllDebrid API endpoint discontinued. Please re-authenticate at alldebrid.com/tools")
-        raise HTTPException(status_code=500, detail=f"AllDebrid error: {error_msg}")
-    
+    result = debrid.ad_add_magnet(api_key, info_hash)
     magnet_id = result.get("id")
     if not magnet_id:
-        raise HTTPException(status_code=500, detail="Failed to add magnet to AllDebrid (no ID returned)")
+        raise HTTPException(status_code=500, detail="Failed to add magnet to AllDebrid")
 
     # Poll for ready status
     for _ in range(15):
