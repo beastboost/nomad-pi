@@ -1248,7 +1248,7 @@ async function loadFileBrowser(path) {
                         </div>
                     `;
                     // Use addEventListener instead of inline onclick for better reliability
-                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(itemPath));
+                    div.addEventListener('click', () => loadFileBrowser(itemPath));
                 } else {
                     const ext = item.name.split('.').pop().toLowerCase();
                     let icon = '📄';
@@ -1266,7 +1266,7 @@ async function loadFileBrowser(path) {
                         </div>
                     `;
                     // Use addEventListener instead of inline onclick for better reliability
-                    div.querySelector('.media-card').addEventListener('click', () => openFile(itemPath));
+                    div.addEventListener('click', () => openFile(itemPath));
                 }
                 container.appendChild(div);
             });
@@ -2366,70 +2366,80 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     // ============================================================
     //  TOUCH GESTURES FOR VIDEO PLAYER
     // ============================================================
-    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
-    let lastTapTap = 0;
-    
-    function showVideoControls() {
-        const modal = document.getElementById('viewer-modal');
-        const header = modal?.querySelector('.modal-header');
-        if (header) header.style.opacity = '1';
-        video.controls = true;
+    try {
+        let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+        let lastTapTap = 0;
         
-        clearTimeout(video._controlsTimeout);
-        video._controlsTimeout = setTimeout(() => {
-            if (header) header.style.opacity = '0';
-        }, 3000);
-    }
-    
-    // Toggle controls on tap
-    video.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        showVideoControls();
-    }, { passive: false });
-    
-    // Double-tap to seek + swipe gestures on wrapper
-    videoWrap.addEventListener('touchstart', (e) => {
-        const t = e.touches[0];
-        touchStartX = t.clientX;
-        touchStartY = t.clientY;
-        touchStartTime = Date.now();
-    }, { passive: true });
-    
-    videoWrap.addEventListener('touchend', (e) => {
-        const touch = e.changedTouches[0];
-        const dx = touch.clientX - touchStartX;
-        const dy = touch.clientY - touchStartY;
-        const dt = Date.now() - touchStartTime;
-        
-        // Double tap detection (< 300ms, < 10px movement)
-        if (dt < 300 && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
-            const now = Date.now();
-            if (now - lastTapTap < 300) {
-                // Double tap - seek 10 seconds
-                const seekTime = touchStartX > window.innerWidth * 0.6 ? 10 : -10;
-                video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekTime));
-                showVideoControls();
-            }
-            lastTapTap = now;
-            return;
+        function showVideoControls() {
+            try {
+                const modal = document.getElementById('viewer-modal');
+                const header = modal?.querySelector('.modal-header');
+                if (header) header.style.opacity = '1';
+                video.controls = true;
+                
+                clearTimeout(video._controlsTimeout);
+                video._controlsTimeout = setTimeout(() => {
+                    if (header) header.style.opacity = '0';
+                }, 3000);
+            } catch(e) {}
         }
         
-        // Swipe gestures (min 30px movement)
-        if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
-            if (Math.abs(dx) > Math.abs(dy)) {
-                // Horizontal swipe - seek
-                const seekAmount = dx > 0 ? 10 : -10;
-                video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekAmount));
-            } else {
-                // Vertical swipe on right side - volume
-                if (touchStartX > window.innerWidth * 0.6) {
-                    const volChange = dy < 0 ? 0.1 : -0.1;
-                    video.volume = Math.max(0, Math.min(1, video.volume + volChange));
-                }
-            }
+        // Toggle controls on tap
+        video.addEventListener('touchend', (e) => {
+            e.preventDefault();
             showVideoControls();
-        }
-    }, { passive: true });
+        }, { passive: false });
+        
+        // Double-tap to seek + swipe gestures on wrapper
+        videoWrap.addEventListener('touchstart', (e) => {
+            const t = e.touches[0];
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+            touchStartTime = Date.now();
+        }, { passive: true });
+        
+        videoWrap.addEventListener('touchend', (e) => {
+            try {
+                const touch = e.changedTouches[0];
+                const dx = touch.clientX - touchStartX;
+                const dy = touch.clientY - touchStartY;
+                const dt = Date.now() - touchStartTime;
+                
+                // Double tap detection (< 300ms, < 10px movement)
+                if (dt < 300 && Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+                    const now = Date.now();
+                    if (now - lastTapTap < 300 && video.duration) {
+                        // Double tap - seek 10 seconds
+                        const seekTime = touchStartX > window.innerWidth * 0.6 ? 10 : -10;
+                        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekTime));
+                        showVideoControls();
+                    }
+                    lastTapTap = now;
+                    return;
+                }
+                
+                // Swipe gestures (min 30px movement)
+                if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        // Horizontal swipe - seek
+                        if (video.duration) {
+                            const seekAmount = dx > 0 ? 10 : -10;
+                            video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekAmount));
+                        }
+                    } else {
+                        // Vertical swipe on right side - volume
+                        if (touchStartX > window.innerWidth * 0.6) {
+                            const volChange = dy < 0 ? 0.1 : -0.1;
+                            video.volume = Math.max(0, Math.min(1, video.volume + volChange));
+                        }
+                    }
+                    showVideoControls();
+                }
+            } catch(e) { /* Ignore touch errors */ }
+        }, { passive: true });
+    } catch(e) {
+        console.error('Touch gestures init failed:', e);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
