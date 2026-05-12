@@ -1488,8 +1488,8 @@ function renderMediaList(category, files) {
 
     files.forEach(file => {
         const div = document.createElement('div');
-        const isListCategory = (category === 'music' || category === 'files' || category === 'books');
-        div.className = isListCategory ? 'list-item' : 'media-item';
+        const isListCategory = (category === 'music' || category === 'files');
+        div.className = isListCategory ? 'list-item' : (category === 'books' ? 'book-card' : 'media-item');
         div.style.position = 'relative';
 
         let folderHtml = '';
@@ -1572,37 +1572,61 @@ function renderMediaList(category, files) {
                 });
             }
         } else if (category === 'books') {
-            const isPdf = /\.pdf$/i.test(file.name || '');
-            const isCbz = /\.cbz$/i.test(file.name || '');
-            const isCbr = /\.cbr$/i.test(file.name || '');
+            const isPdf  = /\.pdf$/i.test(file.name || '');
+            const isCbz  = /\.cbz$/i.test(file.name || '');
+            const isCbr  = /\.cbr$/i.test(file.name || '');
             const isEpub = /\.epub$/i.test(file.name || '');
-            const title = escapeHtml(cleanTitle(file.name));
-            const bookIcon = isPdf ? '📄' : (isCbz || isCbr) ? '📚' : isEpub ? '📖' : '📖';
+            const isMobi = /\.mobi$/i.test(file.name || '');
             const canView = isPdf || isCbz || isCbr;
+            const title = escapeHtml(cleanTitle(file.name));
+            const folderLabel = (file.folder && file.folder !== '.') ? escapeHtml(file.folder) : '';
+
+            const fmtClass = isPdf ? 'fmt-pdf' : (isCbz || isCbr) ? 'fmt-comic' : isEpub ? 'fmt-epub' : 'fmt-other';
+            const fmtLabel = isPdf ? 'PDF' : isCbz ? 'CBZ' : isCbr ? 'CBR' : isEpub ? 'EPUB' : isMobi ? 'MOBI' : 'BOOK';
+
+            // Colour-coded spine background per format
+            const spineColors = {
+                'fmt-pdf':   'linear-gradient(160deg,#7f1d1d,#450a0a)',
+                'fmt-comic': 'linear-gradient(160deg,#1e3a5f,#0c1f3d)',
+                'fmt-epub':  'linear-gradient(160deg,#14532d,#052e16)',
+                'fmt-other': 'linear-gradient(160deg,#3b2f6b,#1e1040)',
+            };
+            const spine = spineColors[fmtClass] || spineColors['fmt-other'];
+
+            div.className = 'book-card';
+            div.style.position = 'relative';
             div.innerHTML = `
-                <div class="book-cover">${bookIcon}</div>
-                <div class="book-info">
-                    <div class="book-title">${title}</div>
-                    ${file.folder && file.folder !== '.' ? `<div class="book-folder">${escapeHtml(file.folder)}</div>` : ''}
+                <div class="book-card-cover" style="background:${spine};" ${canView ? 'role="button" tabindex="0"' : ''}>
+                    <div class="book-card-icon">${isPdf ? '<i class="fas fa-file-pdf"></i>' : (isCbz||isCbr) ? '<i class="fas fa-book-open"></i>' : isEpub ? '<i class="fas fa-book"></i>' : '<i class="fas fa-book-reader"></i>'}</div>
+                    <span class="book-fmt-badge ${fmtClass}">${fmtLabel}</span>
+                    ${canView ? '<div class="book-card-overlay"><i class="fas fa-eye"></i></div>' : ''}
+                    ${cardDeleteBtn}
                 </div>
-                <div class="book-actions">
-                    ${canEdit ? '<button class="icon-btn rename-btn-card" title="Rename">✏</button>' : ''}
-                    ${canView ? '<button class="icon-btn view-btn" title="View">👁</button>' : ''}
-                    <a href="${escapeHtml(file.path)}" target="_blank" class="btn-open-file">Open</a>
-                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
+                <div class="book-card-meta">
+                    <div class="book-card-title" title="${title}">${title}</div>
+                    ${folderLabel ? `<div class="book-card-folder">${folderLabel}</div>` : ''}
+                    <div class="book-card-actions">
+                        <a href="${escapeHtml(file.path)}" download class="book-action-btn" title="Download"><i class="fas fa-download"></i></a>
+                        ${canView ? '<button class="book-action-btn book-view-btn" title="Read"><i class="fas fa-eye"></i> Read</button>' : ''}
+                        ${canEdit ? '<button class="book-action-btn book-rename-btn" title="Rename"><i class="fas fa-pen"></i></button>' : ''}
+                        ${canEdit ? `<button class="book-action-btn book-del-btn" title="Delete" onclick="event.stopPropagation();deleteItem(${JSON.stringify(file.path)})"><i class="fas fa-trash"></i></button>` : ''}
+                    </div>
                 </div>
             `;
 
-            const btn = div.querySelector('.view-btn');
-            if (btn) {
-                btn.addEventListener('click', () => {
-                    if (isPdf) openPdfViewer(file.path, file.name || 'PDF');
-                    else openComicViewer(file.path, file.name || 'Comic');
-                });
+            if (canView) {
+                const cover = div.querySelector('.book-card-cover');
+                const readBtn = div.querySelector('.book-view-btn');
+                const openBook = () => {
+                    if (isPdf) openPdfViewer(file.path, cleanTitle(file.name));
+                    else openComicViewer(file.path, cleanTitle(file.name));
+                };
+                if (cover) cover.addEventListener('click', openBook);
+                if (readBtn) readBtn.addEventListener('click', e => { e.stopPropagation(); openBook(); });
             }
-            const renameBtn = div.querySelector('.rename-btn-card');
+            const renameBtn = div.querySelector('.book-rename-btn');
             if (renameBtn) {
-                renameBtn.addEventListener('click', (e) => {
+                renameBtn.addEventListener('click', e => {
                     e.stopPropagation();
                     promptRename(file.path, file.name, () => loadMediaPage('books', true));
                 });
