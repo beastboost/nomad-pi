@@ -1,14 +1,7 @@
-const CACHE_NAME = 'nomad-pi-v1.3.1';
+const CACHE_NAME = 'nomad-pi-v1.3.2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/admin.html',
   '/manifest.json',
   '/sw.js',
-  '/css/style.css',
-  '/css/admin.css',
-  '/js/app.js',
-  '/js/admin.js',
   '/icons/icon-512.svg'
 ];
 
@@ -52,6 +45,12 @@ self.addEventListener('fetch', (event) => {
 
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
+  if (url.origin !== self.location.origin) return;
+
+  // Never intercept the app shell; stale JS/CSS/HTML is worse than no cache.
+  if (event.request.destination === 'document' || event.request.destination === 'script' || event.request.destination === 'style') {
+    return;
+  }
 
   // Strategy for static assets: Stale-While-Revalidate
   if (STATIC_ASSETS.includes(url.pathname) || STATIC_ASSETS.includes(event.request.url)) {
