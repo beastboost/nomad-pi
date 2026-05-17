@@ -20,8 +20,7 @@ from app import database
 logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
-AD_BASE = "https://api.alldebrid.com"
-TB_BASE = "https://api.torbox.app"
+AD_BASE = "https://api.alldebrid.com/v4.1"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
@@ -267,19 +266,14 @@ def delete_rd_torrent(api_key: str, torrent_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _ad_headers(api_key: str) -> dict:
-    """Return headers for AllDebrid API v4 with Bearer token auth."""
-    return {"Authorization": f"Bearer {api_key}"}
-
-
-def _tb_headers(api_key: str) -> dict:
-    """Return headers for TorBox API with Bearer token auth."""
+    """Return headers for AllDebrid API v4.1 with Bearer token auth."""
     return {"Authorization": f"Bearer {api_key}"}
 
 
 def ad_get_user(api_key: str) -> dict:
     """Get AllDebrid account info."""
     r = requests.get(
-        f"{AD_BASE}/v4/user",
+        f"{AD_BASE}/user",
         headers=_ad_headers(api_key),
         timeout=15,
     )
@@ -294,7 +288,7 @@ def ad_add_magnet(api_key: str, info_hash: str) -> dict:
     """Add a magnet link to AllDebrid."""
     magnet = f"magnet:?xt=urn:btih:{info_hash}"
     r = requests.post(
-        f"{AD_BASE}/v4/magnet/upload",
+        f"{AD_BASE}/magnet/upload",
         headers=_ad_headers(api_key),
         data={"magnets[]": magnet},
         timeout=15,
@@ -312,7 +306,7 @@ def ad_add_magnet(api_key: str, info_hash: str) -> dict:
 def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     """Get AllDebrid magnet status."""
     r = requests.get(
-        f"{AD_BASE}/v4.1/magnet/status",
+        f"{AD_BASE}/magnet/status",
         headers=_ad_headers(api_key),
         params={"id": magnet_id},
         timeout=15,
@@ -324,28 +318,10 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     return data.get("data", {}).get("magnets", {})
 
 
-def ad_get_magnet_files(api_key: str, magnet_id: str) -> list:
-    """Get files for an AllDebrid magnet."""
-    r = requests.get(
-        f"{AD_BASE}/v4/magnet/files",
-        headers=_ad_headers(api_key),
-        params={"id[]": magnet_id},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
-    magnets = data.get("data", {}).get("magnets", [])
-    if magnets:
-        return magnets[0].get("files", [])
-    return []
-
-
 def ad_unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a link via AllDebrid."""
     r = requests.post(
-        f"{AD_BASE}/v4/link/unlock",
+        f"{AD_BASE}/link/unlock",
         headers=_ad_headers(api_key),
         data={"link": link},
         timeout=15,
@@ -358,37 +334,24 @@ def ad_unrestrict_link(api_key: str, link: str) -> dict:
 
 
 def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
-    """Check AllDebrid instant availability by uploading magnets.
-
-    AllDebrid doesn't have a dedicated instant-check endpoint.
-    We upload the magnets and check if they are immediately Ready.
-    """
+    """Check AllDebrid instant availability."""
     if not hashes:
         return {}
-    result = {h: False for h in hashes}
+    result = {}
     try:
-        magnets = [f"magnet:?xt=urn:btih:{h}" for h in hashes]
+        data = {"magnets": hashes}
         r = requests.post(
-            f"{AD_BASE}/v4/magnet/upload",
+            f"{AD_BASE}/magnet/instant",
             headers=_ad_headers(api_key),
-            data={"magnets[]": magnets},
-            timeout=20,
+            data=data,
+            timeout=15,
         )
         if r.status_code == 200:
             data = r.json()
-            for m in data.get("data", {}).get("magnets", []):
-                if m.get("ready"):
-                    h = m.get("hash", "").lower()
-                    if h in result:
-                        result[h] = True
-                    ad_delete_magnet(api_key, str(m.get("id", "")))
-                else:
-                    mid = str(m.get("id", ""))
-                    if mid:
-                        try:
-                            ad_delete_magnet(api_key, mid)
-                        except Exception:
-                            pass
+            magnets = data.get("data", {}).get("magnets", [])
+            for m in magnets:
+                h = m.get("hash", m.get("magnet", ""))
+                result[h] = m.get("instant", False)
     except Exception as e:
         logger.warning(f"AllDebrid instant check failed: {e}")
     return result
@@ -397,128 +360,9 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
 def ad_delete_magnet(api_key: str, magnet_id: str) -> None:
     """Delete a magnet from AllDebrid."""
     r = requests.post(
-        f"{AD_BASE}/v4/magnet/delete",
+        f"{AD_BASE}/magnet/delete",
         headers=_ad_headers(api_key),
         data={"id": magnet_id},
-        timeout=15,
-    )
-    r.raise_for_status()
-
-
-# ---------------------------------------------------------------------------
-# TorBox API functions
-# ---------------------------------------------------------------------------
-
-def tb_get_user(api_key: str) -> dict:
-    """Get TorBox account info."""
-    r = requests.get(
-        f"{TB_BASE}/v1/api/user/me",
-        headers=_tb_headers(api_key),
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise Exception(data.get("detail", "TorBox error"))
-    return data.get("data", {})
-
-
-def tb_add_magnet(api_key: str, info_hash: str) -> dict:
-    """Add a magnet link to TorBox."""
-    magnet = f"magnet:?xt=urn:btih:{info_hash}"
-    r = requests.post(
-        f"{TB_BASE}/v1/api/torrents/createtorrent",
-        headers=_tb_headers(api_key),
-        data={"magnet": magnet, "seed": 1, "allow_zip": "true"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise Exception(data.get("detail", "TorBox error"))
-    return data.get("data", {})
-
-
-def tb_get_torrent_list(api_key: str) -> list:
-    """Get TorBox torrent list."""
-    r = requests.get(
-        f"{TB_BASE}/v1/api/torrents/mylist",
-        headers=_tb_headers(api_key),
-        params={"bypass_cache": "true"},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise Exception(data.get("detail", "TorBox error"))
-    return data.get("data", []) or []
-
-
-def tb_get_torrent_info(api_key: str, torrent_id: int) -> dict:
-    """Get TorBox torrent info."""
-    r = requests.get(
-        f"{TB_BASE}/v1/api/torrents/torrentinfo",
-        headers=_tb_headers(api_key),
-        params={"id": torrent_id, "bypass_cache": "true"},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise Exception(data.get("detail", "TorBox error"))
-    return data.get("data", {})
-
-
-def tb_request_download(api_key: str, torrent_id: int, file_id: int = 0,
-                        zip_link: bool = False) -> str:
-    """Request a download link from TorBox."""
-    params = {"token": api_key, "torrent_id": torrent_id}
-    if zip_link:
-        params["zip_link"] = "true"
-    else:
-        params["file_id"] = file_id
-    r = requests.get(
-        f"{TB_BASE}/v1/api/torrents/requestdl",
-        headers=_tb_headers(api_key),
-        params=params,
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if not data.get("success"):
-        raise Exception(data.get("detail", "TorBox error"))
-    return data.get("data", "")
-
-
-def tb_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
-    """Check TorBox instant availability."""
-    if not hashes:
-        return {}
-    result = {h: False for h in hashes}
-    try:
-        r = requests.get(
-            f"{TB_BASE}/v1/api/torrents/checkcached",
-            headers=_tb_headers(api_key),
-            params={"hash": ",".join(hashes), "format": "object"},
-            timeout=15,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            cached = data.get("data", {}) or {}
-            for h in hashes:
-                if cached.get(h.lower()) or cached.get(h):
-                    result[h] = True
-    except Exception as e:
-        logger.warning(f"TorBox instant check failed: {e}")
-    return result
-
-
-def tb_delete_torrent(api_key: str, torrent_id: int) -> None:
-    """Delete a torrent from TorBox."""
-    r = requests.post(
-        f"{TB_BASE}/v1/api/torrents/controltorrent",
-        headers=_tb_headers(api_key),
-        data={"torrent_id": torrent_id, "operation": "delete"},
         timeout=15,
     )
     r.raise_for_status()
@@ -597,8 +441,8 @@ def clean_media_filename(raw_filename: str, title: str = "",
     if not title_part:
         return _sanitize_filename(raw_filename)
 
-    if year_match:
-        clean = f"{title_part} ({year_match.group(1)})"
+    if found_year:
+        clean = f"{title_part} ({found_year})"
     else:
         clean = title_part
 
