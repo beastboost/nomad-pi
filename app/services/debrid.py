@@ -28,6 +28,35 @@ _TORRENTIO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; NomadPi/1.0)",
 }
 
+_RD_BLOCKED_SUBSTRINGS = (
+    "web-dl",
+    "webrip",
+    "bdrip",
+    "hdrip",
+    "dvdrip",
+)
+
+_RD_BLOCKED_DOT_PATTERNS = (
+    "bluray.x264",
+    "hdtv.x264",
+    "hdtv.xvid",
+    "web.x264",
+    "web.h264",
+)
+
+_RD_PREFERRED_TERMS = (
+    "x265",
+    "h265",
+    "hevc",
+    "av1",
+    "avc",
+    "blu-ray",
+    "remux",
+    "web.h265",
+    "web.x265",
+    "bluray.x265",
+)
+
 # Active downloads tracked in memory
 _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
@@ -98,6 +127,59 @@ def get_rd_user(api_key: str) -> dict:
         raise DebridAuthError(f"Real-Debrid connection failed: {str(e)}")
 
 
+def _quality_rank(quality: str) -> int:
+    ranks = {
+        "4k": 5,
+        "2160p": 5,
+        "1080p": 4,
+        "720p": 3,
+        "480p": 2,
+        "hdcam": 1,
+        "cam": 0,
+        "unknown": 0,
+    }
+    return ranks.get((quality or "unknown").lower(), 0)
+
+
+def _analyze_rd_release(title: str, details: str) -> dict:
+    """Flag Torrentio releases that are likely to hit RD filename filters."""
+    text = f"{title} {details}".lower()
+    dot_text = re.sub(r"[\s_]+", ".", text)
+    reasons = []
+
+    for pattern in _RD_BLOCKED_SUBSTRINGS:
+        if pattern in text:
+            reasons.append(pattern.upper())
+
+    for pattern in _RD_BLOCKED_DOT_PATTERNS:
+        if pattern in dot_text:
+            reasons.append(pattern.upper())
+
+    preferred_terms = [term.upper() for term in _RD_PREFERRED_TERMS if term in dot_text or term in text]
+    is_likely_blocked = bool(reasons)
+
+    if is_likely_blocked:
+        status = "likely_blocked"
+        warning = f"Likely blocked by RD: {', '.join(reasons[:3])}"
+        score = -100 - (len(reasons) * 10)
+    elif preferred_terms:
+        status = "safer"
+        warning = f"Safer for RD: {', '.join(preferred_terms[:3])}"
+        score = 25 + (len(preferred_terms) * 5)
+    else:
+        status = "neutral"
+        warning = ""
+        score = 0
+
+    return {
+        "status": status,
+        "warning": warning,
+        "reasons": reasons,
+        "preferred_terms": preferred_terms,
+        "score": score,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Torrent search via Torrentio (Stremio addon)
 # ---------------------------------------------------------------------------
@@ -164,6 +246,8 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                     source = s
                     break
 
+            rd_analysis = _analyze_rd_release(name, details)
+
             results.append({
                 "name": name,
                 "info_hash": info_hash,
@@ -173,9 +257,23 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                 "source": source,
                 "details": details,
                 "seeders": stream.get("seeders"),
+                "rd_status": rd_analysis["status"],
+                "rd_warning": rd_analysis["warning"],
+                "rd_reasons": rd_analysis["reasons"],
+                "rd_score": rd_analysis["score"],
             })
     except requests.RequestException as e:
         logger.error(f"Torrentio search failed: {e}")
+
+    results.sort(
+        key=lambda item: (
+            item.get("rd_status") == "likely_blocked",
+            -(item.get("rd_score", 0)),
+            -int(item.get("seeders") or 0),
+            -_quality_rank(item.get("quality", "Unknown")),
+            item.get("name", "").lower(),
+        )
+    )
 
     return results
 

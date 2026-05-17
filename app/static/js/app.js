@@ -6702,24 +6702,35 @@ async function renderTorrentResults(results, imdbId) {
         const qColor = qualityColors[t.quality] || 'var(--text-secondary)';
         const isCached = cached[t.info_hash] || cached[t.info_hash?.toLowerCase()];
         const providerBadge = (_debridProvider || 'rd').toUpperCase();
+        const isRD = _debridProvider === 'rd';
         const cachedBadge = isCached
             ? `<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">${providerBadge} CACHED</span>`
+            : '';
+        const riskBadge = isRD && t.rd_status === 'likely_blocked'
+            ? '<span style="background:#d9534f;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD RISK</span>'
+            : '';
+        const saferBadge = isRD && t.rd_status === 'safer'
+            ? '<span style="background:#2e8b57;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD SAFER</span>'
+            : '';
+        const warningLine = isRD && t.rd_warning
+            ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-secondary)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
             : '';
         const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
         return `
             <div class="glass-card" style="padding:1rem;margin-bottom:.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
                     <div style="flex:1;min-width:200px">
-                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}</div>
+                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
                         <div style="font-size:.85rem;color:var(--text-secondary)">
                             <span style="color:${qColor};font-weight:600">${t.quality}</span>
                             ${t.size ? ` &middot; ${t.size}` : ''}
                             ${t.source ? ` &middot; ${t.source}` : ''}
                             ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}
                         </div>
+                        ${warningLine}
                     </div>
                     <div style="display:flex;gap:.5rem;flex-shrink:0">
-                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isCached ? 'Instantly available — stream or download' : 'Send to Real-Debrid'}">
+                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : 'Send to Real-Debrid')}">
                             <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
                         </button>
                     </div>
