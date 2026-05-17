@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.3.0';
+const CACHE_NAME = 'nomad-pi-v1.3.1';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -73,15 +73,17 @@ self.addEventListener('fetch', (event) => {
 
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cachedResponse = await cache.match(request);
+  const url = new URL(request.url);
+  const cacheKey = STATIC_ASSETS.includes(url.pathname) ? url.pathname : request;
+  const cachedResponse = await cache.match(cacheKey, { ignoreSearch: true });
   const networkPromise = fetch(request).then((networkResponse) => {
     if (networkResponse.status === 200) {
-      cache.put(request, networkResponse.clone());
+      cache.put(cacheKey, networkResponse.clone());
     }
     return networkResponse;
   }).catch(err => {
     console.warn('SW fetch failed:', err);
-    return cachedResponse; // Fallback to cache if network fails
+    return cachedResponse || Response.error();
   });
   return cachedResponse || networkPromise;
 }

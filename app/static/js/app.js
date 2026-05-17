@@ -6919,6 +6919,7 @@ async function debridHandleLinks(links, filename) {
     }
 
     let handled = false;
+    let lastError = '';
     for (const link of links) {
         try {
             debridUpdateProcessing('Unrestricting link...', 50);
@@ -6929,7 +6930,8 @@ async function debridHandleLinks(links, filename) {
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                console.warn('Unrestrict failed:', err.detail || res.status);
+                lastError = err.detail || `Unrestrict failed (${res.status})`;
+                console.warn('Unrestrict failed:', lastError);
                 continue;
             }
             const data = await res.json();
@@ -6951,7 +6953,7 @@ async function debridHandleLinks(links, filename) {
 
     if (!handled) {
         debridHideProcessing();
-        showToast('Could not get download links — try again or choose a different torrent', 'error');
+        showToast(lastError || 'Could not get download links — try again or choose a different torrent', 'error');
     }
 }
 
@@ -7173,6 +7175,12 @@ async function debridPollTorrent(torrentId, filename) {
             if (data.status === 'downloaded' && data.links && data.links.length > 0) {
                 debridUpdateProcessing('Ready! Getting stream link...', 100);
                 debridHandleLinks(data.links, filename);
+                return;
+            }
+
+            if (data.status === 'expired') {
+                debridHideProcessing();
+                showToast('This torrent is no longer available on the provider. Add it again or choose another torrent.', 'warning');
                 return;
             }
 

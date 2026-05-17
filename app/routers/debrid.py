@@ -8,11 +8,14 @@ Provides endpoints for:
 """
 
 import logging
+import json
 import time
+import urllib.request
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+import requests
 
 from app import database
 from app.routers.auth import get_current_user_id
@@ -21,6 +24,45 @@ from app.services import debrid
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/debrid", tags=["debrid"])
 SUPPORTED_PROVIDERS = {"rd", "ad", "tb"}
+
+
+# #region debug-point A:debug-helper
+def _debug_report(hypothesis_id: str, location: str, msg: str, data: Optional[dict] = None, trace_id: str = "") -> None:
+    _p = ".dbg/web-ui-not-loading.env"
+    _u = "http://127.0.0.1:7777/event"
+    _s = "web-ui-not-loading"
+    try:
+        with open(_p, encoding="utf-8") as f:
+            c = f.read()
+        for line in c.splitlines():
+            if line.startswith("DEBUG_SERVER_URL="):
+                _u = line.split("=", 1)[1] or _u
+            elif line.startswith("DEBUG_SESSION_ID="):
+                _s = line.split("=", 1)[1] or _s
+    except Exception:
+        pass
+    try:
+        payload = {
+            "sessionId": _s,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "msg": f"[DEBUG] {msg}",
+            "data": data or {},
+            "traceId": trace_id,
+            "ts": int(time.time() * 1000),
+        }
+        urllib.request.urlopen(
+            urllib.request.Request(
+                _u,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            timeout=2,
+        ).read()
+    except Exception:
+        pass
+# #endregion
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -61,6 +103,11 @@ def _key_for(provider: str) -> Optional[str]:
     mapping = {"rd": "rd_api_key", "ad": "ad_api_key", "tb": "tb_api_key"}
     setting = mapping.get(provider)
     return database.get_setting(setting) if setting else None
+
+
+def _http_error_status(exc: Exception) -> Optional[int]:
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None)
 
 
 @router.get("/provider")
@@ -337,6 +384,9 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 "files": files,
             }
     except Exception as e:
+        status_code = _http_error_status(e)
+        if provider == "rd" and status_code == 451:
+            raise HTTPException(451, "Real-Debrid blocked this release. Try a BluRay, HEVC, AV1, or another safer torrent.")
         raise HTTPException(500, f"Failed to add magnet: {e}")
 
 
@@ -345,12 +395,15 @@ def get_torrent_status(torrent_id: str,
                        user_id: int = Depends(get_current_user_id)):
     provider = _provider(None)
     key = _key_for(provider)
+    # #region debug-point A:router-torrent-entry
+    _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status entry", {"provider": provider, "torrent_id": str(torrent_id), "has_key": bool(key)})
+    # #endregion
     if not key:
         raise HTTPException(400, f"No API key set for {provider}")
     try:
         if provider == "rd":
             info = debrid.get_torrent_info(key, torrent_id)
-            return {
+            response = {
                 "status": info.get("status"),
                 "progress": info.get("progress", 0),
                 "speed": info.get("speed"),
@@ -358,6 +411,10 @@ def get_torrent_status(torrent_id: str,
                 "filename": info.get("filename", ""),
                 "files": info.get("files", []),
             }
+            # #region debug-point A:router-torrent-rd-success
+            _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status rd success", {"provider": provider, "torrent_id": str(torrent_id), "status": str(response.get("status", "")), "links_count": len(response.get("links", []) or [])})
+            # #endregion
+            return response
         elif provider == "ad":
             info = debrid.ad_get_magnet_status(key, torrent_id)
             files = []
@@ -375,7 +432,7 @@ def get_torrent_status(torrent_id: str,
                             if sf.get("l"):
                                 links.append(sf["l"])
             progress = 100 if info.get("statusCode", 0) >= 4 else info.get("downloaded", 0) / max(info.get("size", 1), 1) * 100
-            return {
+            response = {
                 "status": "downloaded" if info.get("statusCode", 0) >= 4 else "processing",
                 "progress": round(progress, 1),
                 "speed": info.get("downloadSpeed", 0),
@@ -383,6 +440,10 @@ def get_torrent_status(torrent_id: str,
                 "filename": info.get("filename", ""),
                 "files": files,
             }
+            # #region debug-point A:router-torrent-ad-success
+            _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status ad success", {"provider": provider, "torrent_id": str(torrent_id), "status": str(response.get("status", "")), "links_count": len(response.get("links", []) or []), "file_count": len(files)})
+            # #endregion
+            return response
         elif provider == "tb":
             info = debrid.tb_get_torrent_info(key, int(torrent_id))
             files = info.get("files", [])
@@ -399,7 +460,7 @@ def get_torrent_status(torrent_id: str,
             progress = info.get("progress", 0)
             if isinstance(progress, float) and progress <= 1:
                 progress = progress * 100
-            return {
+            response = {
                 "status": "downloaded" if finished else "processing",
                 "progress": round(progress, 1),
                 "speed": info.get("download_speed", 0),
@@ -407,7 +468,28 @@ def get_torrent_status(torrent_id: str,
                 "filename": info.get("name", ""),
                 "files": files,
             }
+            # #region debug-point A:router-torrent-tb-success
+            _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status tb success", {"provider": provider, "torrent_id": str(torrent_id), "status": str(response.get("status", "")), "links_count": len(response.get("links", []) or []), "file_count": len(files)})
+            # #endregion
+            return response
     except Exception as e:
+        status_code = _http_error_status(e)
+        if provider == "rd" and status_code == 404:
+            response = {
+                "status": "expired",
+                "progress": 0,
+                "speed": 0,
+                "links": [],
+                "filename": "",
+                "files": [],
+            }
+            # #region debug-point A:router-torrent-rd-expired
+            _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status rd expired", {"provider": provider, "torrent_id": str(torrent_id)})
+            # #endregion
+            return response
+        # #region debug-point A:router-torrent-error
+        _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status error", {"provider": provider, "torrent_id": str(torrent_id), "error": str(e), "error_type": type(e).__name__})
+        # #endregion
         raise HTTPException(500, f"Failed to get torrent status: {e}")
 
 
@@ -417,28 +499,49 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
     link = body.get("link", "")
     provider = _provider(None)
     key = _key_for(provider)
+    # #region debug-point A:router-unrestrict-entry
+    _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict entry", {"provider": provider, "has_key": bool(key), "link_prefix": link[:120]})
+    # #endregion
     if not key:
         raise HTTPException(400, f"No API key for {provider}")
     try:
         if provider == "rd":
             result = debrid.unrestrict_link(key, link)
-            return {
+            response = {
                 "url": result.get("download"),
                 "filename": result.get("filename", ""),
                 "filesize": result.get("filesize", 0),
                 "mimeType": result.get("mimeType", ""),
             }
+            # #region debug-point A:router-unrestrict-rd-success
+            _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict rd success", {"provider": provider, "has_url": bool(response.get("url")), "filename": response.get("filename", "")[:120]})
+            # #endregion
+            return response
         elif provider == "ad":
             result = debrid.ad_unrestrict_link(key, link)
-            return {
+            response = {
                 "url": result.get("link"),
                 "filename": result.get("filename", ""),
                 "filesize": result.get("filesize", 0),
                 "mimeType": result.get("mimeType", ""),
             }
+            # #region debug-point A:router-unrestrict-ad-success
+            _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict ad success", {"provider": provider, "has_url": bool(response.get("url")), "filename": response.get("filename", "")[:120]})
+            # #endregion
+            return response
         elif provider == "tb":
-            return {"url": link, "filename": "", "filesize": 0}
+            response = {"url": link, "filename": "", "filesize": 0}
+            # #region debug-point A:router-unrestrict-tb-success
+            _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict tb passthrough", {"provider": provider, "has_url": bool(response.get("url"))})
+            # #endregion
+            return response
     except Exception as e:
+        status_code = _http_error_status(e)
+        if provider == "rd" and status_code == 451:
+            raise HTTPException(451, "Real-Debrid blocked this file. Try a BluRay, HEVC, AV1, or another safer torrent.")
+        # #region debug-point A:router-unrestrict-error
+        _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict error", {"provider": provider, "error": str(e), "error_type": type(e).__name__, "link_prefix": link[:120]})
+        # #endregion
         raise HTTPException(500, f"Unrestrict failed: {e}")
 
 
