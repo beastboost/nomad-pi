@@ -87,8 +87,8 @@ def get_show(tmdb_id: int, user_id: int = Depends(get_current_user_id)):
 
 @router.get("/trending")
 def get_trending(
-    media_type: str = Query("movie", regex="^(movie|tv|all)$"),
-    time_window: str = Query("week", regex="^(day|week)$"),
+    media_type: str = Query("movie", pattern="^(movie|tv|all)$"),
+    time_window: str = Query("week", pattern="^(day|week)$"),
     user_id: int = Depends(get_current_user_id),
 ):
     try:
