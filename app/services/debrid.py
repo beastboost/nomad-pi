@@ -20,7 +20,7 @@ from app import database
 logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
-AD_BASE = "https://api.alldebrid.com/v4.1"
+AD_BASE = "https://api.alldebrid.com/v4"  # Updated to v4 (latest API)
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
@@ -32,8 +32,50 @@ _TORRENTIO_HEADERS = {
 _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
 
+# Rate limiter for API calls
+_api_call_times: dict[str, list] = {"rd": [], "ad": []}
+_api_rate_lock = threading.Lock()
+API_RATE_LIMIT = 100  # requests
+API_RATE_WINDOW = 60   # seconds
+
+
+class DebridAuthError(Exception):
+    """Raised when API authentication fails."""
+    pass
+
+
+class DebridRateLimitError(Exception):
+    """Raised when rate limit is exceeded."""
+    pass
+
+
+def _check_rate_limit(provider: str) -> None:
+    """Check and enforce rate limiting."""
+    with _api_rate_lock:
+        now = time.time()
+        window_start = now - API_RATE_WINDOW
+        
+        # Remove old entries outside window
+        _api_call_times[provider] = [t for t in _api_call_times[provider] if t > window_start]
+        
+        # Check if limit exceeded
+        if len(_api_call_times[provider]) >= API_RATE_LIMIT:
+            oldest = _api_call_times[provider][0]
+            wait_time = (oldest + API_RATE_WINDOW) - now
+            if wait_time > 0:
+                logger.warning(f"{provider.upper()} rate limit approaching, waiting {wait_time:.1f}s")
+                time.sleep(wait_time)
+        
+        # Record this call
+        _api_call_times[provider].append(now)
+
 
 def _rd_headers(api_key: str) -> dict:
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _ad_headers(api_key: str) -> dict:
+    """Return headers for AllDebrid API v4 with Bearer token auth."""
     return {"Authorization": f"Bearer {api_key}"}
 
 
@@ -43,9 +85,17 @@ def _rd_headers(api_key: str) -> dict:
 
 def get_rd_user(api_key: str) -> dict:
     """Validate API key and return user info."""
-    r = requests.get(f"{RD_BASE}/user", headers=_rd_headers(api_key), timeout=10)
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.get(f"{RD_BASE}/user", headers=_rd_headers(api_key), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid or expired Real-Debrid API key")
+        raise DebridAuthError(f"Real-Debrid auth failed: {str(e)}")
+    except Exception as e:
+        raise DebridAuthError(f"Real-Debrid connection failed: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +197,11 @@ def check_instant_availability(api_key: str, hashes: list[str]) -> dict[str, boo
     batch_size = 50
     for i in range(0, len(hashes), batch_size):
         batch = hashes[i:i + batch_size]
+        # Normalize hashes to lowercase for consistency
+        batch = [h.lower() for h in batch]
         hash_path = "/".join(batch)
         try:
+            _check_rate_limit("rd")
             r = requests.get(
                 f"{RD_BASE}/torrents/instantAvailability/{hash_path}",
                 headers=_rd_headers(api_key),
@@ -158,7 +211,7 @@ def check_instant_availability(api_key: str, hashes: list[str]) -> dict[str, boo
                 data = r.json()
                 for h in batch:
                     # RD returns the hash as key with hosters as value
-                    entry = data.get(h) or data.get(h.lower()) or {}
+                    entry = data.get(h) or {}
                     # If there are any cached file variants, it's instant
                     if isinstance(entry, dict) and entry.get("rd"):
                         result[h] = True
@@ -184,162 +237,228 @@ def check_instant_availability(api_key: str, hashes: list[str]) -> dict[str, boo
 def add_magnet(api_key: str, info_hash: str) -> dict:
     """Add a magnet link to Real-Debrid."""
     magnet = f"magnet:?xt=urn:btih:{info_hash}"
-    r = requests.post(
-        f"{RD_BASE}/torrents/addMagnet",
-        headers=_rd_headers(api_key),
-        data={"magnet": magnet},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.post(
+            f"{RD_BASE}/torrents/addMagnet",
+            headers=_rd_headers(api_key),
+            data={"magnet": magnet},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 def select_files(api_key: str, torrent_id: str, file_ids: str = "all") -> None:
     """Select files to download from a torrent."""
-    r = requests.post(
-        f"{RD_BASE}/torrents/selectFiles/{torrent_id}",
-        headers=_rd_headers(api_key),
-        data={"files": file_ids},
-        timeout=15,
-    )
-    r.raise_for_status()
+    try:
+        _check_rate_limit("rd")
+        r = requests.post(
+            f"{RD_BASE}/torrents/selectFiles/{torrent_id}",
+            headers=_rd_headers(api_key),
+            data={"files": file_ids},
+            timeout=15,
+        )
+        r.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
+
 
 def get_torrent_info(api_key: str, torrent_id: str) -> dict:
     """Get torrent status and links."""
-    r = requests.get(
-        f"{RD_BASE}/torrents/info/{torrent_id}",
-        headers=_rd_headers(api_key),
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.get(
+            f"{RD_BASE}/torrents/info/{torrent_id}",
+            headers=_rd_headers(api_key),
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 def unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a hoster link to get a direct download URL."""
-    r = requests.post(
-        f"{RD_BASE}/unrestrict/link",
-        headers=_rd_headers(api_key),
-        data={"link": link},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.post(
+            f"{RD_BASE}/unrestrict/link",
+            headers=_rd_headers(api_key),
+            data={"link": link},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 def get_rd_downloads(api_key: str, page: int = 1, limit: int = 50) -> list[dict]:
     """Get user's download history from Real-Debrid."""
-    r = requests.get(
-        f"{RD_BASE}/downloads",
-        headers=_rd_headers(api_key),
-        params={"page": page, "limit": limit},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.get(
+            f"{RD_BASE}/downloads",
+            headers=_rd_headers(api_key),
+            params={"page": page, "limit": limit},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 def get_rd_torrents(api_key: str, page: int = 1, limit: int = 50) -> list[dict]:
     """Get user's torrent list from Real-Debrid."""
-    r = requests.get(
-        f"{RD_BASE}/torrents",
-        headers=_rd_headers(api_key),
-        params={"page": page, "limit": limit},
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        _check_rate_limit("rd")
+        r = requests.get(
+            f"{RD_BASE}/torrents",
+            headers=_rd_headers(api_key),
+            params={"page": page, "limit": limit},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 def delete_rd_torrent(api_key: str, torrent_id: str) -> None:
     """Delete a torrent from Real-Debrid."""
-    r = requests.delete(
-        f"{RD_BASE}/torrents/delete/{torrent_id}",
-        headers=_rd_headers(api_key),
-        timeout=15,
-    )
-    r.raise_for_status()
+    try:
+        _check_rate_limit("rd")
+        r = requests.delete(
+            f"{RD_BASE}/torrents/delete/{torrent_id}",
+            headers=_rd_headers(api_key),
+            timeout=15,
+        )
+        r.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid Real-Debrid API key")
+        raise
 
 
 # ---------------------------------------------------------------------------
-# AllDebrid API functions (updated to use Bearer token auth for v4.1 API)
+# AllDebrid API functions (v4 - latest)
 # ---------------------------------------------------------------------------
-
-def _ad_headers(api_key: str) -> dict:
-    """Return headers for AllDebrid API v4.1 with Bearer token auth."""
-    return {"Authorization": f"Bearer {api_key}"}
-
 
 def ad_get_user(api_key: str) -> dict:
     """Get AllDebrid account info."""
-    r = requests.get(
-        f"{AD_BASE}/user",
-        headers=_ad_headers(api_key),
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", data.get("error", "AllDebrid error")))
-    return data.get("data", {}).get("user", {})
+    try:
+        _check_rate_limit("ad")
+        r = requests.get(
+            f"{AD_BASE}/user",
+            headers=_ad_headers(api_key),
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            raise DebridAuthError(data.get("error", {}).get("message", "AllDebrid error"))
+        return data.get("data", {}).get("user", {})
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid or expired AllDebrid API key")
+        raise DebridAuthError(f"AllDebrid auth failed: {str(e)}")
+    except Exception as e:
+        raise DebridAuthError(f"AllDebrid connection failed: {str(e)}")
 
 
 def ad_add_magnet(api_key: str, info_hash: str) -> dict:
     """Add a magnet link to AllDebrid."""
     magnet = f"magnet:?xt=urn:btih:{info_hash}"
-    r = requests.post(
-        f"{AD_BASE}/magnet/upload",
-        headers=_ad_headers(api_key),
-        data={"magnets[]": magnet},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
-    magnets = data.get("data", {}).get("magnets", [])
-    if magnets:
-        return magnets[0]
-    return {}
+    try:
+        _check_rate_limit("ad")
+        r = requests.post(
+            f"{AD_BASE}/magnet/upload",
+            headers=_ad_headers(api_key),
+            data={"magnets[]": magnet},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+        magnets = data.get("data", {}).get("magnets", [])
+        if magnets:
+            return magnets[0]
+        return {}
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
+        raise
 
 
 def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     """Get AllDebrid magnet status."""
-    r = requests.get(
-        f"{AD_BASE}/magnet/status",
-        headers=_ad_headers(api_key),
-        params={"id": magnet_id},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
-    return data.get("data", {}).get("magnets", {})
+    try:
+        _check_rate_limit("ad")
+        r = requests.get(
+            f"{AD_BASE}/magnet/status",
+            headers=_ad_headers(api_key),
+            params={"id": magnet_id},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+        return data.get("data", {}).get("magnets", {})
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
+        raise
 
 
 def ad_unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a link via AllDebrid."""
-    r = requests.post(
-        f"{AD_BASE}/link/unlock",
-        headers=_ad_headers(api_key),
-        data={"link": link},
-        timeout=15,
-    )
-    r.raise_for_status()
-    data = r.json()
-    if data.get("status") == "error":
-        raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
-    return data.get("data", {})
+    try:
+        _check_rate_limit("ad")
+        r = requests.post(
+            f"{AD_BASE}/link/unlock",
+            headers=_ad_headers(api_key),
+            data={"link": link},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("status") == "error":
+            raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
+        return data.get("data", {})
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
+        raise
 
 
 def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
     """Check AllDebrid instant availability."""
     if not hashes:
         return {}
-    result = {}
+    
+    result = {}  # FIXED: Initialize result dict before using it
     try:
         data = {"magnets": hashes}
+        _check_rate_limit("ad")
         r = requests.post(
             f"{AD_BASE}/magnet/instant",
             headers=_ad_headers(api_key),
@@ -351,37 +470,52 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
             for m in data.get("data", {}).get("magnets", []):
                 if m.get("ready"):
                     h = m.get("hash", "").lower()
-                    if h in result:
+                    if h:
                         result[h] = True
+                    # Clean up: delete after checking
                     try:
                         ad_delete_magnet(api_key, str(m.get("id", "")))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to delete AllDebrid magnet {m.get('id')}: {e}")
                 else:
                     mid = str(m.get("id", ""))
                     if mid:
                         try:
                             ad_delete_magnet(api_key, mid)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Failed to delete AllDebrid magnet {mid}: {e}")
+            
+            # Build result dict with hash -> availability mapping
             magnets = data.get("data", {}).get("magnets", [])
             for m in magnets:
-                h = m.get("hash", m.get("magnet", ""))
-                result[h] = m.get("instant", False)
+                h = m.get("hash", m.get("magnet", "")).lower()
+                if h and h not in result:  # Don't overwrite ready magnets
+                    result[h] = m.get("instant", False)
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"AllDebrid instant check failed: {e}")
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
     except Exception as e:
         logger.warning(f"AllDebrid instant check failed: {e}")
+    
     return result
 
 
 def ad_delete_magnet(api_key: str, magnet_id: str) -> None:
     """Delete a magnet from AllDebrid."""
-    r = requests.post(
-        f"{AD_BASE}/magnet/delete",
-        headers=_ad_headers(api_key),
-        data={"id": magnet_id},
-        timeout=15,
-    )
-    r.raise_for_status()
+    try:
+        _check_rate_limit("ad")
+        r = requests.post(
+            f"{AD_BASE}/magnet/delete",
+            headers=_ad_headers(api_key),
+            data={"id": magnet_id},
+            timeout=15,
+        )
+        r.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
+        logger.warning(f"Failed to delete AllDebrid magnet {magnet_id}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -404,14 +538,38 @@ def _get_category_from_filename(filename: str) -> str:
     return "files"
 
 
-def _sanitize_filename(name: str) -> str:
-    """Remove invalid filesystem characters."""
-    return re.sub(r'[<>:"/\\|?*]', '_', name).strip('. ')
+def _sanitize_filename(name: str, max_length: int = 200) -> str:
+    """Remove invalid filesystem characters and ensure cross-platform compatibility."""
+    # Remove invalid characters
+    name = re.sub(r'[<>:"/\\|?*\x00]', '_', name)
+    
+    # Remove null bytes
+    name = name.replace('\0', '')
+    
+    # Handle Unicode safely - encode/decode to ensure filesystem compatibility
+    try:
+        name = name.encode('utf-8', errors='ignore').decode('utf-8')
+    except Exception:
+        pass
+    
+    # Truncate to max length (accounting for extension)
+    if len(name) > max_length:
+        name = name[:max_length]
+    
+    # Remove trailing dots/spaces
+    name = name.strip('. ')
+    
+    # Handle Windows reserved names
+    reserved = {'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM9', 'LPT1', 'LPT9'}
+    if name.upper() in reserved:
+        name = f"_{name}"
+    
+    return name
 
 
 def clean_media_filename(raw_filename: str, title: str = "",
-                         year: str = "", media_type: str = "movie",
-                         season: int = 0, episode: int = 0) -> str:
+                          year: str = "", media_type: str = "movie",
+                          season: int = 0, episode: int = 0) -> str:
     """Produce a clean filename from RD's raw release name and search metadata.
 
     Movies  → "Title (Year).ext"
@@ -453,6 +611,7 @@ def clean_media_filename(raw_filename: str, title: str = "",
             title_part = name
         title_part = re.sub(r'^\[.*?\]\s*', '', title_part).strip()
         title_part = re.sub(r'\s{2,}', ' ', title_part).strip()
+        found_year = None
 
     if not title_part:
         return _sanitize_filename(raw_filename)
@@ -521,82 +680,115 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
 
 
 def _download_worker(download_id: str, url: str, dest_path: str, category: str):
-    """Background worker that downloads a file and updates progress."""
+    """Background worker that downloads a file with retry logic and updates progress."""
     from app.routers import media
 
-    try:
-        r = requests.get(url, stream=True, timeout=30)
-        r.raise_for_status()
+    max_retries = 3
+    retry_delay = 5  # seconds
 
-        total = int(r.headers.get("content-length", 0))
-        downloaded = 0
-        last_update = time.time()
-        last_bytes = 0
-
-        with _downloads_lock:
-            _downloads[download_id]["size_total"] = total
-
-        with open(dest_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1000):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                downloaded += len(chunk)
-
-                now = time.time()
-                elapsed = now - last_update
-                if elapsed >= 1.0:
-                    speed = (downloaded - last_bytes) / elapsed
-                    progress = (downloaded / total * 100) if total > 0 else 0
-
-                    with _downloads_lock:
-                        if download_id in _downloads:
-                            _downloads[download_id].update({
-                                "progress": round(progress, 1),
-                                "speed": round(speed),
-                                "size_downloaded": downloaded,
-                            })
-                    last_update = now
-                    last_bytes = downloaded
-
-        with _downloads_lock:
-            if download_id in _downloads:
-                _downloads[download_id].update({
-                    "status": "completed",
-                    "progress": 100,
-                    "size_downloaded": downloaded,
-                    "speed": 0,
-                })
-
+    for attempt in range(max_retries):
         try:
-            web_path = f"/data/{os.path.relpath(dest_path, media.BASE_DIR).replace(os.sep, '/')}"
-            st = os.stat(dest_path)
-            folder = os.path.relpath(os.path.dirname(dest_path), os.path.join(media.BASE_DIR, category)).replace(os.sep, '/')
-            item = {
-                "path": web_path,
-                "category": category,
-                "name": os.path.basename(dest_path),
-                "folder": folder,
-                "source": "debrid",
-                "poster": None,
-                "mtime": float(st.st_mtime),
-                "size": int(st.st_size),
-            }
-            media.database.upsert_library_index_item(item)
-            logger.info(f"Debrid download indexed: {web_path}")
+            r = requests.get(url, stream=True, timeout=30)
+            r.raise_for_status()
+
+            total = int(r.headers.get("content-length", 0))
+            downloaded = 0
+            last_update = time.time()
+            last_bytes = 0
+
+            with _downloads_lock:
+                if download_id in _downloads:
+                    _downloads[download_id]["size_total"] = total
+
+            with open(dest_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1024 * 1000):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    now = time.time()
+                    elapsed = now - last_update
+                    if elapsed >= 1.0:
+                        speed = (downloaded - last_bytes) / elapsed
+                        progress = (downloaded / total * 100) if total > 0 else 0
+
+                        with _downloads_lock:
+                            if download_id in _downloads:
+                                _downloads[download_id].update({
+                                    "progress": round(progress, 1),
+                                    "speed": round(speed),
+                                    "size_downloaded": downloaded,
+                                })
+                        last_update = now
+                        last_bytes = downloaded
+
+            with _downloads_lock:
+                if download_id in _downloads:
+                    _downloads[download_id].update({
+                        "status": "completed",
+                        "progress": 100,
+                        "size_downloaded": downloaded,
+                        "speed": 0,
+                    })
+
+            try:
+                web_path = f"/data/{os.path.relpath(dest_path, media.BASE_DIR).replace(os.sep, '/')}"
+                st = os.stat(dest_path)
+                folder = os.path.relpath(os.path.dirname(dest_path), os.path.join(media.BASE_DIR, category)).replace(os.sep, '/')
+                item = {
+                    "path": web_path,
+                    "category": category,
+                    "name": os.path.basename(dest_path),
+                    "folder": folder,
+                    "source": "debrid",
+                    "poster": None,
+                    "mtime": float(st.st_mtime),
+                    "size": int(st.st_size),
+                }
+                media.database.upsert_library_index_item(item)
+                logger.info(f"Debrid download indexed: {web_path}")
+            except Exception as e:
+                logger.error(f"Failed to index debrid download: {e}")
+
+            logger.info(f"Download complete: {dest_path}")
+            return  # Success, exit retries
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Download timeout (attempt {attempt + 1}/{max_retries}): {download_id}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                error_msg = "Download failed: Request timeout after multiple retries"
+                with _downloads_lock:
+                    if download_id in _downloads:
+                        _downloads[download_id].update({
+                            "status": "failed",
+                            "error": error_msg,
+                        })
+                logger.error(f"{error_msg} for {download_id}")
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"Download connection error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                error_msg = f"Download failed: Connection error - {str(e)}"
+                with _downloads_lock:
+                    if download_id in _downloads:
+                        _downloads[download_id].update({
+                            "status": "failed",
+                            "error": error_msg,
+                        })
+                logger.error(f"{error_msg} for {download_id}")
         except Exception as e:
-            logger.error(f"Failed to index debrid download: {e}")
-
-        logger.info(f"Download complete: {dest_path}")
-
-    except Exception as e:
-        logger.error(f"Download failed for {download_id}: {e}")
-        with _downloads_lock:
-            if download_id in _downloads:
-                _downloads[download_id].update({
-                    "status": "failed",
-                    "error": str(e),
-                })
+            logger.error(f"Download failed for {download_id}: {e}")
+            with _downloads_lock:
+                if download_id in _downloads:
+                    _downloads[download_id].update({
+                        "status": "failed",
+                        "error": str(e),
+                    })
+            return
 
 
 def get_download_status(download_id: str) -> Optional[dict]:
