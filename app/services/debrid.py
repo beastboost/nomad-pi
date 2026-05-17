@@ -424,6 +424,21 @@ def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str 
     return ""
 
 
+def tb_delete_torrent(api_key: str, torrent_id: int | str) -> None:
+    """Delete a torrent from TorBox."""
+    try:
+        normalized_id: int | str = int(torrent_id)
+    except (TypeError, ValueError):
+        normalized_id = torrent_id
+
+    _tb_request(
+        "POST",
+        "/torrents/controltorrent",
+        api_key,
+        json={"torrent_id": normalized_id, "operation": "delete"},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Real-Debrid instant availability
 # ---------------------------------------------------------------------------
