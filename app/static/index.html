@@ -321,6 +321,7 @@
                     <span style="font-size:.85rem;color:var(--text-secondary);margin-right:.25rem">Provider:</span>
                     <button id="debrid-tab-rd" onclick="debridSwitchProvider('rd')" class="small primary">Real-Debrid</button>
                     <button id="debrid-tab-ad" onclick="debridSwitchProvider('ad')" class="small secondary">AllDebrid</button>
+                    <button id="debrid-tab-tb" onclick="debridSwitchProvider('tb')" class="small secondary">TorBox</button>
                 </div>
 
                 <!-- Real-Debrid Setup -->
@@ -342,6 +343,17 @@
                     <div style="display:flex;gap:.5rem;margin-top:1rem">
                         <input id="ad-api-key-input" type="password" placeholder="Paste your AllDebrid API key..." style="flex:1">
                         <button onclick="saveADKey()" class="primary">Save Key</button>
+                    </div>
+                </div>
+
+                <!-- TorBox Setup -->
+                <div id="debrid-setup-tb" class="glass-card" style="margin-bottom:1rem;padding:1.5rem;display:none">
+                    <h3>Setup TorBox</h3>
+                    <p style="color:var(--text-secondary);margin:.5rem 0">Enter your TorBox API key to enable torrent search, streaming, and downloading.</p>
+                    <p style="font-size:.85rem;color:var(--text-secondary)">Get your API key from <a href="https://torbox.app/settings" target="_blank" rel="noopener" style="color:var(--accent)">torbox.app/settings</a></p>
+                    <div style="display:flex;gap:.5rem;margin-top:1rem">
+                        <input id="tb-api-key-input" type="password" placeholder="Paste your TorBox API key..." style="flex:1">
+                        <button onclick="saveTBKey()" class="primary">Save Key</button>
                     </div>
                 </div>
 

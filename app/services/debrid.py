@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
 AD_BASE = "https://api.alldebrid.com/v4"  # Updated to v4 (latest API)
+TB_BASE = "https://api.torbox.app/v1/api"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
@@ -62,7 +63,7 @@ _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
 
 # Rate limiter for API calls
-_api_call_times: dict[str, list] = {"rd": [], "ad": []}
+_api_call_times: dict[str, list] = {"rd": [], "ad": [], "tb": []}
 _api_rate_lock = threading.Lock()
 API_RATE_LIMIT = 100  # requests
 API_RATE_WINDOW = 60   # seconds
@@ -108,6 +109,38 @@ def _ad_headers(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}"}
 
 
+def _tb_headers(api_key: str) -> dict:
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _tb_extract_data(payload):
+    if isinstance(payload, dict):
+        success = payload.get("success")
+        if success is False:
+            detail = payload.get("detail") or payload.get("error") or "TorBox error"
+            raise Exception(str(detail))
+        if "data" in payload:
+            return payload.get("data")
+    return payload
+
+
+def _tb_request(method: str, path: str, api_key: str, **kwargs):
+    _check_rate_limit("tb")
+    r = requests.request(
+        method,
+        f"{TB_BASE}{path}",
+        headers=_tb_headers(api_key),
+        timeout=15,
+        **kwargs,
+    )
+    r.raise_for_status()
+    try:
+        payload = r.json()
+    except ValueError:
+        return r.text
+    return _tb_extract_data(payload)
+
+
 # ---------------------------------------------------------------------------
 # Real-Debrid account helpers
 # ---------------------------------------------------------------------------
@@ -125,6 +158,21 @@ def get_rd_user(api_key: str) -> dict:
         raise DebridAuthError(f"Real-Debrid auth failed: {str(e)}")
     except Exception as e:
         raise DebridAuthError(f"Real-Debrid connection failed: {str(e)}")
+
+
+def tb_get_user(api_key: str) -> dict:
+    """Validate TorBox API key and return account info."""
+    try:
+        data = _tb_request("GET", "/user/me", api_key)
+        if isinstance(data, dict):
+            return data
+        raise DebridAuthError("Invalid TorBox API response")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            raise DebridAuthError("Invalid TorBox API key")
+        raise DebridAuthError(f"TorBox connection failed: {str(e)}")
+    except Exception as e:
+        raise DebridAuthError(f"TorBox connection failed: {str(e)}")
 
 
 def _quality_rank(quality: str) -> int:
@@ -276,6 +324,104 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
     )
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# TorBox helpers
+# ---------------------------------------------------------------------------
+
+
+def tb_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
+    """Check which hashes are instantly available (cached) on TorBox."""
+    if not hashes:
+        return {}
+
+    normalized = [h.lower() for h in hashes if h]
+    result = {h: False for h in normalized}
+    params = [("hash", h) for h in normalized]
+    params.append(("format", "object"))
+
+    try:
+        data = _tb_request("GET", "/torrents/checkcached", api_key, params=params)
+        if isinstance(data, dict):
+            for key, value in data.items():
+                hash_value = str(key).lower()
+                if hash_value in result:
+                    result[hash_value] = bool(value)
+        elif isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, str):
+                    hash_value = entry.lower()
+                    if hash_value in result:
+                        result[hash_value] = True
+                elif isinstance(entry, dict):
+                    hash_value = str(entry.get("hash", "")).lower()
+                    if hash_value in result:
+                        result[hash_value] = bool(
+                            entry.get("cached")
+                            or entry.get("available")
+                            or entry.get("status") in ("cached", "found")
+                        )
+    except Exception as e:
+        logger.warning(f"TorBox instant check failed: {e}")
+
+    return result
+
+
+def tb_add_magnet(api_key: str, info_hash: str) -> dict:
+    """Create a TorBox torrent from an info hash."""
+    magnet = f"magnet:?xt=urn:btih:{info_hash}"
+    data = _tb_request("POST", "/torrents/createtorrent", api_key, data={"magnet": magnet})
+    if isinstance(data, dict):
+        return data
+    return {"id": data}
+
+
+def tb_get_torrent_info(api_key: str, torrent_id: int | str) -> dict:
+    """Fetch a TorBox torrent from the user's list."""
+    try:
+        data = _tb_request("GET", "/torrents/mylist", api_key, params={"id": torrent_id})
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            for item in data:
+                if str(item.get("id")) == str(torrent_id):
+                    return item
+    except Exception:
+        data = _tb_request("GET", "/torrents/mylist", api_key)
+        if isinstance(data, list):
+            for item in data:
+                if str(item.get("id")) == str(torrent_id):
+                    return item
+    raise Exception(f"TorBox torrent {torrent_id} not found")
+
+
+def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str = 0) -> str:
+    """Request a TorBox download link for a file in a torrent."""
+    _check_rate_limit("tb")
+    r = requests.get(
+        f"{TB_BASE}/torrents/requestdl",
+        params={
+            "token": api_key,
+            "torrent_id": torrent_id,
+            "file_id": file_id,
+            "redirect": "false",
+        },
+        timeout=15,
+    )
+    r.raise_for_status()
+
+    try:
+        payload = r.json()
+    except ValueError:
+        return r.text.strip()
+
+    data = _tb_extract_data(payload)
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        return data.get("url") or data.get("link") or ""
+    return ""
 
 
 # ---------------------------------------------------------------------------

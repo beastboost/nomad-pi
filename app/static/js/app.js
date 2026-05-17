@@ -6465,8 +6465,10 @@ async function initDebrid() {
 function _updateProviderTabs() {
     const rdTab = document.getElementById('debrid-tab-rd');
     const adTab = document.getElementById('debrid-tab-ad');
+    const tbTab = document.getElementById('debrid-tab-tb');
     if (rdTab) { rdTab.className = _debridProvider === 'rd' ? 'small primary' : 'small secondary'; }
     if (adTab) { adTab.className = _debridProvider === 'ad' ? 'small primary' : 'small secondary'; }
+    if (tbTab) { tbTab.className = _debridProvider === 'tb' ? 'small primary' : 'small secondary'; }
 }
 
 async function debridSwitchProvider(provider) {
@@ -6485,14 +6487,16 @@ async function debridSwitchProvider(provider) {
 async function _checkDebridKey() {
     const setupRd = document.getElementById('debrid-setup');
     const setupAd = document.getElementById('debrid-setup-ad');
+    const setupTb = document.getElementById('debrid-setup-tb');
     const main = document.getElementById('debrid-main');
     const accountInfo = document.getElementById('rd-account-info');
 
     // Hide both setups first
     if (setupRd) setupRd.style.display = 'none';
     if (setupAd) setupAd.style.display = 'none';
+    if (setupTb) setupTb.style.display = 'none';
 
-    const endpoint = _debridProvider === 'ad' ? 'ad/key' : 'rd/key';
+    const endpoint = _debridProvider === 'ad' ? 'ad/key' : (_debridProvider === 'tb' ? 'tb/key' : 'rd/key');
     try {
         const res = await fetch(`${API_BASE}/debrid/${endpoint}`, { headers: getAuthHeaders() });
         if (!res.ok) { _showDebridSetup(); return; }
@@ -6518,9 +6522,11 @@ async function _checkDebridKey() {
 function _showDebridSetup() {
     const setupRd = document.getElementById('debrid-setup');
     const setupAd = document.getElementById('debrid-setup-ad');
+    const setupTb = document.getElementById('debrid-setup-tb');
     const main = document.getElementById('debrid-main');
     if (setupRd) setupRd.style.display = _debridProvider === 'rd' ? 'block' : 'none';
     if (setupAd) setupAd.style.display = _debridProvider === 'ad' ? 'block' : 'none';
+    if (setupTb) setupTb.style.display = _debridProvider === 'tb' ? 'block' : 'none';
     if (main) main.style.display = 'none';
 }
 
@@ -6566,10 +6572,31 @@ async function saveADKey() {
     } catch (e) { showToast(e.message, 'error'); }
 }
 
+async function saveTBKey() {
+    const input = document.getElementById('tb-api-key-input');
+    const key = input ? input.value.trim() : '';
+    if (!key) { showToast('Please enter a TorBox API key', 'warning'); return; }
+
+    try {
+        const res = await fetch(`${API_BASE}/debrid/tb/key`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to save key');
+        }
+        showToast('TorBox connected!', 'success');
+        _debridProvider = 'tb';
+        await debridSwitchProvider('tb');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
 async function removeDebridKey() {
-    const label = _debridProvider === 'ad' ? 'AllDebrid' : 'Real-Debrid';
+    const label = _debridProvider === 'ad' ? 'AllDebrid' : (_debridProvider === 'tb' ? 'TorBox' : 'Real-Debrid');
     if (!confirm(`Remove ${label} API key?`)) return;
-    const endpoint = _debridProvider === 'ad' ? 'ad/key' : 'rd/key';
+    const endpoint = _debridProvider === 'ad' ? 'ad/key' : (_debridProvider === 'tb' ? 'tb/key' : 'rd/key');
     try {
         await fetch(`${API_BASE}/debrid/${endpoint}`, { method: 'DELETE', headers: getAuthHeaders() });
         showToast(`${label} key removed`, 'info');
@@ -6703,6 +6730,7 @@ async function renderTorrentResults(results, imdbId) {
         const isCached = cached[t.info_hash] || cached[t.info_hash?.toLowerCase()];
         const providerBadge = (_debridProvider || 'rd').toUpperCase();
         const isRD = _debridProvider === 'rd';
+        const addTitle = _debridProvider === 'ad' ? 'Send to AllDebrid' : (_debridProvider === 'tb' ? 'Send to TorBox' : 'Send to Real-Debrid');
         const cachedBadge = isCached
             ? `<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">${providerBadge} CACHED</span>`
             : '';
@@ -6730,7 +6758,7 @@ async function renderTorrentResults(results, imdbId) {
                         ${warningLine}
                     </div>
                     <div style="display:flex;gap:.5rem;flex-shrink:0">
-                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : 'Send to Real-Debrid')}">
+                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
                             <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
                         </button>
                     </div>
@@ -6741,7 +6769,7 @@ async function renderTorrentResults(results, imdbId) {
 }
 
 async function debridAddMagnet(infoHash, fileIdx, name) {
-    const providerName = _debridProvider === 'ad' ? 'AllDebrid' : 'Real-Debrid';
+    const providerName = _debridProvider === 'ad' ? 'AllDebrid' : (_debridProvider === 'tb' ? 'TorBox' : 'Real-Debrid');
     showToast(`Adding to ${providerName}...`, 'info');
     debridShowProcessing(name, 'Adding magnet...');
     try {

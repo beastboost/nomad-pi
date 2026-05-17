@@ -20,6 +20,7 @@ from app.services import debrid
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/debrid", tags=["debrid"])
+SUPPORTED_PROVIDERS = {"rd", "ad", "tb"}
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -50,9 +51,10 @@ class SelectFilesBody(BaseModel):
 # Provider / key management
 # ---------------------------------------------------------------------------
 
-def _provider(request: Request) -> str:
-    """Read the active debrid provider from the DB (rd / ad / tb)."""
-    return database.get_setting("debrid_provider") or "rd"
+def _provider(request: Optional[Request] = None) -> str:
+    """Read the active debrid provider from the DB and fall back to supported values."""
+    provider = database.get_setting("debrid_provider") or "rd"
+    return provider if provider in SUPPORTED_PROVIDERS else "rd"
 
 
 def _key_for(provider: str) -> Optional[str]:
@@ -63,13 +65,13 @@ def _key_for(provider: str) -> Optional[str]:
 
 @router.get("/provider")
 def get_provider(user_id: int = Depends(get_current_user_id)):
-    return {"provider": database.get_setting("debrid_provider") or "rd"}
+    return {"provider": _provider(None)}
 
 
 @router.post("/provider")
 def set_provider(body: dict, user_id: int = Depends(get_current_user_id)):
     p = body.get("provider", "rd")
-    if p not in ("rd", "ad", "tb"):
+    if p not in SUPPORTED_PROVIDERS:
         raise HTTPException(400, "Invalid provider")
     database.set_setting("debrid_provider", p)
     return {"ok": True, "provider": p}
@@ -209,7 +211,7 @@ def search_torrents(imdb_id: str = Query(...),
 def check_instant(body: dict, user_id: int = Depends(get_current_user_id)):
     """Check instant availability for a list of hashes on the active provider."""
     hashes = body.get("hashes", [])
-    provider = body.get("provider") or (database.get_setting("debrid_provider") or "rd")
+    provider = body.get("provider") or _provider(None)
     key = _key_for(provider)
     if not key:
         return {"cached": {}}
@@ -234,7 +236,7 @@ def check_instant(body: dict, user_id: int = Depends(get_current_user_id)):
 
 @router.post("/magnet")
 def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
-    provider = database.get_setting("debrid_provider") or "rd"
+    provider = _provider(None)
     key = _key_for(provider)
     if not key:
         raise HTTPException(400, f"No API key set for {provider}")
@@ -306,26 +308,25 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
         elif provider == "tb":
             result = debrid.tb_add_magnet(key, body.info_hash)
             torrent_id = result.get("torrent_id") or result.get("id")
-            # Poll for completion
             info = {}
             for _ in range(15):
                 info = debrid.tb_get_torrent_info(key, torrent_id)
-                ds = info.get("download_state", "")
+                ds = str(info.get("download_state", ""))
                 if ds in ("completed", "cached", "uploading", "paused"):
                     break
                 if info.get("download_finished"):
                     break
                 time.sleep(1)
-            # Build file list with download links
             files = info.get("files", [])
             links = []
             if info.get("download_finished") or info.get("download_state") in ("completed", "cached"):
                 for f in files:
                     try:
                         dl = debrid.tb_request_download(key, torrent_id, f.get("id", 0))
-                        links.append(dl)
-                    except Exception:
-                        pass
+                        if dl:
+                            links.append(dl)
+                    except Exception as e:
+                        logger.warning(f"TorBox requestdl failed for torrent {torrent_id} file {f.get('id')}: {e}")
             return {
                 "ok": True,
                 "provider": "tb",
@@ -342,7 +343,7 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
 @router.get("/torrent/{torrent_id}")
 def get_torrent_status(torrent_id: str,
                        user_id: int = Depends(get_current_user_id)):
-    provider = database.get_setting("debrid_provider") or "rd"
+    provider = _provider(None)
     key = _key_for(provider)
     if not key:
         raise HTTPException(400, f"No API key set for {provider}")
@@ -391,9 +392,10 @@ def get_torrent_status(torrent_id: str,
                 for f in files:
                     try:
                         dl = debrid.tb_request_download(key, int(torrent_id), f.get("id", 0))
-                        links.append(dl)
-                    except Exception:
-                        pass
+                        if dl:
+                            links.append(dl)
+                    except Exception as e:
+                        logger.warning(f"TorBox requestdl failed for torrent {torrent_id} file {f.get('id')}: {e}")
             progress = info.get("progress", 0)
             if isinstance(progress, float) and progress <= 1:
                 progress = progress * 100
@@ -413,7 +415,7 @@ def get_torrent_status(torrent_id: str,
 def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
     """Unrestrict a download link (RD/AD). TorBox uses requestdl instead."""
     link = body.get("link", "")
-    provider = database.get_setting("debrid_provider") or "rd"
+    provider = _provider(None)
     key = _key_for(provider)
     if not key:
         raise HTTPException(400, f"No API key for {provider}")
@@ -443,7 +445,7 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
 @router.post("/select-files/{torrent_id}")
 def select_files(torrent_id: str, body: SelectFilesBody,
                  user_id: int = Depends(get_current_user_id)):
-    provider = database.get_setting("debrid_provider") or "rd"
+    provider = _provider(None)
     key = _key_for(provider)
     if not key:
         raise HTTPException(400, f"No API key for {provider}")
