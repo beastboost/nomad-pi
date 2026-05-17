@@ -1,4 +1,4 @@
-console.log("App v1.3 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
+console.log("App v1.3.3 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;

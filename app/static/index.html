@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=1779051600">
-    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="css/style.css?v=1779058800">
+    <link rel="manifest" href="manifest.json?v=1779058800">
     <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1138,11 +1138,11 @@
 
     </div><!-- /#comic-overlay -->
 
-    <script src="js/app.js?v=1779055200"></script>
+    <script src="js/app.js?v=1779058800"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js?v=1779055200')
+                navigator.serviceWorker.register('/sw.js?v=1779058800')
                     .then(async reg => {
                         console.log('Service Worker registered!', reg);
                         try { await reg.update(); } catch (_) {}
