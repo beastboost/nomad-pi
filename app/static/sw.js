@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.3.2';
+const CACHE_NAME = 'nomad-pi-v1.3.3';
 const STATIC_ASSETS = [
   '/manifest.json',
   '/sw.js',
