@@ -4,14 +4,16 @@ Handles torrent search via Torrentio, magnet submission to Real-Debrid
 or AllDebrid, unrestricting download links, and downloading files to the Pi.
 """
 
+import json
 import logging
 import os
 import re
 import shutil
 import threading
 import time
+import urllib.request
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 import requests
 
@@ -67,6 +69,45 @@ _api_call_times: dict[str, list] = {"rd": [], "ad": [], "tb": []}
 _api_rate_lock = threading.Lock()
 API_RATE_LIMIT = 100  # requests
 API_RATE_WINDOW = 60   # seconds
+
+
+# #region debug-point A:debug-helper
+def _debug_report(hypothesis_id: str, location: str, msg: str, data: Optional[dict] = None, trace_id: str = "") -> None:
+    _p = ".dbg/web-ui-not-loading.env"
+    _u = "http://127.0.0.1:7777/event"
+    _s = "web-ui-not-loading"
+    try:
+        with open(_p, encoding="utf-8") as f:
+            c = f.read()
+        for line in c.splitlines():
+            if line.startswith("DEBUG_SERVER_URL="):
+                _u = line.split("=", 1)[1] or _u
+            elif line.startswith("DEBUG_SESSION_ID="):
+                _s = line.split("=", 1)[1] or _s
+    except Exception:
+        pass
+    try:
+        payload = {
+            "sessionId": _s,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "msg": f"[DEBUG] {msg}",
+            "data": data or {},
+            "traceId": trace_id,
+            "ts": int(time.time() * 1000),
+        }
+        urllib.request.urlopen(
+            urllib.request.Request(
+                _u,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            timeout=2,
+        ).read()
+    except Exception:
+        pass
+# #endregion
 
 
 class DebridAuthError(Exception):
@@ -377,28 +418,46 @@ def tb_add_magnet(api_key: str, info_hash: str) -> dict:
     return {"id": data}
 
 
-def tb_get_torrent_info(api_key: str, torrent_id: int | str) -> dict:
+def tb_get_torrent_info(api_key: str, torrent_id: Union[int, str]) -> dict:
     """Fetch a TorBox torrent from the user's list."""
     try:
+        # #region debug-point D:tb-torrent-info-entry
+        _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info entry", {"torrent_id": str(torrent_id)})
+        # #endregion
         data = _tb_request("GET", "/torrents/mylist", api_key, params={"id": torrent_id})
         if isinstance(data, dict):
+            # #region debug-point D:tb-torrent-info-dict
+            _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info dict payload", {"torrent_id": str(torrent_id), "keys": sorted(list(data.keys()))[:20], "download_state": str(data.get("download_state", "")), "download_finished": bool(data.get("download_finished"))})
+            # #endregion
             return data
         if isinstance(data, list):
+            # #region debug-point D:tb-torrent-info-list
+            _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info list payload", {"torrent_id": str(torrent_id), "count": len(data)})
+            # #endregion
             for item in data:
                 if str(item.get("id")) == str(torrent_id):
                     return item
-    except Exception:
+    except Exception as e:
+        # #region debug-point D:tb-torrent-info-fallback
+        _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info primary request failed", {"torrent_id": str(torrent_id), "error": str(e)})
+        # #endregion
         data = _tb_request("GET", "/torrents/mylist", api_key)
         if isinstance(data, list):
             for item in data:
                 if str(item.get("id")) == str(torrent_id):
                     return item
+    # #region debug-point D:tb-torrent-info-miss
+    _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info not found", {"torrent_id": str(torrent_id)})
+    # #endregion
     raise Exception(f"TorBox torrent {torrent_id} not found")
 
 
-def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str = 0) -> str:
+def tb_request_download(api_key: str, torrent_id: Union[int, str], file_id: Union[int, str] = 0) -> str:
     """Request a TorBox download link for a file in a torrent."""
     _check_rate_limit("tb")
+    # #region debug-point D:tb-request-download-entry
+    _debug_report("D", "app/services/debrid.py:tb_request_download", "tb_request_download entry", {"torrent_id": str(torrent_id), "file_id": str(file_id)})
+    # #endregion
     r = requests.get(
         f"{TB_BASE}/torrents/requestdl",
         params={
@@ -414,9 +473,15 @@ def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str 
     try:
         payload = r.json()
     except ValueError:
+        # #region debug-point D:tb-request-download-text
+        _debug_report("D", "app/services/debrid.py:tb_request_download", "tb_request_download text payload", {"torrent_id": str(torrent_id), "file_id": str(file_id), "status_code": r.status_code, "text_sample": r.text[:200]})
+        # #endregion
         return r.text.strip()
 
     data = _tb_extract_data(payload)
+    # #region debug-point D:tb-request-download-json
+    _debug_report("D", "app/services/debrid.py:tb_request_download", "tb_request_download json payload", {"torrent_id": str(torrent_id), "file_id": str(file_id), "status_code": r.status_code, "payload_type": type(data).__name__})
+    # #endregion
     if isinstance(data, str):
         return data
     if isinstance(data, dict):
@@ -424,10 +489,10 @@ def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str 
     return ""
 
 
-def tb_delete_torrent(api_key: str, torrent_id: int | str) -> None:
+def tb_delete_torrent(api_key: str, torrent_id: Union[int, str]) -> None:
     """Delete a torrent from TorBox."""
     try:
-        normalized_id: int | str = int(torrent_id)
+        normalized_id: Union[int, str] = int(torrent_id)
     except (TypeError, ValueError):
         normalized_id = torrent_id
 
@@ -533,14 +598,24 @@ def get_torrent_info(api_key: str, torrent_id: str) -> dict:
     """Get torrent status and links."""
     try:
         _check_rate_limit("rd")
+        # #region debug-point B:rd-torrent-info-entry
+        _debug_report("B", "app/services/debrid.py:get_torrent_info", "rd get_torrent_info entry", {"torrent_id": str(torrent_id)})
+        # #endregion
         r = requests.get(
             f"{RD_BASE}/torrents/info/{torrent_id}",
             headers=_rd_headers(api_key),
             timeout=15,
         )
         r.raise_for_status()
-        return r.json()
+        payload = r.json()
+        # #region debug-point B:rd-torrent-info-success
+        _debug_report("B", "app/services/debrid.py:get_torrent_info", "rd get_torrent_info success", {"torrent_id": str(torrent_id), "status_code": r.status_code, "status": str(payload.get("status", "")), "progress": payload.get("progress"), "links_count": len(payload.get("links", []) or [])})
+        # #endregion
+        return payload
     except requests.exceptions.HTTPError as e:
+        # #region debug-point B:rd-torrent-info-http-error
+        _debug_report("B", "app/services/debrid.py:get_torrent_info", "rd get_torrent_info http error", {"torrent_id": str(torrent_id), "status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else "")})
+        # #endregion
         if r.status_code == 401:
             raise DebridAuthError("Invalid Real-Debrid API key")
         raise
@@ -550,6 +625,9 @@ def unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a hoster link to get a direct download URL."""
     try:
         _check_rate_limit("rd")
+        # #region debug-point C:rd-unrestrict-entry
+        _debug_report("C", "app/services/debrid.py:unrestrict_link", "rd unrestrict entry", {"link_prefix": link[:120]})
+        # #endregion
         r = requests.post(
             f"{RD_BASE}/unrestrict/link",
             headers=_rd_headers(api_key),
@@ -557,8 +635,15 @@ def unrestrict_link(api_key: str, link: str) -> dict:
             timeout=15,
         )
         r.raise_for_status()
-        return r.json()
+        payload = r.json()
+        # #region debug-point C:rd-unrestrict-success
+        _debug_report("C", "app/services/debrid.py:unrestrict_link", "rd unrestrict success", {"status_code": r.status_code, "has_download": bool(payload.get("download")), "filename": payload.get("filename", "")[:120]})
+        # #endregion
+        return payload
     except requests.exceptions.HTTPError as e:
+        # #region debug-point C:rd-unrestrict-http-error
+        _debug_report("C", "app/services/debrid.py:unrestrict_link", "rd unrestrict http error", {"status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else ""), "link_prefix": link[:120]})
+        # #endregion
         if r.status_code == 401:
             raise DebridAuthError("Invalid Real-Debrid API key")
         raise
@@ -671,6 +756,9 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     """Get AllDebrid magnet status."""
     try:
         _check_rate_limit("ad")
+        # #region debug-point E:ad-magnet-status-entry
+        _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status entry", {"magnet_id": str(magnet_id)})
+        # #endregion
         r = requests.get(
             "https://api.alldebrid.com/v4.1/magnet/status",
             headers=_ad_headers(api_key),
@@ -679,10 +767,16 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
         )
         r.raise_for_status()
         data = r.json()
+        # #region debug-point E:ad-magnet-status-success
+        _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status success", {"magnet_id": str(magnet_id), "status_code": r.status_code, "top_level_keys": sorted(list(data.keys()))[:20], "ad_status": str(data.get("status", ""))})
+        # #endregion
         if data.get("status") == "error":
             raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
         return data.get("data", {}).get("magnets", {})
     except requests.exceptions.HTTPError as e:
+        # #region debug-point E:ad-magnet-status-http-error
+        _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status http error", {"magnet_id": str(magnet_id), "status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else "")})
+        # #endregion
         if r.status_code == 401:
             raise DebridAuthError("Invalid AllDebrid API key")
         raise
@@ -692,6 +786,9 @@ def ad_unrestrict_link(api_key: str, link: str) -> dict:
     """Unrestrict a link via AllDebrid."""
     try:
         _check_rate_limit("ad")
+        # #region debug-point E:ad-unrestrict-entry
+        _debug_report("E", "app/services/debrid.py:ad_unrestrict_link", "ad_unrestrict entry", {"link_prefix": link[:120]})
+        # #endregion
         r = requests.post(
             f"{AD_BASE}/link/unlock",
             headers=_ad_headers(api_key),
@@ -700,10 +797,16 @@ def ad_unrestrict_link(api_key: str, link: str) -> dict:
         )
         r.raise_for_status()
         data = r.json()
+        # #region debug-point E:ad-unrestrict-success
+        _debug_report("E", "app/services/debrid.py:ad_unrestrict_link", "ad_unrestrict success", {"status_code": r.status_code, "top_level_keys": sorted(list(data.keys()))[:20], "ad_status": str(data.get("status", ""))})
+        # #endregion
         if data.get("status") == "error":
             raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
         return data.get("data", {})
     except requests.exceptions.HTTPError as e:
+        # #region debug-point E:ad-unrestrict-http-error
+        _debug_report("E", "app/services/debrid.py:ad_unrestrict_link", "ad_unrestrict http error", {"status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else ""), "link_prefix": link[:120]})
+        # #endregion
         if r.status_code == 401:
             raise DebridAuthError("Invalid AllDebrid API key")
         raise
