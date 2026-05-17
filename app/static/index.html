@@ -1138,12 +1138,15 @@
 
     </div><!-- /#comic-overlay -->
 
-    <script src="js/app.js?v=1775509265"></script>
+    <script src="js/app.js?v=1779055200"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(reg => console.log('Service Worker registered!', reg))
+                navigator.serviceWorker.register('/sw.js?v=1779055200')
+                    .then(async reg => {
+                        console.log('Service Worker registered!', reg);
+                        try { await reg.update(); } catch (_) {}
+                    })
                     .catch(err => console.error('Service Worker registration failed:', err));
             });
         }
