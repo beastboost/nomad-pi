@@ -413,7 +413,7 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     try:
         _check_rate_limit("ad")
         r = requests.get(
-            f"{AD_BASE}/magnet/status",
+            "https://api.alldebrid.com/v4.1/magnet/status",
             headers=_ad_headers(api_key),
             params={"id": magnet_id},
             timeout=15,

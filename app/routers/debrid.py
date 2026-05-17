@@ -1,4 +1,4 @@
-
+"""
 Provides endpoints for:
 - Saving / validating API keys for each provider
 - Torrent search via Torrentio + Cinemeta title lookup
@@ -513,7 +513,3 @@ def clean_filename(body: dict, user_id: int = Depends(get_current_user_id)):
     episode = body.get("episode", 0)
     clean = debrid.clean_media_filename(raw, title, year, media_type, season, episode)
     return {"clean_filename": clean}
-from fastapi import APIRouter
-router = APIRouter(prefix="/api/debrid", tags=["debrid"])
-
-print("[router] Debrid router reverted to placeholder")
