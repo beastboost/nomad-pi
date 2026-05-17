@@ -348,6 +348,22 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
         )
         if r.status_code == 200:
             data = r.json()
+            for m in data.get("data", {}).get("magnets", []):
+                if m.get("ready"):
+                    h = m.get("hash", "").lower()
+                    if h in result:
+                        result[h] = True
+                    try:
+                        ad_delete_magnet(api_key, str(m.get("id", "")))
+                    except Exception:
+                        pass
+                else:
+                    mid = str(m.get("id", ""))
+                    if mid:
+                        try:
+                            ad_delete_magnet(api_key, mid)
+                        except Exception:
+                            pass
             magnets = data.get("data", {}).get("magnets", [])
             for m in magnets:
                 h = m.get("hash", m.get("magnet", ""))
