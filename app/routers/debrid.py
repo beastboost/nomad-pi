@@ -10,6 +10,7 @@ Provides endpoints for:
 
 import logging
 import time
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -55,7 +56,7 @@ def _provider(request: Request) -> str:
     return database.get_setting("debrid_provider") or "rd"
 
 
-def _key_for(provider: str) -> str | None:
+def _key_for(provider: str) -> Optional[str]:
     mapping = {"rd": "rd_api_key", "ad": "ad_api_key", "tb": "tb_api_key"}
     setting = mapping.get(provider)
     return database.get_setting(setting) if setting else None
@@ -86,11 +87,18 @@ def set_rd_key(body: KeyBody, user_id: int = Depends(get_current_user_id)):
         raise HTTPException(400, f"Invalid Real-Debrid key: {e}")
 
 
+def _mask_key(key: str) -> str:
+    """Mask an API key, avoiding overlap-exposure for short keys."""
+    if len(key) >= 8:
+        return key[:4] + "****" + key[-4:]
+    return "****"
+
+
 @router.get("/rd/key")
 def get_rd_key(user_id: int = Depends(get_current_user_id)):
     key = database.get_setting("rd_api_key")
     if key:
-        return {"has_key": True, "masked": key[:4] + "****" + key[-4:]}
+        return {"has_key": True, "masked": _mask_key(key)}
     return {"has_key": False}
 
 
@@ -115,7 +123,7 @@ def set_ad_key(body: KeyBody, user_id: int = Depends(get_current_user_id)):
 def get_ad_key(user_id: int = Depends(get_current_user_id)):
     key = database.get_setting("ad_api_key")
     if key:
-        return {"has_key": True, "masked": key[:4] + "****" + key[-4:]}
+        return {"has_key": True, "masked": _mask_key(key)}
     return {"has_key": False}
 
 
@@ -140,7 +148,7 @@ def set_tb_key(body: KeyBody, user_id: int = Depends(get_current_user_id)):
 def get_tb_key(user_id: int = Depends(get_current_user_id)):
     key = database.get_setting("tb_api_key")
     if key:
-        return {"has_key": True, "masked": key[:4] + "****" + key[-4:]}
+        return {"has_key": True, "masked": _mask_key(key)}
     return {"has_key": False}
 
 
@@ -186,8 +194,8 @@ def search_title(q: str = Query(..., min_length=1),
 @router.get("/search/torrents")
 def search_torrents(imdb_id: str = Query(...),
                     media_type: str = Query("movie"),
-                    season: int | None = Query(None),
-                    episode: int | None = Query(None),
+                    season: Optional[int] = Query(None),
+                    episode: Optional[int] = Query(None),
                     user_id: int = Depends(get_current_user_id)):
     results = debrid.search_torrentio("", media_type=media_type, imdb_id=imdb_id,
                                       season=season, episode=episode)

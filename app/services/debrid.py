@@ -381,7 +381,10 @@ def ad_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
                     h = m.get("hash", "").lower()
                     if h in result:
                         result[h] = True
-                    ad_delete_magnet(api_key, str(m.get("id", "")))
+                    try:
+                        ad_delete_magnet(api_key, str(m.get("id", "")))
+                    except Exception:
+                        pass
                 else:
                     mid = str(m.get("id", ""))
                     if mid:
