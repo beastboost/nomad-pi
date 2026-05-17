@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=1775509264">
+    <link rel="stylesheet" href="css/style.css?v=1779051600">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -25,13 +25,17 @@
 <body>
     <div id="login-screen" class="login-container">
         <div class="login-box">
-            <div class="logo">Nomad Pi ✨</div>
-            <p>Sign in to access your media</p>
-            <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)">
-            <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
-            <button onclick="login()" class="primary">Enter</button>
+            <span class="login-badge">Private Media Hub</span>
+            <div class="logo">Nomad Pi</div>
+            <p class="login-copy">Sign in to browse your library, manage downloads, and control the box from one place.</p>
+            <div class="login-form">
+                <input type="text" id="username-input" placeholder="Username" value="admin" onkeypress="handleLoginKey(event)">
+                <input type="password" id="password-input" placeholder="Password" onkeypress="handleLoginKey(event)">
+                <button onclick="login()" class="primary">Enter Nomad</button>
+            </div>
             <p id="login-error" class="login-error" style="display:none;">Incorrect username or password</p>
             <p id="setup-hint" class="login-hint" style="display:none;"></p>
+            <p class="login-footnote">Default admin username is prefilled during initial setup.</p>
         </div>
     </div>
 
@@ -85,7 +89,33 @@
 
         <main>
             <section id="home" class="active">
-                <h1 class="section-welcome">Welcome Home</h1>
+                <div class="home-hero glass-card">
+                    <div class="home-hero-copy">
+                        <span class="section-chip">Control Center</span>
+                        <h1 class="section-welcome">Welcome Home</h1>
+                        <p class="home-hero-text">Check system health, jump into your library, and get back to active downloads faster.</p>
+                        <div class="home-hero-actions">
+                            <button class="primary" onclick="showSection('movies')"><i class="fas fa-film"></i> Browse Movies</button>
+                            <button class="secondary" onclick="showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Open Debrid</button>
+                            <button class="secondary" onclick="showSection('files')"><i class="fas fa-folder-open"></i> View Files</button>
+                        </div>
+                    </div>
+                    <div class="home-hero-meta">
+                        <div class="hero-meta-card">
+                            <span class="hero-meta-label">Library</span>
+                            <strong>Movies, shows, music, books, and gallery</strong>
+                        </div>
+                        <div class="hero-meta-card">
+                            <span class="hero-meta-label">System</span>
+                            <strong>Live storage, CPU, RAM, and temp stats</strong>
+                        </div>
+                        <div class="hero-meta-card">
+                            <span class="hero-meta-label">Downloads</span>
+                            <strong>Debrid search, stream, and Pi transfers</strong>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="stats-grid">
                     <div class="stat-card glass-hover" data-stat="storage">
                         <div class="stat-header">
@@ -123,43 +153,56 @@
                         <div id="temp-details" class="stat-details">Core Temperature</div>
                     </div>
                 </div>
-                
+
+                <div class="section-header section-header--compact">
+                    <h2><i class="fas fa-compass"></i> Quick Access</h2>
+                    <span class="section-meta">Jump straight into the parts of Nomad Pi you use most</span>
+                </div>
                 <div class="menu-grid">
                     <div class="card glass-hover" data-section="movies" onclick="showSection('movies')">
                         <div class="icon"><i class="fas fa-film"></i></div>
                         <h3>Movies</h3>
+                        <p class="card-subtitle">Browse your film library</p>
                     </div>
                     <div class="card glass-hover" data-section="shows" onclick="showSection('shows')">
                         <div class="icon"><i class="fas fa-tv"></i></div>
                         <h3>Shows</h3>
+                        <p class="card-subtitle">Episodes and seasons</p>
                     </div>
                     <div class="card glass-hover" data-section="music" onclick="showSection('music')">
                         <div class="icon"><i class="fas fa-music"></i></div>
                         <h3>Music</h3>
+                        <p class="card-subtitle">Albums and tracks</p>
                     </div>
                     <div class="card glass-hover" data-section="books" onclick="showSection('books')">
                         <div class="icon"><i class="fas fa-book"></i></div>
                         <h3>Books</h3>
+                        <p class="card-subtitle">Read and manage ebooks</p>
                     </div>
                     <div class="card glass-hover" data-section="gallery" onclick="showSection('gallery')">
                         <div class="icon"><i class="fas fa-image"></i></div>
                         <h3>Gallery</h3>
+                        <p class="card-subtitle">Photos and image folders</p>
                     </div>
                     <div class="card glass-hover" data-section="files" onclick="showSection('files')">
                         <div class="icon"><i class="fas fa-folder-open"></i></div>
                         <h3>Files</h3>
+                        <p class="card-subtitle">Everything on disk</p>
                     </div>
                     <div class="card glass-hover" data-section="debrid" onclick="showSection('debrid')">
                         <div class="icon"><i class="fas fa-cloud-download-alt"></i></div>
                         <h3>Debrid</h3>
+                        <p class="card-subtitle">Search, stream, download</p>
                     </div>
                     <div class="card glass-hover" data-section="admin" onclick="showSection('admin')">
                         <div class="icon"><i class="fas fa-user-shield"></i></div>
                         <h3>Admin</h3>
+                        <p class="card-subtitle">Users, system, services</p>
                     </div>
                     <div class="card glass-hover" data-section="settings" onclick="showSection('settings')">
                         <div class="icon"><i class="fas fa-cog"></i></div>
                         <h3>Settings</h3>
+                        <p class="card-subtitle">Theme, network, setup</p>
                     </div>
                 </div>
 
@@ -321,6 +364,7 @@
                     <span style="font-size:.85rem;color:var(--text-secondary);margin-right:.25rem">Provider:</span>
                     <button id="debrid-tab-rd" onclick="debridSwitchProvider('rd')" class="small primary">Real-Debrid</button>
                     <button id="debrid-tab-ad" onclick="debridSwitchProvider('ad')" class="small secondary">AllDebrid</button>
+                    <button id="debrid-tab-tb" onclick="debridSwitchProvider('tb')" class="small secondary">TorBox</button>
                 </div>
 
                 <!-- Real-Debrid Setup -->
@@ -342,6 +386,17 @@
                     <div style="display:flex;gap:.5rem;margin-top:1rem">
                         <input id="ad-api-key-input" type="password" placeholder="Paste your AllDebrid API key..." style="flex:1">
                         <button onclick="saveADKey()" class="primary">Save Key</button>
+                    </div>
+                </div>
+
+                <!-- TorBox Setup -->
+                <div id="debrid-setup-tb" class="glass-card" style="margin-bottom:1rem;padding:1.5rem;display:none">
+                    <h3>Setup TorBox</h3>
+                    <p style="color:var(--text-secondary);margin:.5rem 0">Enter your TorBox API key to enable torrent search, streaming, and downloading.</p>
+                    <p style="font-size:.85rem;color:var(--text-secondary)">Get your API key from <a href="https://torbox.app/settings" target="_blank" rel="noopener" style="color:var(--accent)">torbox.app/settings</a></p>
+                    <div style="display:flex;gap:.5rem;margin-top:1rem">
+                        <input id="tb-api-key-input" type="password" placeholder="Paste your TorBox API key..." style="flex:1">
+                        <button onclick="saveTBKey()" class="primary">Save Key</button>
                     </div>
                 </div>
 

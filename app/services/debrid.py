@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
 AD_BASE = "https://api.alldebrid.com/v4"  # Updated to v4 (latest API)
+TB_BASE = "https://api.torbox.app/v1/api"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
 # Torrentio blocks the default python-requests User-Agent
@@ -28,12 +29,41 @@ _TORRENTIO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; NomadPi/1.0)",
 }
 
+_RD_BLOCKED_SUBSTRINGS = (
+    "web-dl",
+    "webrip",
+    "bdrip",
+    "hdrip",
+    "dvdrip",
+)
+
+_RD_BLOCKED_DOT_PATTERNS = (
+    "bluray.x264",
+    "hdtv.x264",
+    "hdtv.xvid",
+    "web.x264",
+    "web.h264",
+)
+
+_RD_PREFERRED_TERMS = (
+    "x265",
+    "h265",
+    "hevc",
+    "av1",
+    "avc",
+    "blu-ray",
+    "remux",
+    "web.h265",
+    "web.x265",
+    "bluray.x265",
+)
+
 # Active downloads tracked in memory
 _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
 
 # Rate limiter for API calls
-_api_call_times: dict[str, list] = {"rd": [], "ad": []}
+_api_call_times: dict[str, list] = {"rd": [], "ad": [], "tb": []}
 _api_rate_lock = threading.Lock()
 API_RATE_LIMIT = 100  # requests
 API_RATE_WINDOW = 60   # seconds
@@ -79,6 +109,38 @@ def _ad_headers(api_key: str) -> dict:
     return {"Authorization": f"Bearer {api_key}"}
 
 
+def _tb_headers(api_key: str) -> dict:
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _tb_extract_data(payload):
+    if isinstance(payload, dict):
+        success = payload.get("success")
+        if success is False:
+            detail = payload.get("detail") or payload.get("error") or "TorBox error"
+            raise Exception(str(detail))
+        if "data" in payload:
+            return payload.get("data")
+    return payload
+
+
+def _tb_request(method: str, path: str, api_key: str, **kwargs):
+    _check_rate_limit("tb")
+    r = requests.request(
+        method,
+        f"{TB_BASE}{path}",
+        headers=_tb_headers(api_key),
+        timeout=15,
+        **kwargs,
+    )
+    r.raise_for_status()
+    try:
+        payload = r.json()
+    except ValueError:
+        return r.text
+    return _tb_extract_data(payload)
+
+
 # ---------------------------------------------------------------------------
 # Real-Debrid account helpers
 # ---------------------------------------------------------------------------
@@ -96,6 +158,74 @@ def get_rd_user(api_key: str) -> dict:
         raise DebridAuthError(f"Real-Debrid auth failed: {str(e)}")
     except Exception as e:
         raise DebridAuthError(f"Real-Debrid connection failed: {str(e)}")
+
+
+def tb_get_user(api_key: str) -> dict:
+    """Validate TorBox API key and return account info."""
+    try:
+        data = _tb_request("GET", "/user/me", api_key)
+        if isinstance(data, dict):
+            return data
+        raise DebridAuthError("Invalid TorBox API response")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            raise DebridAuthError("Invalid TorBox API key")
+        raise DebridAuthError(f"TorBox connection failed: {str(e)}")
+    except Exception as e:
+        raise DebridAuthError(f"TorBox connection failed: {str(e)}")
+
+
+def _quality_rank(quality: str) -> int:
+    ranks = {
+        "4k": 5,
+        "2160p": 5,
+        "1080p": 4,
+        "720p": 3,
+        "480p": 2,
+        "hdcam": 1,
+        "cam": 0,
+        "unknown": 0,
+    }
+    return ranks.get((quality or "unknown").lower(), 0)
+
+
+def _analyze_rd_release(title: str, details: str) -> dict:
+    """Flag Torrentio releases that are likely to hit RD filename filters."""
+    text = f"{title} {details}".lower()
+    dot_text = re.sub(r"[\s_]+", ".", text)
+    reasons = []
+
+    for pattern in _RD_BLOCKED_SUBSTRINGS:
+        if pattern in text:
+            reasons.append(pattern.upper())
+
+    for pattern in _RD_BLOCKED_DOT_PATTERNS:
+        if pattern in dot_text:
+            reasons.append(pattern.upper())
+
+    preferred_terms = [term.upper() for term in _RD_PREFERRED_TERMS if term in dot_text or term in text]
+    is_likely_blocked = bool(reasons)
+
+    if is_likely_blocked:
+        status = "likely_blocked"
+        warning = f"Likely blocked by RD: {', '.join(reasons[:3])}"
+        score = -100 - (len(reasons) * 10)
+    elif preferred_terms:
+        status = "safer"
+        warning = f"Safer for RD: {', '.join(preferred_terms[:3])}"
+        score = 25 + (len(preferred_terms) * 5)
+    else:
+        status = "neutral"
+        warning = ""
+        score = 0
+
+    return {
+        "status": status,
+        "warning": warning,
+        "reasons": reasons,
+        "preferred_terms": preferred_terms,
+        "score": score,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +294,8 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                     source = s
                     break
 
+            rd_analysis = _analyze_rd_release(name, details)
+
             results.append({
                 "name": name,
                 "info_hash": info_hash,
@@ -173,11 +305,138 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                 "source": source,
                 "details": details,
                 "seeders": stream.get("seeders"),
+                "rd_status": rd_analysis["status"],
+                "rd_warning": rd_analysis["warning"],
+                "rd_reasons": rd_analysis["reasons"],
+                "rd_score": rd_analysis["score"],
             })
     except requests.RequestException as e:
         logger.error(f"Torrentio search failed: {e}")
 
+    results.sort(
+        key=lambda item: (
+            item.get("rd_status") == "likely_blocked",
+            -(item.get("rd_score", 0)),
+            -int(item.get("seeders") or 0),
+            -_quality_rank(item.get("quality", "Unknown")),
+            item.get("name", "").lower(),
+        )
+    )
+
     return results
+
+
+# ---------------------------------------------------------------------------
+# TorBox helpers
+# ---------------------------------------------------------------------------
+
+
+def tb_check_instant(api_key: str, hashes: list[str]) -> dict[str, bool]:
+    """Check which hashes are instantly available (cached) on TorBox."""
+    if not hashes:
+        return {}
+
+    normalized = [h.lower() for h in hashes if h]
+    result = {h: False for h in normalized}
+    params = [("hash", h) for h in normalized]
+    params.append(("format", "object"))
+
+    try:
+        data = _tb_request("GET", "/torrents/checkcached", api_key, params=params)
+        if isinstance(data, dict):
+            for key, value in data.items():
+                hash_value = str(key).lower()
+                if hash_value in result:
+                    result[hash_value] = bool(value)
+        elif isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, str):
+                    hash_value = entry.lower()
+                    if hash_value in result:
+                        result[hash_value] = True
+                elif isinstance(entry, dict):
+                    hash_value = str(entry.get("hash", "")).lower()
+                    if hash_value in result:
+                        result[hash_value] = bool(
+                            entry.get("cached")
+                            or entry.get("available")
+                            or entry.get("status") in ("cached", "found")
+                        )
+    except Exception as e:
+        logger.warning(f"TorBox instant check failed: {e}")
+
+    return result
+
+
+def tb_add_magnet(api_key: str, info_hash: str) -> dict:
+    """Create a TorBox torrent from an info hash."""
+    magnet = f"magnet:?xt=urn:btih:{info_hash}"
+    data = _tb_request("POST", "/torrents/createtorrent", api_key, data={"magnet": magnet})
+    if isinstance(data, dict):
+        return data
+    return {"id": data}
+
+
+def tb_get_torrent_info(api_key: str, torrent_id: int | str) -> dict:
+    """Fetch a TorBox torrent from the user's list."""
+    try:
+        data = _tb_request("GET", "/torrents/mylist", api_key, params={"id": torrent_id})
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            for item in data:
+                if str(item.get("id")) == str(torrent_id):
+                    return item
+    except Exception:
+        data = _tb_request("GET", "/torrents/mylist", api_key)
+        if isinstance(data, list):
+            for item in data:
+                if str(item.get("id")) == str(torrent_id):
+                    return item
+    raise Exception(f"TorBox torrent {torrent_id} not found")
+
+
+def tb_request_download(api_key: str, torrent_id: int | str, file_id: int | str = 0) -> str:
+    """Request a TorBox download link for a file in a torrent."""
+    _check_rate_limit("tb")
+    r = requests.get(
+        f"{TB_BASE}/torrents/requestdl",
+        params={
+            "token": api_key,
+            "torrent_id": torrent_id,
+            "file_id": file_id,
+            "redirect": "false",
+        },
+        timeout=15,
+    )
+    r.raise_for_status()
+
+    try:
+        payload = r.json()
+    except ValueError:
+        return r.text.strip()
+
+    data = _tb_extract_data(payload)
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        return data.get("url") or data.get("link") or ""
+    return ""
+
+
+def tb_delete_torrent(api_key: str, torrent_id: int | str) -> None:
+    """Delete a torrent from TorBox."""
+    try:
+        normalized_id: int | str = int(torrent_id)
+    except (TypeError, ValueError):
+        normalized_id = torrent_id
+
+    _tb_request(
+        "POST",
+        "/torrents/controltorrent",
+        api_key,
+        json={"torrent_id": normalized_id, "operation": "delete"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +672,7 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
     try:
         _check_rate_limit("ad")
         r = requests.get(
-            f"{AD_BASE}/magnet/status",
+            "https://api.alldebrid.com/v4.1/magnet/status",
             headers=_ad_headers(api_key),
             params={"id": magnet_id},
             timeout=15,
