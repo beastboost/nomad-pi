@@ -328,21 +328,19 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                     if status_info.get("statusCode", 0) >= 4:
                         break
                     time.sleep(1)
-            # Get files
             files = []
-            try:
-                files = debrid.ad_get_magnet_files(key, magnet_id)
-            except Exception:
-                pass
             links = []
             if status_info.get("statusCode", 0) >= 4:
-                for f in files:
-                    if f.get("l"):
-                        links.append(f["l"])
-                    elif f.get("e"):
-                        for sf in f["e"]:
-                            if sf.get("l"):
-                                links.append(sf["l"])
+                for idx, f in enumerate(status_info.get("links", [])):
+                    link = f.get("link")
+                    if link:
+                        links.append(link)
+                        files.append({
+                            "id": idx,
+                            "path": f.get("filename", ""),
+                            "bytes": f.get("size", 0),
+                            "selected": 1
+                        })
             return {
                 "ok": True,
                 "provider": "ad",
@@ -419,18 +417,17 @@ def get_torrent_status(torrent_id: str,
             info = debrid.ad_get_magnet_status(key, torrent_id)
             files = []
             links = []
-            try:
-                files = debrid.ad_get_magnet_files(key, torrent_id)
-            except Exception:
-                pass
             if info.get("statusCode", 0) >= 4:
-                for f in files:
-                    if f.get("l"):
-                        links.append(f["l"])
-                    elif f.get("e"):
-                        for sf in f["e"]:
-                            if sf.get("l"):
-                                links.append(sf["l"])
+                for idx, f in enumerate(info.get("links", [])):
+                    link = f.get("link")
+                    if link:
+                        links.append(link)
+                        files.append({
+                            "id": idx,
+                            "path": f.get("filename", ""),
+                            "bytes": f.get("size", 0),
+                            "selected": 1
+                        })
             progress = 100 if info.get("statusCode", 0) >= 4 else info.get("downloaded", 0) / max(info.get("size", 1), 1) * 100
             response = {
                 "status": "downloaded" if info.get("statusCode", 0) >= 4 else "processing",
@@ -530,7 +527,17 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
             # #endregion
             return response
         elif provider == "tb":
-            response = {"url": link, "filename": "", "filesize": 0}
+            # TorBox requestdl already returns the final URL.
+            # Try to guess a filename from the URL, or provide a fallback.
+            import urllib.parse
+            import os
+            try:
+                fname = os.path.basename(urllib.parse.urlparse(link).path)
+                if not fname:
+                    fname = "torbox_download"
+            except Exception:
+                fname = "torbox_download"
+            response = {"url": link, "filename": fname, "filesize": 0}
             # #region debug-point A:router-unrestrict-tb-success
             _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict tb passthrough", {"provider": provider, "has_url": bool(response.get("url"))})
             # #endregion
