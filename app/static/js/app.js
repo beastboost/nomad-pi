@@ -6450,7 +6450,7 @@ async function initDebrid() {
 
     // Load saved provider preference
     try {
-        const provRes = await fetch(`${API_BASE}/debrid/settings/provider`, { headers: getAuthHeaders() });
+        const provRes = await fetch(`${API_BASE}/debrid/provider`, { headers: getAuthHeaders() });
         if (provRes.ok) {
             const provData = await provRes.json();
             _debridProvider = provData.provider || 'rd';
@@ -6473,8 +6473,10 @@ async function debridSwitchProvider(provider) {
     _debridProvider = provider;
     _updateProviderTabs();
     try {
-        await fetch(`${API_BASE}/debrid/settings/provider?provider=${provider}`, {
-            method: 'POST', headers: getAuthHeaders(),
+        await fetch(`${API_BASE}/debrid/provider`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider }),
         });
     } catch (e) { /* ignore */ }
     await _checkDebridKey();
@@ -6490,20 +6492,20 @@ async function _checkDebridKey() {
     if (setupRd) setupRd.style.display = 'none';
     if (setupAd) setupAd.style.display = 'none';
 
-    const endpoint = _debridProvider === 'ad' ? 'settings/ad-key' : 'settings/key';
+    const endpoint = _debridProvider === 'ad' ? 'ad/key' : 'rd/key';
     try {
         const res = await fetch(`${API_BASE}/debrid/${endpoint}`, { headers: getAuthHeaders() });
         if (!res.ok) { _showDebridSetup(); return; }
         const data = await res.json();
 
-        if (data.configured && (data.user || data.valid !== false)) {
+        if (data.has_key) {
             if (main) main.style.display = 'block';
             if (accountInfo) {
                 accountInfo.style.display = 'block';
                 const usernameEl = document.getElementById('rd-username');
-                if (usernameEl) usernameEl.textContent = (data.user?.username || 'Connected');
+                if (usernameEl) usernameEl.textContent = data.masked ? `Connected (${data.masked})` : 'Connected';
                 const badge = document.getElementById('rd-premium-badge');
-                if (badge) badge.style.display = (data.user?.premium) ? '' : 'none';
+                if (badge) badge.style.display = 'none';
             }
         } else {
             _showDebridSetup();
@@ -6528,10 +6530,10 @@ async function saveRDKey() {
     if (!key) { showToast('Please enter an API key', 'warning'); return; }
 
     try {
-        const res = await fetch(`${API_BASE}/debrid/settings/key`, {
+        const res = await fetch(`${API_BASE}/debrid/rd/key`, {
             method: 'POST',
             headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: key }),
+            body: JSON.stringify({ key }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -6549,10 +6551,10 @@ async function saveADKey() {
     if (!key) { showToast('Please enter an AllDebrid API key', 'warning'); return; }
 
     try {
-        const res = await fetch(`${API_BASE}/debrid/settings/ad-key`, {
+        const res = await fetch(`${API_BASE}/debrid/ad/key`, {
             method: 'POST',
             headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: key }),
+            body: JSON.stringify({ key }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -6567,7 +6569,7 @@ async function saveADKey() {
 async function removeDebridKey() {
     const label = _debridProvider === 'ad' ? 'AllDebrid' : 'Real-Debrid';
     if (!confirm(`Remove ${label} API key?`)) return;
-    const endpoint = _debridProvider === 'ad' ? 'settings/ad-key' : 'settings/key';
+    const endpoint = _debridProvider === 'ad' ? 'ad/key' : 'rd/key';
     try {
         await fetch(`${API_BASE}/debrid/${endpoint}`, { method: 'DELETE', headers: getAuthHeaders() });
         showToast(`${label} key removed`, 'info');
@@ -6598,34 +6600,25 @@ async function debridSearch() {
     torrentsDiv.style.display = 'none';
 
     try {
-        let params = `query=${encodeURIComponent(query)}&media_type=${mediaType}`;
-        if (season) params += `&season=${season}`;
-        if (episode) params += `&episode=${episode}`;
-
-        const res = await fetch(`${API_BASE}/debrid/search?${params}`, { headers: getAuthHeaders() });
+        const res = await fetch(`${API_BASE}/debrid/search/title?q=${encodeURIComponent(query)}`, { headers: getAuthHeaders() });
         if (!res.ok) throw new Error('Search failed');
         const data = await res.json();
 
-        if (data.type === 'search_results') {
-            if (!data.results || data.results.length === 0) {
-                const msg = data.message || 'No results found. Try a different search or enter an IMDB ID (e.g. tt0111161).';
-                resultsList.innerHTML = `<p style="text-align:center;color:var(--text-secondary)">${msg}</p>`;
-                return;
-            }
-            resultsList.innerHTML = data.results.map(r => `
-                <div class="glass-card" style="padding:1rem;margin-bottom:.5rem;cursor:pointer;display:flex;gap:1rem;align-items:center"
-                     onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title).replace(/'/g, "\\'") }','${mediaType}','${r.year || ''}')">
-                    ${r.poster ? `<img src="${r.poster}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
-                    <div>
-                        <strong>${escapeHtml(r.title)}</strong> <span style="color:var(--text-secondary)">(${r.year || '?'})</span>
-                        <div style="font-size:.8rem;color:var(--text-secondary)">${r.imdb_id} &middot; ${r.type || mediaType}</div>
-                    </div>
-                </div>
-            `).join('');
-        } else if (data.type === 'torrents') {
-            resultsDiv.style.display = 'none';
-            renderTorrentResults(data.results, data.imdb_id);
+        if (!data.results || data.results.length === 0) {
+            const msg = 'No results found. Try a different search or enter an IMDB ID (e.g. tt0111161).';
+            resultsList.innerHTML = `<p style="text-align:center;color:var(--text-secondary)">${msg}</p>`;
+            return;
         }
+        resultsList.innerHTML = data.results.map(r => `
+            <div class="glass-card" style="padding:1rem;margin-bottom:.5rem;cursor:pointer;display:flex;gap:1rem;align-items:center"
+                 onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title).replace(/'/g, "\\'") }','${mediaType}','${r.year || ''}')">
+                ${r.poster ? `<img src="${r.poster}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
+                <div>
+                    <strong>${escapeHtml(r.title)}</strong> <span style="color:var(--text-secondary)">(${r.year || '?'})</span>
+                    <div style="font-size:.8rem;color:var(--text-secondary)">${r.imdb_id} &middot; ${r.type || mediaType}</div>
+                </div>
+            </div>
+        `).join('');
     } catch (e) {
         resultsList.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`;
     }
@@ -6650,7 +6643,7 @@ async function debridSelectTitle(imdbId, title, mediaType, year) {
         if (season) params += `&season=${season}`;
         if (episode) params += `&episode=${episode}`;
 
-        const res = await fetch(`${API_BASE}/debrid/search?${params}`, { headers: getAuthHeaders() });
+        const res = await fetch(`${API_BASE}/debrid/search/torrents?${params}`, { headers: getAuthHeaders() });
         if (!res.ok) throw new Error('Torrent search failed');
         const data = await res.json();
 
@@ -6708,8 +6701,9 @@ async function renderTorrentResults(results, imdbId) {
     torrentsList.innerHTML = results.map((t, i) => {
         const qColor = qualityColors[t.quality] || 'var(--text-secondary)';
         const isCached = cached[t.info_hash] || cached[t.info_hash?.toLowerCase()];
+        const providerBadge = (_debridProvider || 'rd').toUpperCase();
         const cachedBadge = isCached
-            ? '<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD CACHED</span>'
+            ? `<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">${providerBadge} CACHED</span>`
             : '';
         const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
         return `
@@ -6736,7 +6730,8 @@ async function renderTorrentResults(results, imdbId) {
 }
 
 async function debridAddMagnet(infoHash, fileIdx, name) {
-    showToast('Adding to Real-Debrid...', 'info');
+    const providerName = _debridProvider === 'ad' ? 'AllDebrid' : 'Real-Debrid';
+    showToast(`Adding to ${providerName}...`, 'info');
     debridShowProcessing(name, 'Adding magnet...');
     try {
         const body = { info_hash: infoHash };
@@ -6752,19 +6747,19 @@ async function debridAddMagnet(infoHash, fileIdx, name) {
         }
         const data = await res.json();
 
-        if (data.torrent_status === 'downloaded' && data.links && data.links.length > 0) {
+        if (data.status === 'downloaded' && data.links && data.links.length > 0) {
             debridShowProcessing(name, 'Cached! Getting stream link...');
             debridHandleLinks(data.links, data.filename || name);
-        } else if (data.torrent_status === 'waiting_files_selection' && data.files && data.files.length > 0) {
+        } else if (data.status === 'waiting_files_selection' && data.files && data.files.length > 0) {
             debridHideProcessing();
             showToast('Select files to download', 'info');
             debridShowFiles(data);
-        } else if (data.torrent_status === 'error' || data.torrent_status === 'dead' || data.torrent_status === 'virus' || data.torrent_status === 'magnet_error') {
+        } else if (data.status === 'error' || data.status === 'dead' || data.status === 'virus' || data.status === 'magnet_error') {
             debridHideProcessing();
-            showToast(`Torrent failed: ${data.torrent_status}`, 'error');
+            showToast(`Torrent failed: ${data.status}`, 'error');
         } else {
             // Any other status — start polling with visible progress
-            debridShowProcessing(name, `${data.torrent_status || 'Processing'}...`);
+            debridShowProcessing(name, `${data.status || 'Processing'}...`);
             if (data.torrent_id) debridPollTorrent(data.torrent_id, data.filename || name);
         }
     } catch (e) {
@@ -6818,24 +6813,14 @@ async function debridHandleLinks(links, filename) {
         return;
     }
 
-    // Build metadata query params for clean filename generation
-    const mediaType = document.getElementById('debrid-type')?.value || 'movie';
-    const season = document.getElementById('debrid-season')?.value || '';
-    const episode = document.getElementById('debrid-episode')?.value || '';
-    let metaParams = '';
-    if (_debridSelectedTitle) metaParams += `&title=${encodeURIComponent(_debridSelectedTitle)}`;
-    if (_debridSelectedYear) metaParams += `&year=${encodeURIComponent(_debridSelectedYear)}`;
-    metaParams += `&media_type=${mediaType}`;
-    if (season) metaParams += `&season=${season}`;
-    if (episode) metaParams += `&episode=${episode}`;
-
     let handled = false;
     for (const link of links) {
         try {
             debridUpdateProcessing('Unrestricting link...', 50);
-            const res = await fetch(`${API_BASE}/debrid/unrestrict?link=${encodeURIComponent(link)}${metaParams}`, {
+            const res = await fetch(`${API_BASE}/debrid/unrestrict`, {
                 method: 'POST',
-                headers: getAuthHeaders(),
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ link }),
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -6844,13 +6829,13 @@ async function debridHandleLinks(links, filename) {
             }
             const data = await res.json();
 
-            if (data.download && data.filename) {
+            if (data.url && data.filename) {
                 debridHideProcessing();
-                const action = await debridActionDialog(data.filename, data.download, data.filesize);
+                const action = await debridActionDialog(data.filename, data.url, data.filesize);
                 if (action === 'stream') {
-                    debridStreamFile(data.download, data.filename);
+                    debridStreamFile(data.url, data.filename);
                 } else if (action === 'download') {
-                    debridDownloadToPi(data.download, data.filename);
+                    debridDownloadToPi(data.url, data.filename);
                 }
                 handled = true;
             }
@@ -6983,7 +6968,7 @@ async function debridDownloadToPi(url, filename) {
         const res = await fetch(`${API_BASE}/debrid/download`, {
             method: 'POST',
             headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ download_url: url, filename, category: 'auto', is_show: isShow }),
+            body: JSON.stringify({ url, filename, category: 'auto', is_show: isShow }),
         });
         if (!res.ok) throw new Error('Download request failed');
         showToast(`Downloading ${filename} to Pi...`, 'success');
@@ -7051,7 +7036,7 @@ async function refreshDebridDownloads() {
 
 async function cancelDebridDownload(id) {
     try {
-        await fetch(`${API_BASE}/debrid/downloads/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        await fetch(`${API_BASE}/debrid/download/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
         refreshDebridDownloads();
     } catch (e) { showToast(e.message, 'error'); }
 }
@@ -7094,10 +7079,10 @@ async function debridPollTorrent(torrentId, filename) {
             // Auto-select files if stuck waiting
             if (data.status === 'waiting_files_selection') {
                 try {
-                    await fetch(`${API_BASE}/debrid/select-files`, {
+                    await fetch(`${API_BASE}/debrid/select-files/${torrentId}`, {
                         method: 'POST',
                         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ torrent_id: torrentId, file_ids: 'all' }),
+                        body: JSON.stringify({ file_ids: 'all' }),
                     });
                 } catch (e) { /* retry on next poll */ }
             }
@@ -7167,10 +7152,10 @@ async function debridConfirmFiles(btn, torrentId, filename) {
     if (checked.length === 0) { showToast('No files selected', 'warning'); return; }
 
     try {
-        await fetch(`${API_BASE}/debrid/select-files`, {
+        await fetch(`${API_BASE}/debrid/select-files/${torrentId}`, {
             method: 'POST',
             headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ torrent_id: torrentId, file_ids: checked.join(',') }),
+            body: JSON.stringify({ file_ids: checked.join(',') }),
         });
         debridPollTorrent(torrentId, filename);
     } catch (e) { showToast(e.message, 'error'); }
