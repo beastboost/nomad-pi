@@ -2253,6 +2253,59 @@ async function openMovieDetails(file) {
     });
 }
 
+function getVideoMimeType(pathOrName) {
+    const ext = ((pathOrName || '').split('.').pop() || '').toLowerCase();
+    const mimeTypes = {
+        mp4: 'video/mp4',
+        m4v: 'video/mp4',
+        webm: 'video/webm',
+        mov: 'video/quicktime',
+        mkv: 'video/x-matroska',
+        avi: 'video/x-msvideo',
+        ts: 'video/mp2t',
+    };
+    return mimeTypes[ext] || 'video/mp4';
+}
+
+function getExternalPlaybackUrls(url) {
+    const fullUrl = /^https?:\/\//i.test(url) ? url : `${window.location.origin}${url}`;
+    return {
+        fullUrl,
+        vlcUrl: `vlc://${fullUrl.replace(/^https?:\/\//i, '')}`,
+    };
+}
+
+function prefersExternalPlayback(ext) {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
+    return ext === 'mkv' && (isIOS || isSafari);
+}
+
+function buildPlaybackFallbackHtml(url, vlcUrl, ext, message = '') {
+    const copyUrl = String(url).replace(/'/g, "\\'");
+    const detail = message || `Browser can't play this format directly (${String(ext || '').toUpperCase()})`;
+    return `
+        <div style="text-align:center;padding:2rem">
+            <p style="margin-bottom:1rem;color:var(--text-secondary)">
+                <i class="fas fa-exclamation-triangle" style="color:var(--warning,#ff9800)"></i>
+                ${detail}
+            </p>
+            <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
+                <a href="${url}" target="_blank" class="primary" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px;text-decoration:none">
+                    <i class="fas fa-external-link-alt"></i> Open in Browser
+                </a>
+                <a href="${vlcUrl}" class="secondary" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px;text-decoration:none">
+                    <i class="fas fa-play-circle"></i> Open in VLC
+                </a>
+                <button class="secondary" onclick="navigator.clipboard.writeText('${copyUrl}');showToast('Link copied — paste in VLC or another player','success')" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px">
+                    <i class="fas fa-copy"></i> Copy Link
+                </button>
+            </div>
+        </div>
+    `;
+}
+
 function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const modal = document.getElementById('viewer-modal');
     const body = document.getElementById('viewer-body');
@@ -2270,14 +2323,14 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
     if (token) streamUrl += '&token=' + token;
 
-    // Build the full URL for external players
-    const fullUrl = window.location.origin + streamUrl;
-    const vlcUrl = `vlc://${fullUrl.replace(/^https?:\/\//, '')}`;
-
     // Sanitize title and filename
     const safeTitle = title ? escapeHtml(String(title)) : 'Video';
     const extMatch = path.match(/\.([a-z0-9]+)$/i);
     const safeExt = extMatch ? extMatch[0] : '.mp4';
+    const ext = extMatch ? extMatch[1].toLowerCase() : 'mp4';
+    const mimeType = getVideoMimeType(path);
+    const { fullUrl, vlcUrl } = getExternalPlaybackUrls(streamUrl);
+    const preferExternal = prefersExternalPlayback(ext);
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
     heading.innerHTML = `
@@ -2324,7 +2377,10 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     video.controls = true;
     video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
-    video.src = streamUrl;
+    const source = document.createElement('source');
+    source.src = streamUrl;
+    source.type = mimeType;
+    video.appendChild(source);
     video.addEventListener('timeupdate', () => {
         updateProgress(video, path);
         if (activeDashboardSessionId && !video.paused) {
@@ -2358,6 +2414,9 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         }
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
+    video.addEventListener('error', () => {
+        body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext, `Browser can't play this ${ext.toUpperCase()} stream directly`);
+    });
 
     // Auto-detect and load subtitles
     loadSubtitlesForVideo(video, path);
@@ -2384,6 +2443,13 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     }
 
     videoWrap.appendChild(video);
+    if (preferExternal) {
+        const warning = document.createElement('div');
+        warning.className = 'glass-card';
+        warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
+        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can fail in Safari and iOS browsers. VLC is the safer option if playback stalls or audio is missing.';
+        body.appendChild(warning);
+    }
     body.appendChild(videoWrap);
     modal.classList.remove('hidden');
 }
@@ -6938,6 +7004,9 @@ function debridStreamFile(url, filename) {
     }
 
     const safeTitle = escapeHtml(filename);
+    const mimeType = getVideoMimeType(filename);
+    const { fullUrl, vlcUrl } = getExternalPlaybackUrls(url);
+    const preferExternal = prefersExternalPlayback(ext);
 
     if (heading) {
         heading.innerHTML = `
@@ -6958,6 +7027,9 @@ function debridStreamFile(url, filename) {
                     <a href="${url}" download="${escapeHtml(filename)}" class="player-action-btn" title="Download file">
                         <span>💾</span><span class="btn-text">Save</span>
                     </a>
+                    <a href="${vlcUrl}" class="player-action-btn vlc-btn" title="Open in VLC">
+                        <span>🧡</span><span class="btn-text">VLC</span>
+                    </a>
                     <button class="player-action-btn" title="Copy link" onclick="navigator.clipboard.writeText('${url}');showToast('Link copied!','success')">
                         <span>📋</span><span class="btn-text">Copy URL</span>
                     </button>
@@ -6972,33 +7044,28 @@ function debridStreamFile(url, filename) {
     video.className = 'video-frame';
     video.controls = true;
     video.preload = 'auto';
-    video.src = url;
     video.style.width = '100%';
     video.style.maxHeight = '80vh';
+    const source = document.createElement('source');
+    source.src = url;
+    source.type = mimeType;
+    video.appendChild(source);
 
     video.addEventListener('error', () => {
-        body.innerHTML = `
-            <div style="text-align:center;padding:2rem">
-                <p style="margin-bottom:1rem;color:var(--text-secondary)">
-                    <i class="fas fa-exclamation-triangle" style="color:var(--warning,#ff9800)"></i>
-                    Browser can't play this format directly (${ext.toUpperCase()})
-                </p>
-                <div style="display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap">
-                    <a href="${url}" target="_blank" class="primary" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px;text-decoration:none">
-                        <i class="fas fa-external-link-alt"></i> Open in Browser
-                    </a>
-                    <button class="secondary" onclick="navigator.clipboard.writeText('${url}');showToast('Link copied — paste in VLC or another player','success')" style="display:inline-flex;align-items:center;gap:.5rem;padding:.5rem 1rem;border-radius:8px">
-                        <i class="fas fa-copy"></i> Copy Link for VLC
-                    </button>
-                </div>
-            </div>
-        `;
+        body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext);
     });
 
+    if (preferExternal) {
+        const warning = document.createElement('div');
+        warning.className = 'glass-card';
+        warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
+        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can be unreliable in some browsers. If this stream fails, use VLC or copy the link into another player.';
+        body.appendChild(warning);
+    }
     body.appendChild(video);
     modal.classList.remove('hidden');
     video.play().catch(() => {});
-    showToast('Streaming from Real-Debrid', 'success');
+    showToast('Opening stream', 'success');
 }
 
 async function debridDownloadToPi(url, filename) {
