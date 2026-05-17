@@ -1454,38 +1454,74 @@ button.primary:active {
 }
 
 .login-box {
-    background: rgba(0, 0, 0, 0.75);
-    padding: 60px;
-    border-radius: 4px;
-    text-align: center;
+    background:
+        linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)),
+        rgba(6, 10, 18, 0.82);
+    padding: 42px;
+    border-radius: 28px;
+    text-align: left;
     width: 100%;
-    max-width: 450px;
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
-    box-shadow: 0 15px 25px rgba(0,0,0,0.6);
+    max-width: 460px;
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+}
+
+.login-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.14);
+    border: 1px solid rgba(96, 165, 250, 0.26);
+    color: #dbeafe;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .login-box .logo {
-    font-size: 2.5rem;
-    margin-bottom: 20px;
-    color: var(--accent-color);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    font-size: clamp(2.2rem, 5vw, 3rem);
+    margin: 1rem 0 0.75rem;
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    text-transform: none;
+}
+
+.login-copy {
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 1.25rem;
+}
+
+.login-form {
+    display: grid;
+    gap: 0.85rem;
 }
 
 .login-box input {
-    margin-bottom: 10px;
+    margin-bottom: 0;
 }
 
 .login-error {
     color: var(--danger-color);
+    margin-top: 1rem;
 }
 
 .login-hint {
     color: var(--text-muted);
     font-size: 0.9em;
     margin-top: 10px;
+}
+
+.login-footnote {
+    margin-top: 1rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
 }
 
 /* Dark inputs: default and dark-theme (not light-theme) */
@@ -1815,11 +1851,13 @@ h1, h2, h3 {
 
 .card-subtitle {
     color: var(--text-muted);
-    font-size: 0.9rem;
-    margin-top: 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.8rem;
+    margin-top: 2px;
+    line-height: 1.45;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    max-width: 18ch;
 }
 
 .video-frame {
@@ -3564,6 +3602,76 @@ button i, .button i {
     margin-bottom: 0.25rem;
 }
 
+.section-chip {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 0.35rem 0.72rem;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.home-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+    gap: 18px;
+    padding: 22px;
+    margin-bottom: 18px;
+}
+
+.home-hero-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.home-hero-text {
+    max-width: 720px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1.65;
+    margin: 0;
+}
+
+.home-hero-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.home-hero-meta {
+    display: grid;
+    gap: 12px;
+}
+
+.hero-meta-card {
+    display: grid;
+    gap: 6px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+
+.hero-meta-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.hero-meta-card strong {
+    color: var(--text-color);
+    line-height: 1.45;
+}
+
 /* Section h2 headings — accent underline */
 main section > h2 {
     font-size: 1.5rem;
@@ -3658,6 +3766,15 @@ main section > h2::after {
     color: var(--text-color);
 }
 
+.section-header--compact {
+    margin-bottom: 14px;
+}
+
+.section-meta {
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}
+
 @media (max-width: 768px) {
     header {
         width: calc(100% - 16px);
@@ -3672,6 +3789,22 @@ main section > h2::after {
     main > section {
         padding: 16px;
         border-radius: 20px;
+    }
+
+    .login-box {
+        margin: 16px;
+        padding: 28px 22px;
+        border-radius: 24px;
+    }
+
+    .home-hero {
+        grid-template-columns: 1fr;
+        padding: 18px;
+    }
+
+    .home-hero-actions {
+        display: grid;
+        grid-template-columns: 1fr;
     }
 
     .section-header {
