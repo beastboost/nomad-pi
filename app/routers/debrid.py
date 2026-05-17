@@ -89,7 +89,7 @@ def set_rd_key(body: KeyBody, user_id: int = Depends(get_current_user_id)):
 
 def _mask_key(key: str) -> str:
     """Mask an API key, avoiding overlap-exposure for short keys."""
-    if len(key) >= 8:
+    if len(key) >= 12:
         return key[:4] + "****" + key[-4:]
     return "****"
 
