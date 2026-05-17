@@ -1141,25 +1141,27 @@ async function loadFileBrowser(path) {
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('/data')">
+                <div class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back to /data)</h3>
                     </div>
                 </div>
             `;
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('/data'));
             container.appendChild(backDiv);
 
             drives.forEach(d => {
                 const div = document.createElement('div');
                 div.className = 'media-item folder';
                 div.innerHTML = `
-                    <div class="media-card glass" onclick="loadFileBrowser(${JSON.stringify(d.mountpoint)})">
+                    <div class="media-card glass">
                         <div class="media-info">
                             <h3>💽 Drive ${escapeHtml(d.name)} (${formatBytes(d.free)} free)</h3>
                             <p>${escapeHtml(d.fstype)} - ${escapeHtml(d.mountpoint)}</p>
                         </div>
                     </div>
                 `;
+                div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(d.mountpoint));
                 container.appendChild(div);
             });
             return;
@@ -1198,36 +1200,39 @@ async function loadFileBrowser(path) {
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser(${JSON.stringify(parentPath || '/data')})">
+                <div class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back)</h3>
                     </div>
                 </div>
             `;
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(parentPath || '/data'));
             container.appendChild(backDiv);
         } else if (path === '/data') {
             // Show "Browse Drives" button at /data root
             const driveDiv = document.createElement('div');
             driveDiv.className = 'media-item folder';
             driveDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                <div class="media-card glass">
                     <div class="media-info">
                         <h3>💽 Browse External Drives / Partitions</h3>
                     </div>
                 </div>
             `;
+            driveDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES'));
             container.appendChild(driveDiv);
         } else if (isWindows && isRoot) {
             // At drive root, allow going back to drives list
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass" onclick="loadFileBrowser('DRIVES')">
+                <div class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back to Drives)</h3>
                     </div>
                 </div>
             `;
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES'));
             container.appendChild(backDiv);
         }
 
@@ -6028,7 +6033,7 @@ function renderWatchlistCard(item) {
     return `<div class="media-item" onclick="openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', 0)">
         <div class="poster-shell">
             ${poster ? `<img class="poster-img" src="${poster}" loading="lazy" onerror="this.style.display='none'">` : ''}
-            <div class="poster-play"><i class="fas fa-play"></i></div>
+            <div class="poster-play"></div>
             <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${path}', '${escapeHtml(item.category || '')}', '${title.replace(/'/g,"\\'")}', '${poster}')">
                 <i class="fas fa-heart"></i>
             </button>

@@ -460,11 +460,11 @@ def tb_request_download(api_key: str, torrent_id: Union[int, str], file_id: Unio
     # #endregion
     r = requests.get(
         f"{TB_BASE}/torrents/requestdl",
+        headers=_tb_headers(api_key),
         params={
-            "token": api_key,
             "torrent_id": torrent_id,
             "file_id": file_id,
-            "redirect": "false",
+            "zip_link": "false"
         },
         timeout=15,
     )
@@ -772,7 +772,12 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
         # #endregion
         if data.get("status") == "error":
             raise Exception(data.get("error", {}).get("message", "AllDebrid error"))
-        return data.get("data", {}).get("magnets", {})
+        magnets = data.get("data", {}).get("magnets", [])
+        if isinstance(magnets, list) and len(magnets) > 0:
+            return magnets[0]
+        if isinstance(magnets, dict):
+            return magnets
+        return {}
     except requests.exceptions.HTTPError as e:
         # #region debug-point E:ad-magnet-status-http-error
         _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status http error", {"magnet_id": str(magnet_id), "status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else "")})
