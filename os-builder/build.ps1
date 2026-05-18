@@ -38,6 +38,14 @@ Set-Location $BUILD_DIR
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "Running build via Docker directly..."
+    
+    # Check if Docker daemon is actually running
+    docker info > $null 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Docker is installed, but the Docker daemon is not running! Please open 'Docker Desktop' from your Windows Start Menu, wait for it to initialize, and try again."
+        exit 1
+    }
+
     Write-Host "Building Docker image first..."
     docker build -t pi-gen .
     
