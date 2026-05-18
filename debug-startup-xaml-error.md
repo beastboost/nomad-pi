@@ -20,11 +20,16 @@ Status: OPEN
 - New runtime evidence showed `StaticResourceExtension` failed during `InitializeComponent()`, before `MainWindow` construction completed.
 - `MainWindow.xaml` line 6 used `Background="{StaticResource BackgroundColor}"` on the root `Window`, while `BackgroundColor` is declared later inside `Window.Resources`.
 - After changing the root window background to a literal color, both `dotnet build` and `dotnet publish` succeed.
+- New runtime evidence from the startup dialog showed:
+  - `System.InvalidOperationException: The calling thread cannot access this object because a different thread owns it.`
+  - stack points to `MainWindow.RefreshDrives()` at the first access to `DriveList.SelectedItem`.
+- `RefreshDrives()` is called by a timer/background callback, so direct reads/writes to `DriveList` and `Drives` must happen on the dispatcher thread.
 
 ## Fix
 - Updated `generate_xaml.py` so it now emits valid WPF markup matching `MainWindow.xaml`.
 - Replaced the root `Window` background lookup with a literal `#0D0D0D` to avoid early local-resource resolution.
 - Added deeper startup exception formatting in `App.xaml.cs` so future startup failures include inner exception details.
+- Updated `RefreshDrives()` so UI-bound reads and writes are wrapped in `Dispatcher.InvokeAsync`, while the actual drive enumeration stays off the UI thread.
 
 ## Verification
 - `dotnet publish` passes locally on current HEAD.

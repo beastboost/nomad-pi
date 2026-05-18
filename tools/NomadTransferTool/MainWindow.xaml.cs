@@ -1197,15 +1197,24 @@ namespace NomadTransferTool
 
         private async void RefreshDrives()
         {
-            var selectedName = (DriveList.SelectedItem as DriveInfoModel)?.Name;
-            
+            string? selectedName = null;
+            bool useSamba = false;
+            string sambaPath = "";
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                selectedName = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+                useSamba = UseSamba;
+                sambaPath = SambaPath;
+            });
+
             // Temporary list to avoid flickering/multiple UI updates
             var newDrives = new List<DriveInfoModel>();
 
             // 1. Add Local USB Drives
             string systemDrive = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
-            
-            await Task.Run(() => 
+
+            await Task.Run(() =>
             {
                 foreach (var drive in DriveInfo.GetDrives())
                 {
@@ -1239,54 +1248,55 @@ namespace NomadTransferTool
             });
 
             // 2. Add Samba Share if enabled and path is valid
-            if (UseSamba && !string.IsNullOrEmpty(SambaPath) && SambaPath.StartsWith("\\\\"))
+            if (useSamba && !string.IsNullOrEmpty(sambaPath) && sambaPath.StartsWith("\\\\"))
             {
-                await Task.Run(() => 
+                await Task.Run(() =>
                 {
                     try
                     {
                         long freeBytes, totalBytes, totalFreeBytes;
-                        bool spaceOk = GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes);
+                        bool spaceOk = GetDiskFreeSpaceEx(sambaPath, out freeBytes, out totalBytes, out totalFreeBytes);
 
                         newDrives.Add(new DriveInfoModel
                         {
-                            Name = SambaPath,
+                            Name = sambaPath,
                             Label = "Nomad Pi Network Share",
                             TotalSize = spaceOk ? totalBytes : 0,
                             AvailableFreeSpace = spaceOk ? freeBytes : 0,
-                            IsMounted = true // We consider it "mounted" if Samba is enabled and path is set
+                            IsMounted = true
                         });
                     }
-                    catch { /* Ignore Samba drive errors */ }
+                    catch { }
                 });
             }
 
-            // Update the ObservableCollection only if something changed
-            bool changed = Drives.Count != newDrives.Count;
-            if (!changed)
+            await Dispatcher.InvokeAsync(() =>
             {
-                for (int i = 0; i < Drives.Count; i++)
+                bool changed = Drives.Count != newDrives.Count;
+                if (!changed)
                 {
-                    if (Drives[i].Name != newDrives[i].Name || 
-                        Drives[i].AvailableFreeSpace != newDrives[i].AvailableFreeSpace ||
-                        Drives[i].IsMounted != newDrives[i].IsMounted)
+                    for (int i = 0; i < Drives.Count; i++)
                     {
-                        changed = true;
-                        break;
+                        if (Drives[i].Name != newDrives[i].Name ||
+                            Drives[i].AvailableFreeSpace != newDrives[i].AvailableFreeSpace ||
+                            Drives[i].IsMounted != newDrives[i].IsMounted)
+                        {
+                            changed = true;
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (changed)
-            {
+                if (!changed) return;
+
                 Drives.Clear();
                 foreach (var d in newDrives) Drives.Add(d);
-                
+
                 if (selectedName != null)
                 {
                     DriveList.SelectedItem = Drives.FirstOrDefault(d => d.Name == selectedName);
                 }
-            }
+            });
         }
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
