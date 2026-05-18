@@ -566,7 +566,7 @@ xaml_content = """<Window x:Class="NomadTransferTool.MainWindow"
                                 </ListBox.ItemsPanel>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Width="130" Margin="5" Background="#252525" CornerRadius="8" Overflow="Hidden">
+                                        <Border Width="130" Margin="5" Background="#252525" CornerRadius="8" ClipToBounds="True">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="195"/>
@@ -576,10 +576,12 @@ xaml_content = """<Window x:Class="NomadTransferTool.MainWindow"
                                                 <Rectangle Grid.Row="0" Fill="#1A1A1A"/>
                                                 <Image Grid.Row="0" Source="{Binding Poster}" Stretch="UniformToFill"/>
                                                 
-                                                <StackPanel Grid.Row="1" Padding="8">
-                                                    <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="12" TextWrapping="Wrap" MaxHeight="34" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Text="{Binding Year}" FontSize="11" Foreground="{StaticResource PrimaryColor}" Margin="0,2,0,0"/>
-                                                </StackPanel>
+                                                <Border Grid.Row="1" Padding="8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="12" TextWrapping="Wrap" MaxHeight="34" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Year}" FontSize="11" Foreground="{StaticResource PrimaryColor}" Margin="0,2,0,0"/>
+                                                    </StackPanel>
+                                                </Border>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
