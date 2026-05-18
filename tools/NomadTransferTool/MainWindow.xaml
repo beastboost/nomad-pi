@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:NomadTransferTool"
         Title="Nomad Media Transfer Tool" Height="800" Width="1300"
-        Background="{StaticResource BackgroundColor}" Foreground="White"
+        Background="#0D0D0D" Foreground="White"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <SolidColorBrush x:Key="DangerColor" Color="#f44336"/>
