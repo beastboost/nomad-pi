@@ -20,6 +20,7 @@ using Microsoft.Win32;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace NomadTransferTool
 {
@@ -146,6 +147,16 @@ namespace NomadTransferTool
         private string _fileManagerPath = "";
         private string _fileManagerStatus = "";
         private string _fileManagerRoot = "";
+        private ObservableCollection<DebridProviderOption> _debridProviders = new ObservableCollection<DebridProviderOption>();
+        private DebridProviderOption? _selectedDebridProvider;
+        private string _debridApiKey = "";
+        private string _debridTitleQuery = "";
+        private string _debridSearchType = "movie";
+        private ObservableCollection<DebridTitleResult> _debridTitleResults = new ObservableCollection<DebridTitleResult>();
+        private DebridTitleResult? _selectedDebridTitle;
+        private ObservableCollection<DebridTorrentResult> _debridTorrentResults = new ObservableCollection<DebridTorrentResult>();
+        private DebridTorrentResult? _selectedDebridTorrent;
+        private string _debridStatus = "";
 
         // Samba Properties
         private bool _useSamba;
@@ -579,6 +590,16 @@ namespace NomadTransferTool
         public ObservableCollection<FileManagerItem> FileManagerItems { get => _fileManagerItems; set { _fileManagerItems = value; OnPropertyChanged(); } }
         public string FileManagerPath { get => _fileManagerPath; set { _fileManagerPath = value; OnPropertyChanged(); } }
         public string FileManagerStatus { get => _fileManagerStatus; set { _fileManagerStatus = value; OnPropertyChanged(); } }
+        public ObservableCollection<DebridProviderOption> DebridProviders { get => _debridProviders; set { _debridProviders = value; OnPropertyChanged(); } }
+        public DebridProviderOption? SelectedDebridProvider { get => _selectedDebridProvider; set { _selectedDebridProvider = value; OnPropertyChanged(); } }
+        public string DebridApiKey { get => _debridApiKey; set { _debridApiKey = value; OnPropertyChanged(); } }
+        public string DebridTitleQuery { get => _debridTitleQuery; set { _debridTitleQuery = value; OnPropertyChanged(); } }
+        public string DebridSearchType { get => _debridSearchType; set { _debridSearchType = value; OnPropertyChanged(); } }
+        public ObservableCollection<DebridTitleResult> DebridTitleResults { get => _debridTitleResults; set { _debridTitleResults = value; OnPropertyChanged(); } }
+        public DebridTitleResult? SelectedDebridTitle { get => _selectedDebridTitle; set { _selectedDebridTitle = value; OnPropertyChanged(); } }
+        public ObservableCollection<DebridTorrentResult> DebridTorrentResults { get => _debridTorrentResults; set { _debridTorrentResults = value; OnPropertyChanged(); } }
+        public DebridTorrentResult? SelectedDebridTorrent { get => _selectedDebridTorrent; set { _selectedDebridTorrent = value; OnPropertyChanged(); } }
+        public string DebridStatus { get => _debridStatus; set { _debridStatus = value; OnPropertyChanged(); } }
         public EncodingPreset? SelectedGlobalPreset 
         { 
             get => _selectedGlobalPreset; 
@@ -611,6 +632,14 @@ namespace NomadTransferTool
             _ = MonitorServerStatus();
             
             InitializePresets();
+
+            DebridProviders = new ObservableCollection<DebridProviderOption>
+            {
+                new DebridProviderOption("rd", "Real-Debrid"),
+                new DebridProviderOption("ad", "AllDebrid"),
+                new DebridProviderOption("tb", "TorBox"),
+            };
+            SelectedDebridProvider = DebridProviders.FirstOrDefault();
             
             // Load OMDB key if exists
             if (File.Exists(OMDB_FILE)) 
@@ -1320,6 +1349,246 @@ namespace NomadTransferTool
             {
                 string? folder = Path.GetDirectoryName(dialog.FileName);
                 if (folder != null) OnFilesDropped(new[] { folder });
+            }
+        }
+
+        private string GetDebridProviderId()
+        {
+            return SelectedDebridProvider?.Id ?? "rd";
+        }
+
+        private async Task<bool> DebridApplyProviderAndKey(bool showUserErrors)
+        {
+            var provider = GetDebridProviderId();
+            var providerBody = new StringContent(JsonConvert.SerializeObject(new { provider }), Encoding.UTF8, "application/json");
+            var setProvider = await PostWithAuthRetry($"{API_BASE}/debrid/provider", providerBody, showUserErrors);
+            if (setProvider == null) return false;
+            if (!setProvider.IsSuccessStatusCode)
+            {
+                var txt = await setProvider.Content.ReadAsStringAsync();
+                DebridStatus = $"Provider set failed: {txt}";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(DebridApiKey))
+            {
+                var keyBody = new StringContent(JsonConvert.SerializeObject(new { key = DebridApiKey.Trim() }), Encoding.UTF8, "application/json");
+                var res = await PostWithAuthRetry($"{API_BASE}/debrid/{provider}/key", keyBody, showUserErrors);
+                if (res == null) return false;
+                if (!res.IsSuccessStatusCode)
+                {
+                    var txt = await res.Content.ReadAsStringAsync();
+                    DebridStatus = $"Key save failed: {txt}";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private async void DebridSaveKey_Click(object sender, RoutedEventArgs e)
+        {
+            DebridStatus = "Saving debrid settings...";
+            try
+            {
+                var ok = await DebridApplyProviderAndKey(true);
+                DebridStatus = ok ? "Saved to Nomad Pi" : "Save failed";
+            }
+            catch (Exception ex)
+            {
+                DebridStatus = $"Save failed: {ex.Message}";
+            }
+        }
+
+        private async void DebridSearchTitles_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(DebridTitleQuery))
+            {
+                DebridStatus = "Enter a title to search";
+                return;
+            }
+
+            DebridStatus = "Searching titles...";
+            try
+            {
+                var q = Uri.EscapeDataString(DebridTitleQuery.Trim());
+                var res = await GetWithAuthRetry($"{API_BASE}/debrid/search/title?q={q}", true);
+                if (res == null) return;
+                var json = await res.Content.ReadAsStringAsync();
+                var root = JObject.Parse(json);
+                var results = root["results"]?.ToObject<List<DebridTitleResult>>() ?? new List<DebridTitleResult>();
+
+                Dispatcher.Invoke(() =>
+                {
+                    DebridTitleResults.Clear();
+                    foreach (var r in results) DebridTitleResults.Add(r);
+                    SelectedDebridTitle = DebridTitleResults.FirstOrDefault();
+                    DebridTorrentResults.Clear();
+                    SelectedDebridTorrent = null;
+                });
+
+                DebridStatus = results.Count == 0 ? "No results" : $"Found {results.Count} result(s)";
+            }
+            catch (Exception ex)
+            {
+                DebridStatus = $"Search failed: {ex.Message}";
+            }
+        }
+
+        private async void DebridLoadTorrents_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedDebridTitle == null || string.IsNullOrWhiteSpace(SelectedDebridTitle.ImdbId))
+            {
+                DebridStatus = "Pick a title first";
+                return;
+            }
+
+            DebridStatus = "Loading torrents...";
+            try
+            {
+                var imdb = Uri.EscapeDataString(SelectedDebridTitle.ImdbId.Trim());
+                var mtVal = !string.IsNullOrWhiteSpace(SelectedDebridTitle.Type) ? SelectedDebridTitle.Type : DebridSearchType;
+                var mt = Uri.EscapeDataString(string.IsNullOrWhiteSpace(mtVal) ? "movie" : mtVal);
+                var res = await GetWithAuthRetry($"{API_BASE}/debrid/search/torrents?imdb_id={imdb}&media_type={mt}", true);
+                if (res == null) return;
+                var json = await res.Content.ReadAsStringAsync();
+                var root = JObject.Parse(json);
+                var results = root["results"]?.ToObject<List<DebridTorrentResult>>() ?? new List<DebridTorrentResult>();
+
+                Dispatcher.Invoke(() =>
+                {
+                    DebridTorrentResults.Clear();
+                    foreach (var r in results) DebridTorrentResults.Add(r);
+                    SelectedDebridTorrent = DebridTorrentResults.FirstOrDefault();
+                });
+
+                DebridStatus = results.Count == 0 ? "No torrents found" : $"Found {results.Count} torrent(s)";
+            }
+            catch (Exception ex)
+            {
+                DebridStatus = $"Load torrents failed: {ex.Message}";
+            }
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "download";
+            var s = name.Trim();
+            foreach (var ch in Path.GetInvalidFileNameChars()) s = s.Replace(ch, '_');
+            s = s.TrimEnd('.', ' ');
+            if (string.IsNullOrWhiteSpace(s)) return "download";
+            return s;
+        }
+
+        private async Task DownloadFileWithProgress(string url, string destPath, Action<string> status)
+        {
+            using var http = new HttpClient();
+            http.Timeout = TimeSpan.FromHours(6);
+            using var res = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            res.EnsureSuccessStatusCode();
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath) ?? Path.GetTempPath());
+
+            var total = res.Content.Headers.ContentLength;
+            await using var src = await res.Content.ReadAsStreamAsync();
+            await using var dst = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, true);
+
+            var buffer = new byte[1024 * 256];
+            long readTotal = 0;
+            var sw = Stopwatch.StartNew();
+
+            while (true)
+            {
+                var read = await src.ReadAsync(buffer.AsMemory(0, buffer.Length));
+                if (read <= 0) break;
+                await dst.WriteAsync(buffer.AsMemory(0, read));
+                readTotal += read;
+
+                if (sw.ElapsedMilliseconds > 350)
+                {
+                    sw.Restart();
+                    if (total.HasValue && total.Value > 0)
+                    {
+                        var pct = (double)readTotal / total.Value * 100.0;
+                        status($"{pct:0.0}%");
+                    }
+                    else
+                    {
+                        status($"{readTotal / 1024 / 1024} MB");
+                    }
+                }
+            }
+        }
+
+        private async void DebridDownloadSelected_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedDebridTorrent == null || string.IsNullOrWhiteSpace(SelectedDebridTorrent.InfoHash))
+            {
+                DebridStatus = "Pick a torrent first";
+                return;
+            }
+
+            try
+            {
+                DebridStatus = "Preparing debrid download...";
+                var ok = await DebridApplyProviderAndKey(true);
+                if (!ok) return;
+
+                var magnetBody = new StringContent(JsonConvert.SerializeObject(new { info_hash = SelectedDebridTorrent.InfoHash.Trim() }), Encoding.UTF8, "application/json");
+                var magnetRes = await PostWithAuthRetry($"{API_BASE}/debrid/magnet", magnetBody, true);
+                if (magnetRes == null) return;
+                var magnetJson = await magnetRes.Content.ReadAsStringAsync();
+                if (!magnetRes.IsSuccessStatusCode)
+                {
+                    DebridStatus = $"Debrid add failed: {magnetJson}";
+                    return;
+                }
+
+                var magnetRoot = JObject.Parse(magnetJson);
+                var links = magnetRoot["links"]?.ToObject<List<string>>() ?? new List<string>();
+                if (links.Count == 0)
+                {
+                    DebridStatus = "No links returned from debrid";
+                    return;
+                }
+
+                DebridStatus = "Resolving direct download URL...";
+                var unrestrictBody = new StringContent(JsonConvert.SerializeObject(new { link = links[0] }), Encoding.UTF8, "application/json");
+                var unrestrictRes = await PostWithAuthRetry($"{API_BASE}/debrid/unrestrict", unrestrictBody, true);
+                if (unrestrictRes == null) return;
+                var unrestrictJson = await unrestrictRes.Content.ReadAsStringAsync();
+                if (!unrestrictRes.IsSuccessStatusCode)
+                {
+                    DebridStatus = $"Unrestrict failed: {unrestrictJson}";
+                    return;
+                }
+
+                var u = JObject.Parse(unrestrictJson);
+                var dlUrl = u["url"]?.ToString() ?? "";
+                var dlName = u["filename"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(dlUrl))
+                {
+                    DebridStatus = "No direct URL returned";
+                    return;
+                }
+
+                var tempRoot = Path.Combine(Path.GetTempPath(), "NomadDebrid");
+                Directory.CreateDirectory(tempRoot);
+                var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(dlName) ? (SelectedDebridTorrent.Name + ".mkv") : dlName);
+                var destPath = Path.Combine(tempRoot, fileName);
+
+                DebridStatus = "Downloading...";
+                await DownloadFileWithProgress(dlUrl, destPath, p => Dispatcher.Invoke(() => DebridStatus = $"Downloading... {p}"));
+                DebridStatus = $"Downloaded: {Path.GetFileName(destPath)}";
+
+                Dispatcher.Invoke(() =>
+                {
+                    OnFilesDropped(new[] { destPath });
+                });
+            }
+            catch (Exception ex)
+            {
+                DebridStatus = $"Download failed: {ex.Message}";
             }
         }
 
@@ -3126,6 +3395,67 @@ namespace NomadTransferTool
             public string Poster { get; set; } = "";
             public string Plot { get; set; } = "";
             public string Response { get; set; } = "";
+        }
+
+        public class DebridProviderOption
+        {
+            public DebridProviderOption(string id, string name)
+            {
+                Id = id;
+                Name = name;
+            }
+
+            public string Id { get; set; } = "";
+            public string Name { get; set; } = "";
+        }
+
+        public class DebridTitleResult
+        {
+            [JsonProperty("title")]
+            public string Title { get; set; } = "";
+
+            [JsonProperty("year")]
+            public string Year { get; set; } = "";
+
+            [JsonProperty("type")]
+            public string Type { get; set; } = "";
+
+            [JsonProperty("imdb_id")]
+            public string ImdbId { get; set; } = "";
+
+            public string Display => string.IsNullOrWhiteSpace(Year) ? Title : $"{Title} ({Year})";
+        }
+
+        public class DebridTorrentResult
+        {
+            [JsonProperty("name")]
+            public string Name { get; set; } = "";
+
+            [JsonProperty("info_hash")]
+            public string InfoHash { get; set; } = "";
+
+            [JsonProperty("size")]
+            public long Size { get; set; }
+
+            [JsonProperty("seeders")]
+            public int Seeders { get; set; }
+
+            [JsonProperty("quality")]
+            public string Quality { get; set; } = "";
+
+            private static string FormatSizeLocal(long bytes)
+            {
+                const double KB = 1024;
+                const double MB = KB * 1024;
+                const double GB = MB * 1024;
+
+                if (bytes >= GB) return $"{bytes / GB:0.00} GB";
+                if (bytes >= MB) return $"{bytes / MB:0.00} MB";
+                if (bytes >= KB) return $"{bytes / KB:0.00} KB";
+                return $"{bytes} B";
+            }
+
+            public string Meta => $"{(string.IsNullOrWhiteSpace(Quality) ? "" : Quality + " • ")}{FormatSizeLocal(Size)} • {Seeders} seeders";
         }
 
         public class GithubRelease

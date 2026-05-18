@@ -117,6 +117,10 @@ function getCookie(name) {
     return null;
 }
 
+function getSessionToken() {
+    return localStorage.getItem('nomad_auth_token');
+}
+
 // Theme Management
 function initTheme() {
     let savedTheme = localStorage.getItem('nomadpi_theme');
@@ -1291,10 +1295,11 @@ async function loadFileBrowser(path, opts) {
 
         if (opts.pushHistory && window.history && window.history.pushState) {
             const state = { section: 'files', path: path };
+            const nextHash = `#files?path=${encodeURIComponent(path)}`;
             if (opts.replaceHistory) {
-                history.replaceState(state, '', '#files');
+                history.replaceState(state, '', nextHash);
             } else {
-                history.pushState(state, '', '#files');
+                history.pushState(state, '', nextHash);
             }
         }
     } catch (e) {
@@ -2078,7 +2083,7 @@ function playMusicAt(idx) {
     const artEl = document.getElementById('player-art');
     if (artEl) artEl.textContent = '🎵';
     
-    const token = getCookie('auth_token');
+    const token = getSessionToken();
     
     // Use the /api/media/stream endpoint for all playback to handle auth and external paths
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(track.path)}`;
@@ -2178,7 +2183,7 @@ function openImageViewer(path, title) {
     const heading = document.getElementById('viewer-title');
     if (!modal || !body || !heading) return;
 
-    const token = getCookie('auth_token');
+    const token = getSessionToken();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
     if (token) streamUrl += '&token=' + token;
 
@@ -2221,7 +2226,7 @@ async function openMovieDetails(file) {
         </div>
     `;
 
-    const token = getCookie('auth_token');
+    const token = getSessionToken();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(file.path)}`;
     if (token) streamUrl += '&token=' + token;
     const fullUrl = window.location.origin + streamUrl;
@@ -2346,7 +2351,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     activeVideoTitle = title || 'Video';
     activeVideoPoster = posterUrl || null;
 
-    const token = getCookie('auth_token');
+    const token = getSessionToken();
     let streamUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}`;
     if (token) streamUrl += '&token=' + token;
 
@@ -2567,7 +2572,7 @@ function _comicShowError(msg) {
 
 function _comicTokenUrl(url) {
     if (!url) return '';
-    const token = getCookie('auth_token');
+    const token = getSessionToken();
     if (token && (url.startsWith('/data/') || url.startsWith('/api/'))) {
         return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
     }
@@ -2629,7 +2634,6 @@ function _comicScrollToTop() {
 }
 
 function _comicPreload() {
-    const token = getCookie('auth_token');
     [-1, 1, 2].forEach(offset => {
         const i = comicIndex + offset;
         if (i < 0 || i >= comicPages.length) return;
@@ -5568,7 +5572,7 @@ async function loadSubtitlesForVideo(videoElement, videoPath) {
         const subs = Array.isArray(data?.subtitles) ? data.subtitles : [];
         if (subs.length === 0) return;
 
-        const token = getCookie('auth_token');
+        const token = getSessionToken();
         const makeSrc = (p) => {
             let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(p)}`;
             if (token) subUrl += '&token=' + token;
@@ -6211,7 +6215,7 @@ document.addEventListener('keydown', e => {
 function downloadBackup() {
     showToast('Preparing backup...', 'info');
     const a = document.createElement('a');
-    a.href = `${API_BASE}/system/backup?token=${getCookie('auth_token') || ''}`;
+    a.href = `${API_BASE}/system/backup?token=${getSessionToken() || ''}`;
     a.download = '';
     document.body.appendChild(a);
     a.click();
