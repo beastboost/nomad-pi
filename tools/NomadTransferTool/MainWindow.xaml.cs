@@ -53,6 +53,7 @@ namespace NomadTransferTool
 
     public partial class MainWindow : Window, INotifyPropertyChanged, IDisposable
     {
+        private WebServer _webServer;
         private const string APP_VERSION = "1.5.1";
         private const string DEFAULT_SERVER_IP = "nomadpi.local";
         private const string STATUS_READY = "Ready";
@@ -76,6 +77,7 @@ namespace NomadTransferTool
 
         public void Dispose()
         {
+            _webServer?.Stop();
             _driveRefreshTimer?.Dispose();
             _processingCts?.Dispose();
             GC.SuppressFinalize(this);
@@ -759,6 +761,9 @@ namespace NomadTransferTool
             RealDebridKeyStatus = string.IsNullOrWhiteSpace(RealDebridApiKey) ? "Not saved locally" : "Loaded locally";
             AllDebridKeyStatus = string.IsNullOrWhiteSpace(AllDebridApiKey) ? "Not saved locally" : "Loaded locally";
             TorBoxKeyStatus = string.IsNullOrWhiteSpace(TorBoxApiKey) ? "Not saved locally" : "Loaded locally";
+
+            _webServer = new WebServer(this);
+            _webServer.Start();
 
             // Try to find the media server data path
             string currentDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -1944,7 +1949,7 @@ namespace NomadTransferTool
             }
         }
 
-        private void AddLog(string message)
+        public void AddLog(string message)
         {
             Dispatcher.Invoke(() => {
                 _processingLogs.Insert(0, $"[{DateTime.Now:HH:mm:ss}] {message}");
@@ -2384,6 +2389,9 @@ namespace NomadTransferTool
             if (ext == ".pdf" || ext == ".epub" || ext == ".mobi") return Categories.Books;
             return Categories.Files;
         }
+
+        public void StartProcessingCommand() => StartProcessing_Click(this, new RoutedEventArgs());
+        public void StopProcessingCommand() => StopProcessing_Click(this, new RoutedEventArgs());
 
         private async void StartProcessing_Click(object sender, RoutedEventArgs e)
         {
