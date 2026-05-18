@@ -292,8 +292,14 @@ def get_stats(user_id: int = Depends(get_current_user_id)):
                 # Output format: throttled=0x0
                 throttled_hex = result.stdout.strip().split('=')[1]
                 throttled_value = int(throttled_hex, 16)
-                # Bit 0: under-voltage, Bit 1: arm frequency capped, Bit 2: currently throttled
-                throttled = (throttled_value & 0x7) != 0
+                # We need to distinguish between CURRENTLY throttled vs HAS throttled since last boot
+                # Bit 0: Under-voltage detected
+                # Bit 1: Arm frequency capped
+                # Bit 2: Currently throttled
+                # Bit 3: Soft temperature limit active
+                # We only want to alert if it is CURRENTLY under-voltage, capped, or throttled (Bits 0-3)
+                # We ignore bits 16-19 which mean "has occurred since last boot"
+                throttled = (throttled_value & 0xF) != 0
         except (subprocess.SubprocessError, FileNotFoundError, OSError, IndexError, ValueError):
             pass
 
