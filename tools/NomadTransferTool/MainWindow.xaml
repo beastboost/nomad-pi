@@ -565,7 +565,7 @@
                                 </ListBox.ItemsPanel>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Width="130" Margin="5" Background="#252525" CornerRadius="8" Overflow="Hidden">
+                                        <Border Width="130" Margin="5" Background="#252525" CornerRadius="8" ClipToBounds="True">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="195"/>
