@@ -811,6 +811,7 @@ function toggleMobileMenu() {
 }
 
 function showSection(id) {
+    const opts = arguments.length > 1 && typeof arguments[1] === 'object' ? arguments[1] : {};
     if (id === 'admin' && !(currentUser && currentUser.is_admin)) {
         showToast('Admin access required', 'warning');
         id = 'home';
@@ -859,16 +860,24 @@ function showSection(id) {
         driveScanInterval = null;
     }
 
-    if (['movies', 'music', 'books', 'gallery'].includes(id)) loadMedia(id);
-    if (id === 'files') loadMedia('files');
-    if (id === 'shows') {
-        showsLibraryCache = null;
-        loadShowsLibrary();
+    if (!opts.skipAutoLoad) {
+        if (['movies', 'music', 'books', 'gallery'].includes(id)) loadMedia(id);
+        if (id === 'files') loadMedia('files');
+        if (id === 'shows') {
+            showsLibraryCache = null;
+            loadShowsLibrary();
+        }
+        if (id === 'home') {
+            loadResume();
+            loadRecent();
+            loadStorageStats();
+        }
     }
-    if (id === 'home') {
-        loadResume();
-        loadRecent();
-        loadStorageStats();
+
+    if (!opts.skipHistory && id !== 'files' && window.history && window.history.pushState) {
+        const nextState = { section: id };
+        const nextHash = `#${encodeURIComponent(id)}`;
+        history.pushState(nextState, '', nextHash);
     }
 
     // Setup search listeners
@@ -1114,13 +1123,14 @@ function copyToClipboard(text) {
 
 async function loadMedia(category) {
     if (category === 'files') {
-        loadFileBrowser(mediaState.path || '/data');
+        loadFileBrowser(mediaState.path || '/data', { pushHistory: true, replaceHistory: false });
         return;
     }
     await loadMediaPage(category, true);
 }
 
-async function loadFileBrowser(path) {
+async function loadFileBrowser(path, opts) {
+    opts = opts || {};
     console.log('loadFileBrowser called with path:', path);
     const container = document.getElementById('files-list');
     if (!container) return;
@@ -1147,7 +1157,7 @@ async function loadFileBrowser(path) {
                     </div>
                 </div>
             `;
-            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('/data'));
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('/data', { pushHistory: true }));
             container.appendChild(backDiv);
 
             drives.forEach(d => {
@@ -1161,7 +1171,7 @@ async function loadFileBrowser(path) {
                         </div>
                     </div>
                 `;
-                div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(d.mountpoint));
+                div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(d.mountpoint, { pushHistory: true }));
                 container.appendChild(div);
             });
             return;
@@ -1206,7 +1216,7 @@ async function loadFileBrowser(path) {
                     </div>
                 </div>
             `;
-            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(parentPath || '/data'));
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(parentPath || '/data', { pushHistory: true }));
             container.appendChild(backDiv);
         } else if (path === '/data') {
             // Show "Browse Drives" button at /data root
@@ -1219,7 +1229,7 @@ async function loadFileBrowser(path) {
                     </div>
                 </div>
             `;
-            driveDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES'));
+            driveDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES', { pushHistory: true }));
             container.appendChild(driveDiv);
         } else if (isWindows && isRoot) {
             // At drive root, allow going back to drives list
@@ -1232,7 +1242,7 @@ async function loadFileBrowser(path) {
                     </div>
                 </div>
             `;
-            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES'));
+            backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES', { pushHistory: true }));
             container.appendChild(backDiv);
         }
 
@@ -1253,7 +1263,7 @@ async function loadFileBrowser(path) {
                         </div>
                     `;
                     // Use addEventListener instead of inline onclick for better reliability
-                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(itemPath));
+                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(itemPath, { pushHistory: true }));
                 } else {
                     const ext = item.name.split('.').pop().toLowerCase();
                     let icon = '📄';
@@ -1278,6 +1288,15 @@ async function loadFileBrowser(path) {
         }
         
         mediaState.path = path;
+
+        if (opts.pushHistory && window.history && window.history.pushState) {
+            const state = { section: 'files', path: path };
+            if (opts.replaceHistory) {
+                history.replaceState(state, '', '#files');
+            } else {
+                history.pushState(state, '', '#files');
+            }
+        }
     } catch (e) {
         console.error('Error in loadFileBrowser:', e);
         container.innerHTML = `<p>Error loading directory: ${escapeHtml(e.message || String(e))}</p>`;
@@ -3935,6 +3954,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     checkAuth(); // Check auth on load
+
+    window.addEventListener('popstate', (ev) => {
+        const st = ev && ev.state ? ev.state : null;
+        if (!st || !st.section) return;
+        if (st.section === 'files') {
+            showSection('files', { skipHistory: true, skipAutoLoad: true });
+            loadFileBrowser(st.path || '/data', { pushHistory: false });
+            return;
+        }
+        showSection(String(st.section), { skipHistory: true });
+    });
 
     const setupHintEl = document.getElementById('setup-hint');
     const passwordInput = document.getElementById('password-input');
@@ -6866,7 +6896,8 @@ async function debridAddMagnet(infoHash, fileIdx, name) {
             debridShowFiles(data);
         } else if (data.status === 'error' || data.status === 'dead' || data.status === 'virus' || data.status === 'magnet_error') {
             debridHideProcessing();
-            showToast(`Torrent failed: ${data.status}`, 'error');
+            const msg = data.message ? data.message : `Torrent failed: ${data.status}`;
+            showToast(msg, 'error');
         } else {
             // Any other status — start polling with visible progress
             debridShowProcessing(name, `${data.status || 'Processing'}...`);
@@ -6950,6 +6981,7 @@ async function debridHandleLinks(links, filename) {
                     debridDownloadToPi(data.url, data.filename);
                 }
                 handled = true;
+                break;
             }
         } catch (e) {
             console.error('Unrestrict failed:', e);

@@ -26,6 +26,12 @@ router = APIRouter(prefix="/api/debrid", tags=["debrid"])
 SUPPORTED_PROVIDERS = {"rd", "ad", "tb"}
 
 
+def _is_video_filename(name: str) -> bool:
+    n = (name or "").lower()
+    ext = n.rsplit(".", 1)[-1] if "." in n else ""
+    return ext in {"mp4", "mkv", "avi", "mov", "webm", "m4v", "ts", "wmv", "flv", "mpg", "mpeg"}
+
+
 # #region debug-point A:debug-helper
 def _debug_report(hypothesis_id: str, location: str, msg: str, data: Optional[dict] = None, trace_id: str = "") -> None:
     _p = ".dbg/web-ui-not-loading.env"
@@ -332,6 +338,14 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
             links = []
             if status_info.get("statusCode", 0) >= 4:
                 ad_files = debrid.ad_get_magnet_files(key, magnet_id)
+                ad_files = sorted(
+                    ad_files,
+                    key=lambda f: (
+                        0 if _is_video_filename(str(f.get("filename", ""))) else 1,
+                        -int(f.get("size") or 0),
+                        str(f.get("filename", "")).lower(),
+                    ),
+                )
                 for idx, f in enumerate(ad_files):
                     link = f.get("link")
                     if link:
@@ -365,6 +379,15 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                     break
                 time.sleep(1)
             files = info.get("files", [])
+            if isinstance(files, list):
+                files = sorted(
+                    files,
+                    key=lambda f: (
+                        0 if _is_video_filename(str(f.get("name", ""))) else 1,
+                        -int(f.get("size") or 0),
+                        str(f.get("name", "")).lower(),
+                    ),
+                )
             links = []
             if info.get("download_finished") or info.get("download_state") in ("completed", "cached", "uploading") or info.get("download_present"):
                 for f in files:
@@ -374,6 +397,13 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                             links.append(dl)
                     except Exception as e:
                         logger.warning(f"TorBox requestdl failed for torrent {torrent_id} file {f.get('id')}: {e}")
+                if not links:
+                    try:
+                        dl = debrid.tb_request_download(key, torrent_id, 0)
+                        if dl:
+                            links.append(dl)
+                    except Exception as e:
+                        logger.warning(f"TorBox requestdl failed for torrent {torrent_id}: {e}")
             return {
                 "ok": True,
                 "provider": "tb",
@@ -423,6 +453,14 @@ def get_torrent_status(torrent_id: str,
             status_code = info.get("statusCode", 0)
             if status_code >= 4:
                 ad_files = debrid.ad_get_magnet_files(key, torrent_id)
+                ad_files = sorted(
+                    ad_files,
+                    key=lambda f: (
+                        0 if _is_video_filename(str(f.get("filename", ""))) else 1,
+                        -int(f.get("size") or 0),
+                        str(f.get("filename", "")).lower(),
+                    ),
+                )
                 for idx, f in enumerate(ad_files):
                     link = f.get("link")
                     if link:
@@ -452,6 +490,15 @@ def get_torrent_status(torrent_id: str,
         elif provider == "tb":
             info = debrid.tb_get_torrent_info(key, torrent_id)
             files = info.get("files") or []
+            if isinstance(files, list):
+                files = sorted(
+                    files,
+                    key=lambda f: (
+                        0 if _is_video_filename(str(f.get("name", ""))) else 1,
+                        -int(f.get("size") or 0),
+                        str(f.get("name", "")).lower(),
+                    ),
+                )
             links = []
             ds = str(info.get("download_state", "")).lower()
             finished = bool(info.get("download_finished") or info.get("download_present")) or ds in ("cached",)
@@ -463,7 +510,7 @@ def get_torrent_status(torrent_id: str,
                             links.append(dl)
                     except Exception as e:
                         logger.warning(f"TorBox requestdl failed for torrent {torrent_id} file {f.get('id')}: {e}")
-                if not links and not files:
+                if not links:
                     try:
                         dl = debrid.tb_request_download(key, torrent_id, 0)
                         if dl:
@@ -532,17 +579,30 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
             # #endregion
             return response
         elif provider == "ad":
-            result = debrid.ad_unrestrict_link(key, link)
-            response = {
-                "url": result.get("link"),
-                "filename": result.get("filename", ""),
-                "filesize": result.get("filesize", 0),
-                "mimeType": result.get("mimeType", ""),
-            }
-            # #region debug-point A:router-unrestrict-ad-success
-            _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict ad success", {"provider": provider, "has_url": bool(response.get("url")), "filename": response.get("filename", "")[:120]})
-            # #endregion
-            return response
+            try:
+                result = debrid.ad_unrestrict_link(key, link)
+                response = {
+                    "url": result.get("link"),
+                    "filename": result.get("filename", ""),
+                    "filesize": result.get("filesize", 0),
+                    "mimeType": result.get("mimeType", ""),
+                }
+                # #region debug-point A:router-unrestrict-ad-success
+                _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict ad success", {"provider": provider, "has_url": bool(response.get("url")), "filename": response.get("filename", "")[:120]})
+                # #endregion
+                return response
+            except Exception:
+                import urllib.parse
+                import os
+                try:
+                    fname = os.path.basename(urllib.parse.urlparse(link).path)
+                    if not fname:
+                        fname = "alldebrid_download"
+                except Exception:
+                    fname = "alldebrid_download"
+                response = {"url": link, "filename": fname, "filesize": 0}
+                _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict ad passthrough", {"provider": provider, "has_url": bool(response.get("url")), "filename": fname[:120]})
+                return response
         elif provider == "tb":
             # TorBox requestdl already returns the final URL.
             # Try to guess a filename from the URL, or provide a fallback.
