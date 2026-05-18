@@ -1042,6 +1042,8 @@ button.primary:active {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
+    min-width: 0;
 }
 
 .modal-title {
@@ -1049,6 +1051,8 @@ button.primary:active {
     font-weight: 700;
     margin: 0;
     color: var(--text-color);
+    flex: 1;
+    min-width: 0;
 }
 
 .modal-close {
@@ -2076,6 +2080,9 @@ h1, h2, h3 {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 /* External Player Buttons */
@@ -2111,11 +2118,32 @@ h1, h2, h3 {
 }
 
 @media (max-width: 600px) {
+    .viewer-title-row {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .external-player-btns {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
     .player-action-btn .btn-text {
         display: none;
     }
     .player-action-btn {
         padding: 8px;
+    }
+}
+
+@media (max-width: 600px) {
+    .modal-header {
+        padding: 16px;
+        align-items: flex-start;
+    }
+
+    .modal-close {
+        padding: 8px 12px;
     }
 }
 

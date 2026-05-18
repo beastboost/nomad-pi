@@ -2293,15 +2293,18 @@ function getVideoMimeType(pathOrName) {
 
 function getExternalPlaybackUrls(url) {
     const fullUrl = /^https?:\/\//i.test(url) ? url : `${window.location.origin}${url}`;
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const iosVlcUrl = `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(fullUrl)}`;
     return {
         fullUrl,
-        vlcUrl: `vlc://${fullUrl.replace(/^https?:\/\//i, '')}`,
+        vlcUrl: isIOS ? iosVlcUrl : `vlc://${fullUrl.replace(/^https?:\/\//i, '')}`,
     };
 }
 
 function prefersExternalPlayback(ext) {
     const ua = navigator.userAgent || '';
-    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
     return ext === 'mkv' && (isIOS || isSafari);
 }
@@ -7079,6 +7082,13 @@ function debridStreamFile(url, filename) {
 
     body.innerHTML = '';
 
+    if (preferExternal) {
+        body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext, `Browser can't play this ${ext.toUpperCase()} stream directly`);
+        modal.classList.remove('hidden');
+        showToast('Use VLC / external player for this file type', 'warning');
+        return;
+    }
+
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
@@ -7094,13 +7104,6 @@ function debridStreamFile(url, filename) {
         body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext);
     });
 
-    if (preferExternal) {
-        const warning = document.createElement('div');
-        warning.className = 'glass-card';
-        warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
-        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can be unreliable in some browsers. If this stream fails, use VLC or copy the link into another player.';
-        body.appendChild(warning);
-    }
     body.appendChild(video);
     modal.classList.remove('hidden');
     video.play().catch(() => {});
