@@ -7,10 +7,13 @@ or AllDebrid, unrestricting download links, and downloading files to the Pi.
 import json
 import logging
 import os
+import ipaddress
 import re
 import shutil
+import socket
 import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Optional, Union
@@ -1087,6 +1090,59 @@ def _sanitize_filename(name: str, max_length: int = 200) -> str:
     return name
 
 
+def is_safe_external_url(url: str) -> bool:
+    try:
+        p = urllib.parse.urlparse(str(url))
+        if p.scheme not in ("http", "https"):
+            return False
+        host = p.hostname
+        if not host:
+            return False
+        if host in ("localhost",):
+            return False
+        if host.endswith(".local"):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                return False
+            return True
+        except ValueError:
+            pass
+
+        addrs = socket.getaddrinfo(host, p.port or (443 if p.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        for _family, _type, _proto, _canonname, sockaddr in addrs:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                    return False
+            except ValueError:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def safe_head(url: str, timeout: int = 10, max_redirects: int = 3) -> requests.Response:
+    if not is_safe_external_url(url):
+        raise ValueError("Unsafe URL")
+    current = url
+    for _ in range(max_redirects + 1):
+        r = requests.head(current, allow_redirects=False, timeout=timeout)
+        if r.is_redirect or r.is_permanent_redirect:
+            loc = r.headers.get("Location") or r.headers.get("location") or ""
+            if not loc:
+                return r
+            nxt = urllib.parse.urljoin(current, loc)
+            if not is_safe_external_url(nxt):
+                raise ValueError("Unsafe redirect URL")
+            current = nxt
+            continue
+        return r
+    return r
+
+
 def clean_media_filename(raw_filename: str, title: str = "",
                           year: str = "", media_type: str = "movie",
                           season: int = 0, episode: int = 0) -> str:
@@ -1156,11 +1212,10 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
     def _cd_filename(cd: str) -> str:
         if not cd:
             return ""
-        m = re.search(r"filename\\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
+        m = re.search(r"filename\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
         if m:
             try:
-                import urllib.parse as _up
-                return _up.unquote(m.group(1)).strip().strip('"')
+                return urllib.parse.unquote(m.group(1)).strip().strip('"')
             except Exception:
                 return m.group(1).strip().strip('"')
         m = re.search(r'filename="([^"]+)"', cd)
@@ -1191,7 +1246,7 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
 
     if raw_filename and not os.path.splitext(raw_filename)[1]:
         try:
-            r = requests.head(download_url, allow_redirects=True, timeout=10)
+            r = safe_head(download_url, timeout=10)
             cd = r.headers.get("Content-Disposition") or r.headers.get("content-disposition") or ""
             ct = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
             header_name = _cd_filename(cd)
