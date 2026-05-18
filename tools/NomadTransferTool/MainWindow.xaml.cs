@@ -1699,6 +1699,31 @@ namespace NomadTransferTool
             DebridStatus = ok ? "TorBox key saved" : "TorBox key save failed";
         }
 
+        public void DebridSearchTitlesCommand(string query)
+        {
+            Dispatcher.Invoke(() => { DebridTitleQuery = query; });
+            DebridSearchTitles_Click(this, new RoutedEventArgs());
+        }
+
+        public void DebridLoadTorrentsCommand(string imdbId, string type, string season, string episode)
+        {
+            Dispatcher.Invoke(() => {
+                SelectedDebridTitle = new DebridTitleResult { ImdbId = imdbId, Type = type };
+                DebridSearchType = type;
+                DebridSearchSeason = season;
+                DebridSearchEpisode = episode;
+            });
+            DebridLoadTorrents_Click(this, new RoutedEventArgs());
+        }
+
+        public void DebridDownloadCommand(string infoHash, string name)
+        {
+            Dispatcher.Invoke(() => {
+                SelectedDebridTorrent = new DebridTorrentResult { InfoHash = infoHash, Name = name };
+            });
+            DebridDownloadSelected_Click(this, new RoutedEventArgs());
+        }
+
         private async void DebridSearchTitles_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(DebridTitleQuery))

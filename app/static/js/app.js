@@ -2321,11 +2321,11 @@ function prefersExternalPlayback(ext, pathOrName = '') {
     const ua = navigator.userAgent || '';
     const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
-    const isArmLinux = false; // Disabled to prevent Pi 3B+ MP4 stuttering
-    const name = String(pathOrName || '').toLowerCase();
-    const looksHevc = false; // Disabled to prevent Pi 3B+ MP4 stuttering
-    const problematicExt = ['mkv', 'ts', 'm2ts', 'mts', 'avi', 'mov'].includes(ext);
-    return (ext === 'mkv' && (isIOS || isSafari)) || looksHevc || (isArmLinux && problematicExt);
+    
+    // We completely removed server-side FFmpeg transcoding to ensure Pi 3B+ doesn't stutter.
+    // Everything is forced to direct play now.
+    // If iOS/Safari users try to play MKVs, they must use the VLC fallback button.
+    return false;
 }
 
 async function ensureIosCompatiblePath(path, onStatus) {
