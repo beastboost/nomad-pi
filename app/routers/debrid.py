@@ -288,7 +288,7 @@ def search_torrents(imdb_id: str = Query(...),
         name = r.get("name", "").lower()
         meta = r.get("meta", "").lower()
         
-        if filter_type:
+        if filter_type and filter_type.lower() != "all":
             # We want to match the exact extension/container string
             if filter_type.lower() == "mp4" and "mp4" not in name and "mp4" not in meta:
                 continue
@@ -297,7 +297,7 @@ def search_torrents(imdb_id: str = Query(...),
             if filter_type.lower() == "h264" and "h264" not in name and "x264" not in name and "avc" not in name:
                 continue
                 
-        if filter_quality:
+        if filter_quality and filter_quality.lower() != "all":
             if filter_quality.lower() == "2160p" and "2160p" not in meta and "4k" not in meta:
                 continue
             if filter_quality.lower() == "1080p" and "1080p" not in meta:

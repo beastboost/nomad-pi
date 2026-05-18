@@ -416,11 +416,17 @@
                                 <option value="movie">Movie</option>
                                 <option value="series">Series</option>
                             </select>
-                            <select id="debrid-quality" style="width:auto" title="Max quality filter">
-                                <option value="">All Qualities</option>
-                                <option value="1080">Up to 1080p</option>
-                                <option value="720">Up to 720p</option>
-                                <option value="480">Up to 480p</option>
+                            <select id="debrid-quality" style="width:auto" title="Resolution filter">
+                                <option value="All">All Qualities</option>
+                                <option value="2160p">2160p (4K)</option>
+                                <option value="1080p">1080p</option>
+                                <option value="720p">720p</option>
+                            </select>
+                            <select id="debrid-filter-type" style="width:auto" title="File Type Filter">
+                                <option value="All">All Types</option>
+                                <option value="MP4">MP4</option>
+                                <option value="H264">H264</option>
+                                <option value="MKV">MKV</option>
                             </select>
                             <button onclick="debridSearch()" class="primary"><i class="fas fa-search"></i> Search</button>
                         </div>

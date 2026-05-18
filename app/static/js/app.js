@@ -6858,6 +6858,11 @@ async function debridSelectTitle(imdbId, title, mediaType, year) {
         if (season) params += `&season=${season}`;
         if (episode) params += `&episode=${episode}`;
 
+        const filterType = document.getElementById('debrid-filter-type')?.value || 'All';
+        const filterQuality = document.getElementById('debrid-quality')?.value || 'All';
+        
+        params += `&filter_type=${encodeURIComponent(filterType)}&filter_quality=${encodeURIComponent(filterQuality)}`;
+
         const res = await fetch(`${API_BASE}/debrid/search/torrents?${params}`, { headers: getAuthHeaders() });
         if (!res.ok) throw new Error('Torrent search failed');
         const data = await res.json();
@@ -6875,22 +6880,6 @@ async function renderTorrentResults(results, imdbId) {
 
     if (!results || results.length === 0) {
         torrentsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No torrents found for this title</p>';
-        return;
-    }
-
-    // Apply quality filter
-    const maxQuality = document.getElementById('debrid-quality')?.value;
-    if (maxQuality) {
-        const maxRes = parseInt(maxQuality);
-        const qualityValue = { '480p': 480, '720p': 720, '1080p': 1080, '2160p': 2160, '4K': 2160 };
-        results = results.filter(t => {
-            const qVal = qualityValue[t.quality] || 0;
-            return qVal === 0 || qVal <= maxRes;
-        });
-    }
-
-    if (results.length === 0) {
-        torrentsList.innerHTML = '<p style="text-align:center;color:var(--text-secondary)">No torrents match your quality filter</p>';
         return;
     }
 

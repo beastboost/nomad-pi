@@ -1,0 +1,2 @@
+USE_QEMU=1
+IMG_SUFFIX="-nomad"

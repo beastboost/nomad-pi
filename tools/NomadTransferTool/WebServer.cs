@@ -312,19 +312,25 @@ namespace NomadTransferTool
                 document.getElementById('btn-start').style.display = data.isTransferring ? 'none' : 'block';
                 document.getElementById('btn-stop').style.display = data.isTransferring ? 'block' : 'none';
 
-                document.getElementById('queue-count').innerText = data.reviewQueue.length;
-                document.getElementById('queue-list').innerHTML = data.reviewQueue.map(q => `<div style='margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #303030;'><b>${q.title}</b> (${q.year})<br><span style='color:#888'>${q.category}</span></div>`).join('') || 'Empty';
+                if (data.reviewQueue) {
+                    document.getElementById('queue-count').innerText = data.reviewQueue.length;
+                    document.getElementById('queue-list').innerHTML = data.reviewQueue.map(q => `<div style='margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #303030;'><b>${q.title}</b> (${q.year})<br><span style='color:#888'>${q.category}</span></div>`).join('') || 'Empty';
+                }
 
-                document.getElementById('drives-list').innerHTML = data.drives.map(d => `<div style='margin-bottom:8px;'><b>${d.label}</b> (${d.name})<br><div class='progress-bar'><div class='progress-fill' style='width:${d.percent}%'></div></div>${d.size}</div>`).join('') || 'None';
+                if (data.drives) {
+                    document.getElementById('drives-list').innerHTML = data.drives.map(d => `<div style='margin-bottom:8px;'><b>${d.label}</b> (${d.name})<br><div class='progress-bar'><div class='progress-fill' style='width:${d.percent}%'></div></div>${d.size}</div>`).join('') || 'None';
+                }
 
-                document.getElementById('downloads-list').innerHTML = data.activeDownloads.map(d => `<div style='margin-bottom:8px;'><b>${d.file}</b><br><span style='color:#4caf50'>${d.progress}</span></div>`).join('') || 'None';
+                if (data.activeDownloads) {
+                    document.getElementById('downloads-list').innerHTML = data.activeDownloads.map(d => `<div style='margin-bottom:8px;'><b>${d.file}</b><br><span style='color:#4caf50'>${d.progress}</span></div>`).join('') || 'None';
+                }
                 
                 if (data.debridStatus) {
                     document.getElementById('debrid-status').innerText = data.debridStatus;
                 }
 
             } catch (e) {
-                console.error(e);
+                console.error('Fetch status error:', e);
             }
         }
 
