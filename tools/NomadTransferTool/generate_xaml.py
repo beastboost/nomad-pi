@@ -1,4 +1,6 @@
-<Window x:Class="NomadTransferTool.MainWindow"
+import os
+
+xaml_content = """<Window x:Class="NomadTransferTool.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:NomadTransferTool"
@@ -443,18 +445,17 @@
                                     </ListBox.ItemTemplate>
                                 </ListBox>
 
-                        <!-- Action Bar -->
-                        <Border Grid.Row="2" Background="#111" CornerRadius="6" Padding="15" Margin="0,10,0,0">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding SpaceWarning}" Foreground="{StaticResource PrimaryColor}" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding TranscodeQueue.Count, StringFormat='Transcode Queue: {0} items pending'}" Foreground="{StaticResource MutedTextColor}" FontSize="11" Margin="0,4,0,0" Visibility="{Binding TranscodeQueue.Count, Converter={StaticResource CountToVisibilityConverter}, ConverterParameter=0}"/>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Grid.Column="1">
+                                <!-- Action Bar -->
+                                <Border Grid.Row="2" Background="#111" CornerRadius="6" Padding="15" Margin="0,10,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SpaceWarning}" Foreground="{StaticResource PrimaryColor}" FontWeight="SemiBold"/>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Grid.Column="1">
                                             <Button Content="STOP" Click="StopProcessing_Click" Background="{StaticResource DangerColor}" Width="80" Height="36" Margin="0,0,10,0"
                                                     Visibility="{Binding IsTransferring, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="START TRANSFER" Click="StartProcessing_Click" Style="{StaticResource PrimaryButton}" Width="160" Height="36"
@@ -858,3 +859,9 @@
         </Grid>
     </Grid>
 </Window>
+"""
+
+with open(r"c:\Users\conne\nomad-pi\tools\NomadTransferTool\MainWindow.xaml", "w", encoding="utf-8") as f:
+    f.write(xaml_content)
+
+print("Generated new MainWindow.xaml successfully.")

@@ -3477,6 +3477,9 @@ namespace NomadTransferTool
             [JsonProperty("type")]
             public string Type { get; set; } = "";
 
+            [JsonProperty("poster")]
+            public string Poster { get; set; } = "";
+
             [JsonProperty("imdb_id")]
             public string ImdbId { get; set; } = "";
 
