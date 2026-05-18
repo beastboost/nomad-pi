@@ -1,0 +1,17 @@
+[
+  {
+    "url": "http://127.0.0.1:8001/",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8"
+  },
+  {
+    "url": "http://127.0.0.1:8001/js/app.js?v=1775509265",
+    "status": 200,
+    "content_type": "text/javascript; charset=utf-8"
+  },
+  {
+    "url": "http://127.0.0.1:8001/sw.js",
+    "status": 200,
+    "content_type": "text/javascript; charset=utf-8"
+  }
+]

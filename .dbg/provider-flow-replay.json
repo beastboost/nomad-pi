@@ -1,0 +1,2051 @@
+{
+  "steps": [
+    {
+      "step": "login",
+      "status_code": 200,
+      "json": {
+        "status": "ok",
+        "token": "405e9b82-cbce-47b6-86cf-b277da6b24de",
+        "user": {
+          "id": 1,
+          "username": "admin",
+          "is_admin": true,
+          "must_change_password": true
+        }
+      }
+    },
+    {
+      "step": "search_torrents",
+      "status_code": 200,
+      "json": {
+        "results": [
+          {
+            "name": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole) [QxR]",
+            "info_hash": "643294b09097abe573f60d81999891ed5bf0d299",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "25.72 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 9 \ud83d\udcbe 25.72 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 40
+          },
+          {
+            "name": "Interstellar (2014) IMAX Complete (2160p BluRay x265 HEVC 10bit SDR AAC 5.1 Joy) [UTR]",
+            "info_hash": "a2a342d5ddd4f8844ec9f25f6e9c6f3f2762a657",
+            "file_idx": null,
+            "quality": "2160p",
+            "size": "11.3 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 6 \ud83d\udcbe 11.3 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 40
+          },
+          {
+            "name": "Interstellar.2014.IMAX.UHD.Blu-Ray.2160p.DV.HEVC.TrueHD.7.1.Atmos.x265-E",
+            "info_hash": "20c13c11f513b4c7c14c29840d294e72d21a67d8",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "66.49 GB",
+            "source": "",
+            "details": "\ud83d\udc64 38 \ud83d\udcbe 66.49 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC, BLU-RAY",
+            "rd_reasons": [],
+            "rd_score": 40
+          },
+          {
+            "name": "Interstellar (2014) IMAX (1080p BluRay x265 HEVC 10bit AAC 5.1 Tigole) [QxR]",
+            "info_hash": "b476e787603fbbd7be4a0c0190efeed4cbcaf8ba",
+            "file_idx": 19,
+            "quality": "1080p",
+            "size": "",
+            "source": "BluRay",
+            "details": "Interstellar (2014) IMAX (1080p BluRay x265 10bit Tigole).mkv",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 40
+          },
+          {
+            "name": "Interstellar 2014 1080p DS4K BluRay x265 10 bit HDR AAC 5 1",
+            "info_hash": "f61bef7f51c1ae5b9a1cb0e776586ffa0cfa7858",
+            "file_idx": 0,
+            "quality": "4K",
+            "size": "11.45 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 20 \ud83d\udcbe 11.45 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar 2014 2160p AV1 HDR10 EN/ITA/FR/ES OPUS 5.1-UH [UserHEVC]",
+            "info_hash": "abf5451366b96d8c518a7f56820f7d247b11222d",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "16.87 GB",
+            "source": "",
+            "details": "\ud83d\udc64 101 \ud83d\udcbe 16.87 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, AV1",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar 2014 IMAX UHD BluRay 2160p HDR10 DV HEVC DTS-HD MA 5.1 x265-E",
+            "info_hash": "6e51635522c34610e944ffedb2d322ecfe992ba8",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "31.74 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 15 \ud83d\udcbe 31.74 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.2160p.4K.UHD.Full.Blu-Ray.HEVC.DTS-HD-MassModz",
+            "info_hash": "b37bbb8d04b37159c3ca704c00836f1a26eb1483",
+            "file_idx": null,
+            "quality": "2160p",
+            "size": "84.1 GB",
+            "source": "",
+            "details": "\ud83d\udc64 15 \ud83d\udcbe 84.1 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, BLU-RAY",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT",
+            "info_hash": "5e745883e5e3c73b71282751be9e05a6c419ad90",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "77.81 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 41 \ud83d\udcbe 77.81 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.2160p.BluRay.x265.10bit.SDR.DTS-HD.MA.5.1-SWTYBLZ",
+            "info_hash": "80e1c80106105a9584077fc39ae7ffd1ba42ee43",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "62.29 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 12 \ud83d\udcbe 62.29 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.2160p.UHD.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1-RARBG",
+            "info_hash": "84c693183f30cb65a79b49ca80e7409414758533",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "14.28 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 10 \ud83d\udcbe 14.28 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.2160p.UHD.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1-TERMiNAL",
+            "info_hash": "3f42d8909d53921cefcd51529e85d46eebb545d0",
+            "file_idx": 2,
+            "quality": "2160p",
+            "size": "33.34 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 140 \ud83d\udcbe 33.34 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.Eng.Fre.Ger.Ita.Por.Spa.Cze.Pol.Rus.Jpn.2160p.BluRay.Hybrid.Remux.DV.HDR.HEVC.DTS-HD.MA-SGF",
+            "info_hash": "86bb6ae15a5cec1a3be3cf8b1eba1f15a48b9913",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "78.22 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 16 \ud83d\udcbe 78.22 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.IMAX.2160p.10bit.HDR.BluRay.6CH.2CH.x265.HEVC-PSA",
+            "info_hash": "163d2082453d037f3bec8bb77ddce782797a7fc3",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "5.75 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 105 \ud83d\udcbe 5.75 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.IMAX.4K.HDR.DV.2160p.BDRemux Ita Eng x265-NAHOM",
+            "info_hash": "cd48aa3be9b0a324cb23e49aa5a32646f958e62c",
+            "file_idx": 2,
+            "quality": "2160p",
+            "size": "63 GB",
+            "source": "",
+            "details": "\ud83d\udc64 60 \ud83d\udcbe 63 GB \u2699\ufe0f ilCorSaRoNeRo",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.iMAX.UHD.2160p.REMUX.HDR10.DV.MULTi.DTS-HD.7.1.ATMOS.H265-KC",
+            "info_hash": "9c4e8ddfc6d8c9f91ef0e1567b87801a2d024238",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "88.57 GB",
+            "source": "",
+            "details": "\ud83d\udc64 30 \ud83d\udcbe 88.57 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.PROPER.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.5.1-FGT",
+            "info_hash": "bb8b23481702f504aac74f6e671aa4bbc0fe5fea",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "77.8 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 22 \ud83d\udcbe 77.8 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.UHD.BluRay.2160p.DTS-HD.MA.5.1.HEVC.REMUX-FraMeSToR",
+            "info_hash": "844928fa99d4b7d59c5825a790298c573acda925",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "65.74 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 106 \ud83d\udcbe 65.74 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "500 Classic Movies Part 1 of 7 - 67 Movies with IMDB Ratings from 8.0 to 9.0 jZQ 196GB Nb8",
+            "info_hash": "2861abae0bfc59a754d83b70eecb1b142198763f",
+            "file_idx": 172,
+            "quality": "1080p",
+            "size": "",
+            "source": "BluRay",
+            "details": "Interstellar (2014) IMDB 8.7/Interstellar.2014.PROPER.1080p.BluRay.x265-RARBG.mp4",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Anne Hathaway 22 Best Movies eSubs jQZ RARBG+",
+            "info_hash": "3aaf8394429cd3c0126a369de1e75a40a293aff7",
+            "file_idx": 37,
+            "quality": "1080p",
+            "size": "",
+            "source": "BluRay",
+            "details": "Interstellar (2014) IMDB 8.6 #D-ChristopherNolan #SciFi AnneHathaway JessicaChastain MackenzieFoy MatthewMcConaughey/Interstellar.2014.PROPER.1080p.BluRay.x265-RARBG.mp4",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "IMDB Top 250 - 2024 Edition - 1080p BluRay eSubs jZQ",
+            "info_hash": "71fee293dc117c48487029c6dcb5038d974a0295",
+            "file_idx": 369,
+            "quality": "1080p",
+            "size": "",
+            "source": "BluRay",
+            "details": "019 Interstellar (2014)/Interstellar.2014.PROPER.1080p.BluRay.x265-RARBG.mp4",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar (2014) IMAX 1080p Bluray x265 10bit EAC3 5.1 FLMN",
+            "info_hash": "4924b1ee17d2c6582f49f404e830d168deb1d0a5",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "6.88 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 22 \ud83d\udcbe 6.88 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar 2014 1080p BluRay x265-YAWNTiC",
+            "info_hash": "a69586540768a095359525d05a5589bc2e11c5dd",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "8.43 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 8.43 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar 2014 IMAX 1080p BluRay HEVC x265 5 1 BONE",
+            "info_hash": "77af86b82b2514aad0d91ce2599907579f263550",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "3.99 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 89 \ud83d\udcbe 3.99 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-RARBG",
+            "info_hash": "f468064f94d1470f94fc637676fad1f1c399ba52",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "42.71 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 44 \ud83d\udcbe 42.71 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.1080p.BluRay.x265-RARBG",
+            "info_hash": "493b02a6efe133f9130c4b4b59a9ec7864552297",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.63 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 2.63 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.IMAX.1080p.10bit.BluRay.6CH.x265.HEVC-PSA",
+            "info_hash": "9d1945b5c27ba67b5eddc16e8391056e38020766",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "3.79 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 3.79 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, HEVC",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.MULTI.VFF.1080p.BluRay.REMUX.DTS.HD.MA.5.1.AVC-Asgardia",
+            "info_hash": "6199065c220864aaf34775f9b0179c97d047879a",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "39.14 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 8 \ud83d\udcbe 39.14 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AVC, REMUX",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.PROPER.1080p.BluRay.x265-RARBG",
+            "info_hash": "6d20728512a9fbefa69abe3dbf77ebfbab7001e5",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.63 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 13 \ud83d\udcbe 2.63 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar.2014.PROPER.IMAX.1080p.UHD.BluRay.x265.HDR.DV.DD+5.1.Dual.YG\u2b50",
+            "info_hash": "13121036a0a971d7ae5601b9b95b5cc77d440b01",
+            "file_idx": 6,
+            "quality": "1080p",
+            "size": "4.21 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 184 \ud83d\udcbe 4.21 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265, BLURAY.X265",
+            "rd_reasons": [],
+            "rd_score": 35
+          },
+          {
+            "name": "Interstellar (2014) 2160p H265 HDR10 IMAX ITA ENG AC3 5.1 MultiSub -Raccoon- [MIRCrew]",
+            "info_hash": "e0318df8fa516a6f776ef109f0071880f339f176",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "14.74 GB",
+            "source": "",
+            "details": "\ud83d\udc64 6 \ud83d\udcbe 14.74 GB \u2699\ufe0f ilCorSaRoNeRo",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar (2014) 2160p UHD HDR IMAX Bluray AV1 Opus Multi6 [dAV1nci]",
+            "info_hash": "cdc623383e7560ae192f04285c3ab60f3e1db7da",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "8.61 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 21 \ud83d\udcbe 8.61 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AV1",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar (2014) IMAX (2160p x265 10bit HDR UHD BD DTS-HD MA 5.1) [Prof]",
+            "info_hash": "0570516261fb339abb9dec9809fbf5c8951e166d",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "39.32 GB",
+            "source": "",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 39.32 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar (2014) IMAX AC3 5.1 ITA.ENG 2160p HDR H265 sub NUita.eng Sp33dy94 MIRCrew",
+            "info_hash": "edfd780b93a10009ac6b9352ca27dc7a7e14eb73",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "5.17 GB",
+            "source": "",
+            "details": "\ud83d\udc64 25 \ud83d\udcbe 5.17 GB \u2699\ufe0f ilCorSaRoNeRo",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar 2014 2160p PROPER IMAX REMUX DV HDR10+ TrueHD 7.1 Atmos-jennaortegaUHD",
+            "info_hash": "d8d05ebec7303f05a7243986e8c7d0e201b0ac0d",
+            "file_idx": 2,
+            "quality": "2160p",
+            "size": "95.63 GB",
+            "source": "",
+            "details": "\ud83d\udc64 203 \ud83d\udcbe 95.63 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: REMUX",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar IMAX (2014) 2160p H265 BluRay Rip 10 bit HDR ita eng AC3 5.1 sub ita eng Licdom",
+            "info_hash": "e4634727ced0b106268a010a1e22883ffbc6ec15",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "7.58 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 24 \ud83d\udcbe 7.58 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.2160p.BluRay.HEVC.DTS-HD.MA.5.1-TASTED",
+            "info_hash": "c1b50fdb2b28e5eb93dce97db908ed7fb881ea4c",
+            "file_idx": null,
+            "quality": "2160p",
+            "size": "84.1 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 102 \ud83d\udcbe 84.1 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.2160p.DV.HDR10.Ai-Enhanced.H265.DTS-HD.5.1-RIFE.4.15-60fps-DirtyHippie",
+            "info_hash": "bffe42abca9bdf44121be8e3b0fc5ace68e3d4c8",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "37.51 GB",
+            "source": "",
+            "details": "\ud83d\udc64 19 \ud83d\udcbe 37.51 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.2160p.IMAX.BluRay.DTS-HDMA5.1.HDR.H265-WiKi.DUAL-andrehsa",
+            "info_hash": "d222e20cd004c1d19a0a1ac84c9be5c5eda9f207",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "39.85 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 21 \ud83d\udcbe 39.85 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: H265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.bluray.hdr.2160p.av1.5.1.opus.subs-Dust",
+            "info_hash": "e2ee70febb72657d0007eb176b2eb938bb052faa",
+            "file_idx": 1,
+            "quality": "2160p",
+            "size": "15.38 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 25 \ud83d\udcbe 15.38 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AV1",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "\u0418\u043d\u0442\u0435\u0440\u0441\u0442\u0435\u043b\u043b\u0430\u0440 / Interstellar (2014) UHD BDRemux 2160p \u043e\u0442 Rusatmos | HDR | D | IMAX Edition",
+            "info_hash": "4c8b290c8b7c8245922f3f12c129544570e13550",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "68.45 GB",
+            "source": "",
+            "details": "\ud83d\udc64 11 \ud83d\udcbe 68.45 GB \u2699\ufe0f Rutor",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: REMUX",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar (2014) 1080p IMAX Bluray AV1 Opus Multi5 [V2] [dAV1nci]",
+            "info_hash": "853025c69305ebdad63db3023c7e4541d783ca83",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "4.32 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 6 \ud83d\udcbe 4.32 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AV1",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar (2014) IMAX MULTI 1080p BluRay AV1 Opus (Eng Fr Spa) [AV1D]",
+            "info_hash": "b4dc1e6b6247406de73beb0c80df23137b62c970",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.6 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 2.6 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: AV1",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar 2014 1080p BluRay DD+ 5.1 x265-edge2020",
+            "info_hash": "58d52b6eb13970b5d6a6fa94d973df7d8c0769d9",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "5.24 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 8 \ud83d\udcbe 5.24 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.1080p.3D.FULL-SBS.HEVC.SBS-SUB.ENG-HUN.iFA-AI3D",
+            "info_hash": "396f812a69aa38cd0ceb702e43af849b1b689e44",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "25.96 GB",
+            "source": "",
+            "details": "\ud83d\udc64 14 \ud83d\udcbe 25.96 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: HEVC",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.1080p.BluRay.DDP5.1.x265.10bit-GalaxyRG265",
+            "info_hash": "9bb5a1b259c6a945eaf71ce162926514712296c7",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "4.49 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 178 \ud83d\udcbe 4.49 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "Interstellar.2014.1080p.UHD.BluRay.DD5.1.HDR.x265-TnP",
+            "info_hash": "b1f1e42f85b0be5e91ee37bbedf94a1fcd14acb2",
+            "file_idx": null,
+            "quality": "1080p",
+            "size": "25.8 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 25.8 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "safer",
+            "rd_warning": "Safer for RD: X265",
+            "rd_reasons": [],
+            "rd_score": 30
+          },
+          {
+            "name": "0peliculas series",
+            "info_hash": "cca5d69debbb9dadf164d91ad6bbd8c04216f3be",
+            "file_idx": 49,
+            "quality": "4K",
+            "size": "",
+            "source": "",
+            "details": "Interstellar.DVD.XviD.[www.DivxTotaL.com].avi",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstelar 2014 4K Dual \u00c1udio 5.1 WWW.BLUDV.COM",
+            "info_hash": "5669c94c766f76a380ef9e113462585cd5468c56",
+            "file_idx": 1,
+            "quality": "4K",
+            "size": "29.53 GB",
+            "source": "",
+            "details": "\ud83d\udc64 26 \ud83d\udcbe 29.53 GB \u2699\ufe0f Comando",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar 2014 2160p BluRay",
+            "info_hash": "fa9773b96054338d1f1c10f2a4d2d9bd5a578b92",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "8.36 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 100 \ud83d\udcbe 8.36 GB \u2699\ufe0f YTS",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.4K.UltraHD.BluRay.2160p.x264.DTS-HD.MA.5.1.AAC",
+            "info_hash": "4e01400cbaf903d5f4d8a5fab4428785fad1fa77",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "14.83 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 8 \ud83d\udcbe 14.83 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Videos cosas",
+            "info_hash": "b78480949e8acea0135133ad162116947588c494",
+            "file_idx": 299,
+            "quality": "4K",
+            "size": "",
+            "source": "",
+            "details": "Interstellar [MicroHD][1080 px][AC3 5.1-Castellano-AC3 5.1 Ingles+Subs][ES-EN]/InterstellarM1080.www.newpct1.com.mkv",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Amazing Films 8 - Mp4 x264 AC3 1080p",
+            "info_hash": "86cdbd9f120d27ddd1af7a9ce497555046fb6678",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "",
+            "source": "",
+            "details": "Interstellar (2014) 1080p Surround.mp4",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Great Films 7 - Mp4 x264 AC3 1080p",
+            "info_hash": "a11b0ed40082445fb2667930653bc4b27c2d89b2",
+            "file_idx": 19,
+            "quality": "1080p",
+            "size": "",
+            "source": "",
+            "details": "Interstellar (2014) 1080p Surround.mp4",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interestelar (2014) IMAX 1080p 6ch BrRip Dual Audio - 1046",
+            "info_hash": "d00c231fcfbafdb26afc448a84211c37cbe6717b",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.82 GB",
+            "source": "BRRip",
+            "details": "\ud83d\udc64 15 \ud83d\udcbe 2.82 GB \u2699\ufe0f Comando",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interestelar 2014 [1080p] WWW.BLUDV.COM",
+            "info_hash": "c041a3e511bcf55987ad1b00c261cbc8e8b02735",
+            "file_idx": 4,
+            "quality": "1080p",
+            "size": "2.79 GB",
+            "source": "",
+            "details": "\ud83d\udc64 25 \ud83d\udcbe 2.79 GB \u2699\ufe0f Comando",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar (2014) (2014) 1080p BrRip x264 - YIFY",
+            "info_hash": "89599bf4dc369a3a8eca26411c5ccf922d78b486",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.26 GB",
+            "source": "BRRip",
+            "details": "\ud83d\udc64 100 \ud83d\udcbe 2.26 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar 2014 BluRay 1080p DD 5 1 x264-BHDStudio",
+            "info_hash": "05a9e8affd01d0bf49a5a5ca9ae17af68444177e",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "10.07 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 44 \ud83d\udcbe 10.07 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar 2014 IMAX 1080p BRRip x264 DTS-JYK",
+            "info_hash": "c06cdcd0a15459d477c834b1a5a359c96702e631",
+            "file_idx": null,
+            "quality": "1080p",
+            "size": "4.26 GB",
+            "source": "BRRip",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 4.26 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.1080p.BluRay.H264.AAC-RARBG",
+            "info_hash": "7e73ef6fa1f2c495720d268794c55d020d8b4fcb",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "3.23 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 11 \ud83d\udcbe 3.23 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.1080p.dual-lat.cinecalidad.lol.mp4",
+            "info_hash": "046e835abf1d87e05884cf893e3f48df7646aab2",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "3.26 GB",
+            "source": "",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 3.26 GB \u2699\ufe0f Cinecalidad",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.1080p.IMAX.BluRay.DTS.HDMA5.1.H264-hallowed.DUAL-andrehsa",
+            "info_hash": "b3445a7fd563f432a820868ed03785c8c427a5d7",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "21.83 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 21.83 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.IMAX.1080p.Bluray.DTS-HD.MA.5.1-LTT",
+            "info_hash": "6610d7690444dc1944b6d55add66e7d844f18ae9",
+            "file_idx": null,
+            "quality": "1080p",
+            "size": "15.37 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 15.37 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.720p.BluRay.H264.AAC-RARBG",
+            "info_hash": "19ae5fa6a5ac854e1d121b646f82692c04fa1165",
+            "file_idx": 0,
+            "quality": "720p",
+            "size": "2.04 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 6 \ud83d\udcbe 2.04 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.TRUEFRENCH.BRRip.XviD-Slay3R",
+            "info_hash": "e84b38d0e88735929680d2e46f1ef9554b449938",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "1.39 GB",
+            "source": "BRRip",
+            "details": "\ud83d\udc64 164 \ud83d\udcbe 1.39 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "Interstellar.2014.TRUEFRENCH.BRRip.XviD-Slay3R",
+            "info_hash": "0f845beb0adb288648af5afc00223839c3be8be2",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "1.39 GB",
+            "source": "BRRip",
+            "details": "\ud83d\udc64 6 \ud83d\udcbe 1.39 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "neutral",
+            "rd_warning": "",
+            "rd_reasons": [],
+            "rd_score": 0
+          },
+          {
+            "name": "\u0418\u043d\u0442\u0435\u0440\u0441\u0442\u0435\u043b\u043b\u0430\u0440 / Interstellar (2014) BDRip 2160p \u043e\u0442 VoX | 4K | HDR | IMAX | D P A",
+            "info_hash": "4e601d51b73c9a860bf2a8754b7d4579366e1ccd",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "41.4 GB",
+            "source": "",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 41.4 GB \u2699\ufe0f Rutor",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "\u0418\u043d\u0442\u0435\u0440\u0441\u0442\u0435\u043b\u043b\u0430\u0440 / Interstellar (2014) UHD BDRip 2160p | SDR | D P A | IMAX Edition",
+            "info_hash": "e4776512929c30820683ecc5f22046e3faaf5fa0",
+            "file_idx": 0,
+            "quality": "2160p",
+            "size": "31.95 GB",
+            "source": "",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 31.95 GB \u2699\ufe0f Rutor",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "[moon] Interstellar 2014 1080p x264 WEBRip AC3 MultiSubs",
+            "info_hash": "ceafad344ea2e07d58ab18268ead930c863c0148",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.95 GB",
+            "source": "WEBRip",
+            "details": "\ud83d\udc64 16 \ud83d\udcbe 2.95 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: WEBRIP",
+            "rd_reasons": [
+              "WEBRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Imdb top 263 movies hindi english gdrive",
+            "info_hash": "66672b822002b6f19af478fb7c886787afee5f9f",
+            "file_idx": 98,
+            "quality": "1080p",
+            "size": "",
+            "source": "BluRay",
+            "details": "Interstellar.2014.2014.1080p.BluRay.x264.YIFY.mp4",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar (2014) 1080p BluRay x264 DTS-HD MA Soup",
+            "info_hash": "c5949a30f4a123c3b252a1f5b6b03baa05044659",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "25.9 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 11 \ud83d\udcbe 25.9 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar (2014) IMAX [BDrip 1080p: H264: Ita Eng Ac3 5.1: Sub NUIta NUEng] : Fratposa [TNT ..",
+            "info_hash": "05ba074d37d81c724669425ac6f143e9f579dc62",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "12.14 GB",
+            "source": "",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 12.14 GB \u2699\ufe0f MagnetDL",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar 2014 1080p ATVP WEB-DL DD 5 1 H 264-PiRaTeS",
+            "info_hash": "4d9a55a604927febdfcdbceb0bdbe253462bb95b",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "8.25 GB",
+            "source": "WEB-DL",
+            "details": "\ud83d\udc64 11 \ud83d\udcbe 8.25 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: WEB-DL",
+            "rd_reasons": [
+              "WEB-DL"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar 2014 1080p PTV WEB-DL AAC 2 0 H 264-PiRaTeS",
+            "info_hash": "306995463214adc16c9504162decc6f076bf04a4",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "4.15 GB",
+            "source": "WEB-DL",
+            "details": "\ud83d\udc64 9 \ud83d\udcbe 4.15 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: WEB-DL",
+            "rd_reasons": [
+              "WEB-DL"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar 2014 IMAX 1080p Bluray x264 DTS-EVO [MovietaM]",
+            "info_hash": "e797fb18a0a7fe4da796b3659a451799264c1fe1",
+            "file_idx": 1,
+            "quality": "1080p",
+            "size": "13.45 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 13.45 GB \u2699\ufe0f ThePirateBay",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar IMAX (2015) [1080p] MULTi BluRay X264-PopHD.mkv",
+            "info_hash": "12c4da846294544145de165a6f0894588d0114c1",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "3.89 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 8 \ud83d\udcbe 3.89 GB \u2699\ufe0f MagnetDL",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.1080p.WEB-DL.AAC.x264-skyflickz",
+            "info_hash": "4e8919ffc99ad81bd7ad10164c8e2898efcfaff3",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "2.3 GB",
+            "source": "WEB-DL",
+            "details": "\ud83d\udc64 23 \ud83d\udcbe 2.3 GB \u2699\ufe0f 1337x",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: WEB-DL",
+            "rd_reasons": [
+              "WEB-DL"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.ENG.1080p.HD.WEBRip.2.64GiB.AAC.x264-PortalGoods",
+            "info_hash": "38c4a823bf4fbb6c1692a25d7c9b03ef976b5254",
+            "file_idx": 2,
+            "quality": "1080p",
+            "size": "2.64 GB",
+            "source": "WEBRip",
+            "details": "\ud83d\udc64 12 \ud83d\udcbe 2.64 GB \u2699\ufe0f TorrentGalaxy",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: WEBRIP",
+            "rd_reasons": [
+              "WEBRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.MULTi.1080p.BluRay.x264-LOST",
+            "info_hash": "b13842f8a1a7308addd75ccd8f6b3e1679c1454b",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "13.12 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 201 \ud83d\udcbe 13.12 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.MULTi.1080p.BluRay.x264-LOST",
+            "info_hash": "67b0e6b69b9a1042e4bf41f559a2f5f409854cad",
+            "file_idx": 0,
+            "quality": "1080p",
+            "size": "13.12 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 13.12 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "The Christopher Nolan Collection (2000-2023) BDRip 1080p",
+            "info_hash": "96913f3281621ef4748c1136bcfb96d12e8a4f0c",
+            "file_idx": 10,
+            "quality": "1080p",
+            "size": "",
+            "source": "",
+            "details": "2014.Interstellar.1920x1080.BDRip.x264.DTS-HD.MA.mkv",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Dual Japanese dubbed English movies super pack",
+            "info_hash": "ea55ba3decb7e929bcb112b6b52882e3ddd1ec46",
+            "file_idx": 124,
+            "quality": "720p",
+            "size": "",
+            "source": "BluRay",
+            "details": "Interstellar.2014.720p.BluRay.x264(DUAL En-Ja)/Interstellar.2014.720p.BluRay.x264(DUAL En-Ja).mkv",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.720p.BluRay.x264.DTS-RARBG",
+            "info_hash": "9ce598aa2eb2611eff6f110bf2bfa9430fb92424",
+            "file_idx": 0,
+            "quality": "720p",
+            "size": "8.21 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 8.21 GB \u2699\ufe0f RARBG",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar.2014.FRENCH.720p.BluRay.x264-CARPEDIEM",
+            "info_hash": "700c4e390a1c9790edec3569c939da4ab9d6fe87",
+            "file_idx": 0,
+            "quality": "720p",
+            "size": "7.49 GB",
+            "source": "BluRay",
+            "details": "\ud83d\udc64 9 \ud83d\udcbe 7.49 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BLURAY.X264",
+            "rd_reasons": [
+              "BLURAY.X264"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar (2014) [PL] [AC3] [DVDRip] [XviD-GR4PE] [Lektor PL]",
+            "info_hash": "3900a8d241932e7d4b3bc93325d186649e9291da",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "1.9 GB",
+            "source": "DVDRip",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 1.9 GB \u2699\ufe0f BestTorrents",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: DVDRIP",
+            "rd_reasons": [
+              "DVDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "Interstellar 2014 DUAL BDRip-AVC IMAX Edition ExKinoRay",
+            "info_hash": "a13f6d472ace265eb13b28fd524fb24d2c6110b3",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "3.1 GB",
+            "source": "",
+            "details": "\ud83d\udc64 18 \ud83d\udcbe 3.1 GB \u2699\ufe0f MagnetDL",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "INTERSTELLAR.2014.FANSUB.VOSTFR.BDRIP.XVID-NOTAG.avi",
+            "info_hash": "3fe0f1e10f23ce3b1c4fd91b4177d95497bc9c4e",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "1.38 GB",
+            "source": "",
+            "details": "\ud83d\udc64 7 \ud83d\udcbe 1.38 GB \u2699\ufe0f Torrent9",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          },
+          {
+            "name": "\u0418\u043d\u0442\u0435\u0440\u0441\u0442\u0435\u043b\u043b\u0430\u0440 / Interstellar (2014) BDRip-AVC \u043e\u0442 HELLYWOOD | IMAX | \u041b\u0438\u0446\u0435\u043d\u0437\u0438\u044f",
+            "info_hash": "d10a4157348ded912d08ad2c0a054f7c5c12b5d6",
+            "file_idx": 0,
+            "quality": "Unknown",
+            "size": "1.46 GB",
+            "source": "",
+            "details": "\ud83d\udc64 5 \ud83d\udcbe 1.46 GB \u2699\ufe0f Rutor",
+            "seeders": null,
+            "rd_status": "likely_blocked",
+            "rd_warning": "Likely blocked by RD: BDRIP",
+            "rd_reasons": [
+              "BDRIP"
+            ],
+            "rd_score": -110
+          }
+        ]
+      }
+    },
+    {
+      "step": "search_summary",
+      "extra": {
+        "count": 88,
+        "sample_names": [
+          "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole) [QxR]",
+          "Interstellar (2014) IMAX Complete (2160p BluRay x265 HEVC 10bit SDR AAC 5.1 Joy) [UTR]",
+          "Interstellar.2014.IMAX.UHD.Blu-Ray.2160p.DV.HEVC.TrueHD.7.1.Atmos.x265-E",
+          "Interstellar (2014) IMAX (1080p BluRay x265 HEVC 10bit AAC 5.1 Tigole) [QxR]",
+          "Interstellar 2014 1080p DS4K BluRay x265 10 bit HDR AAC 5 1"
+        ]
+      }
+    },
+    {
+      "step": "set_provider_rd",
+      "status_code": 200,
+      "json": {
+        "ok": true,
+        "provider": "rd"
+      }
+    },
+    {
+      "step": "instant_rd",
+      "status_code": 200,
+      "json": {
+        "cached": {
+          "643294b09097abe573f60d81999891ed5bf0d299": false,
+          "a2a342d5ddd4f8844ec9f25f6e9c6f3f2762a657": false,
+          "20c13c11f513b4c7c14c29840d294e72d21a67d8": false,
+          "b476e787603fbbd7be4a0c0190efeed4cbcaf8ba": false,
+          "f61bef7f51c1ae5b9a1cb0e776586ffa0cfa7858": false,
+          "abf5451366b96d8c518a7f56820f7d247b11222d": false,
+          "6e51635522c34610e944ffedb2d322ecfe992ba8": false,
+          "b37bbb8d04b37159c3ca704c00836f1a26eb1483": false,
+          "5e745883e5e3c73b71282751be9e05a6c419ad90": false,
+          "80e1c80106105a9584077fc39ae7ffd1ba42ee43": false,
+          "84c693183f30cb65a79b49ca80e7409414758533": false,
+          "3f42d8909d53921cefcd51529e85d46eebb545d0": false,
+          "86bb6ae15a5cec1a3be3cf8b1eba1f15a48b9913": false,
+          "163d2082453d037f3bec8bb77ddce782797a7fc3": false,
+          "cd48aa3be9b0a324cb23e49aa5a32646f958e62c": false
+        }
+      }
+    },
+    {
+      "step": "instant_rd_summary",
+      "extra": {
+        "cached_count": 0,
+        "first_cached": []
+      }
+    },
+    {
+      "step": "magnet_rd",
+      "status_code": 200,
+      "json": {
+        "ok": true,
+        "provider": "rd",
+        "torrent_id": "GAYMNPOO6VGW4",
+        "status": "downloaded",
+        "links": [
+          "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+        ],
+        "filename": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)",
+        "files": [
+          {
+            "id": 1,
+            "path": "/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "bytes": 27616199775,
+            "selected": 1
+          }
+        ]
+      },
+      "extra": {
+        "chosen_hash": "643294b09097abe573f60d81999891ed5bf0d299"
+      }
+    },
+    {
+      "step": "unrestrict_rd_from_magnet",
+      "status_code": 200,
+      "json": {
+        "url": "https://41-4.download.real-debrid.com/d/BP2YS2667VFF2/Interstellar%20%282014%29%20%282160p%20x265%2010bit%20HDR%20Tigole%29.mkv",
+        "filename": "Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+        "filesize": 27616199775,
+        "mimeType": "video/x-matroska"
+      },
+      "extra": {
+        "link_prefix": "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+      }
+    },
+    {
+      "step": "poll_rd_1",
+      "status_code": 200,
+      "json": {
+        "status": "downloaded",
+        "progress": 100,
+        "speed": null,
+        "links": [
+          "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+        ],
+        "filename": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)",
+        "files": [
+          {
+            "id": 1,
+            "path": "/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "bytes": 27616199775,
+            "selected": 1
+          }
+        ]
+      },
+      "extra": {
+        "torrent_id": "GAYMNPOO6VGW4"
+      }
+    },
+    {
+      "step": "poll_rd_2",
+      "status_code": 200,
+      "json": {
+        "status": "downloaded",
+        "progress": 100,
+        "speed": null,
+        "links": [
+          "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+        ],
+        "filename": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)",
+        "files": [
+          {
+            "id": 1,
+            "path": "/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "bytes": 27616199775,
+            "selected": 1
+          }
+        ]
+      },
+      "extra": {
+        "torrent_id": "GAYMNPOO6VGW4"
+      }
+    },
+    {
+      "step": "poll_rd_3",
+      "status_code": 200,
+      "json": {
+        "status": "downloaded",
+        "progress": 100,
+        "speed": null,
+        "links": [
+          "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+        ],
+        "filename": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)",
+        "files": [
+          {
+            "id": 1,
+            "path": "/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "bytes": 27616199775,
+            "selected": 1
+          }
+        ]
+      },
+      "extra": {
+        "torrent_id": "GAYMNPOO6VGW4"
+      }
+    },
+    {
+      "step": "set_provider_tb",
+      "status_code": 200,
+      "json": {
+        "ok": true,
+        "provider": "tb"
+      }
+    },
+    {
+      "step": "instant_tb",
+      "status_code": 200,
+      "json": {
+        "cached": {
+          "643294b09097abe573f60d81999891ed5bf0d299": true,
+          "a2a342d5ddd4f8844ec9f25f6e9c6f3f2762a657": true,
+          "20c13c11f513b4c7c14c29840d294e72d21a67d8": true,
+          "b476e787603fbbd7be4a0c0190efeed4cbcaf8ba": true,
+          "f61bef7f51c1ae5b9a1cb0e776586ffa0cfa7858": true,
+          "abf5451366b96d8c518a7f56820f7d247b11222d": true,
+          "6e51635522c34610e944ffedb2d322ecfe992ba8": true,
+          "b37bbb8d04b37159c3ca704c00836f1a26eb1483": true,
+          "5e745883e5e3c73b71282751be9e05a6c419ad90": true,
+          "80e1c80106105a9584077fc39ae7ffd1ba42ee43": true,
+          "84c693183f30cb65a79b49ca80e7409414758533": true,
+          "3f42d8909d53921cefcd51529e85d46eebb545d0": true,
+          "86bb6ae15a5cec1a3be3cf8b1eba1f15a48b9913": true,
+          "163d2082453d037f3bec8bb77ddce782797a7fc3": true,
+          "cd48aa3be9b0a324cb23e49aa5a32646f958e62c": true
+        }
+      }
+    },
+    {
+      "step": "instant_tb_summary",
+      "extra": {
+        "cached_count": 15,
+        "first_cached": [
+          "643294b09097abe573f60d81999891ed5bf0d299",
+          "a2a342d5ddd4f8844ec9f25f6e9c6f3f2762a657",
+          "20c13c11f513b4c7c14c29840d294e72d21a67d8"
+        ]
+      }
+    },
+    {
+      "step": "magnet_tb",
+      "status_code": 200,
+      "json": {
+        "ok": true,
+        "provider": "tb",
+        "torrent_id": 28271163,
+        "status": "downloaded",
+        "links": [
+          "https://nexus-133.neur.tb-cdn.st/dld/cd24b618-c7a0-47ce-83a2-eaba11aa689b?token=5a2594b9-b349-4341-8e3c-d499bbc61272"
+        ],
+        "filename": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole) [QxR]",
+        "files": [
+          {
+            "id": 0,
+            "md5": null,
+            "hash": "643294b09097abe573f60d81999891ed5bf0d299",
+            "name": "Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "size": 27616199775,
+            "zipped": false,
+            "s3_path": "643294b09097abe573f60d81999891ed5bf0d299/Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "infected": false,
+            "mimetype": "video/x-matroska",
+            "short_name": "Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "absolute_path": "/completed/643294b09097abe573f60d81999891ed5bf0d299/Interstellar (2014) (2160p BluRay x265 HEVC 10bit HDR AAC 5.1 Tigole)/Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv",
+            "opensubtitles_hash": "646077af323d778d"
+          }
+        ]
+      },
+      "extra": {
+        "chosen_hash": "643294b09097abe573f60d81999891ed5bf0d299"
+      }
+    },
+    {
+      "step": "unrestrict_tb_from_magnet",
+      "status_code": 401,
+      "json": {
+        "detail": "Session expired"
+      },
+      "extra": {
+        "link_prefix": "https://nexus-133.neur.tb-cdn.st/dld/cd24b618-c7a0-47ce-83a2-eaba11aa689b?token=5a2594b9-b349-4341-8e3c-d499bbc61272"
+      }
+    },
+    {
+      "step": "poll_tb_1",
+      "status_code": 401,
+      "json": {
+        "detail": "Session expired"
+      },
+      "extra": {
+        "torrent_id": 28271163
+      }
+    },
+    {
+      "step": "poll_tb_2",
+      "status_code": 401,
+      "json": {
+        "detail": "Session expired"
+      },
+      "extra": {
+        "torrent_id": 28271163
+      }
+    },
+    {
+      "step": "poll_tb_3",
+      "status_code": 401,
+      "json": {
+        "detail": "Session expired"
+      },
+      "extra": {
+        "torrent_id": 28271163
+      }
+    },
+    {
+      "step": "debug_logs",
+      "status_code": 200,
+      "json": [
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status entry",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "28265271",
+            "has_key": true
+          },
+          "traceId": "",
+          "ts": 1779053321795
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "28265271"
+          },
+          "traceId": "",
+          "ts": 1779053321859
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info http error",
+          "data": {
+            "torrent_id": "28265271",
+            "status_code": 404,
+            "body_sample": "{\n\t\"error\": \"unknown_method\",\n\t\"error_code\": 3\n}"
+          },
+          "traceId": "",
+          "ts": 1779053322388
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status error",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "28265271",
+            "error": "404 Client Error: Not Found for url: https://api.real-debrid.com/rest/1.0/torrents/info/28265271",
+            "error_type": "HTTPError"
+          },
+          "traceId": "",
+          "ts": 1779053322398
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status entry",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "28265102",
+            "has_key": true
+          },
+          "traceId": "",
+          "ts": 1779053322425
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "28265102"
+          },
+          "traceId": "",
+          "ts": 1779053322453
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info http error",
+          "data": {
+            "torrent_id": "28265102",
+            "status_code": 404,
+            "body_sample": "{\n\t\"error\": \"unknown_method\",\n\t\"error_code\": 3\n}"
+          },
+          "traceId": "",
+          "ts": 1779053322916
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status error",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "28265102",
+            "error": "404 Client Error: Not Found for url: https://api.real-debrid.com/rest/1.0/torrents/info/28265102",
+            "error_type": "HTTPError"
+          },
+          "traceId": "",
+          "ts": 1779053322929
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4"
+          },
+          "traceId": "",
+          "ts": 1779053400383
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info success",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status_code": 200,
+            "status": "waiting_files_selection",
+            "progress": 0,
+            "links_count": 0
+          },
+          "traceId": "",
+          "ts": 1779053400718
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4"
+          },
+          "traceId": "",
+          "ts": 1779053401279
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info success",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status_code": 200,
+            "status": "downloaded",
+            "progress": 100,
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053401616
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:unrestrict_link",
+          "msg": "[DEBUG] router unrestrict entry",
+          "data": {
+            "provider": "rd",
+            "has_key": true,
+            "link_prefix": "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+          },
+          "traceId": "",
+          "ts": 1779053401658
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "C",
+          "location": "app/services/debrid.py:unrestrict_link",
+          "msg": "[DEBUG] rd unrestrict entry",
+          "data": {
+            "link_prefix": "https://real-debrid.com/d/ILC45MRST4C2I3DF"
+          },
+          "traceId": "",
+          "ts": 1779053401683
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "C",
+          "location": "app/services/debrid.py:unrestrict_link",
+          "msg": "[DEBUG] rd unrestrict success",
+          "data": {
+            "status_code": 200,
+            "has_download": true,
+            "filename": "Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv"
+          },
+          "traceId": "",
+          "ts": 1779053402053
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:unrestrict_link",
+          "msg": "[DEBUG] router unrestrict rd success",
+          "data": {
+            "provider": "rd",
+            "has_url": true,
+            "filename": "Interstellar (2014) (2160p x265 10bit HDR Tigole).mkv"
+          },
+          "traceId": "",
+          "ts": 1779053402091
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status entry",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "has_key": true
+          },
+          "traceId": "",
+          "ts": 1779053404125
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4"
+          },
+          "traceId": "",
+          "ts": 1779053404152
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info success",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status_code": 200,
+            "status": "downloaded",
+            "progress": 100,
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053404644
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status rd success",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status": "downloaded",
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053404655
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status entry",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "has_key": true
+          },
+          "traceId": "",
+          "ts": 1779053406690
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4"
+          },
+          "traceId": "",
+          "ts": 1779053406704
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info success",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status_code": 200,
+            "status": "downloaded",
+            "progress": 100,
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053407160
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status rd success",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status": "downloaded",
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053407195
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status entry",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "has_key": true
+          },
+          "traceId": "",
+          "ts": 1779053409230
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info entry",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4"
+          },
+          "traceId": "",
+          "ts": 1779053409259
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "B",
+          "location": "app/services/debrid.py:get_torrent_info",
+          "msg": "[DEBUG] rd get_torrent_info success",
+          "data": {
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status_code": 200,
+            "status": "downloaded",
+            "progress": 100,
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053409676
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "A",
+          "location": "app/routers/debrid.py:get_torrent_status",
+          "msg": "[DEBUG] router torrent status rd success",
+          "data": {
+            "provider": "rd",
+            "torrent_id": "GAYMNPOO6VGW4",
+            "status": "downloaded",
+            "links_count": 1
+          },
+          "traceId": "",
+          "ts": 1779053409688
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "D",
+          "location": "app/services/debrid.py:tb_get_torrent_info",
+          "msg": "[DEBUG] tb_get_torrent_info entry",
+          "data": {
+            "torrent_id": "28271163"
+          },
+          "traceId": "",
+          "ts": 1779053411011
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "D",
+          "location": "app/services/debrid.py:tb_get_torrent_info",
+          "msg": "[DEBUG] tb_get_torrent_info dict payload",
+          "data": {
+            "torrent_id": "28271163",
+            "keys": [
+              "active",
+              "allow_zipped",
+              "alternative_hashes",
+              "auth_id",
+              "availability",
+              "cached",
+              "cached_at",
+              "created_at",
+              "download_finished",
+              "download_path",
+              "download_present",
+              "download_speed",
+              "download_state",
+              "eta",
+              "expires_at",
+              "files",
+              "hash",
+              "id",
+              "long_term_seeding",
+              "magnet"
+            ],
+            "download_state": "cached",
+            "download_finished": true
+          },
+          "traceId": "",
+          "ts": 1779053411613
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "D",
+          "location": "app/services/debrid.py:tb_request_download",
+          "msg": "[DEBUG] tb_request_download entry",
+          "data": {
+            "torrent_id": "28271163",
+            "file_id": "0"
+          },
+          "traceId": "",
+          "ts": 1779053411624
+        },
+        {
+          "sessionId": "web-ui-not-loading",
+          "runId": "pre-fix",
+          "hypothesisId": "D",
+          "location": "app/services/debrid.py:tb_request_download",
+          "msg": "[DEBUG] tb_request_download json payload",
+          "data": {
+            "torrent_id": "28271163",
+            "file_id": "0",
+            "status_code": 200,
+            "payload_type": "str"
+          },
+          "traceId": "",
+          "ts": 1779053412460
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+[
+    {
+        "Id":  4908,
+        "ProcessName":  "ArmouryCrateControlInterface",
+        "Path":  null
+    },
+    {
+        "Id":  5272,
+        "ProcessName":  "python",
+        "Path":  "C:\\Users\\conne\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+    },
+    {
+        "Id":  38316,
+        "ProcessName":  "python",
+        "Path":  "C:\\Users\\conne\\nomad-pi\\.venv\\Scripts\\python.exe"
+    }
+]

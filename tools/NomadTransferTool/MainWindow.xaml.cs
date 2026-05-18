@@ -37,6 +37,20 @@ namespace NomadTransferTool
         }
     }
 
+    public class ActiveDownload : INotifyPropertyChanged
+    {
+        private string _fileName = "";
+        private string _progress = "";
+
+        public string FileName { get => _fileName; set { _fileName = value; OnPropertyChanged(); } }
+        public string Progress { get => _progress; set { _progress = value; OnPropertyChanged(); } }
+        public CancellationTokenSource CancellationTokenSource { get; set; } = new CancellationTokenSource();
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        protected void OnPropertyChanged([CallerMemberName] string? name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
     public partial class MainWindow : Window, INotifyPropertyChanged, IDisposable
     {
         private const string APP_VERSION = "1.5.1";
@@ -398,9 +412,9 @@ namespace NomadTransferTool
 
                 // Push to Pi
                 var content = new StringContent(JsonConvert.SerializeObject(new { key = key }), Encoding.UTF8, "application/json");
-                var res = await client.PostAsync($"{API_BASE}/system/settings/omdb", content);
+                var res = await PostWithAuthRetry($"{API_BASE}/system/settings/omdb", content, true);
                 
-                if (res.IsSuccessStatusCode) {
+                if (res != null && res.IsSuccessStatusCode) {
                     AddLog("OMDb key saved and synced to Pi successfully.");
                     System.Windows.MessageBox.Show("OMDb key saved and synced to Nomad Pi!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
                 } else {
@@ -687,6 +701,7 @@ namespace NomadTransferTool
         public ObservableCollection<DebridTitleResult> DebridTitleResults { get => _debridTitleResults; set { _debridTitleResults = value; OnPropertyChanged(); } }
         public DebridTitleResult? SelectedDebridTitle { get => _selectedDebridTitle; set { _selectedDebridTitle = value; OnPropertyChanged(); } }
         public ObservableCollection<DebridTorrentResult> DebridTorrentResults { get => _debridTorrentResults; set { _debridTorrentResults = value; OnPropertyChanged(); } }
+        public ObservableCollection<ActiveDownload> DebridActiveDownloads { get; set; } = new ObservableCollection<ActiveDownload>();
         public DebridTorrentResult? SelectedDebridTorrent { get => _selectedDebridTorrent; set { _selectedDebridTorrent = value; OnPropertyChanged(); } }
         public string DebridStatus { get => _debridStatus; set { _debridStatus = value; OnPropertyChanged(); } }
         public EncodingPreset? SelectedGlobalPreset 
@@ -1262,7 +1277,7 @@ namespace NomadTransferTool
                 _ = Task.Run(async () => {
                     try {
                         var content = new StringContent(JsonConvert.SerializeObject(new { key = OMDB_API_KEY }), Encoding.UTF8, "application/json");
-                        await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Post, $"{API_BASE}/system/settings/omdb"), content);
+                        await PostWithAuthRetry($"{API_BASE}/system/settings/omdb", content, false);
                     } catch { }
                 });
             }
@@ -1615,8 +1630,9 @@ namespace NomadTransferTool
 
             if (string.IsNullOrWhiteSpace(key))
             {
-                SetDebridKeyStatusForProvider(provider, "Enter an API key");
-                return false;
+                // If key is empty, the user might have saved it on the Pi already.
+                // We just set the provider above, which is enough.
+                return true;
             }
 
             var keyBody = new StringContent(JsonConvert.SerializeObject(new { key }), Encoding.UTF8, "application/json");
@@ -1773,17 +1789,17 @@ namespace NomadTransferTool
             return s;
         }
 
-        private async Task DownloadFileWithProgress(string url, string destPath, Action<string> status)
+        private async Task DownloadFileWithProgress(string url, string destPath, Action<string> status, CancellationToken cancellationToken = default)
         {
             using var http = new HttpClient();
             http.Timeout = TimeSpan.FromHours(6);
-            using var res = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            using var res = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             res.EnsureSuccessStatusCode();
 
             Directory.CreateDirectory(Path.GetDirectoryName(destPath) ?? Path.GetTempPath());
 
             var total = res.Content.Headers.ContentLength;
-            await using var src = await res.Content.ReadAsStreamAsync();
+            await using var src = await res.Content.ReadAsStreamAsync(cancellationToken);
             await using var dst = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, true);
 
             var buffer = new byte[1024 * 256];
@@ -1792,9 +1808,10 @@ namespace NomadTransferTool
 
             while (true)
             {
-                var read = await src.ReadAsync(buffer.AsMemory(0, buffer.Length));
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = await src.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
                 if (read <= 0) break;
-                await dst.WriteAsync(buffer.AsMemory(0, read));
+                await dst.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 readTotal += read;
 
                 if (sw.ElapsedMilliseconds > 350)
@@ -1825,7 +1842,11 @@ namespace NomadTransferTool
             {
                 DebridStatus = "Preparing debrid download...";
                 var ok = await DebridApplyProviderAndKey(true);
-                if (!ok) return;
+                if (!ok) 
+                {
+                    if (DebridStatus == "Preparing debrid download...") DebridStatus = "Provider setup failed";
+                    return;
+                }
 
                 var magnetBody = new StringContent(JsonConvert.SerializeObject(new { info_hash = SelectedDebridTorrent.InfoHash.Trim() }), Encoding.UTF8, "application/json");
                 var magnetRes = await PostWithAuthRetry($"{API_BASE}/debrid/magnet", magnetBody, true);
@@ -1870,13 +1891,19 @@ namespace NomadTransferTool
                 var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(dlName) ? (SelectedDebridTorrent.Name + ".mkv") : dlName);
                 var destPath = Path.Combine(tempRoot, fileName);
 
-                DebridStatus = "Downloading...";
-                await DownloadFileWithProgress(dlUrl, destPath, p => Dispatcher.Invoke(() => DebridStatus = $"Downloading... {p}"));
-                DebridStatus = $"Downloaded: {Path.GetFileName(destPath)}";
+                var activeDl = new ActiveDownload { FileName = fileName, Progress = "Starting..." };
+                Dispatcher.Invoke(() => DebridActiveDownloads.Add(activeDl));
+
+                DebridStatus = "Downloading in background...";
+                await DownloadFileWithProgress(dlUrl, destPath, p => Dispatcher.Invoke(() => activeDl.Progress = p), activeDl.CancellationTokenSource.Token);
+                
+                Dispatcher.Invoke(() => DebridActiveDownloads.Remove(activeDl));
+                DebridStatus = $"Downloaded: {fileName}. Added to Transfer Hub.";
 
                 Dispatcher.Invoke(() =>
                 {
                     OnFilesDropped(new[] { destPath });
+                    TabTransfer.IsChecked = true; // Switch to Transfer Hub so user can see it
                 });
             }
             catch (Exception ex)
@@ -1885,11 +1912,19 @@ namespace NomadTransferTool
             }
         }
 
+        private void CancelDebridDownload_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.DataContext is ActiveDownload activeDl)
+            {
+                activeDl.CancellationTokenSource.Cancel();
+                DebridStatus = $"Cancelled download: {activeDl.FileName}";
+                DebridActiveDownloads.Remove(activeDl);
+            }
+        }
+
         private void DropZone_DragOver(object sender, System.Windows.DragEventArgs e)
         {
             if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
-            {
-                e.Effects = System.Windows.DragDropEffects.Copy;
             }
             else
             {

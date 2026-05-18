@@ -2176,13 +2176,27 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
     copy_video = video_codec in ("h264",)
     copy_audio = audio_codec in ("aac", "mp3")
 
-    codec_args: list[str]
+    codec_args: list[str] = []
     if copy_video and copy_audio:
         codec_args = ["-c", "copy"]
     elif copy_video and not copy_audio:
         codec_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k"]
     else:
-        codec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k"]
+        # Detect hardware encoder for Raspberry Pi
+        hw_encoder = None
+        try:
+            r = subprocess.run(["ffmpeg", "-encoders"], capture_output=True, text=True)
+            if "h264_v4l2m2m" in r.stdout:
+                hw_encoder = "h264_v4l2m2m"
+            elif "h264_omx" in r.stdout:
+                hw_encoder = "h264_omx"
+        except:
+            pass
+
+        if hw_encoder:
+            codec_args = ["-c:v", hw_encoder, "-b:v", "2M", "-c:a", "aac", "-b:a", "160k"]
+        else:
+            codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac", "-b:a", "160k"]
 
     os.makedirs(os.path.dirname(out_fs), exist_ok=True)
     tmp_fs = out_fs + ".tmp.mp4"

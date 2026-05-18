@@ -452,6 +452,10 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding SpaceWarning}" Foreground="{StaticResource PrimaryColor}" FontWeight="SemiBold"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                         <CheckBox x:Name="HubHandbrakeCheck" Content="Optimize for Nomad (Transcode)" IsEnabled="{Binding IsHandbrakeAvailable}" IsChecked="{Binding IsTranscodingEnabled}" Margin="0,0,15,0" Foreground="{StaticResource MutedTextColor}" ToolTip="When enabled, videos are transcoded before transferring to save space and improve playback compatibility."/>
+                                         <ComboBox ItemsSource="{Binding EncodingPresets}" SelectedItem="{Binding SelectedGlobalPreset}" DisplayMemberPath="Name" Height="24" Width="120" FontSize="11" Visibility="{Binding IsTranscodingEnabled, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                     </StackPanel>
                                     <TextBlock Text="{Binding TranscodeQueue.Count, StringFormat='Transcode Queue: {0} items pending'}" Foreground="{StaticResource MutedTextColor}" FontSize="11" Margin="0,4,0,0" Visibility="{Binding TranscodeQueue.Count, Converter={StaticResource CountToVisibilityConverter}, ConverterParameter=0}"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Grid.Column="1">
@@ -640,6 +644,26 @@
                             <StackPanel Grid.Row="2" Margin="0,15,0,0">
                                 <Button Content="Download via Debrid &amp; Add to Queue" Click="DebridDownloadSelected_Click" Style="{StaticResource PrimaryButton}" Height="40" FontSize="14"/>
                                 <TextBlock Text="{Binding DebridStatus}" Foreground="{StaticResource MutedTextColor}" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" HorizontalAlignment="Center"/>
+                                
+                                <!-- Active Downloads -->
+                                <ItemsControl ItemsSource="{Binding DebridActiveDownloads}" Margin="0,10,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#1A1A1A" CornerRadius="4" Padding="8" Margin="0,2">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding FileName}" Foreground="White" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Progress}" Foreground="{StaticResource SecondaryColor}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <Button Grid.Column="2" Content="✕" Click="CancelDebridDownload_Click" Background="Transparent" Foreground="#888" BorderThickness="0" Padding="4,0" Cursor="Hand" VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </Grid>
                     </Border>
