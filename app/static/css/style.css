@@ -216,12 +216,12 @@ nav button.active {
         position: fixed !important;
         top: 0 !important;
         right: -100% !important;
-        width: 80% !important;
-        max-width: 320px !important;
+        width: min(86vw, 360px) !important;
+        max-width: none !important;
         height: 100vh !important;
         background: rgb(20, 30, 50) !important;
         flex-direction: column !important;
-        padding: 80px 20px 20px 20px !important;
+        padding: calc(72px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)) 16px !important;
         gap: 8px !important;
         z-index: 9999 !important;
         border-left: 2px solid rgba(59, 130, 246, 0.8) !important;
@@ -240,7 +240,7 @@ nav button.active {
     header nav#main-nav button {
         width: 100%;
         text-align: left;
-        padding: 16px 20px;
+        padding: 14px 16px;
         font-size: 1rem;
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.05) !important;
@@ -298,7 +298,8 @@ nav button.active {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    right: min(320px, 80%);
+    left: 0;
+    right: 0;
 }
 
 }
@@ -2013,6 +2014,24 @@ h1, h2, h3 {
 
     .player-volume {
         display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    main {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    main > section {
+        padding: 14px;
+        border-radius: 18px;
+        margin-bottom: 14px;
+    }
+
+    .stat-card {
+        padding: 14px;
+        border-radius: 16px;
     }
 }
 
