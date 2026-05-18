@@ -871,13 +871,17 @@ namespace NomadTransferTool
             string zipPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "hb.zip");
             try
             {
+                using var githubClient = new HttpClient();
+                githubClient.Timeout = TimeSpan.FromMinutes(10);
+                githubClient.DefaultRequestHeaders.UserAgent.ParseAdd($"NomadTransferTool/{APP_VERSION}");
+                githubClient.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+
                 IsTransferring = true;
                 TotalProgress = 0;
                 CurrentStatus = "Checking for latest Handbrake release...";
 
                 // 1. Resolve latest release via GitHub API
-                client.DefaultRequestHeaders.UserAgent.ParseAdd($"NomadTransferTool/{APP_VERSION}");
-                var apiResponse = await client.GetStringAsync("https://api.github.com/repos/HandBrake/HandBrake/releases/latest");
+                var apiResponse = await githubClient.GetStringAsync("https://api.github.com/repos/HandBrake/HandBrake/releases/latest");
                 var release = JsonConvert.DeserializeObject<GithubRelease>(apiResponse);
                 if (release == null) throw new Exception("Failed to parse GitHub API response.");
 
@@ -906,7 +910,7 @@ namespace NomadTransferTool
 
                 // 2. Download Handbrake zip
                 CurrentStatus = $"Downloading HandbrakeCLI {version}...";
-                using (var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+                using (var response = await githubClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
                 {
                     response.EnsureSuccessStatusCode();
                     var totalBytes = response.Content.Headers.ContentLength ?? -1L;
@@ -934,7 +938,7 @@ namespace NomadTransferTool
                 {
                     CurrentStatus = "Verifying checksum...";
                     string expectedHash = "";
-                    var hashData = await client.GetStringAsync(checksumUrl);
+                    var hashData = await githubClient.GetStringAsync(checksumUrl);
                     string zipName = Path.GetFileName(downloadUrl) ?? "";
                     
                     foreach (var line in hashData.Split('\n'))
@@ -3505,6 +3509,7 @@ namespace NomadTransferTool
             public string InfoHash { get; set; } = "";
 
             [JsonProperty("size")]
+            [JsonConverter(typeof(FlexibleSizeConverter))]
             public long Size { get; set; }
 
             [JsonProperty("seeders")]
@@ -3727,6 +3732,53 @@ namespace NomadTransferTool
             return category == target ? Visibility.Visible : Visibility.Collapsed;
         }
         public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) => throw new NotImplementedException();
+    }
+
+    public class FlexibleSizeConverter : JsonConverter<long>
+    {
+        public override long ReadJson(JsonReader reader, Type objectType, long existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Integer)
+                return Convert.ToInt64(reader.Value);
+
+            if (reader.TokenType == JsonToken.Float)
+                return Convert.ToInt64(reader.Value);
+
+            if (reader.TokenType != JsonToken.String || reader.Value == null)
+                return 0;
+
+            var text = reader.Value.ToString()?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(text))
+                return 0;
+
+            if (long.TryParse(text, out var rawBytes))
+                return rawBytes;
+
+            var match = Regex.Match(text, @"^(?<num>\d+(?:\.\d+)?)\s*(?<unit>[kmgtp]?b)$", RegexOptions.IgnoreCase);
+            if (!match.Success)
+                return 0;
+
+            if (!double.TryParse(match.Groups["num"].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number))
+                return 0;
+
+            var unit = match.Groups["unit"].Value.ToUpperInvariant();
+            double multiplier = unit switch
+            {
+                "KB" => 1024d,
+                "MB" => 1024d * 1024d,
+                "GB" => 1024d * 1024d * 1024d,
+                "TB" => 1024d * 1024d * 1024d * 1024d,
+                "PB" => 1024d * 1024d * 1024d * 1024d * 1024d,
+                _ => 1d,
+            };
+
+            return Convert.ToInt64(number * multiplier);
+        }
+
+        public override void WriteJson(JsonWriter writer, long value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
     }
 
     public class InverseBooleanConverter : System.Windows.Data.IValueConverter

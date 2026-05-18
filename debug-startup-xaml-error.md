@@ -24,12 +24,18 @@ Status: OPEN
   - `System.InvalidOperationException: The calling thread cannot access this object because a different thread owns it.`
   - stack points to `MainWindow.RefreshDrives()` at the first access to `DriveList.SelectedItem`.
 - `RefreshDrives()` is called by a timer/background callback, so direct reads/writes to `DriveList` and `Drives` must happen on the dispatcher thread.
+- Runtime screenshot showed HandBrake download failing with `401 (Unauthorized)`.
+- `DownloadHandbrake()` was using the shared app `HttpClient`, which also carries Nomad auth state and is reused across unrelated requests.
+- Runtime screenshot also showed Debrid torrent loading failing on JSON conversion: value `"8.87 GB"` could not be converted to `System.Int64`.
+- `DebridTorrentResult.Size` was typed as `long` with default deserialization, which only works when the API returns raw numeric bytes.
 
 ## Fix
 - Updated `generate_xaml.py` so it now emits valid WPF markup matching `MainWindow.xaml`.
 - Replaced the root `Window` background lookup with a literal `#0D0D0D` to avoid early local-resource resolution.
 - Added deeper startup exception formatting in `App.xaml.cs` so future startup failures include inner exception details.
 - Updated `RefreshDrives()` so UI-bound reads and writes are wrapped in `Dispatcher.InvokeAsync`, while the actual drive enumeration stays off the UI thread.
+- Updated `DownloadHandbrake()` to use a dedicated GitHub `HttpClient` with its own headers, instead of the shared authenticated app client.
+- Added `FlexibleSizeConverter` and applied it to `DebridTorrentResult.Size` so string sizes like `"8.87 GB"` deserialize correctly.
 
 ## Verification
 - `dotnet publish` passes locally on current HEAD.
