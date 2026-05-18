@@ -70,6 +70,18 @@ namespace NomadTransferTool
              base.OnClosed(e);
          }
 
+        protected override void OnStateChanged(EventArgs e)
+        {
+            if (WindowState == WindowState.Normal)
+            {
+                this.Activate();
+                this.Topmost = true;
+                this.Topmost = false;
+                this.Focus();
+            }
+            base.OnStateChanged(e);
+        }
+
          private static readonly HttpClient client = new HttpClient();
 
         private string EncryptString(string plainText)
@@ -152,6 +164,8 @@ namespace NomadTransferTool
         private string _debridApiKey = "";
         private string _debridTitleQuery = "";
         private string _debridSearchType = "movie";
+        private string _debridSearchSeason = "1";
+        private string _debridSearchEpisode = "1";
         private ObservableCollection<DebridTitleResult> _debridTitleResults = new ObservableCollection<DebridTitleResult>();
         private DebridTitleResult? _selectedDebridTitle;
         private ObservableCollection<DebridTorrentResult> _debridTorrentResults = new ObservableCollection<DebridTorrentResult>();
@@ -507,6 +521,18 @@ namespace NomadTransferTool
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
                 AuthStatus = $"Logged in as {ServerUsername}";
                 AddLog("Authenticated with Nomad Pi.");
+                
+                // Auto-sync local OMDb key to Pi on login
+                if (!string.IsNullOrEmpty(OMDB_API_KEY))
+                {
+                    _ = Task.Run(async () => {
+                        try {
+                            var content = new StringContent(JsonConvert.SerializeObject(new { key = OMDB_API_KEY }), Encoding.UTF8, "application/json");
+                            await client.PostAsync($"{API_BASE}/system/settings/omdb", content);
+                        } catch { }
+                    });
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -595,6 +621,8 @@ namespace NomadTransferTool
         public string DebridApiKey { get => _debridApiKey; set { _debridApiKey = value; OnPropertyChanged(); } }
         public string DebridTitleQuery { get => _debridTitleQuery; set { _debridTitleQuery = value; OnPropertyChanged(); } }
         public string DebridSearchType { get => _debridSearchType; set { _debridSearchType = value; OnPropertyChanged(); } }
+        public string DebridSearchSeason { get => _debridSearchSeason; set { _debridSearchSeason = value; OnPropertyChanged(); } }
+        public string DebridSearchEpisode { get => _debridSearchEpisode; set { _debridSearchEpisode = value; OnPropertyChanged(); } }
         public ObservableCollection<DebridTitleResult> DebridTitleResults { get => _debridTitleResults; set { _debridTitleResults = value; OnPropertyChanged(); } }
         public DebridTitleResult? SelectedDebridTitle { get => _selectedDebridTitle; set { _selectedDebridTitle = value; OnPropertyChanged(); } }
         public ObservableCollection<DebridTorrentResult> DebridTorrentResults { get => _debridTorrentResults; set { _debridTorrentResults = value; OnPropertyChanged(); } }
@@ -1153,17 +1181,22 @@ namespace NomadTransferTool
         {
             if (OMDB_API_KEY == OmdbKeyBox.Password) return;
             OMDB_API_KEY = OmdbKeyBox.Password;
-            try { File.WriteAllText("omdb.txt", OMDB_API_KEY); } catch { }
+            try { File.WriteAllText("omdb.txt", EncryptString(OMDB_API_KEY)); } catch { }
+            
+            // Auto-sync to Pi
+            if (!string.IsNullOrEmpty(OMDB_API_KEY) && !string.IsNullOrEmpty(_authToken))
+            {
+                _ = Task.Run(async () => {
+                    try {
+                        var content = new StringContent(JsonConvert.SerializeObject(new { key = OMDB_API_KEY }), Encoding.UTF8, "application/json");
+                        await SendAuthedAsync(new HttpRequestMessage(HttpMethod.Post, $"{API_BASE}/system/settings/omdb"), content);
+                    } catch { }
+                });
+            }
         }
 
-        private void RefreshDrives()
+        private async void RefreshDrives()
         {
-            if (!Dispatcher.CheckAccess())
-            {
-                Dispatcher.Invoke(RefreshDrives);
-                return;
-            }
-
             var selectedName = (DriveList.SelectedItem as DriveInfoModel)?.Name;
             
             // Temporary list to avoid flickering/multiple UI updates
@@ -1171,57 +1204,61 @@ namespace NomadTransferTool
 
             // 1. Add Local USB Drives
             string systemDrive = Path.GetPathRoot(Environment.SystemDirectory) ?? "";
-            foreach (var drive in DriveInfo.GetDrives())
+            
+            await Task.Run(() => 
             {
-                bool isReady;
-                try { isReady = drive.IsReady; } catch { continue; }
-                if (!isReady) continue;
-
-                if (drive.DriveType != DriveType.Removable && drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Unknown) continue;
-                if (!string.IsNullOrEmpty(systemDrive) && string.Equals(drive.Name, systemDrive, StringComparison.OrdinalIgnoreCase)) continue;
-
-                string volumeLabel = "";
-                try { volumeLabel = drive.VolumeLabel; } catch { }
-
-                long totalSize = 0;
-                long freeSpace = 0;
-                try { totalSize = drive.TotalSize; } catch { }
-                try { freeSpace = drive.AvailableFreeSpace; } catch { }
-
-                string defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : "Drive";
-                if (string.IsNullOrWhiteSpace(volumeLabel)) defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : drive.Name.TrimEnd('\\');
-
-                newDrives.Add(new DriveInfoModel
+                foreach (var drive in DriveInfo.GetDrives())
                 {
-                    Name = drive.Name,
-                    Label = string.IsNullOrEmpty(volumeLabel) ? defaultLabel : volumeLabel,
-                    TotalSize = totalSize,
-                    AvailableFreeSpace = freeSpace,
-                    IsMounted = true
-                });
-            }
+                    bool isReady;
+                    try { isReady = drive.IsReady; } catch { continue; }
+                    if (!isReady) continue;
+
+                    if (drive.DriveType != DriveType.Removable && drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Unknown) continue;
+                    if (!string.IsNullOrEmpty(systemDrive) && string.Equals(drive.Name, systemDrive, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    string volumeLabel = "";
+                    try { volumeLabel = drive.VolumeLabel; } catch { }
+
+                    long totalSize = 0;
+                    long freeSpace = 0;
+                    try { totalSize = drive.TotalSize; } catch { }
+                    try { freeSpace = drive.AvailableFreeSpace; } catch { }
+
+                    string defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : "Drive";
+                    if (string.IsNullOrWhiteSpace(volumeLabel)) defaultLabel = drive.DriveType == DriveType.Removable ? "USB Drive" : drive.Name.TrimEnd('\\');
+
+                    newDrives.Add(new DriveInfoModel
+                    {
+                        Name = drive.Name,
+                        Label = string.IsNullOrEmpty(volumeLabel) ? defaultLabel : volumeLabel,
+                        TotalSize = totalSize,
+                        AvailableFreeSpace = freeSpace,
+                        IsMounted = true
+                    });
+                }
+            });
 
             // 2. Add Samba Share if enabled and path is valid
             if (UseSamba && !string.IsNullOrEmpty(SambaPath) && SambaPath.StartsWith("\\\\"))
             {
-                try
+                await Task.Run(() => 
                 {
-                    // For UNC paths, we use GetDiskFreeSpaceEx. 
-                    // We don't use Directory.Exists here because it might block or fail if not authenticated.
-                    // Instead, we try to get the space directly.
-                    long freeBytes, totalBytes, totalFreeBytes;
-                    bool spaceOk = GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes);
-
-                    newDrives.Add(new DriveInfoModel
+                    try
                     {
-                        Name = SambaPath,
-                        Label = "Nomad Pi Network Share",
-                        TotalSize = spaceOk ? totalBytes : 0,
-                        AvailableFreeSpace = spaceOk ? freeBytes : 0,
-                        IsMounted = true // We consider it "mounted" if Samba is enabled and path is set
-                    });
-                }
-                catch { /* Ignore Samba drive errors */ }
+                        long freeBytes, totalBytes, totalFreeBytes;
+                        bool spaceOk = GetDiskFreeSpaceEx(SambaPath, out freeBytes, out totalBytes, out totalFreeBytes);
+
+                        newDrives.Add(new DriveInfoModel
+                        {
+                            Name = SambaPath,
+                            Label = "Nomad Pi Network Share",
+                            TotalSize = spaceOk ? totalBytes : 0,
+                            AvailableFreeSpace = spaceOk ? freeBytes : 0,
+                            IsMounted = true // We consider it "mounted" if Samba is enabled and path is set
+                        });
+                    }
+                    catch { /* Ignore Samba drive errors */ }
+                });
             }
 
             // Update the ObservableCollection only if something changed
@@ -1423,6 +1460,10 @@ namespace NomadTransferTool
                     DebridTitleResults.Clear();
                     foreach (var r in results) DebridTitleResults.Add(r);
                     SelectedDebridTitle = DebridTitleResults.FirstOrDefault();
+                    if (SelectedDebridTitle != null && !string.IsNullOrEmpty(SelectedDebridTitle.Type))
+                    {
+                        DebridSearchType = SelectedDebridTitle.Type;
+                    }
                     DebridTorrentResults.Clear();
                     SelectedDebridTorrent = null;
                 });
@@ -1449,7 +1490,18 @@ namespace NomadTransferTool
                 var imdb = Uri.EscapeDataString(SelectedDebridTitle.ImdbId.Trim());
                 var mtVal = !string.IsNullOrWhiteSpace(SelectedDebridTitle.Type) ? SelectedDebridTitle.Type : DebridSearchType;
                 var mt = Uri.EscapeDataString(string.IsNullOrWhiteSpace(mtVal) ? "movie" : mtVal);
-                var res = await GetWithAuthRetry($"{API_BASE}/debrid/search/torrents?imdb_id={imdb}&media_type={mt}", true);
+                
+                string url = $"{API_BASE}/debrid/search/torrents?imdb_id={imdb}&media_type={mt}";
+                if (mt == "series")
+                {
+                    int.TryParse(DebridSearchSeason, out int s);
+                    int.TryParse(DebridSearchEpisode, out int ep);
+                    if (s <= 0) s = 1;
+                    if (ep <= 0) ep = 1;
+                    url += $"&season={s}&episode={ep}";
+                }
+                
+                var res = await GetWithAuthRetry(url, true);
                 if (res == null) return;
                 var json = await res.Content.ReadAsStringAsync();
                 var root = JObject.Parse(json);

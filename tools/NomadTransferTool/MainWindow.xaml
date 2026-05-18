@@ -664,10 +664,18 @@
                                 <ComboBox ItemsSource="{Binding DebridProviders}" SelectedItem="{Binding SelectedDebridProvider}" DisplayMemberPath="Name" Margin="0,0,0,10"/>
 
                                 <TextBlock Text="Search Type" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
-                                <ComboBox SelectedValue="{Binding DebridSearchType}" SelectedValuePath="Tag" Margin="0,0,0,10">
-                                    <ComboBoxItem Content="Movie" Tag="movie"/>
-                                    <ComboBoxItem Content="Show" Tag="series"/>
-                                </ComboBox>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <ComboBox SelectedValue="{Binding DebridSearchType}" SelectedValuePath="Tag" Width="100" Margin="0,0,10,0">
+                                        <ComboBoxItem Content="Movie" Tag="movie"/>
+                                        <ComboBoxItem Content="Show" Tag="series"/>
+                                    </ComboBox>
+                                    
+                                    <TextBlock Text="S" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" Margin="0,0,5,0" Visibility="{Binding DebridSearchType, Converter={StaticResource CategoryToVis}, ConverterParameter=series}"/>
+                                    <TextBox Text="{Binding DebridSearchSeason, UpdateSourceTrigger=PropertyChanged}" Width="40" Margin="0,0,10,0" Padding="5" Visibility="{Binding DebridSearchType, Converter={StaticResource CategoryToVis}, ConverterParameter=series}"/>
+                                    
+                                    <TextBlock Text="E" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" Margin="0,0,5,0" Visibility="{Binding DebridSearchType, Converter={StaticResource CategoryToVis}, ConverterParameter=series}"/>
+                                    <TextBox Text="{Binding DebridSearchEpisode, UpdateSourceTrigger=PropertyChanged}" Width="40" Padding="5" Visibility="{Binding DebridSearchType, Converter={StaticResource CategoryToVis}, ConverterParameter=series}"/>
+                                </StackPanel>
 
                                 <TextBlock Text="API Key (optional, saved to Pi)" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
                                 <DockPanel LastChildFill="True" Margin="0,0,0,10">
