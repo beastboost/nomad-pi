@@ -702,7 +702,7 @@
                                     </ListBox.ItemTemplate>
                                 </ListBox>
 
-                                <Button Content="Download & Add to Queue" Click="DebridDownloadSelected_Click" Background="{StaticResource PrimaryColor}" FontWeight="Bold"/>
+                                <Button Content="Download &amp; Add to Queue" Click="DebridDownloadSelected_Click" Background="{StaticResource PrimaryColor}" FontWeight="Bold"/>
                                 <TextBlock Text="{Binding DebridStatus}" Foreground="{StaticResource MutedTextColor}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Expander>
