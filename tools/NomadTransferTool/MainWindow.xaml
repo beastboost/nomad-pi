@@ -624,8 +624,22 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Available Torrents" Style="{StaticResource HeaderBlock}" Margin="0"/>
-                                <Button Grid.Column="1" Content="Load Torrents" Click="DebridLoadTorrents_Click" Padding="10,4"/>
+                                <TextBlock Text="Available Torrents" Style="{StaticResource HeaderBlock}" Margin="0" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <ComboBox x:Name="FilterTypeBox" Width="70" Margin="0,0,5,0" SelectedIndex="0" ToolTip="File Type">
+                                        <ComboBoxItem Content="All"/>
+                                        <ComboBoxItem Content="MP4"/>
+                                        <ComboBoxItem Content="H264"/>
+                                        <ComboBoxItem Content="MKV"/>
+                                    </ComboBox>
+                                    <ComboBox x:Name="FilterQualityBox" Width="70" Margin="0,0,5,0" SelectedIndex="0" ToolTip="Quality">
+                                        <ComboBoxItem Content="All"/>
+                                        <ComboBoxItem Content="2160p"/>
+                                        <ComboBoxItem Content="1080p"/>
+                                        <ComboBoxItem Content="720p"/>
+                                    </ComboBox>
+                                    <Button Content="Load Torrents" Click="DebridLoadTorrents_Click" Padding="10,4"/>
+                                </StackPanel>
                             </Grid>
 
                             <ListBox Grid.Row="1" ItemsSource="{Binding DebridTorrentResults}" SelectedItem="{Binding SelectedDebridTorrent}" Background="Transparent">

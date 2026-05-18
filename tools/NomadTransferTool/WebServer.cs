@@ -120,7 +120,9 @@ namespace NomadTransferTool
                     var type = req.QueryString["type"] ?? "movie";
                     var season = req.QueryString["season"] ?? "1";
                     var episode = req.QueryString["episode"] ?? "1";
-                    _mainWindow.DebridLoadTorrentsCommand(imdbId, type, season, episode);
+                    var filterType = req.QueryString["filter_type"] ?? "All";
+                    var filterQuality = req.QueryString["filter_quality"] ?? "All";
+                    _mainWindow.DebridLoadTorrentsCommand(imdbId, type, season, episode, filterType, filterQuality);
                     await SendJson(res, new { success = true });
                 }
                 else if (req.Url.AbsolutePath == "/api/debrid/download" && req.HttpMethod == "POST")
@@ -256,6 +258,20 @@ namespace NomadTransferTool
 
         <div class='card' id='torrents-card' style='display:none;'>
             <h3 class='header'>Available Torrents</h3>
+            <div class='flex-row' style='margin-bottom: 10px;'>
+                <select id='debrid-filter-type' onchange='reloadTorrents()'>
+                    <option value='All'>All Types</option>
+                    <option value='MP4'>MP4</option>
+                    <option value='H264'>H264</option>
+                    <option value='MKV'>MKV</option>
+                </select>
+                <select id='debrid-filter-quality' onchange='reloadTorrents()'>
+                    <option value='All'>All Qualities</option>
+                    <option value='2160p'>2160p (4K)</option>
+                    <option value='1080p'>1080p</option>
+                    <option value='720p'>720p</option>
+                </select>
+            </div>
             <div id='debrid-torrents-list'></div>
             <button id='btn-download-debrid' onclick='downloadSelectedTorrent()' style='margin-top: 15px; display: none;'>Download & Add to Queue</button>
         </div>
@@ -347,13 +363,26 @@ namespace NomadTransferTool
             selectedImdbId = imdbId;
             selectedType = type;
             
+            await reloadTorrents();
+        }
+
+        async function reloadTorrents() {
+            if (!selectedImdbId) return;
+            
+            const filterType = document.getElementById('debrid-filter-type').value;
+            const filterQuality = document.getElementById('debrid-filter-quality').value;
+            
             document.getElementById('debrid-status').innerText = 'Loading torrents...';
-            await fetch(`/api/debrid/torrents?imdb_id=${imdbId}&type=${type}`);
+            document.getElementById('torrents-card').style.display = 'block';
+            document.getElementById('debrid-torrents-list').innerHTML = 'Loading...';
+            
+            await fetch(`/api/debrid/torrents?imdb_id=${selectedImdbId}&type=${selectedType}&filter_type=${encodeURIComponent(filterType)}&filter_quality=${encodeURIComponent(filterQuality)}`);
             
             setTimeout(async () => {
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 renderTorrents(data.debridTorrents);
+                document.getElementById('debrid-status').innerText = '';
             }, 2000);
         }
 

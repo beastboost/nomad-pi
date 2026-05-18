@@ -277,10 +277,37 @@ def search_torrents(imdb_id: str = Query(...),
                     media_type: str = Query("movie"),
                     season: Optional[int] = Query(None),
                     episode: Optional[int] = Query(None),
+                    filter_type: Optional[str] = Query(None), # e.g. "mp4", "mkv"
+                    filter_quality: Optional[str] = Query(None), # e.g. "1080p", "2160p"
                     user_id: int = Depends(get_current_user_id)):
     results = debrid.search_torrentio("", media_type=media_type, imdb_id=imdb_id,
                                       season=season, episode=episode)
-    return {"results": results}
+    
+    filtered_results = []
+    for r in results:
+        name = r.get("name", "").lower()
+        meta = r.get("meta", "").lower()
+        
+        if filter_type:
+            # We want to match the exact extension/container string
+            if filter_type.lower() == "mp4" and "mp4" not in name and "mp4" not in meta:
+                continue
+            if filter_type.lower() == "mkv" and "mkv" not in name and "mkv" not in meta:
+                continue
+            if filter_type.lower() == "h264" and "h264" not in name and "x264" not in name and "avc" not in name:
+                continue
+                
+        if filter_quality:
+            if filter_quality.lower() == "2160p" and "2160p" not in meta and "4k" not in meta:
+                continue
+            if filter_quality.lower() == "1080p" and "1080p" not in meta:
+                continue
+            if filter_quality.lower() == "720p" and "720p" not in meta:
+                continue
+                
+        filtered_results.append(r)
+        
+    return {"results": filtered_results}
 
 
 # ---------------------------------------------------------------------------

@@ -1705,13 +1705,26 @@ namespace NomadTransferTool
             DebridSearchTitles_Click(this, new RoutedEventArgs());
         }
 
-        public void DebridLoadTorrentsCommand(string imdbId, string type, string season, string episode)
+        public void DebridLoadTorrentsCommand(string imdbId, string type, string season, string episode, string filterType = "", string filterQuality = "")
         {
             Dispatcher.Invoke(() => {
                 SelectedDebridTitle = new DebridTitleResult { ImdbId = imdbId, Type = type };
                 DebridSearchType = type;
                 DebridSearchSeason = season;
                 DebridSearchEpisode = episode;
+                
+                if (FilterTypeBox.Items.Count > 0)
+                {
+                    var ftMatch = FilterTypeBox.Items.Cast<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString()!.Equals(filterType, StringComparison.OrdinalIgnoreCase));
+                    if (ftMatch != null) FilterTypeBox.SelectedItem = ftMatch;
+                    else FilterTypeBox.SelectedIndex = 0;
+                }
+                if (FilterQualityBox.Items.Count > 0)
+                {
+                    var fqMatch = FilterQualityBox.Items.Cast<ComboBoxItem>().FirstOrDefault(i => i.Content.ToString()!.Equals(filterQuality, StringComparison.OrdinalIgnoreCase));
+                    if (fqMatch != null) FilterQualityBox.SelectedItem = fqMatch;
+                    else FilterQualityBox.SelectedIndex = 0;
+                }
             });
             DebridLoadTorrents_Click(this, new RoutedEventArgs());
         }
@@ -1787,6 +1800,12 @@ namespace NomadTransferTool
                     if (ep <= 0) ep = 1;
                     url += $"&season={s}&episode={ep}";
                 }
+                
+                var filterType = (FilterTypeBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+                var filterQuality = (FilterQualityBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+                
+                if (filterType != "All") url += $"&filter_type={Uri.EscapeDataString(filterType)}";
+                if (filterQuality != "All") url += $"&filter_quality={Uri.EscapeDataString(filterQuality)}";
                 
                 var res = await GetWithAuthRetry(url, true);
                 if (res == null) return;
