@@ -1,7 +1,7 @@
 # Check if Docker is installed
 if (!(Get-Command docker -ErrorAction SilentlyContinue)) {
-    Write-Error "Docker is not installed or not in PATH. Please install Docker Desktop for Windows."
-    exit 1
+    Write-Warning "Docker is not installed or not in PATH. You will need Docker Desktop or WSL to actually run the build-docker.sh script."
+    Write-Warning "Setting up the pi-gen environment anyway..."
 }
 
 Write-Host "=========================================="
