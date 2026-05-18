@@ -2321,10 +2321,10 @@ function prefersExternalPlayback(ext, pathOrName = '') {
     const ua = navigator.userAgent || '';
     const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
-    
-    // We completely removed server-side FFmpeg transcoding to ensure Pi 3B+ doesn't stutter.
-    // Everything is forced to direct play now.
-    // If iOS/Safari users try to play MKVs, they must use the VLC fallback button.
+    const name = String(pathOrName || '').toLowerCase();
+    const looksHevc = /\b(hevc|x265|h\.?265|10bit)\b/i.test(name);
+    if (ext === 'mkv' && (isIOS || isSafari)) return true;
+    if (looksHevc) return true;
     return false;
 }
 
@@ -2470,7 +2470,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'auto';  // Changed from 'metadata' to 'auto' to ensure audio tracks load
+    video.preload = 'metadata';
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     const source = document.createElement('source');
     source.src = streamUrl;
@@ -2542,25 +2542,8 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         const warning = document.createElement('div');
         warning.className = 'glass-card';
         warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
-        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> This file may stutter or fail in the browser on some devices. Preparing an H.264/AAC-compatible stream is recommended; VLC is the fallback if playback still fails.';
+        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> This file (HEVC/x265) may stutter in the browser. Use the <b style="color:#ff9800">VLC</b> button above for smooth playback.';
         body.appendChild(warning);
-
-        ensureIosCompatiblePath(path, (st) => {
-            try {
-                if (st && typeof st.progress === 'number') {
-                    warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing H.264-compatible stream… ${st.progress.toFixed(1)}%`;
-                }
-            } catch (e) {}
-        }).then((outPath) => {
-            if (!outPath) return;
-            let iosUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(outPath)}`;
-            if (token) iosUrl += '&token=' + token;
-            source.src = iosUrl;
-            source.type = 'video/mp4';
-            try { video.load(); } catch (e) {}
-            try { video.play().catch(() => {}); } catch (e) {}
-            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> H.264-compatible stream ready.';
-        });
     }
     body.appendChild(videoWrap);
     modal.classList.remove('hidden');

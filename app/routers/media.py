@@ -2127,8 +2127,16 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
             filename=filename
         )
 
-    # Simple FileResponse for now, it supports range requests
-    return FileResponse(fs_path)
+    ext = os.path.splitext(fs_path)[1].lower()
+    mime_map = {
+        '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
+        '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+        '.mov': 'video/quicktime', '.ts': 'video/mp2t',
+        '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg',
+        '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    }
+    media_type = mime_map.get(ext)
+    return FileResponse(fs_path, media_type=media_type)
 
 
 def _ffprobe_codecs(fs_path: str) -> tuple[str, str, float]:

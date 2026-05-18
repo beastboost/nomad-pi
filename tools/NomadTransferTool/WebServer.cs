@@ -111,7 +111,7 @@ namespace NomadTransferTool
                 else if (req.Url.AbsolutePath == "/api/debrid/search" && req.HttpMethod == "GET")
                 {
                     var q = req.QueryString["q"];
-                    if (!string.IsNullOrEmpty(q)) _mainWindow.DebridSearchTitlesCommand(q);
+                    if (!string.IsNullOrEmpty(q)) _mainWindow.Dispatcher.Invoke(() => _mainWindow.DebridSearchTitlesCommand(q));
                     await SendJson(res, new { success = true });
                 }
                 else if (req.Url.AbsolutePath == "/api/debrid/torrents" && req.HttpMethod == "GET")
@@ -122,7 +122,7 @@ namespace NomadTransferTool
                     var episode = req.QueryString["episode"] ?? "1";
                     var filterType = req.QueryString["filter_type"] ?? "All";
                     var filterQuality = req.QueryString["filter_quality"] ?? "All";
-                    _mainWindow.DebridLoadTorrentsCommand(imdbId, type, season, episode, filterType, filterQuality);
+                    _mainWindow.Dispatcher.Invoke(() => _mainWindow.DebridLoadTorrentsCommand(imdbId, type, season, episode, filterType, filterQuality));
                     await SendJson(res, new { success = true });
                 }
                 else if (req.Url.AbsolutePath == "/api/debrid/download" && req.HttpMethod == "POST")
@@ -131,7 +131,7 @@ namespace NomadTransferTool
                     var data = JsonConvert.DeserializeObject<dynamic>(body);
                     string infoHash = data?.infoHash;
                     string name = data?.name;
-                    if (!string.IsNullOrEmpty(infoHash)) _mainWindow.DebridDownloadCommand(infoHash, name);
+                    if (!string.IsNullOrEmpty(infoHash)) _mainWindow.Dispatcher.Invoke(() => _mainWindow.DebridDownloadCommand(infoHash, name));
                     await SendJson(res, new { success = true });
                 }
                 else
