@@ -647,17 +647,67 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
                 _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict ad passthrough", {"provider": provider, "has_url": bool(response.get("url")), "filename": fname[:120]})
                 return response
         elif provider == "tb":
-            # TorBox requestdl already returns the final URL.
-            # Try to guess a filename from the URL, or provide a fallback.
-            import urllib.parse
             import os
+            import re
+            import urllib.parse
+
+            def _cd_filename(cd: str) -> str:
+                if not cd:
+                    return ""
+                m = re.search(r"filename\\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
+                if m:
+                    try:
+                        return urllib.parse.unquote(m.group(1)).strip().strip('"')
+                    except Exception:
+                        return m.group(1).strip().strip('"')
+                m = re.search(r'filename="([^"]+)"', cd)
+                if m:
+                    return m.group(1).strip()
+                m = re.search(r"filename=([^;]+)", cd)
+                if m:
+                    return m.group(1).strip().strip('"')
+                return ""
+
+            def _ext_from_content_type(ct: str) -> str:
+                ct = (ct or "").split(";", 1)[0].strip().lower()
+                mapping = {
+                    "video/mp4": ".mp4",
+                    "video/quicktime": ".mov",
+                    "video/x-matroska": ".mkv",
+                    "video/webm": ".webm",
+                    "video/x-msvideo": ".avi",
+                    "video/mp2t": ".ts",
+                    "application/x-matroska": ".mkv",
+                }
+                return mapping.get(ct, "")
+
+            url = link
+            fname = ""
+            size = 0
             try:
-                fname = os.path.basename(urllib.parse.urlparse(link).path)
+                r = requests.head(url, allow_redirects=True, timeout=10)
+                cd = r.headers.get("Content-Disposition") or r.headers.get("content-disposition") or ""
+                ct = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
+                size = int(r.headers.get("Content-Length") or r.headers.get("content-length") or 0)
+                fname = _cd_filename(cd)
                 if not fname:
-                    fname = "torbox_download"
+                    path_base = os.path.basename(urllib.parse.urlparse(r.url or url).path)
+                    fname = path_base
+                if fname and not os.path.splitext(fname)[1]:
+                    ext = _ext_from_content_type(ct)
+                    if ext:
+                        fname = fname + ext
             except Exception:
+                fname = ""
+
+            if not fname:
+                try:
+                    fname = os.path.basename(urllib.parse.urlparse(url).path)
+                except Exception:
+                    fname = ""
+            if not fname:
                 fname = "torbox_download"
-            response = {"url": link, "filename": fname, "filesize": 0}
+            response = {"url": url, "filename": fname, "filesize": size}
             # #region debug-point A:router-unrestrict-tb-success
             _debug_report("A", "app/routers/debrid.py:unrestrict_link", "router unrestrict tb passthrough", {"provider": provider, "has_url": bool(response.get("url"))})
             # #endregion

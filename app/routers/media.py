@@ -40,6 +40,11 @@ POSTER_CACHE_DIR = os.path.join(BASE_DIR, "cache", "posters")
 os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
 POSTER_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 
+IOS_CACHE_DIR = os.path.join(BASE_DIR, ".nomad_cache", "ios")
+os.makedirs(IOS_CACHE_DIR, exist_ok=True)
+_ios_transcodes: Dict[str, Dict] = {}
+_ios_transcodes_lock = threading.Lock()
+
 def _get_setting_int(key: str, default: int) -> int:
     raw = database.get_setting(key)
     try:
@@ -2124,6 +2129,201 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
 
     # Simple FileResponse for now, it supports range requests
     return FileResponse(fs_path)
+
+
+def _ios_output_paths(fs_path: str) -> tuple[str, str]:
+    st = os.stat(fs_path)
+    key = hashlib.sha1(f"{fs_path}:{st.st_mtime_ns}:{st.st_size}".encode("utf-8", errors="ignore")).hexdigest()
+    out_fs = os.path.join(IOS_CACHE_DIR, f"{key}.mp4")
+    out_web = f"/data/.nomad_cache/ios/{key}.mp4"
+    return out_fs, out_web
+
+
+def _ffprobe_codecs(fs_path: str) -> tuple[str, str, float]:
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            fs_path,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            return "", "", 0.0
+        info = json.loads(r.stdout or "{}")
+        duration = float((info.get("format") or {}).get("duration") or 0.0)
+        streams = info.get("streams") or []
+        v = next((s for s in streams if s.get("codec_type") == "video"), {}) or {}
+        a = next((s for s in streams if s.get("codec_type") == "audio"), {}) or {}
+        return str(v.get("codec_name") or ""), str(a.get("codec_name") or ""), duration
+    except Exception:
+        return "", "", 0.0
+
+
+def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
+    with _ios_transcodes_lock:
+        job = _ios_transcodes.get(job_id)
+        if job is None:
+            return
+        job["status"] = "running"
+        job["started_at"] = datetime.utcnow().isoformat()
+
+    video_codec, audio_codec, duration = _ffprobe_codecs(src_fs)
+    copy_video = video_codec in ("h264",)
+    copy_audio = audio_codec in ("aac", "mp3")
+
+    codec_args: list[str]
+    if copy_video and copy_audio:
+        codec_args = ["-c", "copy"]
+    elif copy_video and not copy_audio:
+        codec_args = ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k"]
+    else:
+        codec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k"]
+
+    os.makedirs(os.path.dirname(out_fs), exist_ok=True)
+    tmp_fs = out_fs + ".tmp"
+    try:
+        if os.path.exists(tmp_fs):
+            os.remove(tmp_fs)
+    except Exception:
+        pass
+
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-y",
+        "-i",
+        src_fs,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        "-sn",
+        *codec_args,
+        "-movflags",
+        "+faststart",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        tmp_fs,
+    ]
+
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except Exception as e:
+        with _ios_transcodes_lock:
+            if job_id in _ios_transcodes:
+                _ios_transcodes[job_id]["status"] = "failed"
+                _ios_transcodes[job_id]["error"] = str(e)
+        return
+
+    last_out_time_ms = 0
+    try:
+        if p.stdout:
+            for line in p.stdout:
+                line = (line or "").strip()
+                if not line or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k == "out_time_ms":
+                    try:
+                        last_out_time_ms = int(v)
+                    except Exception:
+                        last_out_time_ms = last_out_time_ms
+                elif k == "progress" and v == "end":
+                    break
+                if duration > 0 and last_out_time_ms > 0:
+                    pct = min(99.0, (last_out_time_ms / 1000000.0) / duration * 100.0)
+                    with _ios_transcodes_lock:
+                        if job_id in _ios_transcodes:
+                            _ios_transcodes[job_id]["progress"] = round(pct, 1)
+    except Exception:
+        pass
+
+    rc = p.wait()
+    err = ""
+    try:
+        if p.stderr:
+            err = p.stderr.read() or ""
+    except Exception:
+        err = ""
+
+    if rc == 0 and os.path.exists(tmp_fs):
+        try:
+            if os.path.exists(out_fs):
+                os.remove(out_fs)
+        except Exception:
+            pass
+        try:
+            os.replace(tmp_fs, out_fs)
+        except Exception:
+            pass
+
+    with _ios_transcodes_lock:
+        if job_id not in _ios_transcodes:
+            return
+        if rc == 0 and os.path.exists(out_fs):
+            _ios_transcodes[job_id]["status"] = "completed"
+            _ios_transcodes[job_id]["progress"] = 100.0
+            _ios_transcodes[job_id]["completed_at"] = datetime.utcnow().isoformat()
+        else:
+            _ios_transcodes[job_id]["status"] = "failed"
+            _ios_transcodes[job_id]["error"] = (err.strip() or f"ffmpeg exited with code {rc}")[:1000]
+
+
+@router.post("/transcode/ios")
+def transcode_ios(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    try:
+        src_fs = safe_fs_path_from_web_path(path)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not os.path.isfile(src_fs):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        raise HTTPException(status_code=500, detail="ffmpeg/ffprobe not available on this device")
+
+    out_fs, out_web = _ios_output_paths(src_fs)
+    if os.path.exists(out_fs) and os.path.getsize(out_fs) > 0:
+        return {"status": "completed", "output_path": out_web}
+
+    with _ios_transcodes_lock:
+        for jid, job in _ios_transcodes.items():
+            if job.get("output_path") == out_web and job.get("status") in ("queued", "running"):
+                return {"status": job.get("status"), "job_id": jid, "output_path": out_web, "progress": job.get("progress", 0)}
+
+        job_id = hashlib.sha1(f"{out_web}:{time_module.time()}".encode("utf-8", errors="ignore")).hexdigest()[:16]
+        _ios_transcodes[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "progress": 0.0,
+            "source_path": path,
+            "output_path": out_web,
+            "error": "",
+        }
+
+    t = threading.Thread(target=_ios_transcode_worker, args=(job_id, src_fs, out_fs), daemon=True)
+    t.start()
+    return {"status": "queued", "job_id": job_id, "output_path": out_web, "progress": 0.0}
+
+
+@router.get("/transcode/ios/status")
+def transcode_ios_status(job_id: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    with _ios_transcodes_lock:
+        job = _ios_transcodes.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return {
+            "status": job.get("status"),
+            "progress": job.get("progress", 0.0),
+            "output_path": job.get("output_path"),
+            "error": job.get("error", ""),
+        }
 
 def refresh_external_links():
     """Ensure symlinks in data/external exist for all currently mounted USB drives."""

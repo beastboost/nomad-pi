@@ -17,6 +17,7 @@ publish/
 *.exe
 *.pdb
 *.user
+*_wpftmp.csproj
 *.txt
 !requirements.txt
 !.env.example
