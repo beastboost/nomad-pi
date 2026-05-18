@@ -35,9 +35,30 @@ Copy-Item -Path "$PSScriptRoot\..\requirements.txt" -Destination "$APP_DEST\requ
 # 5. Run the Docker build script
 Write-Host "Starting Docker build (this will take a while)..."
 Set-Location $BUILD_DIR
-# Windows requires running the bash script inside WSL or via a Linux container directly.
-# The pi-gen repo provides a build-docker.sh script which mounts the directory into a debian container.
-bash ./build-docker.sh
+
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    Write-Host "Running build via Docker directly..."
+    Write-Host "Building Docker image first..."
+    docker build -t pi-gen .
+    
+    Write-Host "Running container..."
+    # Format the path for Docker on Windows
+    $WIN_PWD = $($PWD.Path -replace '\\', '/')
+    docker run --rm --privileged -v "${WIN_PWD}:/pi-gen" -e DEBIAN_FRONTEND=noninteractive pi-gen
+} elseif (Get-Command wsl -ErrorAction SilentlyContinue) {
+    # Check if WSL actually has a distro installed
+    $wslList = wsl -l -q 2>$null
+    if ($wslList) {
+        Write-Host "Running build via WSL..."
+        wsl -- ./build-docker.sh
+    } else {
+        Write-Error "WSL is installed but no distributions are found. Please install Ubuntu (wsl --install -d Ubuntu) or use Docker Desktop."
+        exit 1
+    }
+} else {
+    Write-Error "Neither WSL (with a distro) nor Docker was found. Cannot compile image on Windows."
+    exit 1
+}
 
 Write-Host "=========================================="
 Write-Host " Build Complete! Check os-builder/pi-gen/deploy for the .img file."
