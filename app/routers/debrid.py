@@ -11,6 +11,7 @@ import logging
 import json
 import time
 import urllib.request
+from urllib.parse import unquote, urlparse
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -27,9 +28,35 @@ SUPPORTED_PROVIDERS = {"rd", "ad", "tb"}
 
 
 def _is_video_filename(name: str) -> bool:
-    n = (name or "").lower()
-    ext = n.rsplit(".", 1)[-1] if "." in n else ""
-    return ext in {"mp4", "mkv", "avi", "mov", "webm", "m4v", "ts", "wmv", "flv", "mpg", "mpeg"}
+    raw = (name or "").strip()
+    if not raw:
+        return False
+    raw = raw.split("#", 1)[0].split("?", 1)[0]
+    if "://" in raw:
+        try:
+            raw = unquote(urlparse(raw).path)
+        except Exception:
+            pass
+    base = raw.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    ext = base.rsplit(".", 1)[-1] if "." in base else ""
+    return ext in {
+        "mp4",
+        "mkv",
+        "avi",
+        "mov",
+        "webm",
+        "m4v",
+        "ts",
+        "m2ts",
+        "mts",
+        "wmv",
+        "flv",
+        "mpg",
+        "mpeg",
+        "mpe",
+        "3gp",
+        "vob",
+    }
 
 
 # #region debug-point A:debug-helper
@@ -341,12 +368,16 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 ad_files = sorted(
                     ad_files,
                     key=lambda f: (
-                        0 if _is_video_filename(str(f.get("filename", ""))) else 1,
+                        0 if _is_video_filename(str(f.get("filename") or f.get("link") or "")) else 1,
                         -int(f.get("size") or 0),
                         str(f.get("filename", "")).lower(),
                     ),
                 )
-                for idx, f in enumerate(ad_files):
+                has_video = any(_is_video_filename(str(f.get("filename") or f.get("link") or "")) for f in ad_files)
+                idx = 0
+                for f in ad_files:
+                    if has_video and not _is_video_filename(str(f.get("filename") or f.get("link") or "")):
+                        continue
                     link = f.get("link")
                     if link:
                         links.append(link)
@@ -356,6 +387,7 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                             "bytes": f.get("size", 0),
                             "selected": 1
                         })
+                        idx += 1
             return {
                 "ok": True,
                 "provider": "ad",
@@ -383,14 +415,17 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 files = sorted(
                     files,
                     key=lambda f: (
-                        0 if _is_video_filename(str(f.get("name", ""))) else 1,
+                        0 if _is_video_filename(str(f.get("name") or f.get("path") or "")) else 1,
                         -int(f.get("size") or 0),
                         str(f.get("name", "")).lower(),
                     ),
                 )
             links = []
             if info.get("download_finished") or info.get("download_state") in ("completed", "cached", "uploading") or info.get("download_present"):
+                has_video = isinstance(files, list) and any(_is_video_filename(str(f.get("name") or f.get("path") or "")) for f in files)
                 for f in files:
+                    if has_video and not _is_video_filename(str(f.get("name") or f.get("path") or "")):
+                        continue
                     try:
                         dl = debrid.tb_request_download(key, torrent_id, f.get("id", 0))
                         if dl:
@@ -456,12 +491,16 @@ def get_torrent_status(torrent_id: str,
                 ad_files = sorted(
                     ad_files,
                     key=lambda f: (
-                        0 if _is_video_filename(str(f.get("filename", ""))) else 1,
+                        0 if _is_video_filename(str(f.get("filename") or f.get("link") or "")) else 1,
                         -int(f.get("size") or 0),
                         str(f.get("filename", "")).lower(),
                     ),
                 )
-                for idx, f in enumerate(ad_files):
+                has_video = any(_is_video_filename(str(f.get("filename") or f.get("link") or "")) for f in ad_files)
+                idx = 0
+                for f in ad_files:
+                    if has_video and not _is_video_filename(str(f.get("filename") or f.get("link") or "")):
+                        continue
                     link = f.get("link")
                     if link:
                         links.append(link)
@@ -471,6 +510,7 @@ def get_torrent_status(torrent_id: str,
                             "bytes": f.get("size", 0),
                             "selected": 1
                         })
+                        idx += 1
             size = info.get("size") or info.get("size_total") or 1
             downloaded = info.get("downloaded") or info.get("downloadedBytes") or info.get("downloaded_bytes") or 0
             progress = 100 if status_code >= 4 else (float(downloaded) / max(float(size), 1.0) * 100)
@@ -494,7 +534,7 @@ def get_torrent_status(torrent_id: str,
                 files = sorted(
                     files,
                     key=lambda f: (
-                        0 if _is_video_filename(str(f.get("name", ""))) else 1,
+                        0 if _is_video_filename(str(f.get("name") or f.get("path") or "")) else 1,
                         -int(f.get("size") or 0),
                         str(f.get("name", "")).lower(),
                     ),
@@ -503,7 +543,10 @@ def get_torrent_status(torrent_id: str,
             ds = str(info.get("download_state", "")).lower()
             finished = bool(info.get("download_finished") or info.get("download_present")) or ds in ("cached",)
             if finished:
+                has_video = isinstance(files, list) and any(_is_video_filename(str(f.get("name") or f.get("path") or "")) for f in files)
                 for f in files:
+                    if has_video and not _is_video_filename(str(f.get("name") or f.get("path") or "")):
+                        continue
                     try:
                         dl = debrid.tb_request_download(key, torrent_id, f.get("id", 0))
                         if dl:

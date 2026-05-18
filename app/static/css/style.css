@@ -67,7 +67,7 @@ body.no-glass * {
     right: 0;
     height: 100%;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 900;
+    z-index: 800;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -102,6 +102,10 @@ body.menu-open {
     overflow: hidden;
     /* Avoid position:fixed which causes scroll-position jump on Android */
     touch-action: manipulation;
+}
+
+body.menu-open .mobile-bottom-nav {
+    pointer-events: none;
 }
 
 /* Glass Elements */
@@ -195,7 +199,7 @@ nav button.active {
     left: 0;
     right: 0;
     height: calc(70px + env(safe-area-inset-bottom));
-    z-index: 1000;
+    z-index: 700;
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom)) 12px;
     justify-content: space-around;
     align-items: center;
@@ -603,6 +607,18 @@ button:disabled {
     background: var(--card-bg);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button.media-card {
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+}
+
+button.media-card:focus {
+    outline: none;
 }
 
 .media-card:hover {
@@ -1814,7 +1830,7 @@ h1, h2, h3 {
 
 .media-card {
     width: 100%;
-    max-width: 160px;
+    max-width: none;
     aspect-ratio: 2/3;
     border-radius: 8px;
 }
@@ -1908,7 +1924,7 @@ h1, h2, h3 {
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
         border-top: var(--glass-border);
-        z-index: 1000;
+        z-index: 700;
         justify-content: space-around;
         align-items: center;
         padding: 0 10px;
@@ -2241,6 +2257,14 @@ h1, h2, h3 {
     grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
     gap: 16px;
     padding: 4px 0 28px;
+}
+
+@media (max-width: 760px) {
+    .media-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        padding-bottom: 18px;
+    }
 }
 
 .media-item {
