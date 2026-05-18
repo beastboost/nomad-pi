@@ -657,6 +657,55 @@
                             <Button Content="Files" Click="SelectFiles_Click" Margin="0,0,2,0" Padding="5"/>
                             <Button Content="Folder" Click="SelectFolder_Click" Margin="2,0,0,0" Padding="5"/>
                         </UniformGrid>
+
+                        <Expander Header="Debrid" Margin="0,12,0,0">
+                            <StackPanel Margin="0,8,0,0">
+                                <TextBlock Text="Provider" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
+                                <ComboBox ItemsSource="{Binding DebridProviders}" SelectedItem="{Binding SelectedDebridProvider}" DisplayMemberPath="Name" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Search Type" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
+                                <ComboBox SelectedValue="{Binding DebridSearchType}" SelectedValuePath="Tag" Margin="0,0,0,10">
+                                    <ComboBoxItem Content="Movie" Tag="movie"/>
+                                    <ComboBoxItem Content="Show" Tag="series"/>
+                                </ComboBox>
+
+                                <TextBlock Text="API Key (optional, saved to Pi)" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
+                                <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                                    <Button Content="Save" Click="DebridSaveKey_Click" Width="70" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding DebridApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Height="28"/>
+                                </DockPanel>
+
+                                <TextBlock Text="Title Search" FontSize="11" Foreground="{StaticResource MutedTextColor}" Margin="0,0,0,5"/>
+                                <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                                    <Button Content="Search" Click="DebridSearchTitles_Click" Width="70" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding DebridTitleQuery, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Height="28"/>
+                                </DockPanel>
+
+                                <ListBox ItemsSource="{Binding DebridTitleResults}" SelectedItem="{Binding SelectedDebridTitle}" Height="110" Margin="0,0,0,10">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Display}" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <Button Content="Load Torrents" Click="DebridLoadTorrents_Click" Margin="0,0,0,10"/>
+
+                                <ListBox ItemsSource="{Binding DebridTorrentResults}" SelectedItem="{Binding SelectedDebridTorrent}" Height="160" Margin="0,0,0,10">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding Meta}" Foreground="{StaticResource MutedTextColor}" FontSize="11"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <Button Content="Download & Add to Queue" Click="DebridDownloadSelected_Click" Background="{StaticResource PrimaryColor}" FontWeight="Bold"/>
+                                <TextBlock Text="{Binding DebridStatus}" Foreground="{StaticResource MutedTextColor}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </Border>
 
