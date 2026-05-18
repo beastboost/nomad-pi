@@ -654,7 +654,7 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
             def _cd_filename(cd: str) -> str:
                 if not cd:
                     return ""
-                m = re.search(r"filename\\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
+                m = re.search(r"filename\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
                 if m:
                     try:
                         return urllib.parse.unquote(m.group(1)).strip().strip('"')
@@ -685,7 +685,7 @@ def unrestrict_link(body: dict, user_id: int = Depends(get_current_user_id)):
             fname = ""
             size = 0
             try:
-                r = requests.head(url, allow_redirects=True, timeout=10)
+                r = debrid.safe_head(url, timeout=10)
                 cd = r.headers.get("Content-Disposition") or r.headers.get("content-disposition") or ""
                 ct = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
                 size = int(r.headers.get("Content-Length") or r.headers.get("content-length") or 0)

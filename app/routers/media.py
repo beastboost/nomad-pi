@@ -2185,7 +2185,7 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         codec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k"]
 
     os.makedirs(os.path.dirname(out_fs), exist_ok=True)
-    tmp_fs = out_fs + ".tmp"
+    tmp_fs = out_fs + ".tmp.mp4"
     try:
         if os.path.exists(tmp_fs):
             os.remove(tmp_fs)
@@ -2209,11 +2209,13 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         "-progress",
         "pipe:1",
         "-nostats",
+        "-f",
+        "mp4",
         tmp_fs,
     ]
 
     try:
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     except Exception as e:
         with _ios_transcodes_lock:
             if job_id in _ios_transcodes:
@@ -2222,10 +2224,15 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         return
 
     last_out_time_ms = 0
+    tail: list[str] = []
     try:
         if p.stdout:
             for line in p.stdout:
                 line = (line or "").strip()
+                if line:
+                    tail.append(line)
+                    if len(tail) > 40:
+                        tail = tail[-40:]
                 if not line or "=" not in line:
                     continue
                 k, v = line.split("=", 1)
@@ -2245,12 +2252,6 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         pass
 
     rc = p.wait()
-    err = ""
-    try:
-        if p.stderr:
-            err = p.stderr.read() or ""
-    except Exception:
-        err = ""
 
     if rc == 0 and os.path.exists(tmp_fs):
         try:
@@ -2272,7 +2273,7 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
             _ios_transcodes[job_id]["completed_at"] = datetime.utcnow().isoformat()
         else:
             _ios_transcodes[job_id]["status"] = "failed"
-            _ios_transcodes[job_id]["error"] = (err.strip() or f"ffmpeg exited with code {rc}")[:1000]
+            _ios_transcodes[job_id]["error"] = ("\n".join(tail).strip() or f"ffmpeg exited with code {rc}")[:1000]
 
 
 @router.post("/transcode/ios")
