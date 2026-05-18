@@ -794,7 +794,7 @@ namespace NomadTransferTool
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.RedirectStandardError = true;
-                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath);
+                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath) ?? AppDomain.CurrentDomain.BaseDirectory;
                 process.Start();
 
                 // Read both streams in parallel to avoid deadlocks
@@ -2133,7 +2133,7 @@ namespace NomadTransferTool
                 process.StartInfo.CreateNoWindow = true;
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.RedirectStandardError = true;
-                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath);
+                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath) ?? AppDomain.CurrentDomain.BaseDirectory;
 
                 var output = new StringBuilder();
                 process.ErrorDataReceived += (s, e) => { if (e.Data != null) output.AppendLine(e.Data); };
@@ -2475,7 +2475,7 @@ namespace NomadTransferTool
                         if (!string.IsNullOrEmpty(item.Season))
                         {
                             // Season-specific poster goes in Season folder
-                            posterBase = Path.GetDirectoryName(finalDest)!;
+                            posterBase = Path.GetDirectoryName(finalDest) ?? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
                             posterName = "poster";
                         }
                         else
@@ -2488,7 +2488,7 @@ namespace NomadTransferTool
                     else
                     {
                         // Movie poster matches file name in same folder
-                        posterBase = Path.GetDirectoryName(finalDest)!;
+                        posterBase = Path.GetDirectoryName(finalDest) ?? Path.Combine(effectiveTargetPath, item.Category, safeTitleDir);
                         posterName = Path.GetFileNameWithoutExtension(finalDest);
                     }
 
@@ -2533,7 +2533,11 @@ namespace NomadTransferTool
 
                         await Task.Run(() =>
                         {
-                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                            var dir = Path.GetDirectoryName(dest);
+                            if (!string.IsNullOrEmpty(dir))
+                            {
+                                Directory.CreateDirectory(dir);
+                            }
                             File.Copy(src, dest, overwrite: false);
                         }, token);
                         return true;
@@ -2888,7 +2892,8 @@ namespace NomadTransferTool
                                 else
                                 {
                                     AddLog($"Transcode complete for {item.Title}");
-                                    string localDest = Path.Combine(Path.GetDirectoryName(item.SourcePath)!, safeTitle + ".mp4");
+                                    string localDir = Path.GetDirectoryName(item.SourcePath) ?? AppDomain.CurrentDomain.BaseDirectory;
+                                    string localDest = Path.Combine(localDir, safeTitle + ".mp4");
                                     if (File.Exists(localDest)) File.Delete(localDest);
                                     File.Move(tempFile, localDest);
                                     tempFilesToClean.Remove(tempFile);
@@ -3304,7 +3309,7 @@ namespace NomadTransferTool
                 process.StartInfo.UseShellExecute = false;
                 process.StartInfo.RedirectStandardError = true;
                 process.StartInfo.RedirectStandardOutput = true;
-                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath);
+                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(hbPath) ?? AppDomain.CurrentDomain.BaseDirectory;
 
                 process.OutputDataReceived += (s, e) => {
                     if (e.Data != null)
@@ -3569,6 +3574,7 @@ namespace NomadTransferTool
                 }
                 OnPropertyChanged(); 
                 OnPropertyChanged(nameof(FileName)); 
+                OnPropertyChanged(nameof(IsVideo));
             } 
         }
 
@@ -3683,8 +3689,8 @@ namespace NomadTransferTool
     {
         public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
         {
-            int count = (int)value;
-            int threshold = int.Parse(parameter?.ToString() ?? "0");
+            int count = value is int i ? i : 0;
+            int threshold = int.TryParse(parameter?.ToString(), out var t) ? t : 0;
             
             if (threshold == 0) // Visible if 0
                 return count == 0 ? Visibility.Visible : Visibility.Collapsed;

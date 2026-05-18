@@ -2324,6 +2324,55 @@ function prefersExternalPlayback(ext) {
     return ext === 'mkv' && (isIOS || isSafari);
 }
 
+async function ensureIosCompatiblePath(path, onStatus) {
+    try {
+        const res = await fetch(`${API_BASE}/media/transcode/ios?path=${encodeURIComponent(path)}`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        if (res.status === 401) { logout(); return null; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showToast(data.detail || 'Transcode request failed', 'error');
+            return null;
+        }
+        if (data.status === 'completed' && data.output_path) {
+            return data.output_path;
+        }
+        const jobId = data.job_id;
+        const outputPath = data.output_path;
+        if (!jobId || !outputPath) return null;
+
+        for (let i = 0; i < 360; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const stRes = await fetch(`${API_BASE}/media/transcode/ios/status?job_id=${encodeURIComponent(jobId)}`, {
+                headers: getAuthHeaders()
+            });
+            if (stRes.status === 401) { logout(); return null; }
+            const st = await stRes.json().catch(() => ({}));
+            if (!stRes.ok) {
+                showToast(st.detail || 'Transcode status failed', 'error');
+                return null;
+            }
+            if (typeof onStatus === 'function') {
+                onStatus(st);
+            }
+            if (st.status === 'completed') {
+                return st.output_path || outputPath;
+            }
+            if (st.status === 'failed') {
+                showToast(st.error || 'Transcode failed', 'error');
+                return null;
+            }
+        }
+        showToast('Transcode timed out', 'error');
+        return null;
+    } catch (e) {
+        showToast('Transcode failed to start', 'error');
+        return null;
+    }
+}
+
 function buildPlaybackFallbackHtml(url, vlcUrl, ext, message = '') {
     const copyUrl = String(url).replace(/'/g, "\\'");
     const detail = message || `Browser can't play this format directly (${String(ext || '').toUpperCase()})`;
@@ -2489,8 +2538,25 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         const warning = document.createElement('div');
         warning.className = 'glass-card';
         warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
-        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can fail in Safari and iOS browsers. VLC is the safer option if playback stalls or audio is missing.';
+        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can fail in Safari and iOS browsers. Preparing an iOS-compatible stream is recommended; VLC is the fallback if playback still fails.';
         body.appendChild(warning);
+
+        ensureIosCompatiblePath(path, (st) => {
+            try {
+                if (st && typeof st.progress === 'number') {
+                    warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing iOS-compatible stream… ${st.progress.toFixed(1)}%`;
+                }
+            } catch (e) {}
+        }).then((outPath) => {
+            if (!outPath) return;
+            let iosUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(outPath)}`;
+            if (token) iosUrl += '&token=' + token;
+            source.src = iosUrl;
+            source.type = 'video/mp4';
+            try { video.load(); } catch (e) {}
+            try { video.play().catch(() => {}); } catch (e) {}
+            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> iOS-compatible stream ready.';
+        });
     }
     body.appendChild(videoWrap);
     modal.classList.remove('hidden');

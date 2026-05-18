@@ -1045,7 +1045,7 @@ def ad_delete_magnet(api_key: str, magnet_id: str) -> None:
 def _get_category_from_filename(filename: str) -> str:
     """Determine media category from file extension."""
     ext = os.path.splitext(filename)[1].lower()
-    video_exts = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.wmv', '.flv'}
+    video_exts = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.m2ts', '.mts', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.mpe', '.vob'}
     music_exts = {'.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac'}
     book_exts = {'.pdf', '.epub', '.mobi', '.cbz', '.cbr'}
 
@@ -1151,8 +1151,60 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
     Returns the download_id for tracking progress.
     """
     from app.routers import media
+    raw_filename = str(filename or "").strip()
 
-    filename = _sanitize_filename(filename)
+    def _cd_filename(cd: str) -> str:
+        if not cd:
+            return ""
+        m = re.search(r"filename\\*=(?:UTF-8''|utf-8'')([^;]+)", cd)
+        if m:
+            try:
+                import urllib.parse as _up
+                return _up.unquote(m.group(1)).strip().strip('"')
+            except Exception:
+                return m.group(1).strip().strip('"')
+        m = re.search(r'filename="([^"]+)"', cd)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"filename=([^;]+)", cd)
+        if m:
+            return m.group(1).strip().strip('"')
+        return ""
+
+    def _ext_from_content_type(ct: str) -> str:
+        ct = (ct or "").split(";", 1)[0].strip().lower()
+        mapping = {
+            "video/mp4": ".mp4",
+            "video/quicktime": ".mov",
+            "video/x-matroska": ".mkv",
+            "video/webm": ".webm",
+            "video/x-msvideo": ".avi",
+            "video/mp2t": ".ts",
+            "application/x-matroska": ".mkv",
+            "audio/mpeg": ".mp3",
+            "audio/flac": ".flac",
+            "audio/wav": ".wav",
+            "audio/x-wav": ".wav",
+            "audio/aac": ".aac",
+        }
+        return mapping.get(ct, "")
+
+    if raw_filename and not os.path.splitext(raw_filename)[1]:
+        try:
+            r = requests.head(download_url, allow_redirects=True, timeout=10)
+            cd = r.headers.get("Content-Disposition") or r.headers.get("content-disposition") or ""
+            ct = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
+            header_name = _cd_filename(cd)
+            if header_name:
+                raw_filename = header_name
+            if raw_filename and not os.path.splitext(raw_filename)[1]:
+                ext = _ext_from_content_type(ct)
+                if ext:
+                    raw_filename = raw_filename + ext
+        except Exception:
+            pass
+
+    filename = _sanitize_filename(raw_filename or "download")
 
     if category == "auto":
         if is_show:
