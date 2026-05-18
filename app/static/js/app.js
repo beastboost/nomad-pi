@@ -1135,7 +1135,6 @@ async function loadMedia(category) {
 
 async function loadFileBrowser(path, opts) {
     opts = opts || {};
-    console.log('loadFileBrowser called with path:', path);
     const container = document.getElementById('files-list');
     if (!container) return;
 
@@ -1155,11 +1154,11 @@ async function loadFileBrowser(path, opts) {
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass">
+                <button type="button" class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back to /data)</h3>
                     </div>
-                </div>
+                </button>
             `;
             backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('/data', { pushHistory: true }));
             container.appendChild(backDiv);
@@ -1168,12 +1167,12 @@ async function loadFileBrowser(path, opts) {
                 const div = document.createElement('div');
                 div.className = 'media-item folder';
                 div.innerHTML = `
-                    <div class="media-card glass">
+                    <button type="button" class="media-card glass">
                         <div class="media-info">
                             <h3>💽 Drive ${escapeHtml(d.name)} (${formatBytes(d.free)} free)</h3>
                             <p>${escapeHtml(d.fstype)} - ${escapeHtml(d.mountpoint)}</p>
                         </div>
-                    </div>
+                    </button>
                 `;
                 div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(d.mountpoint, { pushHistory: true }));
                 container.appendChild(div);
@@ -1183,6 +1182,16 @@ async function loadFileBrowser(path, opts) {
             console.error('Error loading drives:', e);
         }
     }
+
+    const normalizePath = (p) => {
+        if (!p || typeof p !== 'string') return p;
+        if (p === '/' || p === '/data') return p;
+        const isDriveRoot = /^[a-zA-Z]:[\\\/]?$/.test(p);
+        if (isDriveRoot) return p.endsWith('\\') ? p : (p.endsWith(':') ? p + '\\' : p);
+        return p.replace(/[\\\/]+$/, '');
+    };
+
+    path = normalizePath(path);
 
     try {
         const url = `${API_BASE}/media/browse?path=${encodeURIComponent(path)}`;
@@ -1210,15 +1219,16 @@ async function loadFileBrowser(path, opts) {
             } else {
                 parentPath = '/data';
             }
+            parentPath = normalizePath(parentPath) || '/data';
 
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass">
+                <button type="button" class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back)</h3>
                     </div>
-                </div>
+                </button>
             `;
             backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(parentPath || '/data', { pushHistory: true }));
             container.appendChild(backDiv);
@@ -1227,11 +1237,11 @@ async function loadFileBrowser(path, opts) {
             const driveDiv = document.createElement('div');
             driveDiv.className = 'media-item folder';
             driveDiv.innerHTML = `
-                <div class="media-card glass">
+                <button type="button" class="media-card glass">
                     <div class="media-info">
                         <h3>💽 Browse External Drives / Partitions</h3>
                     </div>
-                </div>
+                </button>
             `;
             driveDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES', { pushHistory: true }));
             container.appendChild(driveDiv);
@@ -1240,11 +1250,11 @@ async function loadFileBrowser(path, opts) {
             const backDiv = document.createElement('div');
             backDiv.className = 'media-item folder';
             backDiv.innerHTML = `
-                <div class="media-card glass">
+                <button type="button" class="media-card glass">
                     <div class="media-info">
                         <h3>📁 .. (Back to Drives)</h3>
                     </div>
-                </div>
+                </button>
             `;
             backDiv.querySelector('.media-card').addEventListener('click', () => loadFileBrowser('DRIVES', { pushHistory: true }));
             container.appendChild(backDiv);
@@ -1260,29 +1270,29 @@ async function loadFileBrowser(path, opts) {
 
                 if (item.is_dir) {
                     div.innerHTML = `
-                        <div class="media-card glass">
+                        <button type="button" class="media-card glass">
                             <div class="media-info">
                                 <h3>📁 ${escapeHtml(item.name)}</h3>
                             </div>
-                        </div>
+                        </button>
                     `;
                     // Use addEventListener instead of inline onclick for better reliability
-                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(itemPath, { pushHistory: true }));
+                    div.querySelector('.media-card').addEventListener('click', () => loadFileBrowser(normalizePath(itemPath), { pushHistory: true }));
                 } else {
                     const ext = item.name.split('.').pop().toLowerCase();
                     let icon = '📄';
-                    if (['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) icon = '🎬';
+                    if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg', 'm2ts', 'mts', 'vob', 'mpe'].includes(ext)) icon = '🎬';
                     if (['mp3', 'flac', 'wav', 'm4a'].includes(ext)) icon = '🎵';
                     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) icon = '🖼️';
                     if (['pdf', 'epub', 'cbz', 'cbr'].includes(ext)) icon = '📚';
 
                     div.innerHTML = `
-                        <div class="media-card glass">
+                        <button type="button" class="media-card glass">
                             <div class="media-info">
                                 <h3>${icon} ${escapeHtml(item.name)}</h3>
                                 <p>${formatBytes(item.size)}</p>
                             </div>
-                        </div>
+                        </button>
                     `;
                     // Use addEventListener instead of inline onclick for better reliability
                     div.querySelector('.media-card').addEventListener('click', () => openFile(itemPath));
@@ -1310,7 +1320,7 @@ async function loadFileBrowser(path, opts) {
 
 function openFile(path) {
     const ext = path.split('.').pop().toLowerCase();
-    if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg'].includes(ext)) {
+    if (['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', 'ts', 'wmv', 'flv', '3gp', 'mpg', 'mpeg', 'm2ts', 'mts', 'vob', 'mpe'].includes(ext)) {
         openVideoViewer(path);
     } else if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
         openImageViewer(path);
