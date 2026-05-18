@@ -28,6 +28,9 @@ Status: OPEN
 - `DownloadHandbrake()` was using the shared app `HttpClient`, which also carries Nomad auth state and is reused across unrelated requests.
 - Runtime screenshot also showed Debrid torrent loading failing on JSON conversion: value `"8.87 GB"` could not be converted to `System.Int64`.
 - `DebridTorrentResult.Size` was typed as `long` with default deserialization, which only works when the API returns raw numeric bytes.
+- Runtime screenshot then showed another Debrid JSON conversion failure: `seeders` could be `null`, but the client model expected a non-null `int`.
+- User also reported the redesigned tool only exposed one Debrid key field even though the backend has separate provider key endpoints for `rd`, `ad`, and `tb`.
+- Web playback path on the Pi only auto-prepared an H.264-compatible stream for iOS/Safari MKV cases, leaving common ARM/Linux stutter cases on direct browser playback.
 
 ## Fix
 - Updated `generate_xaml.py` so it now emits valid WPF markup matching `MainWindow.xaml`.
@@ -36,6 +39,10 @@ Status: OPEN
 - Updated `RefreshDrives()` so UI-bound reads and writes are wrapped in `Dispatcher.InvokeAsync`, while the actual drive enumeration stays off the UI thread.
 - Updated `DownloadHandbrake()` to use a dedicated GitHub `HttpClient` with its own headers, instead of the shared authenticated app client.
 - Added `FlexibleSizeConverter` and applied it to `DebridTorrentResult.Size` so string sizes like `"8.87 GB"` deserialize correctly.
+- Added `FlexibleIntConverter` and applied it to `DebridTorrentResult.Seeders` so `null` and string values deserialize safely.
+- Added separate provider-specific Debrid key storage, save actions, and status display for Real-Debrid, AllDebrid, and TorBox in the Transfer Tool UI.
+- Added selected-provider key editing in the Debrid tab and per-provider key rows in Settings, each linked to the correct `/debrid/{provider}/key` endpoint.
+- Broadened browser playback compatibility logic so Pi/ARM devices and HEVC-style files prefer the existing H.264/AAC transcode path instead of raw direct playback.
 
 ## Verification
 - `dotnet publish` passes locally on current HEAD.

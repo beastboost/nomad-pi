@@ -509,6 +509,10 @@
                 <!-- Search Header -->
                 <Border Grid.Row="0" Style="{StaticResource CardBorder}" Margin="0,0,0,15">
                     <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
@@ -538,6 +542,19 @@
                             <ComboBox ItemsSource="{Binding DebridProviders}" SelectedItem="{Binding SelectedDebridProvider}" DisplayMemberPath="Name" Height="36" Width="120" Margin="0,0,10,0"/>
                             <Button Content="Search Cinemeta" Click="DebridSearchTitles_Click" Height="36" Padding="20,0" Style="{StaticResource PrimaryButton}" FontSize="14"/>
                         </StackPanel>
+
+                        <Grid Grid.Row="1" Grid.ColumnSpan="3" Margin="0,15,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Selected Provider Key" VerticalAlignment="Center" Margin="0,0,12,0" Foreground="{StaticResource MutedTextColor}"/>
+                            <TextBox Grid.Column="1" Text="{Binding DebridApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Height="34" Padding="10,0" VerticalContentAlignment="Center" Margin="0,0,10,0"/>
+                            <Button Grid.Column="2" Content="Save Key" Click="DebridSaveKey_Click" Height="34" Padding="15,0" Margin="0,0,10,0"/>
+                            <TextBlock Grid.Column="3" Text="{Binding SelectedDebridKeyStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" TextWrapping="Wrap"/>
+                        </Grid>
                     </Grid>
                 </Border>
 
@@ -820,10 +837,38 @@
                                         <ColumnDefinition Width="200"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="220"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Debrid API Key" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}"/>
-                                    <TextBox Grid.Column="1" Text="{Binding DebridApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Padding="8" Margin="0,0,10,0"/>
-                                    <Button Grid.Column="2" Content="Save" Click="DebridSaveKey_Click" Padding="15,6"/>
+                                    <TextBlock Text="Real-Debrid API Key" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}"/>
+                                    <TextBox Grid.Column="1" Text="{Binding RealDebridApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Padding="8" Margin="0,0,10,0"/>
+                                    <Button Grid.Column="2" Content="Save" Click="SaveRealDebridKey_Click" Padding="15,6" Margin="0,0,10,0"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding RealDebridKeyStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="220"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="AllDebrid API Key" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}"/>
+                                    <TextBox Grid.Column="1" Text="{Binding AllDebridApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Padding="8" Margin="0,0,10,0"/>
+                                    <Button Grid.Column="2" Content="Save" Click="SaveAllDebridKey_Click" Padding="15,6" Margin="0,0,10,0"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding AllDebridKeyStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid Margin="0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="220"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="TorBox API Key" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}"/>
+                                    <TextBox Grid.Column="1" Text="{Binding TorBoxApiKey, UpdateSourceTrigger=PropertyChanged}" Background="{StaticResource InputBackground}" Foreground="White" BorderThickness="0" Padding="8" Margin="0,0,10,0"/>
+                                    <Button Grid.Column="2" Content="Save" Click="SaveTorBoxKey_Click" Padding="15,6" Margin="0,0,10,0"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding TorBoxKeyStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedTextColor}" TextWrapping="Wrap"/>
                                 </Grid>
                             </StackPanel>
                         </Border>

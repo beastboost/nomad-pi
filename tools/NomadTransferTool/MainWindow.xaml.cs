@@ -44,6 +44,9 @@ namespace NomadTransferTool
         private const string STATUS_READY = "Ready";
         private const string DATA_SHARE = "data";
         private const string OMDB_FILE = "omdb.txt";
+        private const string RD_KEY_FILE = "rd_key.txt";
+        private const string AD_KEY_FILE = "ad_key.txt";
+        private const string TB_KEY_FILE = "tb_key.txt";
         
         public static class Categories
         {
@@ -161,7 +164,12 @@ namespace NomadTransferTool
         private string _fileManagerRoot = "";
         private ObservableCollection<DebridProviderOption> _debridProviders = new ObservableCollection<DebridProviderOption>();
         private DebridProviderOption? _selectedDebridProvider;
-        private string _debridApiKey = "";
+        private string _realDebridApiKey = "";
+        private string _allDebridApiKey = "";
+        private string _torBoxApiKey = "";
+        private string _realDebridKeyStatus = "Not saved";
+        private string _allDebridKeyStatus = "Not saved";
+        private string _torBoxKeyStatus = "Not saved";
         private string _debridTitleQuery = "";
         private string _debridSearchType = "movie";
         private string _debridSearchSeason = "1";
@@ -521,6 +529,7 @@ namespace NomadTransferTool
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _authToken);
                 AuthStatus = $"Logged in as {ServerUsername}";
                 AddLog("Authenticated with Nomad Pi.");
+                _ = RefreshAllDebridKeyStatuses(false);
                 
                 // Auto-sync local OMDb key to Pi on login
                 if (!string.IsNullOrEmpty(OMDB_API_KEY))
@@ -617,8 +626,60 @@ namespace NomadTransferTool
         public string FileManagerPath { get => _fileManagerPath; set { _fileManagerPath = value; OnPropertyChanged(); } }
         public string FileManagerStatus { get => _fileManagerStatus; set { _fileManagerStatus = value; OnPropertyChanged(); } }
         public ObservableCollection<DebridProviderOption> DebridProviders { get => _debridProviders; set { _debridProviders = value; OnPropertyChanged(); } }
-        public DebridProviderOption? SelectedDebridProvider { get => _selectedDebridProvider; set { _selectedDebridProvider = value; OnPropertyChanged(); } }
-        public string DebridApiKey { get => _debridApiKey; set { _debridApiKey = value; OnPropertyChanged(); } }
+        public DebridProviderOption? SelectedDebridProvider
+        {
+            get => _selectedDebridProvider;
+            set
+            {
+                _selectedDebridProvider = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(DebridApiKey));
+                OnPropertyChanged(nameof(SelectedDebridKeyStatus));
+            }
+        }
+        public string DebridApiKey
+        {
+            get => GetDebridApiKeyForProvider(GetDebridProviderId());
+            set
+            {
+                SetDebridApiKeyForProvider(GetDebridProviderId(), value);
+                OnPropertyChanged();
+            }
+        }
+        public string RealDebridApiKey
+        {
+            get => _realDebridApiKey;
+            set
+            {
+                _realDebridApiKey = value;
+                OnPropertyChanged();
+                if (GetDebridProviderId() == "rd") OnPropertyChanged(nameof(DebridApiKey));
+            }
+        }
+        public string AllDebridApiKey
+        {
+            get => _allDebridApiKey;
+            set
+            {
+                _allDebridApiKey = value;
+                OnPropertyChanged();
+                if (GetDebridProviderId() == "ad") OnPropertyChanged(nameof(DebridApiKey));
+            }
+        }
+        public string TorBoxApiKey
+        {
+            get => _torBoxApiKey;
+            set
+            {
+                _torBoxApiKey = value;
+                OnPropertyChanged();
+                if (GetDebridProviderId() == "tb") OnPropertyChanged(nameof(DebridApiKey));
+            }
+        }
+        public string RealDebridKeyStatus { get => _realDebridKeyStatus; set { _realDebridKeyStatus = value; OnPropertyChanged(); if (GetDebridProviderId() == "rd") OnPropertyChanged(nameof(SelectedDebridKeyStatus)); } }
+        public string AllDebridKeyStatus { get => _allDebridKeyStatus; set { _allDebridKeyStatus = value; OnPropertyChanged(); if (GetDebridProviderId() == "ad") OnPropertyChanged(nameof(SelectedDebridKeyStatus)); } }
+        public string TorBoxKeyStatus { get => _torBoxKeyStatus; set { _torBoxKeyStatus = value; OnPropertyChanged(); if (GetDebridProviderId() == "tb") OnPropertyChanged(nameof(SelectedDebridKeyStatus)); } }
+        public string SelectedDebridKeyStatus => GetDebridKeyStatusForProvider(GetDebridProviderId());
         public string DebridTitleQuery { get => _debridTitleQuery; set { _debridTitleQuery = value; OnPropertyChanged(); } }
         public string DebridSearchType { get => _debridSearchType; set { _debridSearchType = value; OnPropertyChanged(); } }
         public string DebridSearchSeason { get => _debridSearchSeason; set { _debridSearchSeason = value; OnPropertyChanged(); } }
@@ -675,6 +736,14 @@ namespace NomadTransferTool
                 OMDB_API_KEY = DecryptString(File.ReadAllText(OMDB_FILE).Trim());
                 OmdbKeyBox.Password = OMDB_API_KEY;
             }
+
+            RealDebridApiKey = LoadEncryptedLocalSetting(RD_KEY_FILE);
+            AllDebridApiKey = LoadEncryptedLocalSetting(AD_KEY_FILE);
+            TorBoxApiKey = LoadEncryptedLocalSetting(TB_KEY_FILE);
+
+            RealDebridKeyStatus = string.IsNullOrWhiteSpace(RealDebridApiKey) ? "Not saved locally" : "Loaded locally";
+            AllDebridKeyStatus = string.IsNullOrWhiteSpace(AllDebridApiKey) ? "Not saved locally" : "Loaded locally";
+            TorBoxKeyStatus = string.IsNullOrWhiteSpace(TorBoxApiKey) ? "Not saved locally" : "Loaded locally";
 
             // Try to find the media server data path
             string currentDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -1408,9 +1477,131 @@ namespace NomadTransferTool
             return SelectedDebridProvider?.Id ?? "rd";
         }
 
-        private async Task<bool> DebridApplyProviderAndKey(bool showUserErrors)
+        private string GetDebridApiKeyForProvider(string provider)
         {
-            var provider = GetDebridProviderId();
+            return provider switch
+            {
+                "ad" => AllDebridApiKey,
+                "tb" => TorBoxApiKey,
+                _ => RealDebridApiKey,
+            };
+        }
+
+        private void SetDebridApiKeyForProvider(string provider, string value)
+        {
+            value ??= "";
+            switch (provider)
+            {
+                case "ad":
+                    AllDebridApiKey = value;
+                    break;
+                case "tb":
+                    TorBoxApiKey = value;
+                    break;
+                default:
+                    RealDebridApiKey = value;
+                    break;
+            }
+        }
+
+        private string GetDebridKeyStatusForProvider(string provider)
+        {
+            return provider switch
+            {
+                "ad" => AllDebridKeyStatus,
+                "tb" => TorBoxKeyStatus,
+                _ => RealDebridKeyStatus,
+            };
+        }
+
+        private void SetDebridKeyStatusForProvider(string provider, string value)
+        {
+            switch (provider)
+            {
+                case "ad":
+                    AllDebridKeyStatus = value;
+                    break;
+                case "tb":
+                    TorBoxKeyStatus = value;
+                    break;
+                default:
+                    RealDebridKeyStatus = value;
+                    break;
+            }
+        }
+
+        private static string GetLocalDebridKeyFile(string provider)
+        {
+            return provider switch
+            {
+                "ad" => AD_KEY_FILE,
+                "tb" => TB_KEY_FILE,
+                _ => RD_KEY_FILE,
+            };
+        }
+
+        private string LoadEncryptedLocalSetting(string fileName)
+        {
+            try
+            {
+                if (!File.Exists(fileName)) return "";
+                return DecryptString(File.ReadAllText(fileName).Trim());
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private void SaveEncryptedLocalSetting(string fileName, string value)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    if (File.Exists(fileName)) File.Delete(fileName);
+                    return;
+                }
+                File.WriteAllText(fileName, EncryptString(value.Trim()));
+            }
+            catch { }
+        }
+
+        private async Task RefreshDebridKeyStatus(string provider, bool showUserErrors = false)
+        {
+            if (!await EnsureAuthenticated(showUserErrors)) return;
+            var res = await GetWithAuthRetry($"{API_BASE}/debrid/{provider}/key", false);
+            if (res == null) return;
+            if (!res.IsSuccessStatusCode)
+            {
+                SetDebridKeyStatusForProvider(provider, $"Status check failed ({(int)res.StatusCode})");
+                return;
+            }
+
+            var content = await res.Content.ReadAsStringAsync();
+            var data = JsonConvert.DeserializeObject<dynamic>(content);
+            bool hasKey = false;
+            string masked = "";
+            try { hasKey = (bool?)data?.has_key == true; } catch { hasKey = false; }
+            try { masked = (string?)data?.masked ?? ""; } catch { masked = ""; }
+
+            if (hasKey)
+                SetDebridKeyStatusForProvider(provider, string.IsNullOrWhiteSpace(masked) ? "Saved on Pi" : $"Saved on Pi: {masked}");
+            else
+                SetDebridKeyStatusForProvider(provider, "Not saved on Pi");
+        }
+
+        private async Task RefreshAllDebridKeyStatuses(bool showUserErrors = false)
+        {
+            await RefreshDebridKeyStatus("rd", showUserErrors);
+            await RefreshDebridKeyStatus("ad", showUserErrors);
+            await RefreshDebridKeyStatus("tb", showUserErrors);
+        }
+
+        private async Task<bool> SaveDebridKeyForProvider(string provider, string key, bool showUserErrors)
+        {
+            key = (key ?? "").Trim();
+
             var providerBody = new StringContent(JsonConvert.SerializeObject(new { provider }), Encoding.UTF8, "application/json");
             var setProvider = await PostWithAuthRetry($"{API_BASE}/debrid/provider", providerBody, showUserErrors);
             if (setProvider == null) return false;
@@ -1418,23 +1609,37 @@ namespace NomadTransferTool
             {
                 var txt = await setProvider.Content.ReadAsStringAsync();
                 DebridStatus = $"Provider set failed: {txt}";
+                SetDebridKeyStatusForProvider(provider, "Provider link failed");
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(DebridApiKey))
+            if (string.IsNullOrWhiteSpace(key))
             {
-                var keyBody = new StringContent(JsonConvert.SerializeObject(new { key = DebridApiKey.Trim() }), Encoding.UTF8, "application/json");
-                var res = await PostWithAuthRetry($"{API_BASE}/debrid/{provider}/key", keyBody, showUserErrors);
-                if (res == null) return false;
-                if (!res.IsSuccessStatusCode)
-                {
-                    var txt = await res.Content.ReadAsStringAsync();
-                    DebridStatus = $"Key save failed: {txt}";
-                    return false;
-                }
+                SetDebridKeyStatusForProvider(provider, "Enter an API key");
+                return false;
             }
 
+            var keyBody = new StringContent(JsonConvert.SerializeObject(new { key }), Encoding.UTF8, "application/json");
+            var res = await PostWithAuthRetry($"{API_BASE}/debrid/{provider}/key", keyBody, showUserErrors);
+            if (res == null) return false;
+            if (!res.IsSuccessStatusCode)
+            {
+                var txt = await res.Content.ReadAsStringAsync();
+                DebridStatus = $"Key save failed: {txt}";
+                SetDebridKeyStatusForProvider(provider, $"Save failed: {txt}");
+                return false;
+            }
+
+            SetDebridApiKeyForProvider(provider, key);
+            SaveEncryptedLocalSetting(GetLocalDebridKeyFile(provider), key);
+            await RefreshDebridKeyStatus(provider, false);
             return true;
+        }
+
+        private async Task<bool> DebridApplyProviderAndKey(bool showUserErrors)
+        {
+            var provider = GetDebridProviderId();
+            return await SaveDebridKeyForProvider(provider, GetDebridApiKeyForProvider(provider), showUserErrors);
         }
 
         private async void DebridSaveKey_Click(object sender, RoutedEventArgs e)
@@ -1442,13 +1647,35 @@ namespace NomadTransferTool
             DebridStatus = "Saving debrid settings...";
             try
             {
-                var ok = await DebridApplyProviderAndKey(true);
+                var provider = GetDebridProviderId();
+                var ok = await SaveDebridKeyForProvider(provider, GetDebridApiKeyForProvider(provider), true);
                 DebridStatus = ok ? "Saved to Nomad Pi" : "Save failed";
             }
             catch (Exception ex)
             {
                 DebridStatus = $"Save failed: {ex.Message}";
             }
+        }
+
+        private async void SaveRealDebridKey_Click(object sender, RoutedEventArgs e)
+        {
+            DebridStatus = "Saving Real-Debrid key...";
+            var ok = await SaveDebridKeyForProvider("rd", RealDebridApiKey, true);
+            DebridStatus = ok ? "Real-Debrid key saved" : "Real-Debrid key save failed";
+        }
+
+        private async void SaveAllDebridKey_Click(object sender, RoutedEventArgs e)
+        {
+            DebridStatus = "Saving AllDebrid key...";
+            var ok = await SaveDebridKeyForProvider("ad", AllDebridApiKey, true);
+            DebridStatus = ok ? "AllDebrid key saved" : "AllDebrid key save failed";
+        }
+
+        private async void SaveTorBoxKey_Click(object sender, RoutedEventArgs e)
+        {
+            DebridStatus = "Saving TorBox key...";
+            var ok = await SaveDebridKeyForProvider("tb", TorBoxApiKey, true);
+            DebridStatus = ok ? "TorBox key saved" : "TorBox key save failed";
         }
 
         private async void DebridSearchTitles_Click(object sender, RoutedEventArgs e)
@@ -3513,6 +3740,7 @@ namespace NomadTransferTool
             public long Size { get; set; }
 
             [JsonProperty("seeders")]
+            [JsonConverter(typeof(FlexibleIntConverter))]
             public int Seeders { get; set; }
 
             [JsonProperty("quality")]
@@ -3776,6 +4004,35 @@ namespace NomadTransferTool
         }
 
         public override void WriteJson(JsonWriter writer, long value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value);
+        }
+    }
+
+    public class FlexibleIntConverter : JsonConverter<int>
+    {
+        public override int ReadJson(JsonReader reader, Type objectType, int existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null || reader.Value == null)
+                return 0;
+
+            if (reader.TokenType == JsonToken.Integer)
+                return Convert.ToInt32(reader.Value);
+
+            if (reader.TokenType == JsonToken.Float)
+                return Convert.ToInt32(reader.Value);
+
+            if (reader.TokenType != JsonToken.String)
+                return 0;
+
+            var text = reader.Value.ToString()?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(text))
+                return 0;
+
+            return int.TryParse(text, out var value) ? value : 0;
+        }
+
+        public override void WriteJson(JsonWriter writer, int value, JsonSerializer serializer)
         {
             writer.WriteValue(value);
         }

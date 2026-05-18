@@ -2317,11 +2317,15 @@ function getExternalPlaybackUrls(url) {
     };
 }
 
-function prefersExternalPlayback(ext) {
+function prefersExternalPlayback(ext, pathOrName = '') {
     const ua = navigator.userAgent || '';
     const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/i.test(ua);
-    return ext === 'mkv' && (isIOS || isSafari);
+    const isArmLinux = /Linux/i.test(ua) && /(arm|aarch64)/i.test(ua);
+    const name = String(pathOrName || '').toLowerCase();
+    const looksHevc = /\b(hevc|x265|h265|10bit|remux)\b/i.test(name);
+    const problematicExt = ['mkv', 'ts', 'm2ts', 'mts', 'avi', 'mov'].includes(ext);
+    return (ext === 'mkv' && (isIOS || isSafari)) || looksHevc || (isArmLinux && problematicExt);
 }
 
 async function ensureIosCompatiblePath(path, onStatus) {
@@ -2421,7 +2425,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const ext = extMatch ? extMatch[1].toLowerCase() : 'mp4';
     const mimeType = getVideoMimeType(path);
     const { fullUrl, vlcUrl } = getExternalPlaybackUrls(streamUrl);
-    const preferExternal = prefersExternalPlayback(ext);
+    const preferExternal = prefersExternalPlayback(ext, path);
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
     heading.innerHTML = `
@@ -2538,13 +2542,13 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         const warning = document.createElement('div');
         warning.className = 'glass-card';
         warning.style.cssText = 'padding:.75rem 1rem;margin-bottom:.75rem;color:var(--text-secondary);font-size:.9rem';
-        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can fail in Safari and iOS browsers. Preparing an iOS-compatible stream is recommended; VLC is the fallback if playback still fails.';
+        warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> This file may stutter or fail in the browser on some devices. Preparing an H.264/AAC-compatible stream is recommended; VLC is the fallback if playback still fails.';
         body.appendChild(warning);
 
         ensureIosCompatiblePath(path, (st) => {
             try {
                 if (st && typeof st.progress === 'number') {
-                    warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing iOS-compatible stream… ${st.progress.toFixed(1)}%`;
+                    warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing H.264-compatible stream… ${st.progress.toFixed(1)}%`;
                 }
             } catch (e) {}
         }).then((outPath) => {
@@ -2555,7 +2559,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
             source.type = 'video/mp4';
             try { video.load(); } catch (e) {}
             try { video.play().catch(() => {}); } catch (e) {}
-            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> iOS-compatible stream ready.';
+            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> H.264-compatible stream ready.';
         });
     }
     body.appendChild(videoWrap);
