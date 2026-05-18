@@ -22,7 +22,9 @@ from app import database
 logger = logging.getLogger(__name__)
 
 RD_BASE = "https://api.real-debrid.com/rest/1.0"
-AD_BASE = "https://api.alldebrid.com/v4"  # Updated to v4 (latest API)
+AD_BASE_V4 = "https://api.alldebrid.com/v4"
+AD_BASE_V41 = "https://api.alldebrid.com/v4.1"
+AD_BASE = AD_BASE_V4
 TB_BASE = "https://api.torbox.app/v1/api"
 TORRENTIO_BASE = "https://torrentio.strem.fun"
 
@@ -157,11 +159,15 @@ def _tb_headers(api_key: str) -> dict:
 def _tb_extract_data(payload):
     if isinstance(payload, dict):
         success = payload.get("success")
+        if success is None:
+            success = payload.get("Success")
         if success is False:
             detail = payload.get("detail") or payload.get("error") or "TorBox error"
             raise Exception(str(detail))
         if "data" in payload:
             return payload.get("data")
+        if "Data" in payload:
+            return payload.get("Data")
     return payload
 
 
@@ -414,8 +420,82 @@ def tb_add_magnet(api_key: str, info_hash: str) -> dict:
     magnet = f"magnet:?xt=urn:btih:{info_hash}"
     data = _tb_request("POST", "/torrents/createtorrent", api_key, data={"magnet": magnet})
     if isinstance(data, dict):
+        torrent_id = data.get("torrent_id") or data.get("torrentId") or data.get("id") or data.get("Id")
+        if torrent_id is not None and "torrent_id" not in data:
+            data["torrent_id"] = torrent_id
         return data
     return {"id": data}
+
+
+def _tb_normalize_file(file_item: dict) -> dict:
+    out = dict(file_item)
+    if "id" not in out and "Id" in out:
+        out["id"] = out.get("Id")
+    if "name" not in out and "Name" in out:
+        out["name"] = out.get("Name")
+    if "size" not in out and "Size" in out:
+        out["size"] = out.get("Size")
+    if "size" not in out and "bytes" in out:
+        out["size"] = out.get("bytes")
+    return out
+
+
+def _tb_normalize_torrent(torrent: dict) -> dict:
+    out = dict(torrent)
+    mapping = {
+        "downloadState": "download_state",
+        "downloadFinished": "download_finished",
+        "downloadPresent": "download_present",
+        "downloadSpeed": "download_speed",
+        "uploadSpeed": "upload_speed",
+        "createdAt": "created_at",
+        "updatedAt": "updated_at",
+        "expiresAt": "expires_at",
+        "inactiveCheck": "inactive_check",
+        "torrentFile": "torrent_file",
+        "authId": "auth_id",
+    }
+    for src, dst in mapping.items():
+        if dst not in out and src in out:
+            out[dst] = out.get(src)
+
+    if "id" not in out and "Id" in out:
+        out["id"] = out.get("Id")
+
+    files = out.get("files") or out.get("Files") or []
+    if isinstance(files, list):
+        out["files"] = [_tb_normalize_file(f) for f in files if isinstance(f, dict)]
+
+    return out
+
+
+def _tb_pick_torrent(payload, torrent_id: Union[int, str]) -> Optional[dict]:
+    if isinstance(payload, dict):
+        candidates = (
+            payload.get("torrents")
+            or payload.get("items")
+            or payload.get("data")
+            or payload.get("Data")
+        )
+        if isinstance(candidates, list):
+            for item in candidates:
+                if isinstance(item, dict) and str(item.get("id") or item.get("Id")) == str(torrent_id):
+                    return item
+            if len(candidates) == 1 and isinstance(candidates[0], dict):
+                return candidates[0]
+
+        if any(k in payload for k in ("downloadState", "download_state", "downloadFinished", "download_finished", "files", "Files")):
+            return payload
+
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict) and str(item.get("id") or item.get("Id")) == str(torrent_id):
+                return item
+        if len(payload) == 1 and isinstance(payload[0], dict):
+            return payload[0]
+
+    return None
+
 
 
 def tb_get_torrent_info(api_key: str, torrent_id: Union[int, str]) -> dict:
@@ -425,27 +505,22 @@ def tb_get_torrent_info(api_key: str, torrent_id: Union[int, str]) -> dict:
         _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info entry", {"torrent_id": str(torrent_id)})
         # #endregion
         data = _tb_request("GET", "/torrents/mylist", api_key, params={"id": torrent_id})
-        if isinstance(data, dict):
+        picked = _tb_pick_torrent(data, torrent_id)
+        if isinstance(picked, dict):
+            normalized = _tb_normalize_torrent(picked)
             # #region debug-point D:tb-torrent-info-dict
-            _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info dict payload", {"torrent_id": str(torrent_id), "keys": sorted(list(data.keys()))[:20], "download_state": str(data.get("download_state", "")), "download_finished": bool(data.get("download_finished"))})
+            _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info dict payload", {"torrent_id": str(torrent_id), "keys": sorted(list(normalized.keys()))[:20], "download_state": str(normalized.get("download_state", "")), "download_finished": bool(normalized.get("download_finished"))})
             # #endregion
-            return data
-        if isinstance(data, list):
-            # #region debug-point D:tb-torrent-info-list
-            _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info list payload", {"torrent_id": str(torrent_id), "count": len(data)})
-            # #endregion
-            for item in data:
-                if str(item.get("id")) == str(torrent_id):
-                    return item
+            return normalized
     except Exception as e:
         # #region debug-point D:tb-torrent-info-fallback
         _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info primary request failed", {"torrent_id": str(torrent_id), "error": str(e)})
         # #endregion
         data = _tb_request("GET", "/torrents/mylist", api_key)
-        if isinstance(data, list):
-            for item in data:
-                if str(item.get("id")) == str(torrent_id):
-                    return item
+        picked = _tb_pick_torrent(data, torrent_id)
+        if isinstance(picked, dict):
+            return _tb_normalize_torrent(picked)
+
     # #region debug-point D:tb-torrent-info-miss
     _debug_report("D", "app/services/debrid.py:tb_get_torrent_info", "tb_get_torrent_info not found", {"torrent_id": str(torrent_id)})
     # #endregion
@@ -462,9 +537,11 @@ def tb_request_download(api_key: str, torrent_id: Union[int, str], file_id: Unio
         f"{TB_BASE}/torrents/requestdl",
         headers=_tb_headers(api_key),
         params={
+            "token": api_key,
             "torrent_id": torrent_id,
             "file_id": file_id,
-            "zip_link": "false"
+            "zip_link": "false",
+            "redirect": "false",
         },
         timeout=15,
     )
@@ -759,10 +836,10 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
         # #region debug-point E:ad-magnet-status-entry
         _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status entry", {"magnet_id": str(magnet_id)})
         # #endregion
-        r = requests.get(
-            "https://api.alldebrid.com/v4.1/magnet/status",
+        r = requests.post(
+            f"{AD_BASE_V41}/magnet/status",
             headers=_ad_headers(api_key),
-            params={"id": magnet_id},
+            data={"id": magnet_id},
             timeout=15,
         )
         r.raise_for_status()
@@ -783,6 +860,82 @@ def ad_get_magnet_status(api_key: str, magnet_id: str) -> dict:
         _debug_report("E", "app/services/debrid.py:ad_get_magnet_status", "ad_get_magnet_status http error", {"magnet_id": str(magnet_id), "status_code": getattr(e.response, "status_code", None), "body_sample": (e.response.text[:200] if getattr(e, "response", None) is not None and getattr(e.response, "text", None) else "")})
         # #endregion
         if r.status_code == 401:
+            raise DebridAuthError("Invalid AllDebrid API key")
+        raise
+
+
+def _ad_flatten_file_tree(entries, prefix: str = "") -> list[dict]:
+    out: list[dict] = []
+
+    if isinstance(entries, dict):
+        entries = entries.get("files") or entries.get("e") or entries.get("entries") or entries.get("children") or []
+
+    if not isinstance(entries, list):
+        return out
+
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+
+        name = item.get("n") or item.get("filename") or item.get("name") or ""
+        link = item.get("l") or item.get("link") or item.get("url") or ""
+        size = item.get("s") or item.get("size") or item.get("bytes") or 0
+
+        path = prefix
+        if name:
+            path = f"{prefix}/{name}" if prefix else name
+
+        children = item.get("e") or item.get("entries") or item.get("files") or item.get("children")
+        if children:
+            out.extend(_ad_flatten_file_tree(children, path))
+            continue
+
+        if link:
+            try:
+                size_i = int(size or 0)
+            except Exception:
+                size_i = 0
+            out.append({"filename": path or name, "size": size_i, "link": link})
+
+    return out
+
+
+def ad_get_magnet_files(api_key: str, magnet_id: str) -> list[dict]:
+    try:
+        _check_rate_limit("ad")
+        r = requests.post(
+            f"{AD_BASE}/magnet/files",
+            headers=_ad_headers(api_key),
+            data=[("id[]", magnet_id)],
+            timeout=15,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("status") == "error":
+            raise Exception(payload.get("error", {}).get("message", "AllDebrid error"))
+
+        magnets = payload.get("data", {}).get("magnets")
+        magnet = None
+        if isinstance(magnets, list):
+            for m in magnets:
+                if str(m.get("id")) == str(magnet_id):
+                    magnet = m
+                    break
+            if magnet is None and magnets:
+                magnet = magnets[0]
+        elif isinstance(magnets, dict):
+            magnet = magnets.get(str(magnet_id)) or magnets.get(magnet_id) or magnets
+
+        if isinstance(magnet, dict):
+            file_tree = magnet.get("files") or magnet.get("links") or magnet
+            return _ad_flatten_file_tree(file_tree)
+
+        if isinstance(payload.get("data", {}), dict):
+            return _ad_flatten_file_tree(payload.get("data", {}))
+
+        return []
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", None) == 401:
             raise DebridAuthError("Invalid AllDebrid API key")
         raise
 

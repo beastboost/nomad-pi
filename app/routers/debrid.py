@@ -331,7 +331,8 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
             files = []
             links = []
             if status_info.get("statusCode", 0) >= 4:
-                for idx, f in enumerate(status_info.get("links", [])):
+                ad_files = debrid.ad_get_magnet_files(key, magnet_id)
+                for idx, f in enumerate(ad_files):
                     link = f.get("link")
                     if link:
                         links.append(link)
@@ -345,14 +346,15 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 "ok": True,
                 "provider": "ad",
                 "torrent_id": magnet_id,
-                "status": "downloaded" if status_info.get("statusCode", 0) >= 4 else "processing",
+                "status": "downloaded" if status_info.get("statusCode", 0) >= 4 and links else ("error" if status_info.get("statusCode", 0) >= 5 else "processing"),
                 "links": links,
-                "filename": status_info.get("filename", ""),
+                "filename": status_info.get("filename") or status_info.get("name") or result.get("name", ""),
                 "files": files,
+                "message": (status_info.get("error", {}) or {}).get("message", "") if isinstance(status_info.get("error"), dict) else "",
             }
         elif provider == "tb":
             result = debrid.tb_add_magnet(key, body.info_hash)
-            torrent_id = result.get("torrent_id") or result.get("id")
+            torrent_id = result.get("torrent_id") or result.get("torrentId") or result.get("id") or result.get("Id")
             info = {}
             for _ in range(15):
                 info = debrid.tb_get_torrent_info(key, torrent_id)
@@ -364,7 +366,7 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 time.sleep(1)
             files = info.get("files", [])
             links = []
-            if info.get("download_finished") or info.get("download_state") in ("completed", "cached"):
+            if info.get("download_finished") or info.get("download_state") in ("completed", "cached", "uploading") or info.get("download_present"):
                 for f in files:
                     try:
                         dl = debrid.tb_request_download(key, torrent_id, f.get("id", 0))
@@ -376,10 +378,11 @@ def add_magnet(body: MagnetBody, user_id: int = Depends(get_current_user_id)):
                 "ok": True,
                 "provider": "tb",
                 "torrent_id": torrent_id,
-                "status": "downloaded" if links else "processing",
+                "status": "downloaded" if links else ("error" if (info.get("download_finished") or info.get("download_present")) else "processing"),
                 "links": links,
                 "filename": info.get("name", ""),
                 "files": files,
+                "message": "" if links else "TorBox reported this torrent ready, but no download link could be generated.",
             }
     except Exception as e:
         status_code = _http_error_status(e)
@@ -417,8 +420,10 @@ def get_torrent_status(torrent_id: str,
             info = debrid.ad_get_magnet_status(key, torrent_id)
             files = []
             links = []
-            if info.get("statusCode", 0) >= 4:
-                for idx, f in enumerate(info.get("links", [])):
+            status_code = info.get("statusCode", 0)
+            if status_code >= 4:
+                ad_files = debrid.ad_get_magnet_files(key, torrent_id)
+                for idx, f in enumerate(ad_files):
                     link = f.get("link")
                     if link:
                         links.append(link)
@@ -428,42 +433,54 @@ def get_torrent_status(torrent_id: str,
                             "bytes": f.get("size", 0),
                             "selected": 1
                         })
-            progress = 100 if info.get("statusCode", 0) >= 4 else info.get("downloaded", 0) / max(info.get("size", 1), 1) * 100
+            size = info.get("size") or info.get("size_total") or 1
+            downloaded = info.get("downloaded") or info.get("downloadedBytes") or info.get("downloaded_bytes") or 0
+            progress = 100 if status_code >= 4 else (float(downloaded) / max(float(size), 1.0) * 100)
             response = {
-                "status": "downloaded" if info.get("statusCode", 0) >= 4 else "processing",
+                "status": "downloaded" if status_code >= 4 and links else ("error" if status_code >= 5 else "processing"),
                 "progress": round(progress, 1),
                 "speed": info.get("downloadSpeed", 0),
                 "links": links,
-                "filename": info.get("filename", ""),
+                "filename": info.get("filename") or info.get("name") or "",
                 "files": files,
+                "message": "" if status_code < 5 else "AllDebrid reported an error processing this magnet.",
             }
             # #region debug-point A:router-torrent-ad-success
             _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status ad success", {"provider": provider, "torrent_id": str(torrent_id), "status": str(response.get("status", "")), "links_count": len(response.get("links", []) or []), "file_count": len(files)})
             # #endregion
             return response
         elif provider == "tb":
-            info = debrid.tb_get_torrent_info(key, int(torrent_id))
-            files = info.get("files", [])
+            info = debrid.tb_get_torrent_info(key, torrent_id)
+            files = info.get("files") or []
             links = []
-            finished = info.get("download_finished") or info.get("download_state") in ("completed", "cached")
+            ds = str(info.get("download_state", "")).lower()
+            finished = bool(info.get("download_finished") or info.get("download_present")) or ds in ("cached",)
             if finished:
                 for f in files:
                     try:
-                        dl = debrid.tb_request_download(key, int(torrent_id), f.get("id", 0))
+                        dl = debrid.tb_request_download(key, torrent_id, f.get("id", 0))
                         if dl:
                             links.append(dl)
                     except Exception as e:
                         logger.warning(f"TorBox requestdl failed for torrent {torrent_id} file {f.get('id')}: {e}")
+                if not links and not files:
+                    try:
+                        dl = debrid.tb_request_download(key, torrent_id, 0)
+                        if dl:
+                            links.append(dl)
+                    except Exception as e:
+                        logger.warning(f"TorBox requestdl failed for torrent {torrent_id}: {e}")
             progress = info.get("progress", 0)
             if isinstance(progress, float) and progress <= 1:
                 progress = progress * 100
             response = {
-                "status": "downloaded" if finished else "processing",
+                "status": "downloaded" if finished and links else ("error" if finished else "processing"),
                 "progress": round(progress, 1),
                 "speed": info.get("download_speed", 0),
                 "links": links,
                 "filename": info.get("name", ""),
                 "files": files,
+                "message": "" if links else ("TorBox reported this torrent ready, but no download link could be generated." if finished else ""),
             }
             # #region debug-point A:router-torrent-tb-success
             _debug_report("A", "app/routers/debrid.py:get_torrent_status", "router torrent status tb success", {"provider": provider, "torrent_id": str(torrent_id), "status": str(response.get("status", "")), "links_count": len(response.get("links", []) or []), "file_count": len(files)})

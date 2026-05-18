@@ -7191,7 +7191,8 @@ async function debridPollTorrent(torrentId, filename) {
 
             if (data.status === 'error' || data.status === 'dead' || data.status === 'virus' || data.status === 'magnet_error') {
                 debridHideProcessing();
-                showToast(`Torrent failed: ${data.status}`, 'error');
+                const msg = data.message ? data.message : `Torrent failed: ${data.status}`;
+                showToast(msg, 'error');
                 return;
             }
 
@@ -7222,7 +7223,7 @@ async function debridPollTorrent(torrentId, filename) {
                 setTimeout(poll, 3000);
             } else {
                 debridHideProcessing();
-                showToast('Torrent taking too long — check Real-Debrid dashboard', 'warning');
+                showToast('Torrent taking too long — check your debrid dashboard', 'warning');
             }
         } catch (e) {
             debridHideProcessing();
