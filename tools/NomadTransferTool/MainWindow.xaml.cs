@@ -1925,6 +1925,8 @@ namespace NomadTransferTool
         private void DropZone_DragOver(object sender, System.Windows.DragEventArgs e)
         {
             if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
+            {
+                e.Effects = System.Windows.DragDropEffects.Copy;
             }
             else
             {
