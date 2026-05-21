@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+import tempfile
 from typing import List, Optional
 from datetime import datetime
 from app import database
@@ -2549,3 +2550,153 @@ def delete_backup(filename: str, admin: dict = Depends(get_current_admin)):
 
     os.remove(backup_path)
     return {"status": "ok"}
+
+
+class CaddyConfigRequest(BaseModel):
+    domain: str = ""
+    email: str = ""
+    listen_port: int = 443
+
+    @validator("listen_port")
+    def _port_range(cls, v):
+        if not (1 <= int(v) <= 65535):
+            raise ValueError("listen_port must be 1-65535")
+        return int(v)
+
+
+def _sudo_ok() -> bool:
+    try:
+        subprocess.run(["sudo", "-n", "true"], check=True, capture_output=True, timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def _run_cmd(argv: list[str], timeout: int = 30) -> tuple[int, str]:
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        out = (r.stdout or "") + ("\n" + r.stderr if r.stderr else "")
+        return r.returncode, out.strip()
+    except Exception as e:
+        return 1, str(e)
+
+
+def _looks_like_domain(s: str) -> bool:
+    s = str(s or "").strip()
+    if not s:
+        return False
+    if len(s) > 253:
+        return False
+    if re.match(r"^[0-9.]+$", s):
+        return False
+    return bool(re.match(r"^(?:\\*\\.)?[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$", s))
+
+
+@router.get("/caddy/status")
+def caddy_status(admin: dict = Depends(get_current_admin)):
+    installed = shutil.which("caddy") is not None
+    sudo_ok = _sudo_ok()
+    service_active = False
+    if installed:
+        rc, _ = _run_cmd(["systemctl", "is-active", "caddy"], timeout=5)
+        service_active = rc == 0
+    domain = database.get_setting("caddy.domain") or ""
+    email = database.get_setting("caddy.email") or ""
+    listen_port = int(database.get_setting("caddy.listen_port") or 443)
+    mode = "https" if domain else "http"
+    has_config = os.path.exists("/etc/caddy/Caddyfile")
+    return {
+        "installed": installed,
+        "sudo_ok": sudo_ok,
+        "service_active": service_active,
+        "has_config": has_config,
+        "domain": domain,
+        "email": email,
+        "listen_port": listen_port,
+        "mode": mode,
+    }
+
+
+@router.post("/caddy/install")
+def caddy_install(admin: dict = Depends(get_current_admin)):
+    if shutil.which("caddy") is not None:
+        return {"status": "ok", "message": "caddy already installed"}
+    if not _sudo_ok():
+        raise HTTPException(status_code=403, detail="sudo is not available for install. Install caddy manually.")
+    if shutil.which("apt-get") is None:
+        raise HTTPException(status_code=500, detail="apt-get not available on this OS. Install caddy manually.")
+    rc1, out1 = _run_cmd(["sudo", "-n", "apt-get", "update"], timeout=180)
+    if rc1 != 0:
+        raise HTTPException(status_code=500, detail=(out1 or "apt-get update failed")[:1000])
+    rc2, out2 = _run_cmd(["sudo", "-n", "apt-get", "install", "-y", "caddy"], timeout=300)
+    if rc2 != 0:
+        raise HTTPException(status_code=500, detail=(out2 or "apt-get install caddy failed")[:1000])
+    return {"status": "ok", "message": "caddy installed"}
+
+
+@router.post("/caddy/config")
+def caddy_apply_config(req: CaddyConfigRequest, admin: dict = Depends(get_current_admin)):
+    if shutil.which("caddy") is None:
+        raise HTTPException(status_code=400, detail="Caddy is not installed yet.")
+    if not _sudo_ok():
+        raise HTTPException(status_code=403, detail="sudo is not available. Configure caddy manually.")
+
+    domain = str(req.domain or "").strip()
+    email = str(req.email or "").strip()
+    listen_port = int(req.listen_port or 443)
+
+    if domain and not _looks_like_domain(domain):
+        raise HTTPException(status_code=400, detail="Invalid domain name")
+
+    upstream = "127.0.0.1:8000"
+
+    if domain:
+        site = domain
+        mode = "https"
+    else:
+        site = f":{listen_port}"
+        mode = "http"
+
+    header = ""
+    if email and domain:
+        header = "{\n    email " + email + "\n}\n\n"
+
+    caddyfile = (
+        header
+        + site
+        + " {\n"
+        + "    reverse_proxy "
+        + upstream
+        + "\n"
+        + "}\n"
+    )
+
+    tmp_dir = tempfile.mkdtemp(prefix="nomadpi_caddy_")
+    tmp_path = os.path.join(tmp_dir, "Caddyfile")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(caddyfile)
+
+        rc_v, out_v = _run_cmd(["caddy", "validate", "--config", tmp_path], timeout=10)
+        if rc_v != 0:
+            raise HTTPException(status_code=400, detail=(out_v or "caddy validate failed")[:1000])
+
+        rc_i, out_i = _run_cmd(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644", tmp_path, "/etc/caddy/Caddyfile"], timeout=10)
+        if rc_i != 0:
+            raise HTTPException(status_code=500, detail=(out_i or "failed to write /etc/caddy/Caddyfile")[:1000])
+
+        _run_cmd(["sudo", "-n", "systemctl", "enable", "--now", "caddy"], timeout=30)
+        rc_r, out_r = _run_cmd(["sudo", "-n", "systemctl", "reload", "caddy"], timeout=20)
+        if rc_r != 0:
+            _run_cmd(["sudo", "-n", "systemctl", "restart", "caddy"], timeout=30)
+
+        database.set_setting("caddy.domain", domain)
+        database.set_setting("caddy.email", email)
+        database.set_setting("caddy.listen_port", str(listen_port))
+        database.set_setting("caddy.mode", mode)
+        return {"status": "ok", "mode": mode}
+    finally:
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass

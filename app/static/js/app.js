@@ -5303,69 +5303,7 @@ async function unmountDrive(mountpoint) {
     }
 }
 
-async function changePassword() {
-    const current = document.getElementById('change-pwd-current').value;
-    const newPass = document.getElementById('change-pwd-new').value;
-    const confirm = document.getElementById('change-pwd-confirm').value;
-
-    if (!current || !newPass || !confirm) {
-        alert('Please fill in all password fields.');
-        return;
-    }
-
-    if (newPass !== confirm) {
-        alert('New passwords do not match.');
-        return;
-    }
-
-    if (newPass.length < 8) {
-        alert('New password must be at least 8 characters long.');
-        return;
-    }
-
-    if (!/[A-Z]/.test(newPass)) {
-        alert('New password must contain at least one uppercase letter.');
-        return;
-    }
-
-    if (!/[a-z]/.test(newPass)) {
-        alert('New password must contain at least one lowercase letter.');
-        return;
-    }
-
-    if (!/[0-9]/.test(newPass)) {
-        alert('New password must contain at least one digit.');
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/change-password`, {
-            method: 'POST',
-            headers: { 
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({
-                current_password: current,
-                new_password: newPass
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-            alert('Password updated successfully!');
-            // Clear fields
-            document.getElementById('change-pwd-current').value = '';
-            document.getElementById('change-pwd-new').value = '';
-            document.getElementById('change-pwd-confirm').value = '';
-        } else {
-            alert(data.detail || 'Failed to update password.');
-        }
-    } catch (e) {
-        console.error('Error updating password:', e);
-        alert('Error updating password. See console for details.');
-    }
-}
+ 
 
 async function loadProfileUI() {
     const nameEl = document.getElementById('profile-name');
@@ -6387,6 +6325,107 @@ async function saveOmdbKey() {
         input.value = '';
         input.placeholder = key.slice(0, 4) + '****';
     } catch (e) { showToast('Failed to save OMDb key', 'error'); }
+}
+
+async function caddyCheckStatus() {
+    const statusEl = document.getElementById('caddy-status');
+    if (statusEl) {
+        statusEl.textContent = 'Checking...';
+        statusEl.style.color = 'var(--text-secondary)';
+    }
+    try {
+        const res = await fetch(`${API_BASE}/system/caddy/status`, { headers: getAuthHeaders() });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Status failed');
+        const installed = !!data.installed;
+        const active = !!data.service_active;
+        const sudoOk = !!data.sudo_ok;
+        const domain = data.domain || '';
+        const mode = data.mode || '';
+        const msg = [
+            installed ? 'Caddy installed' : 'Caddy not installed',
+            active ? 'service running' : 'service not running',
+            sudoOk ? 'sudo ok' : 'sudo blocked',
+            domain ? `domain: ${domain}` : '',
+            mode ? `mode: ${mode}` : ''
+        ].filter(Boolean).join(' • ');
+        if (statusEl) {
+            statusEl.textContent = msg || 'OK';
+            statusEl.style.color = installed ? 'var(--success-color)' : 'var(--warning-color)';
+        }
+        const domEl = document.getElementById('caddy-domain');
+        const emailEl = document.getElementById('caddy-email');
+        const portEl = document.getElementById('caddy-listen-port');
+        if (domEl && !domEl.value && domain) domEl.value = domain;
+        if (emailEl && !emailEl.value && data.email) emailEl.value = data.email;
+        if (portEl && data.listen_port) portEl.value = String(data.listen_port);
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = e.message || 'Status failed';
+            statusEl.style.color = 'var(--danger-color)';
+        }
+    }
+}
+
+async function caddyApplyConfig() {
+    const statusEl = document.getElementById('caddy-status');
+    const domainEl = document.getElementById('caddy-domain');
+    const emailEl = document.getElementById('caddy-email');
+    const portEl = document.getElementById('caddy-listen-port');
+    const domain = domainEl ? String(domainEl.value || '').trim() : '';
+    const email = emailEl ? String(emailEl.value || '').trim() : '';
+    const listenPort = portEl ? Number(portEl.value || 443) : 443;
+    if (statusEl) {
+        statusEl.textContent = 'Applying...';
+        statusEl.style.color = 'var(--text-secondary)';
+    }
+    try {
+        const res = await fetch(`${API_BASE}/system/caddy/config`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email, listen_port: listenPort })
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Apply failed');
+        if (statusEl) {
+            statusEl.textContent = 'Applied. Caddy reloaded.';
+            statusEl.style.color = 'var(--success-color)';
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = e.message || 'Apply failed';
+            statusEl.style.color = 'var(--danger-color)';
+        }
+    }
+}
+
+async function caddyInstall() {
+    const statusEl = document.getElementById('caddy-status');
+    if (statusEl) {
+        statusEl.textContent = 'Installing...';
+        statusEl.style.color = 'var(--text-secondary)';
+    }
+    try {
+        const res = await fetch(`${API_BASE}/system/caddy/install`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Install failed');
+        if (statusEl) {
+            statusEl.textContent = 'Caddy installed (if supported on this OS).';
+            statusEl.style.color = 'var(--success-color)';
+        }
+        await caddyCheckStatus();
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = e.message || 'Install failed';
+            statusEl.style.color = 'var(--danger-color)';
+        }
+    }
 }
 
 // --- Metadata Editor ---
