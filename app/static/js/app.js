@@ -2324,9 +2324,14 @@ function prefersExternalPlayback(ext) {
     return ext === 'mkv' && (isIOS || isSafari);
 }
 
-async function ensureIosCompatiblePath(path, onStatus) {
+async function ensureIosCompatiblePath(path, onStatus, opts) {
+    opts = opts || {};
     try {
-        const res = await fetch(`${API_BASE}/media/transcode/ios?path=${encodeURIComponent(path)}`, {
+        let url = `${API_BASE}/media/transcode/ios?path=${encodeURIComponent(path)}`;
+        if (opts.audio !== undefined && opts.audio !== null && String(opts.audio).trim() !== '') {
+            url += `&audio=${encodeURIComponent(String(opts.audio))}`;
+        }
+        const res = await fetch(url, {
             method: 'POST',
             headers: getAuthHeaders()
         });
@@ -2541,22 +2546,63 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> MKV playback can fail in Safari and iOS browsers. Preparing an iOS-compatible stream is recommended; VLC is the fallback if playback still fails.';
         body.appendChild(warning);
 
-        ensureIosCompatiblePath(path, (st) => {
-            try {
-                if (st && typeof st.progress === 'number') {
-                    warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing iOS-compatible stream… ${st.progress.toFixed(1)}%`;
+        const btns = heading.querySelector('.external-player-btns');
+        const audioSelect = document.createElement('select');
+        audioSelect.className = 'player-action-btn speed-select';
+        audioSelect.title = 'Audio track';
+        audioSelect.innerHTML = '<option value="">Audio: Auto</option>';
+        if (btns) {
+            btns.insertBefore(audioSelect, btns.firstChild);
+        }
+
+        let currentAudio = '';
+
+        const startIosPrep = (audioValue) => {
+            currentAudio = String(audioValue || '');
+            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing iOS-compatible stream…';
+            ensureIosCompatiblePath(path, (st) => {
+                try {
+                    if (st && typeof st.progress === 'number') {
+                        warning.innerHTML = `<i class="fas fa-info-circle" style="color:var(--warning,#ff9800)"></i> Preparing iOS-compatible stream… ${st.progress.toFixed(1)}%`;
+                    }
+                } catch (e) {}
+            }, { audio: currentAudio }).then((outPath) => {
+                if (!outPath) return;
+                let iosUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(outPath)}`;
+                if (token) iosUrl += '&token=' + token;
+                source.src = iosUrl;
+                source.type = 'video/mp4';
+                try { video.load(); } catch (e) {}
+                try { video.play().catch(() => {}); } catch (e) {}
+                warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> iOS-compatible stream ready.';
+            });
+        };
+
+        audioSelect.addEventListener('change', () => startIosPrep(audioSelect.value));
+
+        fetch(`${API_BASE}/media/info?path=${encodeURIComponent(path)}`, { headers: getAuthHeaders() })
+            .then(r => r.json().then(j => ({ ok: r.ok, j })))
+            .then(({ ok, j }) => {
+                if (!ok) return;
+                const tracks = (j.audio && Array.isArray(j.audio.tracks)) ? j.audio.tracks : [];
+                if (!tracks.length) return;
+                const opts = [];
+                tracks.forEach((t, idx) => {
+                    const lang = (t.language || '').toString().trim();
+                    const codec = (t.codec || '').toString().toUpperCase();
+                    const ch = t.channels ? `${t.channels}ch` : '';
+                    const label = `${lang ? lang.toUpperCase() : 'Track ' + (idx + 1)}${codec ? ' · ' + codec : ''}${ch ? ' · ' + ch : ''}${t.default ? ' · Default' : ''}`;
+                    opts.push({ value: String(t.index ?? ''), label, lang: lang.toLowerCase(), isDefault: !!t.default });
+                });
+                const preferred = opts.find(o => o.lang === 'eng' || o.lang.startsWith('en')) || opts.find(o => o.isDefault) || opts[0];
+                audioSelect.innerHTML = '<option value="">Audio: Auto</option>' + opts.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+                if (preferred && preferred.value) {
+                    audioSelect.value = preferred.value;
                 }
-            } catch (e) {}
-        }).then((outPath) => {
-            if (!outPath) return;
-            let iosUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(outPath)}`;
-            if (token) iosUrl += '&token=' + token;
-            source.src = iosUrl;
-            source.type = 'video/mp4';
-            try { video.load(); } catch (e) {}
-            try { video.play().catch(() => {}); } catch (e) {}
-            warning.innerHTML = '<i class="fas fa-info-circle" style="color:var(--success-color,#22c55e)"></i> iOS-compatible stream ready.';
-        });
+                startIosPrep(audioSelect.value);
+            })
+            .catch(() => startIosPrep(''));
+
     }
     body.appendChild(videoWrap);
     modal.classList.remove('hidden');

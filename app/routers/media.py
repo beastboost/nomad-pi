@@ -2076,6 +2076,18 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
             if codec in ["ac3", "dts", "eac3", "truehd"]:
                 has_ac3_dts = True
 
+        audio_tracks = []
+        for a in audio_streams:
+            tags = a.get("tags") or {}
+            disp = a.get("disposition") or {}
+            audio_tracks.append({
+                "index": int(a.get("index") or 0),
+                "codec": a.get("codec_name", "unknown"),
+                "channels": a.get("channels"),
+                "language": tags.get("language") or "",
+                "default": bool(disp.get("default") == 1),
+            })
+
         return {
             "format": info.get("format", {}).get("format_long_name"),
             "duration": float(info.get("format", {}).get("duration", 0)),
@@ -2089,7 +2101,8 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
             },
             "audio": {
                 "codecs": audio_info,
-                "compatible": not has_ac3_dts # AC3/DTS is often problematic
+                "compatible": not has_ac3_dts,
+                "tracks": audio_tracks
             },
             "full_info": info if os.environ.get("DEBUG") else None
         }
@@ -2133,7 +2146,15 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
 
 def _ios_output_paths(fs_path: str) -> tuple[str, str]:
     st = os.stat(fs_path)
-    key = hashlib.sha1(f"{fs_path}:{st.st_mtime_ns}:{st.st_size}".encode("utf-8", errors="ignore")).hexdigest()
+    key = hashlib.sha1(f"{fs_path}:{st.st_mtime_ns}:{st.st_size}:default".encode("utf-8", errors="ignore")).hexdigest()
+    out_fs = os.path.join(IOS_CACHE_DIR, f"{key}.mp4")
+    out_web = f"/data/.nomad_cache/ios/{key}.mp4"
+    return out_fs, out_web
+
+
+def _ios_output_paths_variant(fs_path: str, variant: str) -> tuple[str, str]:
+    st = os.stat(fs_path)
+    key = hashlib.sha1(f"{fs_path}:{st.st_mtime_ns}:{st.st_size}:{variant}".encode("utf-8", errors="ignore")).hexdigest()
     out_fs = os.path.join(IOS_CACHE_DIR, f"{key}.mp4")
     out_web = f"/data/.nomad_cache/ios/{key}.mp4"
     return out_fs, out_web
@@ -2164,7 +2185,69 @@ def _ffprobe_codecs(fs_path: str) -> tuple[str, str, float]:
         return "", "", 0.0
 
 
-def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
+def _ffprobe_audio_tracks(fs_path: str) -> list[dict]:
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_streams",
+            fs_path,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            return []
+        info = json.loads(r.stdout or "{}")
+        tracks = []
+        for s in (info.get("streams") or []):
+            if s.get("codec_type") != "audio":
+                continue
+            tags = s.get("tags") or {}
+            disp = s.get("disposition") or {}
+            tracks.append({
+                "index": int(s.get("index") or 0),
+                "codec": str(s.get("codec_name") or ""),
+                "channels": int(s.get("channels") or 0),
+                "language": str(tags.get("language") or ""),
+                "default": bool(disp.get("default") == 1),
+            })
+        return tracks
+    except Exception:
+        return []
+
+
+def _pick_audio_track_index(tracks: list[dict], requested: Optional[str]) -> int:
+    if not tracks:
+        return 0
+    if requested:
+        req = str(requested).strip()
+        if req.isdigit():
+            idx = int(req)
+            for t in tracks:
+                if int(t.get("index") or 0) == idx:
+                    return idx
+        req = req.lower()
+        for t in tracks:
+            lang = str(t.get("language") or "").lower()
+            if lang and (lang == req or lang.startswith(req)):
+                return int(t.get("index") or 0)
+
+    for want in ("eng", "en"):
+        for t in tracks:
+            lang = str(t.get("language") or "").lower()
+            if lang and (lang == want or lang.startswith(want)):
+                return int(t.get("index") or 0)
+
+    for t in tracks:
+        if bool(t.get("default")):
+            return int(t.get("index") or 0)
+
+    return int(tracks[0].get("index") or 0)
+
+
+def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str, requested_audio: Optional[str]) -> None:
     with _ios_transcodes_lock:
         job = _ios_transcodes.get(job_id)
         if job is None:
@@ -2172,9 +2255,16 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         job["status"] = "running"
         job["started_at"] = datetime.utcnow().isoformat()
 
-    video_codec, audio_codec, duration = _ffprobe_codecs(src_fs)
+    video_codec, _first_audio_codec, duration = _ffprobe_codecs(src_fs)
+    tracks = _ffprobe_audio_tracks(src_fs)
+    audio_idx = _pick_audio_track_index(tracks, requested_audio)
+    chosen_audio_codec = ""
+    for t in tracks:
+        if int(t.get("index") or 0) == audio_idx:
+            chosen_audio_codec = str(t.get("codec") or "")
+            break
     copy_video = video_codec in ("h264",)
-    copy_audio = audio_codec in ("aac", "mp3")
+    copy_audio = chosen_audio_codec in ("aac", "mp3")
 
     codec_args: list[str]
     if copy_video and copy_audio:
@@ -2201,7 +2291,7 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
         "-map",
         "0:v:0",
         "-map",
-        "0:a:0?",
+        f"0:a:{audio_idx}?",
         "-sn",
         *codec_args,
         "-movflags",
@@ -2277,7 +2367,7 @@ def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
 
 
 @router.post("/transcode/ios")
-def transcode_ios(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
+def transcode_ios(path: str = Query(...), audio: Optional[str] = Query(None), user_id: int = Depends(get_current_user_id)):
     try:
         src_fs = safe_fs_path_from_web_path(path)
     except Exception:
@@ -2289,7 +2379,8 @@ def transcode_ios(path: str = Query(...), user_id: int = Depends(get_current_use
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         raise HTTPException(status_code=500, detail="ffmpeg/ffprobe not available on this device")
 
-    out_fs, out_web = _ios_output_paths(src_fs)
+    variant = f"audio={audio or ''}"
+    out_fs, out_web = _ios_output_paths_variant(src_fs, variant)
     if os.path.exists(out_fs) and os.path.getsize(out_fs) > 0:
         return {"status": "completed", "output_path": out_web}
 
@@ -2304,11 +2395,12 @@ def transcode_ios(path: str = Query(...), user_id: int = Depends(get_current_use
             "status": "queued",
             "progress": 0.0,
             "source_path": path,
+            "audio": audio or "",
             "output_path": out_web,
             "error": "",
         }
 
-    t = threading.Thread(target=_ios_transcode_worker, args=(job_id, src_fs, out_fs), daemon=True)
+    t = threading.Thread(target=_ios_transcode_worker, args=(job_id, src_fs, out_fs, audio), daemon=True)
     t.start()
     return {"status": "queued", "job_id": job_id, "output_path": out_web, "progress": 0.0}
 
