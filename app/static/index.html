@@ -12,11 +12,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=1779058800">
     <link rel="manifest" href="manifest.json?v=1779058800">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Nomad Pi">
-    <link rel="apple-touch-icon" href="icons/icon-512.svg">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="application-name" content="Nomad Pi">
     <meta name="msapplication-TileColor" content="#0f172a">
@@ -60,9 +60,9 @@
                 <div class="mobile-nav-group-title">System & Profile</div>
                 <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin Dashboard</button>
                 <button onclick="showSection('settings')"><i class="fas fa-cog"></i> User Settings</button>
-                <button onclick="openGlobalSearch()" class="search-nav-btn" title="Search everything"><i class="fas fa-search"></i></button>
+                <button onclick="openGlobalSearch()" class="search-nav-btn" title="Search everything" aria-label="Search"><i class="fas fa-search"></i></button>
                 <span id="header-stats" class="header-stats"></span>
-                <button onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme">
+                <button onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
                     <i class="fas fa-moon" id="theme-icon"></i>
                 </button>
                 <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
@@ -653,11 +653,17 @@
                 </div>
 
                 <div class="admin-panel">
-                    <h3><i class="fas fa-download"></i> Backup</h3>
-                    <p class="section-desc">Download a ZIP backup of your database and settings.</p>
-                    <button onclick="downloadBackup()" class="primary">
-                        <i class="fas fa-file-archive"></i> Download Backup
-                    </button>
+                    <h3><i class="fas fa-download"></i> Backup & Restore</h3>
+                    <p class="section-desc">Download a ZIP backup of your database and settings, or restore from a previous backup.</p>
+                    <div class="button-grid">
+                        <button onclick="downloadBackup()" class="primary">
+                            <i class="fas fa-file-archive"></i> Download Backup
+                        </button>
+                        <button onclick="document.getElementById('restore-file-input').click()" class="secondary">
+                            <i class="fas fa-upload"></i> Restore Backup
+                        </button>
+                        <input type="file" id="restore-file-input" style="display:none" onchange="uploadRestoreBackup(this)">
+                    </div>
                 </div>
 
                 <div class="admin-panel">
@@ -1073,7 +1079,7 @@
         </div>
     </div>
 
-    <div id="toast-container"></div>
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <button id="floating-search-btn" class="floating-search-btn" onclick="openGlobalSearch()" title="Search everything">
         <i class="fas fa-search"></i>
@@ -1176,7 +1182,16 @@
                             const newWorker = reg.installing;
                             newWorker.addEventListener('statechange', () => {
                                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    showToast('New version available! Refresh to update.', 'info', 0);
+                                    const toast = document.createElement('div');
+                                    toast.className = 'toast info';
+                                    toast.style.pointerEvents = 'auto';
+                                    toast.style.cursor = 'pointer';
+                                    toast.innerHTML = '<i class="fas fa-sync-alt"></i> New version available! <u>Tap to update</u>';
+                                    toast.onclick = () => {
+                                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                        window.location.reload();
+                                    };
+                                    document.getElementById('toast-container').appendChild(toast);
                                 }
                             });
                         });

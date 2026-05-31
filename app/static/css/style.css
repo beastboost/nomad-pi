@@ -87,13 +87,18 @@ body.no-glass .glass-hover {
     -webkit-tap-highlight-color: transparent;
 }
 
+html, body {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    position: relative;
+}
+
 body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background-color: var(--bg-color);
     color: var(--text-color);
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
 }
@@ -219,7 +224,8 @@ nav button.active {
     header nav#main-nav {
         position: fixed !important;
         top: 0 !important;
-        right: -100% !important;
+        right: 0 !important;
+        transform: translateX(105%) !important;
         width: min(86vw, 360px) !important;
         max-width: none !important;
         height: 100vh !important;
@@ -231,13 +237,13 @@ nav button.active {
         border-left: 2px solid rgba(59, 130, 246, 0.8) !important;
         box-shadow: -10px 0 40px rgba(0, 0, 0, 0.9) !important;
         overflow-y: auto !important;
-        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
         display: flex !important;
         pointer-events: auto !important;
     }
 
     header nav#main-nav.mobile-menu-open {
-        right: 0 !important;
+        transform: translateX(0) !important;
         display: flex !important;
     }
 
@@ -839,6 +845,8 @@ button.primary:active {
     box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     animation: toast-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
+
+.toast.info { border-color: var(--accent-color); }
 
 @keyframes toast-in {
     from { transform: translateY(20px); opacity: 0; }
@@ -1915,15 +1923,20 @@ h1, h2, h3 {
     background: black;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 768px) {
+    * {
+        max-width: 100vw;
+    }
+
     header {
+        width: 100% !important;
         flex-direction: row;
         justify-content: space-between;
         align-items: center;
         padding: 0 16px;
         padding-top: env(safe-area-inset-top);
         min-height: calc(60px + env(safe-area-inset-top));
-        margin: 0;
+        margin: 0 !important;
         border-radius: 0;
         position: sticky;
         top: 0;

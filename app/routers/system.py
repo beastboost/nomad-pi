@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, File, UploadFile
 from pydantic import BaseModel, validator
 import psutil
 import os
@@ -8,6 +8,10 @@ import json
 import logging
 import shutil
 import re
+import zipfile
+import tempfile
+import sqlite3
+import io
 from typing import List, Optional
 from datetime import datetime
 from app import database
@@ -2417,20 +2421,49 @@ def get_network_interfaces(user_id: int = Depends(get_current_user_id)):
 
 # ── Backup ────────────────────────────────────────────────────────────────────
 @router.get("/backup")
-def download_backup(user_id: int = Depends(get_current_user_id)):
+def download_backup(admin: dict = Depends(get_current_admin)):
     """Create and stream a ZIP backup of the database and settings."""
-    import zipfile, io, time
+    import zipfile, io, time, sqlite3
     from fastapi.responses import StreamingResponse
     buf = io.BytesIO()
     try:
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            db_path = "/data/app.db"
+            # Use data/nomad.db as seen in create_backup and ls data
+            db_path = "data/nomad.db"
             if os.path.exists(db_path):
-                zf.write(db_path, "nomadpi/app.db")
-            # Include any .env or config files if they exist
-            for cfg in ["/app/config.json", "/data/settings.json"]:
-                if os.path.exists(cfg):
-                    zf.write(cfg, f"nomadpi/{os.path.basename(cfg)}")
+                # Use a temporary file for a clean SQLite backup
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    temp_db = tmp.name
+                try:
+                    src = sqlite3.connect(db_path)
+                    dst = sqlite3.connect(temp_db)
+                    src.backup(dst)
+                    dst.close()
+                    src.close()
+                    zf.write(temp_db, "nomad.db")
+                finally:
+                    if os.path.exists(temp_db):
+                        os.remove(temp_db)
+
+            # Backup mounts.json if exists
+            mounts_path = os.path.join("data", "mounts.json")
+            if os.path.exists(mounts_path):
+                zf.write(mounts_path, "mounts.json")
+
+            # Backup .env if exists
+            env_path = ".env"
+            if os.path.exists(env_path):
+                zf.write(env_path, ".env")
+
+            # Add manifest
+            manifest = {
+                "version": VERSION,
+                "created_at": datetime.now().isoformat(),
+                "platform": platform.system(),
+                "hostname": platform.node(),
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
         buf.seek(0)
         stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
         fname = f"nomadpi-backup-{stamp}.zip"
@@ -2440,6 +2473,7 @@ def download_backup(user_id: int = Depends(get_current_user_id)):
             headers={"Content-Disposition": f'attachment; filename="{fname}"'}
         )
     except Exception as e:
+        logger.error(f"Backup streaming failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Settings (generic key/value save) ─────────────────────────────────────────
@@ -2555,3 +2589,58 @@ def delete_backup(filename: str, admin: dict = Depends(get_current_admin)):
 
     os.remove(backup_path)
     return {"status": "ok"}
+
+@router.post("/restore")
+async def restore_backup(
+    file: UploadFile = File(...),
+    admin: dict = Depends(get_current_admin)
+):
+    """Restore the database and settings from a ZIP backup."""
+    import zipfile, shutil, os
+
+    # Save the uploaded file to a temporary location
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        temp_zip = tmp.name
+
+    try:
+        if not zipfile.is_zipfile(temp_zip):
+            raise HTTPException(status_code=400, detail="Invalid backup file (not a ZIP)")
+
+        with zipfile.ZipFile(temp_zip, 'r') as zf:
+            namelist = zf.namelist()
+            # Support both "nomad.db" and "nomadpi/app.db" (legacy)
+            db_entry = "nomad.db" if "nomad.db" in namelist else "nomadpi/app.db" if "nomadpi/app.db" in namelist else None
+
+            if not db_entry:
+                raise HTTPException(status_code=400, detail="Invalid backup: nomad.db missing")
+
+            # Extract to a temporary directory
+            with tempfile.TemporaryDirectory() as extract_dir:
+                zf.extractall(extract_dir)
+
+                # Restore nomad.db
+                new_db = os.path.join(extract_dir, db_entry)
+                if os.path.exists(new_db):
+                    old_db = "data/nomad.db"
+                    if os.path.exists(old_db):
+                        shutil.copy2(old_db, old_db + ".bak")
+                    shutil.copy2(new_db, old_db)
+
+                # Restore mounts.json
+                new_mounts = os.path.join(extract_dir, "mounts.json")
+                if os.path.exists(new_mounts):
+                    shutil.copy2(new_mounts, "data/mounts.json")
+
+                # Restore .env
+                new_env = os.path.join(extract_dir, ".env")
+                if os.path.exists(new_env):
+                    shutil.copy2(new_env, ".env")
+
+        return {"status": "success", "message": "Backup restored successfully. Please restart the app for all changes to take effect."}
+    except Exception as e:
+        logger.error(f"Restore failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+    finally:
+        if os.path.exists(temp_zip):
+            os.remove(temp_zip)

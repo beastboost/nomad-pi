@@ -2143,9 +2143,32 @@ function updateMediaSession(title, artist, album, artworkUrl, type = 'audio') {
             }
         });
 
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+            const skipTime = details.seekOffset || 10;
+            if (type === 'audio') {
+                const audio = document.getElementById('global-audio');
+                if (audio) audio.currentTime = Math.max(audio.currentTime - skipTime, 0);
+            } else if (activeVideoEl) {
+                activeVideoEl.currentTime = Math.max(activeVideoEl.currentTime - skipTime, 0);
+            }
+        });
+
+        navigator.mediaSession.setActionHandler('seekforward', (details) => {
+            const skipTime = details.seekOffset || 10;
+            if (type === 'audio') {
+                const audio = document.getElementById('global-audio');
+                if (audio) audio.currentTime = Math.min(audio.currentTime + skipTime, audio.duration);
+            } else if (activeVideoEl) {
+                activeVideoEl.currentTime = Math.min(activeVideoEl.currentTime + skipTime, activeVideoEl.duration);
+            }
+        });
+
         if (type === 'audio') {
             navigator.mediaSession.setActionHandler('previoustrack', () => musicPrev());
             navigator.mediaSession.setActionHandler('nexttrack', () => musicNext());
+        } else {
+            navigator.mediaSession.setActionHandler('previoustrack', null);
+            navigator.mediaSession.setActionHandler('nexttrack', null);
         }
     }
 }
@@ -2321,20 +2344,20 @@ async function openMovieDetails(file) {
 
     body.innerHTML = `
         <div style="padding: 18px;">
-            <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+            <div style="display:flex; gap:16px; align-items:center; flex-direction:column; text-align:center;">
                 <div style="width: 180px; flex: 0 0 180px;">
                     <div style="width:100%; aspect-ratio:2/3; border-radius: 14px; overflow:hidden; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);">
                         ${file.poster ? `<img src="${file.poster}" alt="${escapeHtml(baseTitle)}" style="width:100%; height:100%; object-fit:cover;">` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-muted); font-weight:700;">MOVIE</div>`}
                     </div>
                 </div>
-                <div style="flex: 1 1 260px; min-width: 240px;">
-                    <div style="font-weight: 900; font-size: 1.25rem; margin-bottom: 8px;">${escapeHtml(baseTitle)}</div>
-                    <div id="movie-meta-line" style="color: var(--text-muted); margin-bottom: 10px;"></div>
-                    <div id="movie-plot" style="color: #d7dde8; line-height: 1.5; margin-bottom: 14px;"></div>
+                <div style="flex: 1; width: 100%;">
+                    <div style="font-weight: 900; font-size: 1.5rem; margin-bottom: 8px;">${escapeHtml(baseTitle)}</div>
+                    <div id="movie-meta-line" style="color: var(--text-muted); margin-bottom: 10px; font-size: 0.9rem;"></div>
+                    <div id="movie-plot" style="color: #d7dde8; line-height: 1.5; margin-bottom: 14px; font-size: 0.95rem;"></div>
                     ${startSeconds > 10 ? `<div style="color: var(--text-muted); margin-bottom: 12px;">Resume at ${escapeHtml(formatClock(startSeconds))}</div>` : ``}
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button class="primary" id="movie-play-btn">${startSeconds > 10 ? 'Resume' : 'Play'}</button>
-                        <button class="secondary" id="movie-play-from-start-btn">Play From Start</button>
+                    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                        <button class="primary" id="movie-play-btn" style="min-width: 120px;">${startSeconds > 10 ? 'Resume' : 'Play'}</button>
+                        <button class="secondary" id="movie-play-from-start-btn" style="min-width: 120px;">Play From Start</button>
                     </div>
                 </div>
             </div>
@@ -2627,8 +2650,8 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
 
     // Detect iOS codec issues and offer VLC
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (isIOS && (ext === 'mkv' || path.toLowerCase().includes('hevc') || path.toLowerCase().includes('x265'))) {
-        showToast('This format might not play smoothly on iOS. Use the VLC button if you experience issues.', 'warning', 6000);
+    if (isIOS && (ext === 'mkv' || path.toLowerCase().includes('hevc') || path.toLowerCase().includes('x265') || path.toLowerCase().includes('10bit'))) {
+        showToast('Format might have issues on iOS. Consider using VLC/Infuse.', 'warning', 6000);
     }
 
     // Auto-detect and load subtitles
@@ -6525,6 +6548,42 @@ function downloadBackup() {
     document.body.removeChild(a);
 }
 
+async function uploadRestoreBackup(input) {
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+
+    if (!confirm(`Are you sure you want to restore from "${file.name}"? This will overwrite your current database and settings and may require a restart.`)) {
+        input.value = '';
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    showToast('Restoring backup... Do not close the page.', 'info', 0);
+
+    try {
+        const res = await fetch(`${API_BASE}/system/restore`, {
+            method: 'POST',
+            headers: getAuthHeaders(false), // false to not set Content-Type to application/json
+            body: formData
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Restore successful! Reloading...', 'success');
+            setTimeout(() => window.location.reload(), 2000);
+        } else {
+            showToast('Restore failed: ' + (data.detail || 'Unknown error'), 'error');
+        }
+    } catch (err) {
+        console.error('Restore error:', err);
+        showToast('Restore failed. Check console for details.', 'error');
+    } finally {
+        input.value = '';
+    }
+}
+
 // --- OpenSubtitles Key ---
 async function saveOpenSubtitlesKey() {
     const input = document.getElementById('opensubtitles-key');
@@ -7219,8 +7278,6 @@ async function renderTorrentResults(results, imdbId) {
                         <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
                         <div style="font-size:.85rem;color:var(--text-secondary)">
                             <span style="color:${qColor};font-weight:600">${t.quality}</span>
-}
-
                             ${t.size ? ` &middot; ${t.size}` : ''}
                             ${t.source ? ` &middot; ${t.source}` : ''}
                             ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}
