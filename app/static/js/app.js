@@ -236,6 +236,7 @@ let activeVideoPath = null;
 let activeVideoTitle = null;
 let activeVideoPoster = null;
 let activeDashboardSessionId = null;
+let wakeLock = null;
 let lastDashboardSessionUpdate = 0;
 const DASHBOARD_SESSION_UPDATE_INTERVAL_MS = 5000;
 let playbackHeartbeatInstalled = false;
@@ -815,6 +816,12 @@ function toggleMobileMenu() {
 }
 
 function showSection(id) {
+    // Hide floating search button if in search overlay or if needed
+    const floatSearch = document.getElementById('floating-search-btn');
+    if (floatSearch) {
+        floatSearch.style.display = (id === 'home' || id === 'movies' || id === 'shows') ? '' : 'none';
+    }
+
     const opts = arguments.length > 1 && typeof arguments[1] === 'object' ? arguments[1] : {};
     if (id === 'admin' && !(currentUser && currentUser.is_admin)) {
         showToast('Admin access required', 'warning');
@@ -843,11 +850,26 @@ function showSection(id) {
         sec.classList.remove('active', 'animate-fade');
     });
 
+    // Update mobile bottom nav
+    document.querySelectorAll('.mobile-bottom-nav .nav-item').forEach(btn => {
+        btn.classList.remove('active');
+        btn.removeAttribute('aria-current');
+        const label = btn.querySelector('.nav-label')?.innerText.toLowerCase();
+        if (label === id.toLowerCase()) {
+            btn.classList.add('active');
+            btn.setAttribute('aria-current', 'page');
+        }
+    });
+
     // Update active nav button
     document.querySelectorAll('nav button').forEach(btn => {
         btn.classList.remove('active');
-        if (btn.innerText.trim().toLowerCase() === id.toLowerCase()) {
+        btn.removeAttribute('aria-current');
+        const btnText = btn.innerText.trim().toLowerCase();
+        const normalizedId = id.toLowerCase();
+        if (btnText === normalizedId || (normalizedId === 'debrid' && btnText.includes('debrid')) || (normalizedId === 'admin' && btnText.includes('admin')) || (normalizedId === 'settings' && btnText.includes('settings'))) {
             btn.classList.add('active');
+            btn.setAttribute('aria-current', 'page');
         }
     });
 
@@ -1353,9 +1375,29 @@ function renderMediaFromCache(category) {
     renderMediaList(category, filtered);
 }
 
+function renderSkeletonGrid(container, count = 12) {
+    if (!container) return;
+    let html = '<div class="media-grid">';
+    for (let i = 0; i < count; i++) {
+        html += `
+            <div class="skeleton-card">
+                <div class="skeleton-card-image skeleton"></div>
+                <div class="skeleton-text skeleton" style="width: 80%"></div>
+                <div class="skeleton-text skeleton" style="width: 60%"></div>
+            </div>
+        `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
 async function loadMediaPage(category, reset) {
     const container = document.getElementById(`${category}-list`);
     if (!container) return;
+
+    if (reset && (category === 'movies' || category === 'shows')) {
+        renderSkeletonGrid(container);
+    }
 
     const searchInput = document.getElementById(`${category}-search`);
     const sortSelect = document.getElementById(`${category}-sort`);
@@ -2073,6 +2115,41 @@ function shuffleOrder(n, start) {
     return arr;
 }
 
+function updateMediaSession(title, artist, album, artworkUrl, type = 'audio') {
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: title,
+            artist: artist || 'Nomad Pi',
+            album: album || 'Media Server',
+            artwork: [
+                { src: artworkUrl || '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }
+            ]
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => {
+            if (type === 'audio') {
+                const audio = document.getElementById('global-audio');
+                audio?.play();
+            } else if (activeVideoEl) {
+                activeVideoEl.play();
+            }
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+            if (type === 'audio') {
+                const audio = document.getElementById('global-audio');
+                audio?.pause();
+            } else if (activeVideoEl) {
+                activeVideoEl.pause();
+            }
+        });
+
+        if (type === 'audio') {
+            navigator.mediaSession.setActionHandler('previoustrack', () => musicPrev());
+            navigator.mediaSession.setActionHandler('nexttrack', () => musicNext());
+        }
+    }
+}
+
 function playMusicAt(idx) {
     console.log('playMusicAt called with index:', idx);
     const audio = document.getElementById('global-audio');
@@ -2103,6 +2180,8 @@ function playMusicAt(idx) {
     
     console.log('Playing track:', track.name, 'Stream URL:', streamUrl);
 
+    updateMediaSession(cleanTitle(track.name), track.folder !== '.' ? track.folder : 'Nomad Pi', 'Music', null, 'audio');
+
     // Reset audio state before loading new src
     audio.pause();
     audio.src = streamUrl;
@@ -2113,6 +2192,7 @@ function playMusicAt(idx) {
         playPromise.then(() => {
             console.log('Playback started successfully');
             if (playBtn) playBtn.textContent = '⏸';
+            requestWakeLock();
         }).catch(err => {
             console.error('Audio play error:', err);
             if (playBtn) playBtn.textContent = '▶';
@@ -2165,7 +2245,32 @@ function openPdfViewer(path, title) {
     modal.classList.remove('hidden');
 }
 
+async function releaseWakeLock() {
+    if (wakeLock !== null) {
+        try {
+            await wakeLock.release();
+            wakeLock = null;
+        } catch (err) {
+            console.error(`${err.name}, ${err.message}`);
+        }
+    }
+}
+
+async function requestWakeLock() {
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => {
+                console.log('Wake Lock was released');
+            });
+        } catch (err) {
+            console.error(`${err.name}, ${err.message}`);
+        }
+    }
+}
+
 function closeViewer() {
+    releaseWakeLock();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
@@ -2432,6 +2537,9 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         <div class="viewer-title-row">
             <span class="viewer-title-text">${safeTitle}</span>
             <div class="external-player-btns">
+                <button class="player-action-btn" id="airplay-btn" title="AirPlay" style="display:none" onclick="activeVideoEl.webkitShowPlaybackTargetPicker()">
+                    <i class="fas fa-airplay"></i><span class="btn-text">AirPlay</span>
+                </button>
                 <button class="player-action-btn" id="pip-btn" title="Picture-in-Picture" onclick="togglePiP()">
                     <span>⧉</span><span class="btn-text">PiP</span>
                 </button>
@@ -2483,6 +2591,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         }
     });
     video.addEventListener('pause', () => {
+        releaseWakeLock();
         try { updateProgress(video, path, true); } catch (e) {}
         if (activeDashboardSessionId) {
             updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'paused', video.currentTime, video.duration, activeVideoPoster);
@@ -2490,6 +2599,8 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     });
     video.addEventListener('seeked', () => { try { updateProgress(video, path, true); } catch (e) {} });
     video.addEventListener('play', () => {
+        requestWakeLock();
+        updateMediaSession(activeVideoTitle, 'Nomad Pi', 'Video', activeVideoPoster, 'video');
         if (activeDashboardSessionId) {
             updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'playing', video.currentTime, video.duration, activeVideoPoster);
         }
@@ -2502,6 +2613,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         }, 5000);
     });
     video.addEventListener('ended', () => {
+        releaseWakeLock();
         if (activeVideoProgressInterval) clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
         if (activeDashboardSessionId) {
@@ -2513,8 +2625,24 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext, `Browser can't play this ${ext.toUpperCase()} stream directly`);
     });
 
+    // Detect iOS codec issues and offer VLC
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS && (ext === 'mkv' || path.toLowerCase().includes('hevc') || path.toLowerCase().includes('x265'))) {
+        showToast('This format might not play smoothly on iOS. Use the VLC button if you experience issues.', 'warning', 6000);
+    }
+
     // Auto-detect and load subtitles
     loadSubtitlesForVideo(video, path);
+
+    // Support for AirPlay on Safari
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+        video.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
+            const airplayBtn = document.getElementById('airplay-btn');
+            if (airplayBtn) {
+                airplayBtn.style.display = (event.availability === 'available') ? 'inline-flex' : 'none';
+            }
+        });
+    }
 
     prefetchAndQueueNextEpisode(path);
 
@@ -2556,7 +2684,15 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
 async function openComicViewer(path, title) {
     comicPath = path;
     comicPages = [];
-    comicIndex = 0;
+
+    // Attempt to restore progress
+    try {
+        const res = await fetch(`${API_BASE}/media/meta?path=${encodeURIComponent(path)}`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        comicIndex = data.progress?.current_time || 0;
+    } catch (e) {
+        comicIndex = 0;
+    }
     comicZoom = 100;
     comicFit = 'width';
     comicDouble = false;
@@ -2578,6 +2714,7 @@ async function openComicViewer(path, title) {
         stage.addEventListener('touchstart', _comicTouchStart, { passive: true });
         stage.addEventListener('touchend', _comicTouchEnd, { passive: true });
         stage._comicTouchBound = true;
+        initComicOrientation();
     }
 
     try {
@@ -2710,6 +2847,15 @@ function comicPrev() {
     if (comicIndex <= 0) return;
     comicIndex = Math.max(0, comicIndex - (comicDouble ? 2 : 1));
     _comicRender();
+
+    // Sync progress
+    if (comicPath) {
+        fetch(`${API_BASE}/media/progress/sync`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: comicPath, current_time: comicIndex, duration: comicPages.length })
+        }).catch(() => {});
+    }
 }
 
 function comicNext() {
@@ -2718,11 +2864,30 @@ function comicNext() {
     if (comicIndex >= max) return;
     comicIndex = Math.min(comicPages.length - 1, comicIndex + (comicDouble ? 2 : 1));
     _comicRender();
+
+    // Sync progress
+    if (comicPath) {
+        fetch(`${API_BASE}/media/progress/sync`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: comicPath, current_time: comicIndex, duration: comicPages.length })
+        }).catch(() => {});
+    }
 }
 
 function comicGoTo(index) {
     comicIndex = Math.max(0, Math.min(index, comicPages.length - 1));
     _comicRender();
+
+    // Sync progress
+    if (comicPath) {
+        fetch(`${API_BASE}/media/progress/sync`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: comicPath, current_time: comicIndex, duration: comicPages.length })
+        }).catch(() => {});
+    }
+
     // Close thumbs on mobile
     if (window.innerWidth < 600) comicThumbsOpen = false, _comicApplyThumbs();
 }
@@ -2778,6 +2943,21 @@ function comicToggleDouble() {
     const btn = document.getElementById('cr-double-btn');
     if (btn) btn.classList.toggle('cr-btn--active', comicDouble);
     _comicRender();
+}
+
+function initComicOrientation() {
+    if (window.screen && window.screen.orientation) {
+        window.screen.orientation.addEventListener('change', () => {
+            if (!document.getElementById('comic-overlay').classList.contains('hidden')) {
+                const isLandscape = window.screen.orientation.type.startsWith('landscape');
+                if (isLandscape && !comicDouble) {
+                    comicToggleDouble();
+                } else if (!isLandscape && comicDouble) {
+                    comicToggleDouble();
+                }
+            }
+        });
+    }
 }
 
 // ── Thumbnails ───────────────────────────────────────────
@@ -6020,6 +6200,16 @@ function setPlaybackSpeed(speed) {
 // --- Home Rows: Continue Watching & Recently Added ---
 async function loadHomeRows() {
     await Promise.all([loadContinueWatching(), loadRecentlyAdded()]);
+
+    // Auto-enable Travel Mode if battery is present or hotspot is active
+    try {
+        const res = await fetch(`${API_BASE}/system/stats`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.battery || data.on_battery) {
+            document.getElementById('travel-dashboard')?.classList.remove('hidden');
+            loadTravelDashboard();
+        }
+    } catch (e) {}
 }
 
 async function loadContinueWatching() {
@@ -6121,6 +6311,7 @@ async function loadWatchlist() {
             return;
         }
         list.innerHTML = `<div class="media-grid">${items.map(item => renderWatchlistCard(item)).join('')}</div>`;
+        updateWatchlistCachedStatus();
     } catch (e) {
         list.innerHTML = `<div class="empty-state"><p>Error loading watchlist: ${e.message}</p></div>`;
     }
@@ -6128,23 +6319,52 @@ async function loadWatchlist() {
 
 function renderWatchlistCard(item) {
     const title = escapeHtml(item.title || 'Unknown');
-    const poster = item.poster ? escapeHtml(item.poster) : '';
-    const path = escapeHtml(item.path || '');
-    return `<div class="media-item" onclick="openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', 0)">
+    const path = item.path || '';
+    const poster = item.poster || '';
+    const category = item.category || '';
+
+    // Check cached availability if this is a watchlist item
+    const checkBadge = (path.startsWith('http') || path.includes('magnet')) ?
+        `<div class="cached-check-badge" id="check-${md5(path)}">Checking...</div>` : '';
+
+    return `<div class="media-item" onclick="openVideoViewer('${escapeHtml(path)}', '${title.replace(/'/g,"\\'")}', 0)">
         <div class="poster-shell">
-            ${poster ? `<img class="poster-img" src="${poster}" loading="lazy" onerror="this.style.display='none'">` : ''}
+            ${poster ? `<img class="poster-img" src="${escapeHtml(poster)}" loading="lazy" onerror="this.style.display='none'">` : ''}
             <div class="poster-play"></div>
-            <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${path}', '${escapeHtml(item.category || '')}', '${title.replace(/'/g,"\\'")}', '${poster}')">
+            ${checkBadge}
+            <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${escapeHtml(path)}', '${escapeHtml(category)}', '${title.replace(/'/g,"\\'")}', '${escapeHtml(poster)}')">
                 <i class="fas fa-heart"></i>
             </button>
         </div>
         <div class="card-title">${title}</div>
-        <div class="card-subtitle">${escapeHtml(item.category || '')}</div>
+        <div class="card-subtitle">${escapeHtml(category)}</div>
     </div>`;
 }
 
+function md5(string) {
+    return string.split('').reduce((a, b) => {
+        a = ((a << 5) - a) + b.charCodeAt(0);
+        return a & a;
+    }, 0).toString(16);
+}
+
+async function updateWatchlistCachedStatus() {
+    const items = document.querySelectorAll(".cached-check-badge");
+    for (const item of items) {
+        const parent = item.closest(".media-item");
+        if (!parent) continue;
+        const onClick = parent.getAttribute("onclick");
+        if (!onClick) continue;
+        const match = onClick.match(/openVideoViewer\('(.*?)'/);
+        const path = match ? match[1] : null;
+        if (path && (path.startsWith("http") || path.includes("magnet"))) {
+            const isCached = await checkMagnetInstant(path);
+            item.textContent = isCached ? "AVAILABLE" : "NOT CACHED";
+            item.className = "cached-check-badge " + (isCached ? "cached-yes" : "cached-no");
+        }
+    }
+}
 async function toggleWatchlist(path, category, title, poster) {
-    try {
         const checkRes = await fetch(`${API_BASE}/media/watchlist`, { headers: getAuthHeaders() });
         const checkData = await checkRes.json();
         const existing = (checkData.items || []).find(i => i.path === path);
@@ -6165,7 +6385,7 @@ async function toggleWatchlist(path, category, title, poster) {
             showToast('Added to watchlist ♥', 'success');
             updateWatchlistBtn(path, true);
         }
-        if (document.getElementById('watchlist')?.classList.contains('active-section')) loadWatchlist();
+        if (document.getElementById('watchlist')?.classList.contains('active')) loadWatchlist();
     } catch (e) { showToast('Failed to update watchlist', 'error'); }
 }
 
@@ -6211,8 +6431,10 @@ function setViewMode(category, mode) {
 // --- Global Search ---
 function openGlobalSearch() {
     const overlay = document.getElementById('global-search-overlay');
+    const floatBtn = document.getElementById('floating-search-btn');
     if (!overlay) return;
     overlay.classList.remove('hidden');
+    if (floatBtn) floatBtn.style.display = 'none';
     setTimeout(() => {
         const input = document.getElementById('global-search-input');
         if (input) input.focus();
@@ -6221,7 +6443,14 @@ function openGlobalSearch() {
 
 function closeGlobalSearch() {
     const overlay = document.getElementById('global-search-overlay');
+    const floatBtn = document.getElementById('floating-search-btn');
     if (overlay) overlay.classList.add('hidden');
+
+    // Restore floating search button if on main sections
+    const activeSec = document.querySelector('main > section.active')?.id;
+    if (floatBtn && (activeSec === 'home' || activeSec === 'movies' || activeSec === 'shows')) {
+        floatBtn.style.display = '';
+    }
 }
 
 let globalSearchTimeout = null;
@@ -6561,6 +6790,57 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+async function loadTravelDashboard() {
+    const container = document.getElementById('travel-dashboard-content');
+    if (!container) return;
+
+    container.innerHTML = '<div class="loading">Loading system status...</div>';
+
+    try {
+        const [statsRes, wifiRes] = await Promise.all([
+            fetch(`${API_BASE}/system/stats`, { headers: getAuthHeaders() }),
+            fetch(`${API_BASE}/system/wifi/status`, { headers: getAuthHeaders() })
+        ]);
+
+        const stats = await statsRes.json();
+        const wifi = await wifiRes.json();
+
+        let batteryHtml = '';
+        if (stats.battery) {
+            batteryHtml = `
+                <div class="hero-meta-card">
+                    <span class="hero-meta-label">Battery</span>
+                    <strong>${stats.battery.percent}% (${stats.battery.power_plugged ? 'Charging' : 'Discharging'})</strong>
+                </div>
+            `;
+        }
+
+        container.innerHTML = `
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Hotspot Status</div>
+                    <div class="stat-value">${wifi.ap_active ? 'ACTIVE' : 'OFF'}</div>
+                    <div class="stat-details">${wifi.ap_ssid || 'NomadPi'}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Storage Free</div>
+                    <div class="stat-value">${formatBytes(stats.disk_free)}</div>
+                    <div class="stat-details">${((stats.disk_free / stats.disk_total) * 100).toFixed(1)}% available</div>
+                </div>
+            </div>
+            <div class="home-hero-meta">
+                ${batteryHtml}
+                <div class="hero-meta-card">
+                    <span class="hero-meta-label">Connections</span>
+                    <strong>${wifi.clients_count || 0} devices connected</strong>
+                </div>
+            </div>
+        `;
+    } catch (e) {
+        container.innerHTML = '<p>Error loading travel dashboard.</p>';
+    }
+}
+
 function showKeyboardShortcutsHelp() {
     const existing = document.getElementById('shortcuts-modal');
     if (existing) { existing.remove(); return; }
@@ -6856,6 +7136,21 @@ async function debridSelectTitle(imdbId, title, mediaType, year) {
     }
 }
 
+async function checkMagnetInstant(infoHash) {
+    try {
+        const res = await fetch(`${API_BASE}/debrid/instant`, {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hashes: [infoHash] }),
+        });
+        if (res.ok) {
+            const data = await res.json();
+            return data.cached && (data.cached[infoHash] || data.cached[infoHash.toLowerCase()]);
+        }
+    } catch (e) {}
+    return false;
+}
+
 async function renderTorrentResults(results, imdbId) {
     const torrentsDiv = document.getElementById('debrid-torrents');
     const torrentsList = document.getElementById('debrid-torrents-list');
@@ -6870,9 +7165,9 @@ async function renderTorrentResults(results, imdbId) {
 
     // Check which torrents are instantly available (cached) on the active debrid provider
     let cached = {};
-    try {
-        const hashes = results.map(t => t.info_hash).filter(Boolean);
-        if (hashes.length) {
+    const hashes = results.map(t => t.info_hash).filter(Boolean);
+    if (hashes.length) {
+        try {
             const res = await fetch(`${API_BASE}/debrid/instant`, {
                 method: 'POST',
                 headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -6882,8 +7177,10 @@ async function renderTorrentResults(results, imdbId) {
                 const data = await res.json();
                 cached = data.cached || {};
             }
+        } catch (e) {
+            console.warn('Instant availability check failed:', e);
         }
-    } catch (e) { console.warn('Instant availability check failed:', e); }
+    }
 
     torrentsList.innerHTML = results.map((t, i) => {
         const qColor = qualityColors[t.quality] || 'var(--text-secondary)';
@@ -6911,6 +7208,8 @@ async function renderTorrentResults(results, imdbId) {
                         <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
                         <div style="font-size:.85rem;color:var(--text-secondary)">
                             <span style="color:${qColor};font-weight:600">${t.quality}</span>
+}
+
                             ${t.size ? ` &middot; ${t.size}` : ''}
                             ${t.source ? ` &middot; ${t.source}` : ''}
                             ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}

@@ -12,11 +12,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css?v=1779058800">
     <link rel="manifest" href="manifest.json?v=1779058800">
-    <meta name="theme-color" content="#3b82f6">
+    <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Nomad Pi">
-    <link rel="apple-touch-icon" href="icons/icon-512.svg">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="application-name" content="Nomad Pi">
     <meta name="msapplication-TileColor" content="#0f172a">
@@ -42,19 +45,24 @@
     <div id="app" class="hidden">
         <header class="glass">
             <div class="logo">Nomad Pi ✨</div>
-            <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+            <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Toggle Navigation Menu">☰</button>
             <nav id="main-nav">
+                <div class="mobile-nav-group-title">Main Library</div>
                 <button onclick="showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
                 <button onclick="showSection('movies')"><i class="fas fa-film"></i> Movies</button>
                 <button onclick="showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
                 <button onclick="showSection('music')"><i class="fas fa-music"></i> Music</button>
                 <button onclick="showSection('books')"><i class="fas fa-book"></i> Books</button>
                 <button onclick="showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
+
+                <div class="mobile-nav-group-title">Tools & Collections</div>
                 <button onclick="showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
                 <button onclick="showSection('watchlist')"><i class="fas fa-heart"></i> Watchlist</button>
-                <button onclick="showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Debrid</button>
-                <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
-                <button onclick="showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
+                <button onclick="showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Debrid Manager</button>
+
+                <div class="mobile-nav-group-title">System & Profile</div>
+                <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin Dashboard</button>
+                <button onclick="showSection('settings')"><i class="fas fa-cog"></i> User Settings</button>
                 <button onclick="openGlobalSearch()" class="search-nav-btn" title="Search everything"><i class="fas fa-search"></i></button>
                 <span id="header-stats" class="header-stats"></span>
                 <button onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme">
@@ -65,23 +73,23 @@
         </header>
 
         <nav class="mobile-bottom-nav glass">
-            <button onclick="showSection('home')" id="btn-home-mob" class="nav-item active">
+            <button onclick="showSection('home')" id="btn-home-mob" class="nav-item active" aria-label="Home" aria-current="page">
                 <span class="nav-icon"><i class="fas fa-home"></i></span>
                 <span class="nav-label">Home</span>
             </button>
-            <button onclick="showSection('movies')" id="btn-movies-mob" class="nav-item">
+            <button onclick="showSection('movies')" id="btn-movies-mob" class="nav-item" aria-label="Movies">
                 <span class="nav-icon"><i class="fas fa-film"></i></span>
                 <span class="nav-label">Movies</span>
             </button>
-            <button onclick="showSection('shows')" id="btn-shows-mob" class="nav-item">
+            <button onclick="showSection('shows')" id="btn-shows-mob" class="nav-item" aria-label="Shows">
                 <span class="nav-icon"><i class="fas fa-tv"></i></span>
                 <span class="nav-label">Shows</span>
             </button>
-            <button onclick="showSection('files')" id="btn-files-mob" class="nav-item">
+            <button onclick="showSection('files')" id="btn-files-mob" class="nav-item" aria-label="Files">
                 <span class="nav-icon"><i class="fas fa-folder-open"></i></span>
                 <span class="nav-label">Files</span>
             </button>
-            <button onclick="toggleMobileMenu()" id="btn-more-mob" class="nav-item">
+            <button onclick="toggleMobileMenu()" id="btn-more-mob" class="nav-item" aria-label="More Menu">
                 <span class="nav-icon"><i class="fas fa-bars"></i></span>
                 <span class="nav-label">More</span>
             </button>
@@ -89,6 +97,13 @@
 
         <main>
             <section id="home" class="active">
+                <div id="travel-dashboard" class="home-row hidden">
+                    <div class="home-row-header">
+                        <h2><i class="fas fa-suitcase"></i> Travel Mode</h2>
+                    </div>
+                    <div id="travel-dashboard-content" class="glass-card" style="padding: 1.5rem;"></div>
+                </div>
+
                 <div class="home-hero glass-card">
                     <div class="home-hero-copy">
                         <span class="section-chip">Control Center</span>
@@ -1063,6 +1078,14 @@
 
     <div id="toast-container"></div>
 
+    <button id="floating-search-btn" class="floating-search-btn" onclick="openGlobalSearch()" title="Search everything">
+        <i class="fas fa-search"></i>
+    </button>
+
+    <div id="offline-banner" class="offline-banner hidden">
+        <i class="fas fa-plane-slash"></i> <span>You are currently offline. Some features may be limited.</span>
+    </div>
+
     <!-- ═══════════════════════════════════════════════
          DEDICATED COMIC READER OVERLAY
          ═══════════════════════════════════════════════ -->
@@ -1149,12 +1172,32 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js?v=1779058800')
-                    .then(async reg => {
-                        console.log('Service Worker registered!', reg);
-                        try { await reg.update(); } catch (_) {}
+                    .then(reg => {
+                        console.log('Service Worker registered!');
+
+                        reg.addEventListener('updatefound', () => {
+                            const newWorker = reg.installing;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    showToast('New version available! Refresh to update.', 'info', 0);
+                                }
+                            });
+                        });
                     })
                     .catch(err => console.error('Service Worker registration failed:', err));
             });
+        }
+
+        // Offline detection
+        window.addEventListener('online', () => {
+            document.getElementById('offline-banner')?.classList.add('hidden');
+            showToast('You are back online!', 'success');
+        });
+        window.addEventListener('offline', () => {
+            document.getElementById('offline-banner')?.classList.remove('hidden');
+        });
+        if (!navigator.onLine) {
+            document.getElementById('offline-banner')?.classList.remove('hidden');
         }
     </script>
 </body>
