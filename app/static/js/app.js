@@ -2157,8 +2157,8 @@ function updateMediaSession(title, artist, album, artworkUrl, type = 'audio') {
             const skipTime = details.seekOffset || 10;
             if (type === 'audio') {
                 const audio = document.getElementById('global-audio');
-                if (audio) audio.currentTime = Math.min(audio.currentTime + skipTime, audio.duration);
-            } else if (activeVideoEl) {
+                if (audio && isFinite(audio.duration)) audio.currentTime = Math.min(audio.currentTime + skipTime, audio.duration);
+            } else if (activeVideoEl && isFinite(activeVideoEl.duration)) {
                 activeVideoEl.currentTime = Math.min(activeVideoEl.currentTime + skipTime, activeVideoEl.duration);
             }
         });
