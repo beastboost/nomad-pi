@@ -2464,6 +2464,22 @@ def list_media(category: str, user_id: int = Depends(get_current_user_id)):
     files.sort(key=lambda x: (natural_sort_key(x.get("folder") or "."), natural_sort_key(x.get("name") or "")))
     return files
 
+@router.post("/progress/sync")
+def sync_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
+    """Sync reading or viewing progress."""
+    path = data.get("path")
+    time_raw = data.get("current_time")
+    duration_raw = data.get("duration")
+    if not path or time_raw is None:
+        return {"status": "error"}
+    try:
+        current_time = float(time_raw)
+        duration = float(duration_raw or 0)
+        database.update_progress(user_id, path, current_time, duration)
+    except (ValueError, TypeError):
+        return {"status": "error", "message": "Invalid numeric values"}
+    return {"status": "ok"}
+
 @router.post("/progress")
 def set_progress(data: Dict = Body(...), user_id: int = Depends(get_current_user_id)):
     path = data.get("path") or data.get("file_path")
