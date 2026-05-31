@@ -15,8 +15,7 @@ const API_CACHE_WHITELIST = [
   '/api/system/stats',
   '/api/media/library/movies',
   '/api/media/library/shows',
-  '/api/media/resume',
-  '/api/auth/profile'
+  '/api/media/resume'
 ];
 
 self.addEventListener('install', (event) => {
@@ -92,7 +91,8 @@ async function staleWhileRevalidate(request) {
     }
     return networkResponse;
   }).catch(err => {
-    return cachedResponse;
+    // Return cachedResponse if network fails, or a generic error response if not in cache
+    return cachedResponse || Response.error();
   });
   return cachedResponse || networkPromise;
 }

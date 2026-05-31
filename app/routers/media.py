@@ -2472,7 +2472,12 @@ def sync_progress(data: Dict = Body(...), user_id: int = Depends(get_current_use
     duration_raw = data.get("duration")
     if not path or time_raw is None:
         return {"status": "error"}
-    database.update_progress(user_id, path, float(time_raw), float(duration_raw or 0))
+    try:
+        current_time = float(time_raw)
+        duration = float(duration_raw or 0)
+        database.update_progress(user_id, path, current_time, duration)
+    except (ValueError, TypeError):
+        return {"status": "error", "message": "Invalid numeric values"}
     return {"status": "ok"}
 
 @router.post("/progress")

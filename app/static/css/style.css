@@ -216,10 +216,6 @@ nav button.active {
         display: flex;
     }
 
-    .mobile-nav-group-title {
-        display: block;
-    }
-
     header nav#main-nav {
         position: fixed !important;
         top: 0 !important;
@@ -285,7 +281,7 @@ nav button.active {
     }
 
     .mobile-nav-group-title {
-        display: none;
+        display: block;
         font-size: 0.75rem;
         font-weight: 700;
         color: var(--text-muted);

@@ -6357,14 +6357,25 @@ async function updateWatchlistCachedStatus() {
         if (!onClick) continue;
         const match = onClick.match(/openVideoViewer\('(.*?)'/);
         const path = match ? match[1] : null;
-        if (path && (path.startsWith("http") || path.includes("magnet"))) {
-            const isCached = await checkMagnetInstant(path);
-            item.textContent = isCached ? "AVAILABLE" : "NOT CACHED";
-            item.className = "cached-check-badge " + (isCached ? "cached-yes" : "cached-no");
+        if (path && path.includes("magnet")) {
+            let hash = null;
+            const hashMatch = path.match(/btih:([a-zA-Z0-9]+)/);
+            if (hashMatch) hash = hashMatch[1];
+
+            if (hash) {
+                const isCached = await checkMagnetInstant(hash);
+                item.textContent = isCached ? "AVAILABLE" : "NOT CACHED";
+                item.className = "cached-check-badge " + (isCached ? "cached-yes" : "cached-no");
+            }
+        } else if (path && path.startsWith("http")) {
+            // If it's already a direct HTTP link, it's effectively available/cached
+            item.textContent = "AVAILABLE";
+            item.className = "cached-check-badge cached-yes";
         }
     }
 }
 async function toggleWatchlist(path, category, title, poster) {
+    try {
         const checkRes = await fetch(`${API_BASE}/media/watchlist`, { headers: getAuthHeaders() });
         const checkData = await checkRes.json();
         const existing = (checkData.items || []).find(i => i.path === path);
