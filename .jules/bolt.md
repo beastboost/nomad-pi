@@ -1,0 +1,3 @@
+## 2025-05-15 - Redundant Large-Scale Data Fetching
+**Learning:** The media library routes were fetching a user's entire watch history (all records in 'progress' table) for every page request or show view, even though the primary SQL queries for those routes already performed a LEFT JOIN with the progress table. This resulted in O(N) database overhead and O(M) memory overhead per request where M is the total size of the user's history.
+**Action:** Always check if primary entity queries (like library items) already join with auxiliary data (like user progress) before performing a separate bulk fetch.
