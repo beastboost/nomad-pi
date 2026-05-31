@@ -2591,7 +2591,7 @@ def delete_backup(filename: str, admin: dict = Depends(get_current_admin)):
     return {"status": "ok"}
 
 @router.post("/restore")
-async def restore_backup(
+def restore_backup(
     file: UploadFile = File(...),
     admin: dict = Depends(get_current_admin)
 ):
@@ -2638,6 +2638,8 @@ async def restore_backup(
                     shutil.copy2(new_env, ".env")
 
         return {"status": "success", "message": "Backup restored successfully. Please restart the app for all changes to take effect."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Restore failed: {e}")
         raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
