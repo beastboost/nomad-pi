@@ -1,10 +1,15 @@
-const CACHE_NAME = 'nomad-pi-v1.4.0';
+const CACHE_NAME = 'nomad-pi-v1.4.1';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
   '/css/style.css',
   '/js/app.js',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/maskable-192.png',
+  '/icons/maskable-512.png',
+  '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
@@ -27,7 +32,7 @@ self.addEventListener('install', (event) => {
       );
     })
   );
-  self.skipWaiting();
+  // Do NOT self.skipWaiting() here if we want to show an update prompt
 });
 
 self.addEventListener('activate', (event) => {
@@ -54,6 +59,7 @@ self.addEventListener('fetch', (event) => {
 
   // Don't cache media streams (audio/video)
   if (url.pathname.includes('/media/stream') ||
+      url.pathname.includes('/api/media/stream') ||
       url.pathname.endsWith('.mp4') ||
       url.pathname.endsWith('.mkv') ||
       url.pathname.endsWith('.mp3') ||
@@ -91,7 +97,6 @@ async function staleWhileRevalidate(request) {
     }
     return networkResponse;
   }).catch(err => {
-    // Return cachedResponse if network fails, or a generic error response if not in cache
     return cachedResponse || Response.error();
   });
   return cachedResponse || networkPromise;
