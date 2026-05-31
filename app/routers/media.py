@@ -138,6 +138,7 @@ def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, g
         # database.query_library_index already joins with progress if user_id is provided
         if r.get("last_played"):
             item["progress"] = {
+                "path": web_path,
                 "current_time": r.get("current_time"),
                 "duration": r.get("duration"),
                 "play_count": r.get("play_count"),
@@ -819,6 +820,7 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
         }
         if r.get("last_played"):
             ep["progress"] = {
+                "path": web_path,
                 "current_time": r.get("current_time"),
                 "duration": r.get("duration"),
                 "play_count": r.get("play_count"),
@@ -1592,8 +1594,11 @@ def get_library(
         if total > 0 or q or genre or year:
             # database.query_library_index/query_shows already joins with progress
             for item in items:
-                if item.get('last_played'):
+                # Only attach progress for items with a path (files).
+                # Aggregated shows from query_shows() don't have these progress fields.
+                if item.get('path') and item.get('last_played'):
                     item['progress'] = {
+                        "path": item.get('path'),
                         "current_time": item.get("current_time"),
                         "duration": item.get("duration"),
                         "play_count": item.get("play_count"),
