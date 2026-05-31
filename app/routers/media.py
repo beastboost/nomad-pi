@@ -116,7 +116,6 @@ def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, g
     idx_info = maybe_start_index_build(category, force=bool(rebuild))
     items, total = database.query_library_index(category, q, offset, limit, sort=sort, genre=genre, year=year, user_id=user_id)
 
-    all_progress = database.get_all_progress(user_id)
     out = []
     for r in items:
         web_path = r.get("path")
@@ -135,8 +134,15 @@ def _get_paged_data(category: str, q: str, offset: int, limit: int, sort: str, g
         }
         if (category == "movies" or category == "shows") and r.get("poster"):
             item["poster"] = r.get("poster")
-        if web_path in all_progress:
-            item["progress"] = all_progress[web_path]
+
+        # database.query_library_index already joins with progress if user_id is provided
+        if r.get("last_played"):
+            item["progress"] = {
+                "current_time": r.get("current_time"),
+                "duration": r.get("duration"),
+                "play_count": r.get("play_count"),
+                "last_played": r.get("last_played")
+            }
         out.append(item)
 
     if not out and int(offset or 0) == 0:
@@ -736,7 +742,6 @@ async def cache_remote_poster(poster_url: str):
 @router.get("/shows/library")
 async def get_shows_library(user_id: int = Depends(get_current_user_id)):
     items, total = database.query_library_index("shows", limit=1000000, user_id=user_id)
-    all_progress = database.get_all_progress(user_id)
     
     shows_dict = {}
     
@@ -793,9 +798,8 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
             shows_dict[show_name]["mtime"] = mtime
         
         # Track last played
-        prog = all_progress.get(web_path)
-        if prog and prog.get("last_played"):
-            lp = prog.get("last_played")
+        lp = r.get("last_played")
+        if lp:
             if not shows_dict[show_name].get("last_played") or lp > shows_dict[show_name]["last_played"]:
                 shows_dict[show_name]["last_played"] = lp
 
@@ -811,9 +815,15 @@ async def get_shows_library(user_id: int = Depends(get_current_user_id)):
             "name": r.get("name"),
             "path": web_path,
             "poster": r.get("poster"),
-            "progress": all_progress.get(web_path),
             "ep_num": parse_ep_num(r.get("name") or "")
         }
+        if r.get("last_played"):
+            ep["progress"] = {
+                "current_time": r.get("current_time"),
+                "duration": r.get("duration"),
+                "play_count": r.get("play_count"),
+                "last_played": r.get("last_played")
+            }
 
         # Aggregation: Use the first available poster for show/season if not set
         # Priority: Show-level poster.jpg, then Season-level poster.jpg, then first episode poster
@@ -1580,11 +1590,15 @@ def get_library(
             items, total = database.query_library_index(category, q=q, offset=offset, limit=limit, sort=sort, genre=genre, year=year, user_id=user_id)
             
         if total > 0 or q or genre or year:
-            # Add progress information for the user
-            all_progress = database.get_all_progress(user_id)
+            # database.query_library_index/query_shows already joins with progress
             for item in items:
-                if item.get('path') in all_progress:
-                    item['progress'] = all_progress[item['path']]
+                if item.get('last_played'):
+                    item['progress'] = {
+                        "current_time": item.get("current_time"),
+                        "duration": item.get("duration"),
+                        "play_count": item.get("play_count"),
+                        "last_played": item.get("last_played")
+                    }
 
             return {
                 "items": items, 
