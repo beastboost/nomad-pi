@@ -221,6 +221,13 @@ nav button.active {
         display: flex;
     }
 
+    /* Fixed mobile nav menu issues:
+       1. Move main-nav out of sticky header context if possible,
+          but since it's HTML-bound, we must override the sticky container effect.
+       2. The sticky header with backdrop-filter creates a new containing block,
+          causing 'position: fixed' to be relative to the header instead of the viewport.
+       3. We use a high z-index and ensure it's truly viewport-fixed.
+    */
     header nav#main-nav {
         position: fixed !important;
         top: 0 !important;
@@ -229,11 +236,12 @@ nav button.active {
         width: min(86vw, 360px) !important;
         max-width: none !important;
         height: 100vh !important;
-        background: rgb(20, 30, 50) !important;
+        /* Use a solid color to prevent transparency issues when scrolling */
+        background: #0f172a !important;
         flex-direction: column !important;
         padding: calc(72px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)) 16px !important;
         gap: 8px !important;
-        z-index: 9999 !important;
+        z-index: 10001 !important; /* Must be higher than sticky header (1000) */
         border-left: 2px solid rgba(59, 130, 246, 0.8) !important;
         box-shadow: -10px 0 40px rgba(0, 0, 0, 0.9) !important;
         overflow-y: auto !important;
@@ -1928,6 +1936,11 @@ h1, h2, h3 {
         max-width: 100vw;
     }
 
+    /* Fixed: Sticky header containing block issue for mobile menu.
+       'backdrop-filter' on a sticky/fixed element creates a containing block
+       for all descendants, even those with 'position: fixed'.
+       This meant the mobile menu was only as tall as the header!
+    */
     header {
         width: 100% !important;
         flex-direction: row;

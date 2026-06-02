@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, JSONResponse
 from app import database
 import sys
@@ -338,6 +339,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Enable GZip compression for API responses (improves load speed for large libraries)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Create data directories if not exist
 DATA_DIRS = ["data/movies", "data/shows", "data/music", "data/books", "data/files", "data/external", "data/gallery", "data/uploads"]
