@@ -61,6 +61,24 @@ def save_omdb_key(request: OmdbKeyRequest, user_id: int = Depends(get_current_us
         logger.error(f"Failed to save OMDb key: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+class SettingRequest(BaseModel):
+    key: str
+    value: str
+
+@router.get("/settings")
+def get_settings(user_id: int = Depends(get_current_user_id)):
+    """Get all settings (admin only)"""
+    return database.get_all_settings()
+
+@router.post("/settings")
+def save_setting(request: SettingRequest, user_id: int = Depends(get_current_user_id)):
+    """Save a setting (admin only)"""
+    try:
+        database.set_setting(request.key, request.value)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @public_router.get("/status")
 def get_system_status():
     """Lightweight endpoint for connectivity checks"""

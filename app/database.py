@@ -343,6 +343,15 @@ def get_setting(key: str) -> Optional[str]:
     finally:
         return_db(conn)
 
+def get_all_settings() -> List[dict]:
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT key, value FROM settings')
+        return [dict(row) for row in c.fetchall()]
+    finally:
+        return_db(conn)
+
 def get_user_by_username(username: str) -> Optional[dict]:
     conn = get_db()
     try:

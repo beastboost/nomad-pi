@@ -1268,12 +1268,12 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
             category = _get_category_from_filename(filename)
 
     # Build destination path
-    base_dir = media.BASE_DIR
+    dest_root = media.pick_effective_storage_root_fs(category)
     if category in ("movies", "shows"):
         folder_name = os.path.splitext(filename)[0]
-        dest_dir = os.path.join(base_dir, category, folder_name)
+        dest_dir = os.path.join(dest_root, folder_name)
     else:
-        dest_dir = os.path.join(base_dir, category)
+        dest_dir = dest_root
 
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = os.path.join(dest_dir, filename)
@@ -1360,9 +1360,38 @@ def _download_worker(download_id: str, url: str, dest_path: str, category: str):
                     })
 
             try:
-                web_path = f"/data/{os.path.relpath(dest_path, media.BASE_DIR).replace(os.sep, '/')}"
+                # Construct web path correctly
+                abs_base = os.path.abspath(media.BASE_DIR)
+                abs_dest = os.path.abspath(dest_path)
+                
+                if abs_dest.startswith(abs_base):
+                    rel_path = os.path.relpath(abs_dest, abs_base).replace(os.sep, '/')
+                    web_path = f"/data/{rel_path}"
+                else:
+                    # For files outside data/ (like /media/pi/...), try to find if they are symlinked in data/external
+                    web_path = abs_dest # Fallback to absolute path
+                    ext_root = os.path.join(media.BASE_DIR, "external")
+                    if os.path.exists(ext_root):
+                        for item in os.listdir(ext_root):
+                            link_path = os.path.join(ext_root, item)
+                            if os.path.islink(link_path):
+                                target = os.path.realpath(link_path)
+                                if abs_dest.startswith(target):
+                                    rel_to_target = os.path.relpath(abs_dest, target).replace(os.sep, '/')
+                                    web_path = f"/data/external/{item}/{rel_to_target}"
+                                    break
+
                 st = os.stat(dest_path)
-                folder = os.path.relpath(os.path.dirname(dest_path), os.path.join(media.BASE_DIR, category)).replace(os.sep, '/')
+                
+                # Folder logic
+                dest_root = media.pick_effective_storage_root_fs(category)
+                if dest_path.startswith(dest_root):
+                    folder = os.path.relpath(os.path.dirname(dest_path), dest_root).replace(os.sep, '/')
+                else:
+                    folder = "."
+                
+                if folder == ".":
+                    folder = ""
                 item = {
                     "path": web_path,
                     "category": category,

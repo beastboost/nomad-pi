@@ -512,6 +512,40 @@
                                 </div>
                             </div>
 
+                            <!-- Storage Configuration Section -->
+                            <div class="settings-card">
+                                <div class="card-header">
+                                    <i class="fas fa-hdd"></i>
+                                    <h3>Storage Routing</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="form-group">
+                                        <label>Debrid Download Target (Movies)</label>
+                                        <div class="input-with-button">
+                                            <input type="text" v-model="settings['storage.target.movies']" placeholder="/data/movies">
+                                            <button @click="saveSetting('storage.target.movies')" class="btn btn-secondary">Save</button>
+                                        </div>
+                                        <p class="help-text">Path to save movies. Use an absolute path for external drives (e.g., /media/pi/DRIVE/movies).</p>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Debrid Download Target (Shows)</label>
+                                        <div class="input-with-button">
+                                            <input type="text" v-model="settings['storage.target.shows']" placeholder="/data/shows">
+                                            <button @click="saveSetting('storage.target.shows')" class="btn btn-secondary">Save</button>
+                                        </div>
+                                        <p class="help-text">Path to save TV shows.</p>
+                                    </div>
+                                    <div class="form-group" style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                                        <label class="checkbox-container">
+                                            <input type="checkbox" v-model="settings['storage.failover.enabled']" @change="saveSetting('storage.failover.enabled', settings['storage.failover.enabled'] ? '1' : '0')">
+                                            <span class="checkmark"></span>
+                                            Enable Storage Failover
+                                        </label>
+                                        <p class="help-text">Automatically switch to a backup drive if the primary drive is full.</p>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Interface Settings Section -->
                             <div class="settings-card">
                                 <div class="card-header">

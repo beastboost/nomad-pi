@@ -318,10 +318,36 @@ createApp({
                 const response = await this.apiCall('/api/system/settings/omdb', 'GET');
                 this.settings.omdb_key = response.key;
                 
+                // Load all settings
+                const allSettings = await this.apiCall('/api/system/settings', 'GET');
+                for (const s of allSettings) {
+                    this.settings[s.key] = s.value;
+                }
+
+                // Initialize checkbox values
+                if (this.settings['storage.failover.enabled'] === undefined) {
+                    this.settings['storage.failover.enabled'] = false;
+                } else {
+                    this.settings['storage.failover.enabled'] = this.settings['storage.failover.enabled'] === '1';
+                }
+                
                 // Refresh Tailscale status when loading settings
                 await this.refreshTailscaleStatus();
             } catch (error) {
                 console.error('Error loading settings:', error);
+            }
+        },
+
+        async saveSetting(key, value) {
+            try {
+                const val = value !== undefined ? value : this.settings[key];
+                await this.apiCall('/api/system/settings', 'POST', {
+                    key: key,
+                    value: String(val || '')
+                });
+                this.showNotification(`Setting '${key}' saved`, 'success');
+            } catch (error) {
+                this.showNotification(`Failed to save setting '${key}'`, 'error');
             }
         },
 
