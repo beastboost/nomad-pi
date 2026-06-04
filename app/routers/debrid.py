@@ -287,15 +287,30 @@ def search_torrents(imdb_id: str = Query(...),
     for r in results:
         name = r.get("name", "").lower()
         meta = r.get("meta", "").lower()
+        codec = (r.get("codec") or "").lower()
         
         if filter_type and filter_type.lower() != "all":
-            # We want to match the exact extension/container string
-            if filter_type.lower() == "mp4" and "mp4" not in name and "mp4" not in meta:
+            ft = filter_type.lower()
+
+            # Container matching
+            if ft == "mp4" and "mp4" not in name and "mp4" not in meta:
                 continue
-            if filter_type.lower() == "mkv" and "mkv" not in name and "mkv" not in meta:
+            if ft == "mkv" and "mkv" not in name and "mkv" not in meta:
                 continue
-            if filter_type.lower() == "h264" and "h264" not in name and "x264" not in name and "avc" not in name:
-                continue
+
+            # Codec matching (comprehensive)
+            if ft == "h264":
+                # Look for H264 in the name, meta, or the newly extracted codec field
+                if codec != "h264" and not any(t in name or t in meta for t in ["h264", "x264", "avc", "h.264"]):
+                    continue
+
+            if ft == "hevc":
+                if codec != "hevc" and not any(t in name or t in meta for t in ["hevc", "h265", "x265", "h.265"]):
+                    continue
+
+            if ft == "av1":
+                if codec != "av1" and "av1" not in name and "av1" not in meta:
+                    continue
                 
         if filter_quality and filter_quality.lower() != "all":
             if filter_quality.lower() == "2160p" and "2160p" not in meta and "4k" not in meta:

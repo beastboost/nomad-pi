@@ -344,6 +344,20 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                     source = s
                     break
 
+            # Extract codec
+            codec = ""
+            codec_map = {
+                "HEVC": ["hevc", "h265", "h.265", "x265"],
+                "H264": ["h264", "h.264", "x264", "avc"],
+                "AV1": ["av1"],
+                "XVID": ["xvid", "divx"]
+            }
+            title_lower = title.lower()
+            for c_name, tags in codec_map.items():
+                if any(t in title_lower for t in tags):
+                    codec = c_name
+                    break
+
             rd_analysis = _analyze_rd_release(name, details)
 
             results.append({
@@ -353,6 +367,7 @@ def search_torrentio(query: str, media_type: str = "movie", imdb_id: Optional[st
                 "quality": quality,
                 "size": size_str,
                 "source": source,
+                "codec": codec,
                 "details": details,
                 "seeders": stream.get("seeders"),
                 "rd_status": rd_analysis["status"],
@@ -1407,13 +1422,30 @@ def _download_worker(download_id: str, url: str, dest_path: str, category: str):
                             "error": error_msg,
                         })
                 logger.error(f"{error_msg} for {download_id}")
+        except requests.exceptions.HTTPError as e:
+            status_code = getattr(e.response, 'status_code', None)
+            if status_code in (401, 403):
+                error_msg = f"Download failed: Link expired or access denied (HTTP {status_code}). Try refreshing the link or changing Debrid service."
+            elif status_code == 404:
+                error_msg = "Download failed: File not found on Debrid server (HTTP 404). Link might have been deleted."
+            else:
+                error_msg = f"Download failed: Debrid server error (HTTP {status_code})"
+
+            logger.error(f"{error_msg} for {download_id}")
+            with _downloads_lock:
+                if download_id in _downloads:
+                    _downloads[download_id].update({
+                        "status": "failed",
+                        "error": error_msg,
+                    })
+            return # Don't retry auth/not-found errors
         except Exception as e:
             logger.error(f"Download failed for {download_id}: {e}")
             with _downloads_lock:
                 if download_id in _downloads:
                     _downloads[download_id].update({
                         "status": "failed",
-                        "error": str(e),
+                        "error": f"Internal Error: {str(e)}",
                     })
             return
 
