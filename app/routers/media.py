@@ -56,7 +56,8 @@ def _normalize_data_web_root(web_root: str) -> Optional[str]:
     s = str(web_root or "").strip()
     if not s:
         return None
-    if not s.startswith("/data/"):
+    # Allow /data/ paths (internal) or absolute paths starting with /media or /mnt (external)
+    if not (s.startswith("/data/") or s.startswith("/media/") or s.startswith("/mnt/")):
         return None
     s = s.rstrip("/")
     if s == "/data":

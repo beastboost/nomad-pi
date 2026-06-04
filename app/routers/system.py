@@ -70,6 +70,11 @@ def get_settings(user_id: int = Depends(get_current_user_id)):
     """Get all settings (admin only)"""
     return database.get_all_settings()
 
+@router.get("/storage/info")
+def get_storage_info(user_id: int = Depends(get_current_user_id)):
+    """Get detailed storage info including mounts (admin only)"""
+    return get_aggregate_disk_usage()
+
 @router.post("/settings")
 def save_setting(request: SettingRequest, user_id: int = Depends(get_current_user_id)):
     """Save a setting (admin only)"""
