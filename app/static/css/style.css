@@ -65,13 +65,17 @@ body.no-glass * {
     top: 0;
     left: 0;
     right: 0;
+    bottom: 0;
+    width: 100%;
     height: 100%;
     background: rgba(0, 0, 0, 0.5);
     z-index: 800;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.3s ease, visibility 0.3s ease;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.3s ease;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
 }
 
 body.no-glass .glass,
@@ -165,8 +169,27 @@ nav#main-nav {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
+nav#main-nav::-webkit-scrollbar {
+    display: none;
+}
+
+/* Keyboard Navigation Support */
+nav#main-nav button:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+header nav#main-nav button:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: -2px;
+    background: rgba(59, 130, 246, 0.25) !important;
 }
 
 nav button {
@@ -245,9 +268,11 @@ nav button.active {
         border-left: 2px solid rgba(59, 130, 246, 0.8) !important;
         box-shadow: -10px 0 40px rgba(0, 0, 0, 0.9) !important;
         overflow-y: auto !important;
+        overflow-x: hidden !important;
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
         display: flex !important;
         pointer-events: auto !important;
+        flex-wrap: nowrap !important;
     }
 
     header nav#main-nav.mobile-menu-open {
@@ -271,6 +296,8 @@ nav button.active {
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
         min-height: 48px;
+        flex-shrink: 0;
+        white-space: nowrap;
     }
 
     header nav#main-nav button:hover {
@@ -303,6 +330,8 @@ nav button.active {
         letter-spacing: 0.05em;
         margin: 16px 0 8px 4px;
         opacity: 0.8;
+        width: 100%;
+        flex-shrink: 0;
     }
 
     header nav#main-nav .logout-btn {
@@ -329,6 +358,8 @@ nav button.active {
     pointer-events: auto;
     left: 0;
     right: 0;
+    top: 0;
+    bottom: 0;
 }
 
 }
@@ -1962,8 +1993,21 @@ h1, h2, h3 {
 
     .mobile-menu-btn {
         display: block;
-        padding: 15px; /* Larger hit area */
-        margin-right: -10px;
+        padding: 12px 15px; /* Larger hit area */
+        margin-right: 0;
+        margin-left: auto;
+        font-size: 1.5rem;
+        line-height: 1;
+        transition: all 0.2s ease;
+    }
+    
+    .mobile-menu-btn:active {
+        transform: scale(0.95);
+    }
+    
+    .mobile-menu-btn:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 2px;
     }
 
     /* Bottom Navigation for Mobile */
@@ -2239,6 +2283,8 @@ h1, h2, h3 {
     gap: 8px;
     position: relative;
     overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .card::before {
@@ -2259,6 +2305,16 @@ h1, h2, h3 {
     transform: translateY(-4px);
     background: rgba(255, 255, 255, 0.045);
     box-shadow: 0 14px 32px rgba(0,0,0,0.28);
+}
+
+.card:active {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.055);
+}
+
+.card:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
 }
 
 /* .card .icon styles live at the bottom of the file (UI enhancements section) */
@@ -4000,32 +4056,76 @@ main section > h2::after {
    ===================================================== */
 @media (max-width: 768px) {
     .menu-grid {
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 12px;
         margin-top: 24px;
+        padding: 0 8px;
     }
 
     .card {
-        padding: 16px 8px;
-        gap: 8px;
+        padding: 14px 8px;
+        gap: 6px;
+        min-height: 100px;
+        justify-content: center;
     }
 
     .card .icon {
-        width: 44px;
-        height: 44px;
-        font-size: 1.3rem;
-        border-radius: 12px;
+        width: 40px;
+        height: 40px;
+        font-size: 1.2rem;
+        border-radius: 10px;
     }
 
     .card h3 {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .card p {
+        font-size: 0.65rem;
     }
 }
 
-@media (max-width: 400px) {
+@media (max-width: 480px) {
     .menu-grid {
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 20px;
+        padding: 0 4px;
+    }
+    
+    .card {
+        padding: 12px 6px;
+        gap: 4px;
+        min-height: 90px;
+    }
+    
+    .card .icon {
+        width: 36px;
+        height: 36px;
+        font-size: 1rem;
+    }
+}
+
+@media (max-width: 360px) {
+    .menu-grid {
+        grid-template-columns: repeat(3, 1fr);
         gap: 8px;
+        margin-top: 16px;
+    }
+    
+    .card {
+        padding: 10px 4px;
+        gap: 3px;
+        min-height: 80px;
+    }
+    
+    .card h3 {
+        font-size: 0.65rem;
+    }
+    
+    .card p {
+        display: none;
     }
 }
 

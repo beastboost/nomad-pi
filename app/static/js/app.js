@@ -792,7 +792,12 @@ function toggleMobileMenu() {
         backdrop = document.createElement('div');
         backdrop.id = 'mobile-menu-backdrop';
         backdrop.className = 'mobile-menu-backdrop';
-        backdrop.onclick = toggleMobileMenu;
+        backdrop.onclick = (e) => {
+            // Only close if clicking on the backdrop itself, not bubbled from menu
+            if (e.target === backdrop) {
+                toggleMobileMenu();
+            }
+        };
         document.body.appendChild(backdrop);
     }
 
@@ -800,11 +805,7 @@ function toggleMobileMenu() {
 
     if (isOpen) {
         // Close menu
-        nav.classList.remove('mobile-menu-open');
-        backdrop.classList.remove('show');
-        if (menuBtn) menuBtn.textContent = '☰';
-        document.body.style.overflow = '';
-        document.body.classList.remove('menu-open');
+        closeMobileMenu();
     } else if (nav) {
         // Open menu
         nav.classList.add('mobile-menu-open');
@@ -813,6 +814,30 @@ function toggleMobileMenu() {
         document.body.style.overflow = 'hidden';
         document.body.classList.add('menu-open');
     }
+}
+
+function closeMobileMenu() {
+    const nav = document.getElementById('main-nav');
+    const menuBtn = document.querySelector('.mobile-menu-btn');
+    const backdrop = document.getElementById('mobile-menu-backdrop');
+    
+    if (nav) nav.classList.remove('mobile-menu-open');
+    if (backdrop) backdrop.classList.remove('show');
+    if (menuBtn) menuBtn.textContent = '☰';
+    document.body.style.overflow = '';
+    document.body.classList.remove('menu-open');
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const nav = document.getElementById('main-nav');
+            if (nav && nav.classList.contains('mobile-menu-open')) {
+                closeMobileMenu();
+                e.preventDefault();
+            }
+        }
+    });
 }
 
 function showSection(id) {
@@ -830,17 +855,7 @@ function showSection(id) {
     // Close mobile menu when navigating
     const nav = document.getElementById('main-nav');
     if (nav && nav.classList.contains('mobile-menu-open')) {
-        nav.classList.remove('mobile-menu-open');
-        const menuBtn = document.querySelector('.mobile-menu-btn');
-        if (menuBtn) {
-            menuBtn.textContent = '☰';
-        }
-        const backdrop = document.getElementById('mobile-menu-backdrop');
-        if (backdrop) {
-            backdrop.classList.remove('show');
-        }
-        document.body.style.overflow = '';
-        document.body.classList.remove('menu-open');
+        closeMobileMenu();
     }
 
 
