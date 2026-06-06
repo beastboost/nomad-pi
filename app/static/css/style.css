@@ -5534,3 +5534,99 @@ body.light-theme input[type="range"]:hover {
         justify-content: flex-end;
     }
 }
+
+/* ============================================================
+   Sleep Timer Picker
+   ============================================================ */
+.sleep-timer-picker {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    z-index: 3000;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: var(--glass-border);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 130px;
+    animation: slideUp 0.18s ease-out;
+}
+
+.sleep-timer-picker .sleep-option {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--text-color);
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.sleep-timer-picker .sleep-option:hover,
+.sleep-timer-picker .sleep-option.active {
+    background: rgba(59,130,246,0.25);
+    border-color: rgba(59,130,246,0.45);
+    color: #93c5fd;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Subtitle size style applied via JS */
+
+/* ============================================================
+   Debrid Multi-File Picker
+   ============================================================ */
+.debrid-file-list {
+    overflow-y: auto;
+    max-height: 42vh;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-right: 4px;
+}
+
+.debrid-file-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.03);
+    cursor: pointer;
+    transition: background 0.15s;
+    user-select: none;
+}
+
+.debrid-file-row:hover {
+    background: rgba(255,255,255,0.07);
+}
+
+.debrid-file-row input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-color);
+    cursor: pointer;
+}
+
+.debrid-file-row-name {
+    flex: 1;
+    font-size: 0.875rem;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+.debrid-file-row-size {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
