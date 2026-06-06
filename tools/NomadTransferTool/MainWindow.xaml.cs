@@ -1915,44 +1915,97 @@ namespace NomadTransferTool
                     return;
                 }
 
-                DebridStatus = "Resolving direct download URL...";
-                var unrestrictBody = new StringContent(JsonConvert.SerializeObject(new { link = links[0] }), Encoding.UTF8, "application/json");
-                var unrestrictRes = await PostWithAuthRetry($"{API_BASE}/debrid/unrestrict", unrestrictBody, true);
-                if (unrestrictRes == null) return;
-                var unrestrictJson = await unrestrictRes.Content.ReadAsStringAsync();
-                if (!unrestrictRes.IsSuccessStatusCode)
+                // Unrestrict ALL links — previously only links[0] was processed,
+                // silently dropping every file after the first in multi-file torrents.
+                DebridStatus = $"Resolving {links.Count} download URL(s)...";
+                var unrestricted = new List<(string Url, string FileName)>();
+                for (int i = 0; i < links.Count; i++)
                 {
-                    DebridStatus = $"Unrestrict failed: {unrestrictJson}";
+                    try
+                    {
+                        DebridStatus = $"Resolving link {i + 1} of {links.Count}...";
+                        var unrestrictBody = new StringContent(
+                            JsonConvert.SerializeObject(new { link = links[i] }),
+                            Encoding.UTF8, "application/json");
+                        var unrestrictRes = await PostWithAuthRetry(
+                            $"{API_BASE}/debrid/unrestrict", unrestrictBody, true);
+                        if (unrestrictRes == null) continue;
+                        if (!unrestrictRes.IsSuccessStatusCode) continue;
+
+                        var unrestrictJson = await unrestrictRes.Content.ReadAsStringAsync();
+                        var u = JObject.Parse(unrestrictJson);
+                        var dlUrl = u["url"]?.ToString() ?? "";
+                        var dlName = u["filename"]?.ToString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(dlUrl))
+                            unrestricted.Add((dlUrl, dlName));
+                    }
+                    catch { /* skip individual link failures, continue with rest */ }
+                }
+
+                if (unrestricted.Count == 0)
+                {
+                    DebridStatus = "No direct URLs could be resolved";
                     return;
                 }
 
-                var u = JObject.Parse(unrestrictJson);
-                var dlUrl = u["url"]?.ToString() ?? "";
-                var dlName = u["filename"]?.ToString() ?? "";
-                if (string.IsNullOrWhiteSpace(dlUrl))
+                // For multi-file torrents ask the user before starting N concurrent downloads
+                if (unrestricted.Count > 1)
                 {
-                    DebridStatus = "No direct URL returned";
-                    return;
+                    var fileList = string.Join("\n", unrestricted.Select(
+                        (f, i) => $"  {i + 1}. {(string.IsNullOrWhiteSpace(f.FileName) ? "(unknown)" : f.FileName)}"));
+                    var answer = System.Windows.MessageBox.Show(
+                        $"Found {unrestricted.Count} files in this torrent:\n\n{fileList}\n\nDownload all {unrestricted.Count} files to the Transfer Hub?",
+                        "Multiple Files Found",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+                    if (answer != MessageBoxResult.Yes)
+                    {
+                        DebridStatus = "Download cancelled";
+                        return;
+                    }
                 }
 
                 var tempRoot = Path.Combine(Path.GetTempPath(), "NomadDebrid");
                 Directory.CreateDirectory(tempRoot);
-                var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(dlName) ? (SelectedDebridTorrent.Name + ".mkv") : dlName);
-                var destPath = Path.Combine(tempRoot, fileName);
 
-                var activeDl = new ActiveDownload { FileName = fileName, Progress = "Starting..." };
-                Dispatcher.Invoke(() => DebridActiveDownloads.Add(activeDl));
+                // Download all files concurrently, each with its own progress tracker
+                var downloadedPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
+                var downloadTasks = unrestricted.Select(async file =>
+                {
+                    var fileName = SanitizeFileName(
+                        string.IsNullOrWhiteSpace(file.FileName)
+                            ? (SelectedDebridTorrent.Name + ".mkv")
+                            : file.FileName);
+                    var destPath = Path.Combine(tempRoot, fileName);
 
-                DebridStatus = "Downloading in background...";
-                await DownloadFileWithProgress(dlUrl, destPath, p => Dispatcher.Invoke(() => activeDl.Progress = p), activeDl.CancellationTokenSource.Token);
-                
-                Dispatcher.Invoke(() => DebridActiveDownloads.Remove(activeDl));
-                DebridStatus = $"Downloaded: {fileName}. Added to Transfer Hub.";
+                    var activeDl = new ActiveDownload { FileName = fileName, Progress = "Starting..." };
+                    Dispatcher.Invoke(() => DebridActiveDownloads.Add(activeDl));
+                    try
+                    {
+                        await DownloadFileWithProgress(
+                            file.Url, destPath,
+                            p => Dispatcher.Invoke(() => activeDl.Progress = p),
+                            activeDl.CancellationTokenSource.Token);
+                        downloadedPaths.Add(destPath);
+                    }
+                    finally
+                    {
+                        Dispatcher.Invoke(() => DebridActiveDownloads.Remove(activeDl));
+                    }
+                }).ToList();
+
+                await Task.WhenAll(downloadTasks);
+
+                var downloadedArr = downloadedPaths.ToArray();
+                DebridStatus = $"Downloaded {downloadedArr.Length} file(s). Added to Transfer Hub.";
 
                 Dispatcher.Invoke(() =>
                 {
-                    OnFilesDropped(new[] { destPath });
-                    TabTransfer.IsChecked = true; // Switch to Transfer Hub so user can see it
+                    if (downloadedArr.Length > 0)
+                    {
+                        OnFilesDropped(downloadedArr);
+                        TabTransfer.IsChecked = true;
+                    }
                 });
             }
             catch (Exception ex)
