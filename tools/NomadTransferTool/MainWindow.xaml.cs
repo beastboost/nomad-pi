@@ -1915,45 +1915,148 @@ namespace NomadTransferTool
                     return;
                 }
 
-                DebridStatus = "Resolving direct download URL...";
-                var unrestrictBody = new StringContent(JsonConvert.SerializeObject(new { link = links[0] }), Encoding.UTF8, "application/json");
-                var unrestrictRes = await PostWithAuthRetry($"{API_BASE}/debrid/unrestrict", unrestrictBody, true);
-                if (unrestrictRes == null) return;
-                var unrestrictJson = await unrestrictRes.Content.ReadAsStringAsync();
-                if (!unrestrictRes.IsSuccessStatusCode)
+                // Unrestrict ALL links — previously only links[0] was processed,
+                // silently dropping every file after the first in multi-file torrents.
+                DebridStatus = $"Resolving {links.Count} download URL(s)...";
+                var unrestricted = new List<(string Url, string FileName)>();
+                for (int i = 0; i < links.Count; i++)
                 {
-                    DebridStatus = $"Unrestrict failed: {unrestrictJson}";
+                    try
+                    {
+                        DebridStatus = $"Resolving link {i + 1} of {links.Count}...";
+                        var unrestrictBody = new StringContent(
+                            JsonConvert.SerializeObject(new { link = links[i] }),
+                            Encoding.UTF8, "application/json");
+                        var unrestrictRes = await PostWithAuthRetry(
+                            $"{API_BASE}/debrid/unrestrict", unrestrictBody, true);
+                        if (unrestrictRes == null) continue;
+                        if (!unrestrictRes.IsSuccessStatusCode) continue;
+
+                        var unrestrictJson = await unrestrictRes.Content.ReadAsStringAsync();
+                        var u = JObject.Parse(unrestrictJson);
+                        var dlUrl = u["url"]?.ToString() ?? "";
+                        var dlName = u["filename"]?.ToString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(dlUrl))
+                            unrestricted.Add((dlUrl, dlName));
+                    }
+                    catch { /* skip individual link failures, continue with rest */ }
+                }
+
+                if (unrestricted.Count == 0)
+                {
+                    DebridStatus = "No direct URLs could be resolved";
                     return;
                 }
 
-                var u = JObject.Parse(unrestrictJson);
-                var dlUrl = u["url"]?.ToString() ?? "";
-                var dlName = u["filename"]?.ToString() ?? "";
-                if (string.IsNullOrWhiteSpace(dlUrl))
+                // For multi-file torrents ask the user before starting N concurrent downloads
+                if (unrestricted.Count > 1)
                 {
-                    DebridStatus = "No direct URL returned";
-                    return;
+                    var fileList = string.Join("\n", unrestricted.Select(
+                        (f, i) => $"  {i + 1}. {(string.IsNullOrWhiteSpace(f.FileName) ? "(unknown)" : f.FileName)}"));
+                    var answer = System.Windows.MessageBox.Show(
+                        $"Found {unrestricted.Count} files in this torrent:\n\n{fileList}\n\nDownload all {unrestricted.Count} files to the Transfer Hub?",
+                        "Multiple Files Found",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+                    if (answer != MessageBoxResult.Yes)
+                    {
+                        DebridStatus = "Download cancelled";
+                        return;
+                    }
                 }
 
                 var tempRoot = Path.Combine(Path.GetTempPath(), "NomadDebrid");
                 Directory.CreateDirectory(tempRoot);
-                var fileName = SanitizeFileName(string.IsNullOrWhiteSpace(dlName) ? (SelectedDebridTorrent.Name + ".mkv") : dlName);
-                var destPath = Path.Combine(tempRoot, fileName);
 
-                var activeDl = new ActiveDownload { FileName = fileName, Progress = "Starting..." };
-                Dispatcher.Invoke(() => DebridActiveDownloads.Add(activeDl));
-
-                DebridStatus = "Downloading in background...";
-                await DownloadFileWithProgress(dlUrl, destPath, p => Dispatcher.Invoke(() => activeDl.Progress = p), activeDl.CancellationTokenSource.Token);
-                
-                Dispatcher.Invoke(() => DebridActiveDownloads.Remove(activeDl));
-                DebridStatus = $"Downloaded: {fileName}. Added to Transfer Hub.";
+                // Add queue items IMMEDIATELY so user sees them right away,
+                // then download concurrently and update each item's status as it progresses.
+                // Bypasses OnFilesDropped to avoid IsTransferring guard and ReviewQueue.Clear().
+                var downloadWork = new List<(ActiveDownload DlTracker, MediaItem QueueItem, string DestPath, string Url)>();
+                string? targetDrive = null;
 
                 Dispatcher.Invoke(() =>
                 {
-                    OnFilesDropped(new[] { destPath });
-                    TabTransfer.IsChecked = true; // Switch to Transfer Hub so user can see it
+                    TabTransfer.IsChecked = true;
+                    targetDrive = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+
+                    foreach (var file in unrestricted)
+                    {
+                        var fileName = SanitizeFileName(
+                            string.IsNullOrWhiteSpace(file.FileName)
+                                ? (SelectedDebridTorrent?.Name ?? "download") + ".mkv"
+                                : file.FileName);
+                        var destPath = Path.Combine(tempRoot, fileName);
+
+                        var queueItem = new MediaItem
+                        {
+                            Title = Path.GetFileNameWithoutExtension(fileName),
+                            StatusMessage = "Downloading...",
+                            Category = Categories.Movies,
+                            SelectedPreset = SelectedGlobalPreset,
+                            IsDownloading = true,
+                        };
+                        queueItem.SourcePath = destPath;
+                        ReviewQueue.Add(queueItem);
+
+                        var activeDl = new ActiveDownload { FileName = fileName, Progress = "0%" };
+                        DebridActiveDownloads.Add(activeDl);
+
+                        downloadWork.Add((activeDl, queueItem, destPath, file.Url));
+                    }
                 });
+
+                DebridStatus = $"Downloading {downloadWork.Count} file(s)...";
+
+                var downloadTasks = downloadWork.Select(async work =>
+                {
+                    try
+                    {
+                        await DownloadFileWithProgress(
+                            work.Url, work.DestPath,
+                            p => Dispatcher.Invoke(() =>
+                            {
+                                work.DlTracker.Progress = p;
+                                work.QueueItem.StatusMessage = p;
+                            }),
+                            work.DlTracker.CancellationTokenSource.Token);
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            work.QueueItem.IsDownloading = false;
+                            work.QueueItem.StatusMessage = "";
+                            try { work.QueueItem.FileSize = new FileInfo(work.DestPath).Length; } catch { }
+                            if (IsHandbrakeAvailable && work.QueueItem.IsVideo)
+                                _ = ScanTracks(work.QueueItem);
+                            if (targetDrive != null)
+                                UpdateItemDuplicateStatus(work.QueueItem, targetDrive);
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            ReviewQueue.Remove(work.QueueItem);
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            work.QueueItem.IsDownloading = false;
+                            work.QueueItem.StatusMessage = $"Failed: {ex.Message}";
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
+                    }
+                }).ToList();
+
+                await Task.WhenAll(downloadTasks);
+
+                var succeeded = downloadWork.Count(w =>
+                    string.IsNullOrEmpty(w.QueueItem.StatusMessage) ||
+                    !w.QueueItem.StatusMessage.StartsWith("Failed"));
+                DebridStatus = $"Done — {succeeded} of {downloadWork.Count} file(s) ready in Transfer Hub.";
             }
             catch (Exception ex)
             {
@@ -2440,8 +2543,21 @@ namespace NomadTransferTool
         private async void StartProcessing_Click(object sender, RoutedEventArgs e)
         {
             if (ReviewQueue.Count == 0 || IsTransferring) return;
-            
-            var items = ReviewQueue.ToList();
+
+            // Exclude items still downloading via debrid
+            var downloading = ReviewQueue.Where(i => i.IsDownloading).ToList();
+            if (downloading.Count > 0)
+            {
+                var answer = System.Windows.MessageBox.Show(
+                    $"{downloading.Count} item(s) are still downloading and will be skipped.\n\nStart processing the remaining items now?",
+                    "Items Still Downloading",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (answer != MessageBoxResult.Yes) return;
+            }
+
+            var items = ReviewQueue.Where(i => !i.IsDownloading && !i.StatusMessage.StartsWith("Failed")).ToList();
+            if (items.Count == 0) return;
             ReviewQueue.Clear();
             
             _processingCts = new System.Threading.CancellationTokenSource();
@@ -3932,6 +4048,7 @@ namespace NomadTransferTool
         private string _season = "";
         private string _episode = "";
         private bool _isProcessing;
+        private bool _isDownloading;
         private bool _isDuplicate;
         private double _progress;
         private string _statusMessage = "";
@@ -3979,6 +4096,7 @@ namespace NomadTransferTool
         public string Season { get => _season; set { _season = value; OnPropertyChanged(); } }
         public string Episode { get => _episode; set { _episode = value; OnPropertyChanged(); } }
         public bool IsProcessing { get => _isProcessing; set { _isProcessing = value; OnPropertyChanged(); } }
+        public bool IsDownloading { get => _isDownloading; set { _isDownloading = value; OnPropertyChanged(); } }
         public bool IsDuplicate { get => _isDuplicate; set { _isDuplicate = value; OnPropertyChanged(); } }
         public double Progress { get => _progress; set { _progress = value; OnPropertyChanged(); } }
         public string StatusMessage { get => _statusMessage; set { _statusMessage = value; OnPropertyChanged(); } }
