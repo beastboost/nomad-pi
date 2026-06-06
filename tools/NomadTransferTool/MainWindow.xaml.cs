@@ -1968,45 +1968,95 @@ namespace NomadTransferTool
                 var tempRoot = Path.Combine(Path.GetTempPath(), "NomadDebrid");
                 Directory.CreateDirectory(tempRoot);
 
-                // Download all files concurrently, each with its own progress tracker
-                var downloadedPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
-                var downloadTasks = unrestricted.Select(async file =>
-                {
-                    var fileName = SanitizeFileName(
-                        string.IsNullOrWhiteSpace(file.FileName)
-                            ? (SelectedDebridTorrent.Name + ".mkv")
-                            : file.FileName);
-                    var destPath = Path.Combine(tempRoot, fileName);
+                // Add queue items IMMEDIATELY so user sees them right away,
+                // then download concurrently and update each item's status as it progresses.
+                // Bypasses OnFilesDropped to avoid IsTransferring guard and ReviewQueue.Clear().
+                var downloadWork = new List<(ActiveDownload DlTracker, MediaItem QueueItem, string DestPath, string Url)>();
+                string? targetDrive = null;
 
-                    var activeDl = new ActiveDownload { FileName = fileName, Progress = "Starting..." };
-                    Dispatcher.Invoke(() => DebridActiveDownloads.Add(activeDl));
+                Dispatcher.Invoke(() =>
+                {
+                    TabTransfer.IsChecked = true;
+                    targetDrive = (DriveList.SelectedItem as DriveInfoModel)?.Name;
+
+                    foreach (var file in unrestricted)
+                    {
+                        var fileName = SanitizeFileName(
+                            string.IsNullOrWhiteSpace(file.FileName)
+                                ? (SelectedDebridTorrent?.Name ?? "download") + ".mkv"
+                                : file.FileName);
+                        var destPath = Path.Combine(tempRoot, fileName);
+
+                        var queueItem = new MediaItem
+                        {
+                            Title = Path.GetFileNameWithoutExtension(fileName),
+                            StatusMessage = "Downloading...",
+                            Category = Categories.Movies,
+                            SelectedPreset = SelectedGlobalPreset,
+                            IsDownloading = true,
+                        };
+                        queueItem.SourcePath = destPath;
+                        ReviewQueue.Add(queueItem);
+
+                        var activeDl = new ActiveDownload { FileName = fileName, Progress = "0%" };
+                        DebridActiveDownloads.Add(activeDl);
+
+                        downloadWork.Add((activeDl, queueItem, destPath, file.Url));
+                    }
+                });
+
+                DebridStatus = $"Downloading {downloadWork.Count} file(s)...";
+
+                var downloadTasks = downloadWork.Select(async work =>
+                {
                     try
                     {
                         await DownloadFileWithProgress(
-                            file.Url, destPath,
-                            p => Dispatcher.Invoke(() => activeDl.Progress = p),
-                            activeDl.CancellationTokenSource.Token);
-                        downloadedPaths.Add(destPath);
+                            work.Url, work.DestPath,
+                            p => Dispatcher.Invoke(() =>
+                            {
+                                work.DlTracker.Progress = p;
+                                work.QueueItem.StatusMessage = p;
+                            }),
+                            work.DlTracker.CancellationTokenSource.Token);
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            work.QueueItem.IsDownloading = false;
+                            work.QueueItem.StatusMessage = "";
+                            try { work.QueueItem.FileSize = new FileInfo(work.DestPath).Length; } catch { }
+                            if (IsHandbrakeAvailable && work.QueueItem.IsVideo)
+                                _ = ScanTracks(work.QueueItem);
+                            if (targetDrive != null)
+                                UpdateItemDuplicateStatus(work.QueueItem, targetDrive);
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
                     }
-                    finally
+                    catch (OperationCanceledException)
                     {
-                        Dispatcher.Invoke(() => DebridActiveDownloads.Remove(activeDl));
+                        Dispatcher.Invoke(() =>
+                        {
+                            ReviewQueue.Remove(work.QueueItem);
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            work.QueueItem.IsDownloading = false;
+                            work.QueueItem.StatusMessage = $"Failed: {ex.Message}";
+                            DebridActiveDownloads.Remove(work.DlTracker);
+                        });
                     }
                 }).ToList();
 
                 await Task.WhenAll(downloadTasks);
 
-                var downloadedArr = downloadedPaths.ToArray();
-                DebridStatus = $"Downloaded {downloadedArr.Length} file(s). Added to Transfer Hub.";
-
-                Dispatcher.Invoke(() =>
-                {
-                    if (downloadedArr.Length > 0)
-                    {
-                        OnFilesDropped(downloadedArr);
-                        TabTransfer.IsChecked = true;
-                    }
-                });
+                var succeeded = downloadWork.Count(w =>
+                    string.IsNullOrEmpty(w.QueueItem.StatusMessage) ||
+                    !w.QueueItem.StatusMessage.StartsWith("Failed"));
+                DebridStatus = $"Done — {succeeded} of {downloadWork.Count} file(s) ready in Transfer Hub.";
             }
             catch (Exception ex)
             {
@@ -2493,8 +2543,21 @@ namespace NomadTransferTool
         private async void StartProcessing_Click(object sender, RoutedEventArgs e)
         {
             if (ReviewQueue.Count == 0 || IsTransferring) return;
-            
-            var items = ReviewQueue.ToList();
+
+            // Exclude items still downloading via debrid
+            var downloading = ReviewQueue.Where(i => i.IsDownloading).ToList();
+            if (downloading.Count > 0)
+            {
+                var answer = System.Windows.MessageBox.Show(
+                    $"{downloading.Count} item(s) are still downloading and will be skipped.\n\nStart processing the remaining items now?",
+                    "Items Still Downloading",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (answer != MessageBoxResult.Yes) return;
+            }
+
+            var items = ReviewQueue.Where(i => !i.IsDownloading && !i.StatusMessage.StartsWith("Failed")).ToList();
+            if (items.Count == 0) return;
             ReviewQueue.Clear();
             
             _processingCts = new System.Threading.CancellationTokenSource();
@@ -3985,6 +4048,7 @@ namespace NomadTransferTool
         private string _season = "";
         private string _episode = "";
         private bool _isProcessing;
+        private bool _isDownloading;
         private bool _isDuplicate;
         private double _progress;
         private string _statusMessage = "";
@@ -4032,6 +4096,7 @@ namespace NomadTransferTool
         public string Season { get => _season; set { _season = value; OnPropertyChanged(); } }
         public string Episode { get => _episode; set { _episode = value; OnPropertyChanged(); } }
         public bool IsProcessing { get => _isProcessing; set { _isProcessing = value; OnPropertyChanged(); } }
+        public bool IsDownloading { get => _isDownloading; set { _isDownloading = value; OnPropertyChanged(); } }
         public bool IsDuplicate { get => _isDuplicate; set { _isDuplicate = value; OnPropertyChanged(); } }
         public double Progress { get => _progress; set { _progress = value; OnPropertyChanged(); } }
         public string StatusMessage { get => _statusMessage; set { _statusMessage = value; OnPropertyChanged(); } }
