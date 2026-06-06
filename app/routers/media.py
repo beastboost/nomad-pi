@@ -1695,7 +1695,7 @@ def find_subtitles(media_fs_path: str) -> List[Dict[str, str]]:
             ext = os.path.splitext(item)[1].lower()
             if ext in sub_exts:
                 # Check if it starts with the same name or is just a sub file in the same dir
-                if item.lower().startswith(base_name.lower()) or len(os.listdir(dir_path)) < 10:
+                if item.lower().startswith(base_name.lower()):
                     label = item
                     # Try to extract language from name (e.g. movie.en.srt)
                     lang_match = re.search(r"\.([a-z]{2,3})\.(srt|vtt|ass|ssa)$", item, re.I)
@@ -2152,11 +2152,100 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
         '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
         '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
         '.mov': 'video/quicktime', '.ts': 'video/mp2t',
+        '.mts': 'video/mp2t', '.m2ts': 'video/mp2t',
+        '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv',
+        '.3gp': 'video/3gpp', '.3g2': 'video/3gpp2',
+        '.mpg': 'video/mpeg', '.mpeg': 'video/mpeg', '.mpe': 'video/mpeg',
         '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.ogg': 'audio/ogg',
         '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+        '.vtt': 'text/vtt', '.srt': 'text/plain',
     }
     media_type = mime_map.get(ext)
     return FileResponse(fs_path, media_type=media_type)
+
+
+@router.get("/subtitle")
+async def serve_subtitle(path: str = Query(...), token: str = Query(None), user_id: int = Depends(get_current_user_id)):
+    """Serve a subtitle file as WebVTT, converting from SRT/ASS/SSA if needed.
+    Browsers require WebVTT for <track> elements; SRT is not natively supported."""
+    try:
+        fs_path = safe_fs_path_from_web_path(path)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not os.path.isfile(fs_path):
+        raise HTTPException(status_code=404, detail="Subtitle not found")
+
+    ext = os.path.splitext(fs_path)[1].lower()
+
+    if ext == '.vtt':
+        return FileResponse(fs_path, media_type='text/vtt')
+
+    try:
+        with open(fs_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not read subtitle file")
+
+    if ext == '.srt':
+        # SRT → WebVTT: add header, convert comma decimal separator to period in timestamps
+        vtt = 'WEBVTT\n\n' + re.sub(r'(\d{2}:\d{2}:\d{2}),(\d{3})', r'\1.\2', content)
+    elif ext in ('.ass', '.ssa'):
+        vtt = _ass_to_vtt(content)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported subtitle format")
+
+    from fastapi.responses import Response as FastAPIResponse
+    return FastAPIResponse(
+        content=vtt,
+        media_type='text/vtt',
+        headers={'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': '*'}
+    )
+
+
+def _ass_to_vtt(content: str) -> str:
+    """Convert ASS/SSA subtitle format to WebVTT."""
+    lines = content.splitlines()
+    events = []
+    in_events = False
+    format_cols: list = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == '[Events]':
+            in_events = True
+            continue
+        if stripped.startswith('[') and stripped != '[Events]':
+            in_events = False
+        if in_events and stripped.startswith('Format:'):
+            format_cols = [c.strip() for c in stripped[7:].split(',')]
+            continue
+        if in_events and stripped.startswith('Dialogue:') and format_cols:
+            parts = stripped[9:].split(',', len(format_cols) - 1)
+            if len(parts) >= len(format_cols):
+                row = dict(zip(format_cols, parts))
+                start = _ass_time_to_vtt(row.get('Start', '0:00:00.00'))
+                end = _ass_time_to_vtt(row.get('End', '0:00:00.00'))
+                text = re.sub(r'\{[^}]*\}', '', row.get('Text', ''))
+                text = text.replace('\\N', '\n').replace('\\n', '\n').replace('\\h', ' ')
+                if text.strip():
+                    events.append((start, end, text.strip()))
+
+    parts = ['WEBVTT\n']
+    for i, (start, end, text) in enumerate(events, 1):
+        parts.append(f"\n{i}\n{start} --> {end}\n{text}\n")
+    return '\n'.join(parts)
+
+
+def _ass_time_to_vtt(t: str) -> str:
+    """Convert ASS time H:MM:SS.cc to VTT time HH:MM:SS.mmm."""
+    try:
+        h, m, s_cs = t.strip().split(':')
+        s, cs = s_cs.split('.')
+        ms = int(cs) * 10
+        return f"{int(h):02d}:{int(m):02d}:{int(s):02d}.{ms:03d}"
+    except Exception:
+        return '00:00:00.000'
 
 
 def _ffprobe_codecs(fs_path: str) -> tuple[str, str, float]:

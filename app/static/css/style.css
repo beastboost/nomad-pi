@@ -167,7 +167,7 @@ header {
 
 nav#main-nav {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.35rem;
     align-items: center;
     flex-wrap: nowrap;
     justify-content: flex-end;
@@ -196,15 +196,16 @@ nav button {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid transparent;
     color: var(--text-muted);
-    padding: 0.55rem 0.85rem;
+    padding: 0.5rem 0.9rem;
     border-radius: 999px;
     cursor: pointer;
     font-weight: 500;
-    font-size: 0.92rem;
+    font-size: 0.875rem;
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.5rem;
     transition: var(--transition-base);
+    white-space: nowrap;
 }
 
 nav button:hover {
@@ -2036,9 +2037,10 @@ h1, h2, h3 {
         background: transparent;
         border: none;
         color: var(--text-muted);
-        gap: 4px;
-        padding: 8px 0;
+        gap: 5px;
+        padding: 8px 10px;
         flex: 1;
+        min-width: 0;
         cursor: pointer;
         transition: all 0.2s;
     }
@@ -2048,12 +2050,18 @@ h1, h2, h3 {
     }
 
     .mobile-bottom-nav .nav-icon {
-        font-size: 1.5rem;
+        font-size: 1.35rem;
+        line-height: 1;
     }
 
     .mobile-bottom-nav .nav-label {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         font-weight: 500;
+        letter-spacing: 0.01em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
     }
 
 
@@ -5377,4 +5385,152 @@ body.light-theme input[type="range"]:hover {
     .home-card { flex: 0 0 110px; }
     .home-card-poster { width: 110px; height: 165px; }
     .global-search-overlay { padding-top: 48px; }
+}
+
+/* ============================================================
+   Debrid Manager — scoped improvements
+   ============================================================ */
+
+#debrid .section-header {
+    margin-bottom: 1rem;
+}
+
+/* Provider tab row */
+.debrid-provider-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Search bar row */
+.debrid-search-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.debrid-search-row input[type="text"] {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.debrid-search-row select {
+    flex: 0 0 auto;
+    min-width: 110px;
+}
+
+/* Torrent card layout */
+.debrid-torrent-card {
+    padding: 0.875rem 1rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.debrid-torrent-info {
+    flex: 1;
+    min-width: 180px;
+}
+
+.debrid-torrent-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    word-break: break-word;
+}
+
+.debrid-torrent-meta {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.debrid-torrent-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    align-items: flex-start;
+}
+
+/* Status / quality badges */
+.badge-cached {
+    background: #16a34a;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+    letter-spacing: 0.02em;
+}
+
+.badge-risk {
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+}
+
+.badge-safer {
+    background: #15803d;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+}
+
+.badge-premium {
+    background: var(--accent-color);
+    color: #000;
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 700;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+}
+
+/* Download queue */
+.debrid-download-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Mobile overrides */
+@media (max-width: 600px) {
+    .debrid-search-row select {
+        min-width: 0;
+        flex: 1 1 calc(50% - 0.25rem);
+    }
+
+    .debrid-torrent-card {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .debrid-torrent-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
 }

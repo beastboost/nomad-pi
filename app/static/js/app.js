@@ -793,10 +793,7 @@ function toggleMobileMenu() {
         backdrop.id = 'mobile-menu-backdrop';
         backdrop.className = 'mobile-menu-backdrop';
         backdrop.onclick = (e) => {
-            // Only close if clicking on the backdrop itself, not bubbled from menu
-            if (e.target === backdrop) {
-                toggleMobileMenu();
-            }
+            if (e.target === backdrop) toggleMobileMenu();
         };
         document.body.appendChild(backdrop);
     }
@@ -804,10 +801,17 @@ function toggleMobileMenu() {
     const isOpen = nav && nav.classList.contains('mobile-menu-open');
 
     if (isOpen) {
-        // Close menu
         closeMobileMenu();
     } else if (nav) {
-        // Open menu
+        // Move nav to <body> before showing — the sticky header has backdrop-filter which
+        // creates a new stacking context on Android Chrome, causing position:fixed children
+        // to be offset relative to the header's document position instead of the viewport.
+        // Re-parenting to body fixes the menu being invisible when the page is scrolled down.
+        if (nav.parentElement !== document.body) {
+            nav._menuReturnParent = nav.parentElement;
+            nav._menuReturnSibling = nav.nextSibling;
+            document.body.appendChild(nav);
+        }
         nav.classList.add('mobile-menu-open');
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
@@ -820,8 +824,20 @@ function closeMobileMenu() {
     const nav = document.getElementById('main-nav');
     const menuBtn = document.querySelector('.mobile-menu-btn');
     const backdrop = document.getElementById('mobile-menu-backdrop');
-    
-    if (nav) nav.classList.remove('mobile-menu-open');
+
+    if (nav) {
+        nav.classList.remove('mobile-menu-open');
+        // Restore nav to its original position inside the header
+        if (nav._menuReturnParent) {
+            if (nav._menuReturnSibling) {
+                nav._menuReturnParent.insertBefore(nav, nav._menuReturnSibling);
+            } else {
+                nav._menuReturnParent.appendChild(nav);
+            }
+            nav._menuReturnParent = null;
+            nav._menuReturnSibling = null;
+        }
+    }
     if (backdrop) backdrop.classList.remove('show');
     if (menuBtn) menuBtn.textContent = '☰';
     document.body.style.overflow = '';
@@ -2445,6 +2461,15 @@ function getVideoMimeType(pathOrName) {
         mkv: 'video/x-matroska',
         avi: 'video/x-msvideo',
         ts: 'video/mp2t',
+        mts: 'video/mp2t',
+        m2ts: 'video/mp2t',
+        wmv: 'video/x-ms-wmv',
+        flv: 'video/x-flv',
+        '3gp': 'video/3gpp',
+        '3g2': 'video/3gpp2',
+        mpg: 'video/mpeg',
+        mpeg: 'video/mpeg',
+        mpe: 'video/mpeg',
     };
     return mimeTypes[ext] || 'video/mp4';
 }
@@ -5854,8 +5879,10 @@ async function loadSubtitlesForVideo(videoElement, videoPath) {
         if (subs.length === 0) return;
 
         const token = getSessionToken();
+        // Use /media/subtitle endpoint which converts SRT/ASS to WebVTT on the fly.
+        // <track> elements require WebVTT; serving raw SRT via /stream silently fails.
         const makeSrc = (p) => {
-            let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(p)}`;
+            let subUrl = `${API_BASE}/media/subtitle?path=${encodeURIComponent(p)}`;
             if (token) subUrl += '&token=' + token;
             return subUrl;
         };
@@ -7274,36 +7301,34 @@ async function renderTorrentResults(results, imdbId) {
         const isRD = _debridProvider === 'rd';
         const addTitle = _debridProvider === 'ad' ? 'Send to AllDebrid' : (_debridProvider === 'tb' ? 'Send to TorBox' : 'Send to Real-Debrid');
         const cachedBadge = isCached
-            ? `<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">${providerBadge} CACHED</span>`
+            ? `<span class="badge-cached">${providerBadge} CACHED</span>`
             : '';
         const riskBadge = isRD && t.rd_status === 'likely_blocked'
-            ? '<span style="background:#d9534f;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD RISK</span>'
+            ? '<span class="badge-risk">RD RISK</span>'
             : '';
         const saferBadge = isRD && t.rd_status === 'safer'
-            ? '<span style="background:#2e8b57;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD SAFER</span>'
+            ? '<span class="badge-safer">SAFER</span>'
             : '';
         const warningLine = isRD && t.rd_warning
-            ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-secondary)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
+            ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-muted)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
             : '';
         const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
         return `
-            <div class="glass-card" style="padding:1rem;margin-bottom:.5rem">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
-                    <div style="flex:1;min-width:200px">
-                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
-                        <div style="font-size:.85rem;color:var(--text-secondary)">
-                            <span style="color:${qColor};font-weight:600">${t.quality}</span>
-                            ${t.size ? ` &middot; ${t.size}` : ''}
-                            ${t.source ? ` &middot; ${t.source}` : ''}
-                            ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}
-                        </div>
-                        ${warningLine}
+            <div class="glass-card debrid-torrent-card">
+                <div class="debrid-torrent-info">
+                    <div class="debrid-torrent-name">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
+                    <div class="debrid-torrent-meta">
+                        <span style="color:${qColor};font-weight:600">${t.quality || '?'}</span>
+                        ${t.size ? `<span>&middot; ${t.size}</span>` : ''}
+                        ${t.source ? `<span>&middot; ${t.source}</span>` : ''}
+                        ${t.seeders != null ? `<span>&middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}</span>` : ''}
                     </div>
-                    <div style="display:flex;gap:.5rem;flex-shrink:0">
-                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
-                            <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
-                        </button>
-                    </div>
+                    ${warningLine}
+                </div>
+                <div class="debrid-torrent-actions">
+                    <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
+                        <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
+                    </button>
                 </div>
             </div>
         `;
