@@ -1,4 +1,4 @@
-console.log("App v1.3.3 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
+console.log("App v1.3.4 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -2332,8 +2332,14 @@ async function requestWakeLock() {
 
 function closeViewer() {
     releaseWakeLock();
-    // Cancel sleep timer on close
-    setSleepTimer(0);
+    // Cancel sleep timer silently on close (only show toast if timer was actually running)
+    if (_sleepTimerTimeout) {
+        setSleepTimer(0);
+    } else {
+        if (_sleepTimerInterval) clearInterval(_sleepTimerInterval);
+        _sleepTimerInterval = null;
+        _sleepTimerEndsAt = null;
+    }
     document.getElementById('sleep-timer-picker')?.remove();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
@@ -2706,8 +2712,6 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         if (activeDashboardSessionId) {
             updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'stopped', video.currentTime, video.duration, activeVideoPoster);
         }
-        // Trigger next-episode auto-play if available
-        handleVideoEnded(path, title);
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
     video.addEventListener('error', () => {
