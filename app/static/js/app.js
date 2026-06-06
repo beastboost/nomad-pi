@@ -43,7 +43,7 @@ async function checkPostUpdate() {
 
             const list = document.getElementById('changelog-list');
             if (list && logData.changelog) {
-                list.innerHTML = logData.changelog.map(item => `<li>${item}</li>`).join('');
+                list.innerHTML = logData.changelog.map(item => `<li>${escapeHtml(String(item))}</li>`).join('');
             }
 
             // Show modal
@@ -793,10 +793,7 @@ function toggleMobileMenu() {
         backdrop.id = 'mobile-menu-backdrop';
         backdrop.className = 'mobile-menu-backdrop';
         backdrop.onclick = (e) => {
-            // Only close if clicking on the backdrop itself, not bubbled from menu
-            if (e.target === backdrop) {
-                toggleMobileMenu();
-            }
+            if (e.target === backdrop) toggleMobileMenu();
         };
         document.body.appendChild(backdrop);
     }
@@ -804,10 +801,17 @@ function toggleMobileMenu() {
     const isOpen = nav && nav.classList.contains('mobile-menu-open');
 
     if (isOpen) {
-        // Close menu
         closeMobileMenu();
     } else if (nav) {
-        // Open menu
+        // Move nav to <body> before showing — the sticky header has backdrop-filter which
+        // creates a new stacking context on Android Chrome, causing position:fixed children
+        // to be offset relative to the header's document position instead of the viewport.
+        // Re-parenting to body fixes the menu being invisible when the page is scrolled down.
+        if (nav.parentElement !== document.body) {
+            nav._menuReturnParent = nav.parentElement;
+            nav._menuReturnSibling = nav.nextSibling;
+            document.body.appendChild(nav);
+        }
         nav.classList.add('mobile-menu-open');
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
@@ -820,8 +824,20 @@ function closeMobileMenu() {
     const nav = document.getElementById('main-nav');
     const menuBtn = document.querySelector('.mobile-menu-btn');
     const backdrop = document.getElementById('mobile-menu-backdrop');
-    
-    if (nav) nav.classList.remove('mobile-menu-open');
+
+    if (nav) {
+        nav.classList.remove('mobile-menu-open');
+        // Restore nav to its original position inside the header
+        if (nav._menuReturnParent) {
+            if (nav._menuReturnSibling) {
+                nav._menuReturnParent.insertBefore(nav, nav._menuReturnSibling);
+            } else {
+                nav._menuReturnParent.appendChild(nav);
+            }
+            nav._menuReturnParent = null;
+            nav._menuReturnSibling = null;
+        }
+    }
     if (backdrop) backdrop.classList.remove('show');
     if (menuBtn) menuBtn.textContent = '☰';
     document.body.style.overflow = '';
@@ -899,6 +915,13 @@ function showSection(id) {
     if (driveScanInterval) {
         clearInterval(driveScanInterval);
         driveScanInterval = null;
+    }
+
+    // Stats polling only needed on the home section
+    if (id === 'home') {
+        startStatsAutoRefresh();
+    } else {
+        stopStatsAutoRefresh();
     }
 
     if (!opts.skipAutoLoad) {
@@ -2309,6 +2332,9 @@ async function requestWakeLock() {
 
 function closeViewer() {
     releaseWakeLock();
+    // Cancel sleep timer on close
+    setSleepTimer(0);
+    document.getElementById('sleep-timer-picker')?.remove();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
         activeVideoProgressInterval = null;
@@ -2445,6 +2471,15 @@ function getVideoMimeType(pathOrName) {
         mkv: 'video/x-matroska',
         avi: 'video/x-msvideo',
         ts: 'video/mp2t',
+        mts: 'video/mp2t',
+        m2ts: 'video/mp2t',
+        wmv: 'video/x-ms-wmv',
+        flv: 'video/x-flv',
+        '3gp': 'video/3gpp',
+        '3g2': 'video/3gpp2',
+        mpg: 'video/mpeg',
+        mpeg: 'video/mpeg',
+        mpe: 'video/mpeg',
     };
     return mimeTypes[ext] || 'video/mp4';
 }
@@ -2581,6 +2616,12 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
                 <button class="player-action-btn" id="pip-btn" title="Picture-in-Picture" onclick="togglePiP()">
                     <span>⧉</span><span class="btn-text">PiP</span>
                 </button>
+                <button class="player-action-btn" title="Skip back 85s (skip intro)" onclick="skipVideo(-85)">
+                    <i class="fas fa-fast-backward"></i><span class="btn-text">−85s</span>
+                </button>
+                <button class="player-action-btn" title="Skip forward 85s (skip credits)" onclick="skipVideo(85)">
+                    <i class="fas fa-fast-forward"></i><span class="btn-text">+85s</span>
+                </button>
                 <select class="player-action-btn speed-select" id="speed-select" title="Playback speed" onchange="setPlaybackSpeed(this.value)">
                     <option value="0.5">0.5×</option>
                     <option value="0.75">0.75×</option>
@@ -2589,6 +2630,15 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
                     <option value="1.5">1.5×</option>
                     <option value="2">2×</option>
                 </select>
+                <select class="player-action-btn" id="sub-size-select" title="Subtitle size" onchange="setSubtitleSize(this.value)">
+                    <option value="80">Sub 80%</option>
+                    <option value="100" selected>Sub 100%</option>
+                    <option value="130">Sub 130%</option>
+                    <option value="160">Sub 160%</option>
+                </select>
+                <button class="player-action-btn" id="sleep-timer-btn" title="Sleep timer — stop playback after a set time" onclick="openSleepTimer()">
+                    <i class="fas fa-moon"></i><span class="btn-text" id="sleep-timer-label">Sleep</span>
+                </button>
                 <button class="player-action-btn" title="Subtitles" onclick="openSubtitleSearch('${escapeHtml(path)}', '${safeTitle}')">
                     <span>💬</span><span class="btn-text">Subs</span>
                 </button>
@@ -2606,7 +2656,6 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     `;
     body.innerHTML = '';
 
-    console.log('Opening video:', path, 'at', streamUrl);
 
     const videoWrap = document.createElement('div');
     videoWrap.style.position = 'relative';
@@ -2657,6 +2706,8 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         if (activeDashboardSessionId) {
             updateDashboardSession(activeDashboardSessionId, path, activeVideoTitle, 'stopped', video.currentTime, video.duration, activeVideoPoster);
         }
+        // Trigger next-episode auto-play if available
+        handleVideoEnded(path, title);
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
     video.addEventListener('error', () => {
@@ -5854,8 +5905,10 @@ async function loadSubtitlesForVideo(videoElement, videoPath) {
         if (subs.length === 0) return;
 
         const token = getSessionToken();
+        // Use /media/subtitle endpoint which converts SRT/ASS to WebVTT on the fly.
+        // <track> elements require WebVTT; serving raw SRT via /stream silently fails.
         const makeSrc = (p) => {
-            let subUrl = `${API_BASE}/media/stream?path=${encodeURIComponent(p)}`;
+            let subUrl = `${API_BASE}/media/subtitle?path=${encodeURIComponent(p)}`;
             if (token) subUrl += '&token=' + token;
             return subUrl;
         };
@@ -5984,7 +6037,6 @@ async function prefetchAndQueueNextEpisode(currentPath) {
 
 // Handle video ended - auto-play next episode
 async function handleVideoEnded(currentPath, currentTitle) {
-    console.log('[Auto-Play] Video ended:', currentPath);
 
     // Check if this is a TV show episode
     const nextEpisode = await findNextEpisode(currentPath);
@@ -6004,8 +6056,6 @@ async function handleVideoEnded(currentPath, currentTitle) {
                 openVideoViewer(nextEpisode.path, nextEpisode.name, 0, nextEpisode.poster || null);
             }, 100);
         });
-    } else {
-        console.log('[Auto-Play] No next episode found');
     }
 }
 
@@ -6019,13 +6069,8 @@ async function findNextEpisode(currentPath) {
         if (!res.ok) return null;
         const data = await res.json().catch(() => ({}));
         const next = data?.next;
-        if (next && next.path) {
-            console.log('[Auto-Play] Found next episode:', next.name);
-            return next;
-        }
-    } catch (e) {
-        console.error('[Auto-Play] Error finding next episode:', e);
-    }
+        if (next && next.path) return next;
+    } catch (e) { /* next episode lookup failed silently */ }
 
     return null;
 }
@@ -6233,6 +6278,123 @@ function togglePiP() {
 function setPlaybackSpeed(speed) {
     const video = activeVideoEl;
     if (video) video.playbackRate = parseFloat(speed);
+}
+
+function skipVideo(seconds) {
+    const video = activeVideoEl;
+    if (!video) return;
+    video.currentTime = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + seconds));
+}
+
+function setSubtitleSize(pct) {
+    const video = activeVideoEl;
+    if (!video) return;
+    const scale = parseFloat(pct) / 100;
+    // Apply to ::cue via a dynamic <style> tag
+    let styleEl = document.getElementById('sub-size-style');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'sub-size-style';
+        document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = `video::cue { font-size: ${scale * 100}%; }`;
+}
+
+// --- Sleep Timer ---
+let _sleepTimerTimeout = null;
+let _sleepTimerInterval = null;
+let _sleepTimerEndsAt = null;
+
+function openSleepTimer() {
+    const options = [
+        { label: 'Off', minutes: 0 },
+        { label: '15 min', minutes: 15 },
+        { label: '30 min', minutes: 30 },
+        { label: '45 min', minutes: 45 },
+        { label: '60 min', minutes: 60 },
+        { label: '90 min', minutes: 90 },
+    ];
+
+    // Build a quick inline picker as a toast/modal
+    const existing = document.getElementById('sleep-timer-picker');
+    if (existing) { existing.remove(); return; }
+
+    const picker = document.createElement('div');
+    picker.id = 'sleep-timer-picker';
+    picker.className = 'sleep-timer-picker glass';
+    picker.innerHTML = `
+        <div style="font-weight:600;margin-bottom:.5rem;font-size:.9rem"><i class="fas fa-moon"></i> Sleep Timer</div>
+        ${options.map(o => `<button class="sleep-option${_sleepTimerEndsAt && o.minutes > 0 ? '' : (o.minutes === 0 && _sleepTimerEndsAt ? ' active' : '')}" data-minutes="${o.minutes}">${o.label}</button>`).join('')}
+    `;
+    document.body.appendChild(picker);
+
+    picker.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const minutes = parseInt(btn.dataset.minutes, 10);
+            setSleepTimer(minutes);
+            picker.remove();
+        });
+    });
+
+    // Auto-close if clicking outside
+    setTimeout(() => {
+        const dismiss = (e) => {
+            if (!picker.contains(e.target) && e.target.id !== 'sleep-timer-btn') {
+                picker.remove();
+                document.removeEventListener('click', dismiss);
+            }
+        };
+        document.addEventListener('click', dismiss);
+    }, 50);
+}
+
+function setSleepTimer(minutes) {
+    // Clear existing timer
+    if (_sleepTimerTimeout) clearTimeout(_sleepTimerTimeout);
+    if (_sleepTimerInterval) clearInterval(_sleepTimerInterval);
+    _sleepTimerTimeout = null;
+    _sleepTimerInterval = null;
+    _sleepTimerEndsAt = null;
+
+    const label = document.getElementById('sleep-timer-label');
+    const btn = document.getElementById('sleep-timer-btn');
+
+    if (minutes === 0) {
+        if (label) label.textContent = 'Sleep';
+        if (btn) btn.style.color = '';
+        showToast('Sleep timer cancelled', 'info');
+        return;
+    }
+
+    _sleepTimerEndsAt = Date.now() + minutes * 60_000;
+
+    const tick = () => {
+        const remaining = _sleepTimerEndsAt - Date.now();
+        if (remaining <= 0) {
+            if (label) label.textContent = 'Sleep';
+            if (btn) btn.style.color = '';
+            clearInterval(_sleepTimerInterval);
+            return;
+        }
+        const m = Math.floor(remaining / 60_000);
+        const s = Math.floor((remaining % 60_000) / 1000);
+        if (label) label.textContent = `${m}:${String(s).padStart(2, '0')}`;
+        if (btn) btn.style.color = 'var(--accent-color)';
+    };
+    tick();
+    _sleepTimerInterval = setInterval(tick, 1000);
+
+    _sleepTimerTimeout = setTimeout(() => {
+        const video = activeVideoEl;
+        if (video) { video.pause(); }
+        clearInterval(_sleepTimerInterval);
+        _sleepTimerEndsAt = null;
+        if (label) label.textContent = 'Sleep';
+        if (btn) btn.style.color = '';
+        showToast('Sleep timer — playback stopped', 'info', 4000);
+    }, minutes * 60_000);
+
+    showToast(`Sleep timer set for ${minutes} minutes`, 'success', 3000);
 }
 
 // --- Home Rows: Continue Watching & Recently Added ---
@@ -7274,36 +7436,34 @@ async function renderTorrentResults(results, imdbId) {
         const isRD = _debridProvider === 'rd';
         const addTitle = _debridProvider === 'ad' ? 'Send to AllDebrid' : (_debridProvider === 'tb' ? 'Send to TorBox' : 'Send to Real-Debrid');
         const cachedBadge = isCached
-            ? `<span style="background:#4CAF50;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">${providerBadge} CACHED</span>`
+            ? `<span class="badge-cached">${providerBadge} CACHED</span>`
             : '';
         const riskBadge = isRD && t.rd_status === 'likely_blocked'
-            ? '<span style="background:#d9534f;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD RISK</span>'
+            ? '<span class="badge-risk">RD RISK</span>'
             : '';
         const saferBadge = isRD && t.rd_status === 'safer'
-            ? '<span style="background:#2e8b57;color:#fff;font-size:.7rem;padding:2px 6px;border-radius:4px;font-weight:700;margin-left:.5rem">RD SAFER</span>'
+            ? '<span class="badge-safer">SAFER</span>'
             : '';
         const warningLine = isRD && t.rd_warning
-            ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-secondary)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
+            ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-muted)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
             : '';
         const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
         return `
-            <div class="glass-card" style="padding:1rem;margin-bottom:.5rem">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
-                    <div style="flex:1;min-width:200px">
-                        <div style="font-weight:600;margin-bottom:.25rem">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
-                        <div style="font-size:.85rem;color:var(--text-secondary)">
-                            <span style="color:${qColor};font-weight:600">${t.quality}</span>
-                            ${t.size ? ` &middot; ${t.size}` : ''}
-                            ${t.source ? ` &middot; ${t.source}` : ''}
-                            ${t.seeders != null ? ` &middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}` : ''}
-                        </div>
-                        ${warningLine}
+            <div class="glass-card debrid-torrent-card">
+                <div class="debrid-torrent-info">
+                    <div class="debrid-torrent-name">${escapeHtml(t.name)}${cachedBadge}${riskBadge}${saferBadge}</div>
+                    <div class="debrid-torrent-meta">
+                        <span style="color:${qColor};font-weight:600">${t.quality || '?'}</span>
+                        ${t.size ? `<span>&middot; ${t.size}</span>` : ''}
+                        ${t.source ? `<span>&middot; ${t.source}</span>` : ''}
+                        ${t.seeders != null ? `<span>&middot; <i class="fas fa-arrow-up" style="font-size:.7rem"></i> ${t.seeders}</span>` : ''}
                     </div>
-                    <div style="display:flex;gap:.5rem;flex-shrink:0">
-                        <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
-                            <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
-                        </button>
-                    </div>
+                    ${warningLine}
+                </div>
+                <div class="debrid-torrent-actions">
+                    <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
+                        <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
+                    </button>
                 </div>
             </div>
         `;
@@ -7395,44 +7555,107 @@ async function debridHandleLinks(links, filename) {
         return;
     }
 
-    let handled = false;
+    // Unrestrict ALL links before showing any dialog so nothing is silently dropped
+    const unrestricted = [];
     let lastError = '';
-    for (const link of links) {
+    for (let i = 0; i < links.length; i++) {
         try {
-            debridUpdateProcessing('Unrestricting link...', 50);
+            debridUpdateProcessing(`Unrestricting link ${i + 1} of ${links.length}…`, Math.round(20 + (i / links.length) * 70));
             const res = await fetch(`${API_BASE}/debrid/unrestrict`, {
                 method: 'POST',
                 headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ link }),
+                body: JSON.stringify({ link: links[i] }),
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 lastError = err.detail || `Unrestrict failed (${res.status})`;
-                console.warn('Unrestrict failed:', lastError);
                 continue;
             }
             const data = await res.json();
-
-            if (data.url && data.filename) {
-                debridHideProcessing();
-                const action = await debridActionDialog(data.filename, data.url, data.filesize);
-                if (action === 'stream') {
-                    debridStreamFile(data.url, data.filename);
-                } else if (action === 'download') {
-                    debridDownloadToPi(data.url, data.filename);
-                }
-                handled = true;
-                break;
-            }
+            if (data.url && data.filename) unrestricted.push(data);
         } catch (e) {
-            console.error('Unrestrict failed:', e);
+            lastError = e.message || 'Unrestrict error';
         }
     }
 
-    if (!handled) {
-        debridHideProcessing();
+    debridHideProcessing();
+
+    if (unrestricted.length === 0) {
         showToast(lastError || 'Could not get download links — try again or choose a different torrent', 'error');
+        return;
     }
+
+    if (unrestricted.length === 1) {
+        // Single file: use existing single-action dialog
+        const data = unrestricted[0];
+        const action = await debridActionDialog(data.filename, data.url, data.filesize);
+        if (action === 'stream') debridStreamFile(data.url, data.filename);
+        else if (action === 'download') debridDownloadToPi(data.url, data.filename);
+    } else {
+        // Multiple files: show a file picker so the user can choose which files and what to do
+        await debridMultiFileDialog(unrestricted);
+    }
+}
+
+function debridMultiFileDialog(files) {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:rgba(0,0,0,.75);padding:1rem;box-sizing:border-box';
+
+        const fileRows = files.map((f, i) => {
+            const sizeStr = f.filesize ? `${(f.filesize / 1073741824).toFixed(2)} GB` : '';
+            return `
+                <label class="debrid-file-row">
+                    <input type="checkbox" value="${i}" checked>
+                    <span class="debrid-file-row-name">${escapeHtml(f.filename)}</span>
+                    ${sizeStr ? `<span class="debrid-file-row-size">${sizeStr}</span>` : ''}
+                </label>`;
+        }).join('');
+
+        modal.innerHTML = `
+            <div class="glass-card" style="padding:1.5rem;max-width:580px;width:100%;max-height:80vh;display:flex;flex-direction:column;gap:.75rem">
+                <h3><i class="fas fa-layer-group" style="color:var(--accent-color)"></i> Select Files <span style="font-size:.85rem;font-weight:400;color:var(--text-muted)">(${files.length} found)</span></h3>
+                <div style="display:flex;gap:.5rem">
+                    <button class="secondary small" id="sel-all-btn">Select All</button>
+                    <button class="secondary small" id="sel-none-btn">None</button>
+                </div>
+                <div class="debrid-file-list">${fileRows}</div>
+                <div style="display:flex;gap:.75rem;flex-wrap:wrap;padding-top:.25rem;border-top:var(--glass-border)">
+                    <button class="primary" id="debrid-multi-stream"><i class="fas fa-play"></i> Stream First + Download Rest</button>
+                    <button class="secondary" id="debrid-multi-download"><i class="fas fa-download"></i> Download All Selected</button>
+                    <button class="danger small" id="debrid-multi-cancel">Cancel</button>
+                </div>
+            </div>`;
+
+        const getSelected = () => Array.from(modal.querySelectorAll('input[type=checkbox]:checked')).map(cb => files[parseInt(cb.value)]);
+
+        modal.querySelector('#sel-all-btn').onclick = () => modal.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = true; });
+        modal.querySelector('#sel-none-btn').onclick = () => modal.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+
+        modal.querySelector('#debrid-multi-stream').onclick = () => {
+            const sel = getSelected();
+            modal.remove();
+            if (!sel.length) { showToast('No files selected', 'warning'); resolve(); return; }
+            debridStreamFile(sel[0].url, sel[0].filename);
+            for (let i = 1; i < sel.length; i++) debridDownloadToPi(sel[i].url, sel[i].filename);
+            if (sel.length > 1) showToast(`Streaming first file, queued ${sel.length - 1} more for download`, 'success');
+            resolve();
+        };
+
+        modal.querySelector('#debrid-multi-download').onclick = () => {
+            const sel = getSelected();
+            modal.remove();
+            if (!sel.length) { showToast('No files selected', 'warning'); resolve(); return; }
+            sel.forEach(f => debridDownloadToPi(f.url, f.filename));
+            showToast(`Queued ${sel.length} file${sel.length > 1 ? 's' : ''} for download to Pi`, 'success');
+            resolve();
+        };
+
+        modal.querySelector('#debrid-multi-cancel').onclick = () => { modal.remove(); resolve(); };
+        modal.addEventListener('click', (e) => { if (e.target === modal) { modal.remove(); resolve(); } });
+        document.body.appendChild(modal);
+    });
 }
 
 function debridActionDialog(filename, downloadUrl, filesize) {
