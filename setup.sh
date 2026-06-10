@@ -448,6 +448,29 @@ if command -v nmcli &> /dev/null; then
         create_hotspot || echo "Warning: Could not create hotspot (hardware might be missing or busy)."
     fi
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Pi-hole / DNS conflict fix
+    # dnsmasq is installed for NetworkManager's hotspot DHCP/DNS support.
+    # If the system-level dnsmasq service also starts, it binds port 53 on
+    # ALL network interfaces — including the home LAN adapter — which prevents
+    # Pi-hole (and any other network DNS server) from functioning correctly.
+    # NetworkManager manages its own private dnsmasq instance for the hotspot
+    # separately from the system service, so masking the service is safe.
+    # ─────────────────────────────────────────────────────────────────────────
+    echo "Preventing dnsmasq system service from hijacking port 53..."
+    sudo systemctl stop dnsmasq 2>/dev/null || true
+    sudo systemctl disable dnsmasq 2>/dev/null || true
+    sudo systemctl mask dnsmasq 2>/dev/null || true
+
+    # Also restrict NetworkManager's hotspot dnsmasq to only the hotspot
+    # interface (bind-interfaces) so it never answers queries arriving on the
+    # home LAN adapter when both connections are active simultaneously.
+    sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+    sudo bash -c 'cat > /etc/NetworkManager/dnsmasq-shared.d/nomadpi-pihole-compat.conf <<EOF
+# Bind only to the hotspot interface so Pi-hole on the home network is unaffected.
+bind-interfaces
+EOF'
+
     # Disable WiFi Power Management (Prevents disconnects mid-transfer)
     echo "Disabling WiFi Power Management..."
     sudo iw dev "$WIFI_DEV" set power_save off 2>/dev/null || true
