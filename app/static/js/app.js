@@ -2671,7 +2671,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'auto';
+    video.preload = 'metadata';
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     const source = document.createElement('source');
     source.src = streamUrl;

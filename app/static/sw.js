@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.4.4';
+const CACHE_NAME = 'nomad-pi-v1.4.5';
 
 const APP_SHELL = [
   '/',
@@ -137,8 +137,13 @@ async function staleWhileRevalidate(request) {
 
   const networkPromise = fetch(request)
     .then((networkResponse) => {
-      // Cache successful responses AND opaque cross-origin responses (status 0)
-      if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+      // Only cache non-opaque responses where we can confirm success.
+      // Opaque responses (cross-origin no-cors) always show status 0 — we
+      // cannot tell them apart from a CDN error page, so caching them risks
+      // permanently storing a 503/429 under the correct asset key.
+      // CDN fonts/icons are pre-cached during install with mode:'cors' so
+      // they arrive as real responses; don't need to re-cache them here.
+      if (networkResponse && networkResponse.status === 200 && networkResponse.type !== 'opaque') {
         cache.put(request, networkResponse.clone());
       }
       return networkResponse;
@@ -153,7 +158,7 @@ async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+    if (networkResponse && networkResponse.status === 200 && networkResponse.type !== 'opaque') {
       cache.put(request, networkResponse.clone());
     }
     return networkResponse;
