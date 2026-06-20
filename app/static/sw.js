@@ -1,4 +1,5 @@
-const CACHE_NAME = 'nomad-pi-v1.4.2';
+const CACHE_NAME = 'nomad-pi-v1.4.4';
+
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -11,42 +12,61 @@ const APP_SHELL = [
   '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
+  // FontAwesome CSS
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+  // FontAwesome webfonts — these are what the CSS references for icons to render
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.ttf',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-regular-400.woff2',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-regular-400.ttf',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-brands-400.woff2',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-brands-400.ttf',
+  // Google Fonts CSS (font files are cached on first use via stale-while-revalidate)
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
 ];
 
-// Essential API calls to cache for offline view
+// API responses to cache with network-first + fallback
 const API_CACHE_WHITELIST = [
   '/api/system/stats',
   '/api/media/library/movies',
   '/api/media/library/shows',
-  '/api/media/resume'
+  '/api/media/library/music',
+  '/api/media/library/books',
+  '/api/media/library/gallery',
+  '/api/media/library',
+  '/api/media/resume',
+  '/api/media/watchlist',
+  '/api/user/settings',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Caching app shell');
+      console.log('[SW] Pre-caching app shell and fonts');
+      // allSettled so a single CDN miss doesn't abort everything
       return Promise.allSettled(
-        APP_SHELL.map((asset) => cache.add(asset))
+        APP_SHELL.map((asset) =>
+          cache.add(new Request(asset, { mode: 'cors' })).catch((err) => {
+            console.warn('[SW] Failed to pre-cache:', asset, err);
+          })
+        )
       );
     })
   );
-  // Do NOT self.skipWaiting() here if we want to show an update prompt
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[SW] Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
+    caches.keys().then((cacheNames) =>
+      Promise.all(
+        cacheNames.map((name) => {
+          if (name !== CACHE_NAME) {
+            console.log('[SW] Deleting old cache:', name);
+            return caches.delete(name);
           }
         })
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
@@ -57,31 +77,54 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  // Don't cache media streams (audio/video)
-  if (url.pathname.includes('/media/stream') ||
-      url.pathname.includes('/api/media/stream') ||
-      url.pathname.endsWith('.mp4') ||
-      url.pathname.endsWith('.mkv') ||
-      url.pathname.endsWith('.mp3') ||
-      url.pathname.endsWith('.flac')) {
+  // Never intercept media streams — let the browser handle range requests
+  if (
+    url.pathname.includes('/media/stream') ||
+    url.pathname.includes('/api/media/stream') ||
+    url.pathname.endsWith('.mp4') ||
+    url.pathname.endsWith('.mkv') ||
+    url.pathname.endsWith('.mp3') ||
+    url.pathname.endsWith('.flac')
+  ) {
     return;
   }
 
-  // Strategy for App Shell (HTML): Network-First
+  // HTML documents: network-first
   if (event.request.destination === 'document' || url.pathname === '/') {
     event.respondWith(networkFirst(event.request));
     return;
   }
 
-  // Strategy for Static Assets: Stale-While-Revalidate
-  const isAppShellAsset = APP_SHELL.some(asset => url.href.includes(asset) || url.pathname === asset);
-  if (isAppShellAsset || event.request.destination === 'script' || event.request.destination === 'style' || event.request.destination === 'font' || event.request.destination === 'image') {
+  // Static assets + fonts + images + CDN resources: stale-while-revalidate
+  const isCdnAsset =
+    url.hostname.includes('cdnjs.cloudflare.com') ||
+    url.hostname.includes('fonts.googleapis.com') ||
+    url.hostname.includes('fonts.gstatic.com');
+
+  if (
+    isCdnAsset ||
+    event.request.destination === 'script' ||
+    event.request.destination === 'style' ||
+    event.request.destination === 'font' ||
+    event.request.destination === 'image'
+  ) {
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
 
-  // Strategy for specific API calls: Network-First with Cache Fallback
-  const isWhitelistedApi = API_CACHE_WHITELIST.some(path => url.pathname.includes(path));
+  // Local static assets (CSS, JS, icons by pathname)
+  const isLocalAsset = APP_SHELL.some(
+    (a) => !a.startsWith('http') && (url.pathname === a || url.href.endsWith(a))
+  );
+  if (isLocalAsset) {
+    event.respondWith(staleWhileRevalidate(event.request));
+    return;
+  }
+
+  // Whitelisted API calls: network-first with cached fallback
+  const isWhitelistedApi = API_CACHE_WHITELIST.some((path) =>
+    url.pathname.startsWith(path) || url.pathname.includes(path)
+  );
   if (isWhitelistedApi) {
     event.respondWith(networkFirst(event.request));
     return;
@@ -91,14 +134,18 @@ self.addEventListener('fetch', (event) => {
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
   const cachedResponse = await cache.match(request, { ignoreSearch: true });
-  const networkPromise = fetch(request).then((networkResponse) => {
-    if (networkResponse && networkResponse.status === 200) {
-      cache.put(request, networkResponse.clone());
-    }
-    return networkResponse;
-  }).catch(err => {
-    return cachedResponse || Response.error();
-  });
+
+  const networkPromise = fetch(request)
+    .then((networkResponse) => {
+      // Cache successful responses AND opaque cross-origin responses (status 0)
+      if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
+        cache.put(request, networkResponse.clone());
+      }
+      return networkResponse;
+    })
+    .catch(() => cachedResponse || Response.error());
+
+  // Serve cached immediately if available; revalidate in background
   return cachedResponse || networkPromise;
 }
 
@@ -106,17 +153,16 @@ async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
     const networkResponse = await fetch(request);
-    if (networkResponse && networkResponse.status === 200) {
+    if (networkResponse && (networkResponse.status === 200 || networkResponse.type === 'opaque')) {
       cache.put(request, networkResponse.clone());
     }
     return networkResponse;
-  } catch (error) {
+  } catch {
     const cachedResponse = await cache.match(request, { ignoreSearch: true });
     return cachedResponse || Response.error();
   }
 }
 
-// Handle messages from the client
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();

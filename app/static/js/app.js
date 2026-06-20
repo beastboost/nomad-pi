@@ -1,4 +1,4 @@
-console.log("App v1.3.4 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
+console.log("App v1.3.5 loaded - Desktop sidebar, iPad layout, WiFi warning, sleep timer fix");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -2671,7 +2671,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const video = document.createElement('video');
     video.className = 'video-frame';
     video.controls = true;
-    video.preload = 'metadata';
+    video.preload = 'auto';
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
     const source = document.createElement('source');
     source.src = streamUrl;
@@ -2714,9 +2714,78 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         }
     });
     video.addEventListener('loadedmetadata', () => checkResume(video, path, Number(startSeconds || 0)), { once: true });
-    video.addEventListener('error', () => {
-        body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext, `Browser can't play this ${ext.toUpperCase()} stream directly`);
+
+    // ── Stream stall detection + auto-reconnect ──────────────────────────────
+    // 'waiting' fires when the browser doesn't have enough data to play. Normal
+    // buffering resolves in seconds; if it hasn't resolved after 10s the stream
+    // connection has likely died and we reconnect at the same position.
+    let _stallTimer = null;
+    let _reconnects = 0;
+    const MAX_RECONNECTS = 8;
+
+    function _clearStall() {
+        if (_stallTimer) { clearTimeout(_stallTimer); _stallTimer = null; }
+    }
+
+    function _reconnectStream(resumeAt) {
+        _clearStall();
+        if (activeVideoEl !== video) return; // viewer was closed
+        if (_reconnects >= MAX_RECONNECTS) {
+            body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext,
+                `Stream disconnected. Try the VLC button or refresh the page.`);
+            return;
+        }
+        _reconnects++;
+        const wasPlaying = !video.paused;
+        showToast(`Stream dropped — reconnecting (${_reconnects}/${MAX_RECONNECTS})…`, 'warning', 3000);
+        // Cache-bust forces a fresh TCP connection to the server
+        video.src = streamUrl + '&_r=' + Date.now();
+        video.load();
+        video.addEventListener('loadedmetadata', () => {
+            if (resumeAt > 1) video.currentTime = resumeAt;
+            if (wasPlaying) video.play().catch(() => {});
+        }, { once: true });
+    }
+
+    video.addEventListener('waiting', () => {
+        if (_stallTimer || video.paused || video.ended) return;
+        _stallTimer = setTimeout(() => {
+            _stallTimer = null;
+            if (activeVideoEl !== video) return; // viewer was closed
+            if (!video.paused && !video.ended && video.readyState < 3) {
+                _reconnectStream(video.currentTime);
+            }
+        }, 10000); // 10s of genuine stall = dead connection
     });
+
+    video.addEventListener('playing', () => {
+        _clearStall();
+        if (_reconnects > 0) {
+            _reconnects = 0;
+            showToast('Stream reconnected ✓', 'success', 2000);
+        }
+    });
+
+    video.addEventListener('canplay', _clearStall);
+    video.addEventListener('pause', _clearStall);
+
+    video.addEventListener('error', () => {
+        const err = video.error;
+        if (!err) return;
+        if (err.code === MediaError.MEDIA_ERR_NETWORK) {
+            // Network error → try to reconnect
+            _reconnectStream(video.currentTime);
+        } else if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ||
+                   err.code === MediaError.MEDIA_ERR_DECODE) {
+            // Codec/format problem → show fallback immediately
+            body.innerHTML = buildPlaybackFallbackHtml(fullUrl, vlcUrl, ext,
+                `Browser can't play this ${ext.toUpperCase()} file. Try the VLC button.`);
+        } else {
+            // Unknown error — attempt reconnect before giving up
+            _reconnectStream(video.currentTime);
+        }
+    });
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Detect iOS codec issues and offer VLC
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -4175,10 +4244,15 @@ function closeWifiModal() {
 }
 
 async function connectToWifi(ssid, password) {
+    const confirmed = confirm(
+        `Connect to "${ssid}"?\n\n⚠️ Warning: If you are currently browsing via the Nomad Pi hotspot, you will lose connection while it switches to the new network. You may need to reconnect to the new WiFi or the hotspot to continue.`
+    );
+    if (!confirmed) return;
+
     const modal = document.getElementById('wifi-modal');
     const connectBtn = document.getElementById('modal-connect-btn');
     const originalText = connectBtn.textContent;
-    
+
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting...';
 
