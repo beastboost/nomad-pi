@@ -441,6 +441,6 @@ if __name__ == "__main__":
         http="auto",
         limit_concurrency=1000,  # Allow more concurrent connections
         limit_max_requests=10000,  # Prevent memory leaks
-        timeout_keep_alive=75,  # Keep connections alive longer
+        timeout_keep_alive=300,  # Keep connections alive for long video streams
         backlog=2048  # Increase connection queue
     )
