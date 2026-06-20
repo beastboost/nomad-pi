@@ -165,6 +165,10 @@ header {
     -webkit-text-fill-color: transparent;
 }
 
+.sidebar-brand {
+    display: none;
+}
+
 nav#main-nav {
     display: flex;
     gap: 0.35rem;
@@ -240,7 +244,7 @@ nav button.active {
     box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
     .mobile-bottom-nav {
         display: flex;
     }
@@ -1965,7 +1969,7 @@ h1, h2, h3 {
     background: black;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
     * {
         max-width: 100vw;
     }
@@ -2142,6 +2146,129 @@ h1, h2, h3 {
 
     .player-volume {
         display: none;
+    }
+}
+
+/* =========================================================
+   Desktop Sidebar Layout (≥ 1025px)
+   ========================================================= */
+@media (min-width: 1025px) {
+    /* Hide mobile-only controls */
+    .mobile-menu-btn { display: none !important; }
+    .mobile-bottom-nav { display: none !important; }
+    /* Hide the logo inside the header — sidebar-brand takes its place */
+    header .logo { display: none !important; }
+
+    /* Show sidebar brand */
+    .sidebar-brand {
+        display: flex;
+        align-items: center;
+        padding: 20px 16px 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        margin-bottom: 8px;
+        flex-shrink: 0;
+    }
+
+    /* Fixed left sidebar */
+    nav#main-nav {
+        position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 220px !important;
+        height: 100vh !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        padding: 0 10px 16px !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        z-index: 100 !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 0 !important;
+        gap: 2px !important;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3) !important;
+        background: #0c0f14 !important;
+        display: flex !important;
+        transform: none !important;
+        flex-wrap: nowrap !important;
+    }
+
+    /* Sidebar nav buttons */
+    nav#main-nav button {
+        width: 100% !important;
+        text-align: left !important;
+        padding: 10px 12px !important;
+        border-radius: 8px !important;
+        font-size: 0.875rem !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 10px !important;
+        background: transparent !important;
+        border: none !important;
+        color: rgba(203, 213, 225, 0.85) !important;
+        min-height: 40px !important;
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        cursor: pointer !important;
+        transition: background 0.15s, color 0.15s !important;
+    }
+
+    nav#main-nav button:hover {
+        background: rgba(255, 255, 255, 0.07) !important;
+        color: #f1f5f9 !important;
+    }
+
+    nav#main-nav button.active {
+        background: rgba(59, 130, 246, 0.18) !important;
+        color: #93c5fd !important;
+    }
+
+    nav#main-nav button i {
+        width: 18px !important;
+        text-align: center !important;
+        flex-shrink: 0 !important;
+    }
+
+    nav#main-nav .logout-btn {
+        margin-top: auto !important;
+        background: rgba(239, 68, 68, 0.12) !important;
+        color: #fca5a5 !important;
+        border: 1px solid rgba(239, 68, 68, 0.2) !important;
+    }
+
+    nav#main-nav .logout-btn:hover {
+        background: rgba(239, 68, 68, 0.22) !important;
+    }
+
+    /* Section group labels */
+    .mobile-nav-group-title {
+        display: block !important;
+        font-size: 0.65rem !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.06em !important;
+        color: rgba(148, 163, 184, 0.6) !important;
+        margin: 14px 0 4px 12px !important;
+        flex-shrink: 0 !important;
+    }
+
+    /* Shift header and main content to the right of the sidebar */
+    header {
+        margin-left: calc(220px + 12px) !important;
+        margin-right: 12px !important;
+        width: auto !important;
+    }
+
+    main {
+        padding-left: calc(220px + 20px) !important;
+        padding-right: 20px !important;
+        padding-bottom: 40px !important;
+        max-width: none !important;
+    }
+
+    /* Stats badge in sidebar */
+    #header-stats {
+        display: none !important;
     }
 }
 

@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=1780768732">
-    <link rel="manifest" href="manifest.json?v=1780768732">
+    <link rel="stylesheet" href="css/style.css?v=1781983945">
+    <link rel="manifest" href="manifest.json?v=1781983945">
     <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -43,31 +43,36 @@
         <header class="glass">
             <div class="logo">Nomad Pi ✨</div>
             <button class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Toggle Navigation Menu">☰</button>
-            <nav id="main-nav">
-                <div class="mobile-nav-group-title">Main Library</div>
-                <button onclick="showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
-                <button onclick="showSection('movies')"><i class="fas fa-film"></i> Movies</button>
-                <button onclick="showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
-                <button onclick="showSection('music')"><i class="fas fa-music"></i> Music</button>
-                <button onclick="showSection('books')"><i class="fas fa-book"></i> Books</button>
-                <button onclick="showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
-
-                <div class="mobile-nav-group-title">Tools & Collections</div>
-                <button onclick="showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
-                <button onclick="showSection('watchlist')"><i class="fas fa-heart"></i> Watchlist</button>
-                <button onclick="showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Debrid Manager</button>
-
-                <div class="mobile-nav-group-title">System & Profile</div>
-                <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin Dashboard</button>
-                <button onclick="showSection('settings')"><i class="fas fa-cog"></i> User Settings</button>
-                <button onclick="openGlobalSearch()" class="search-nav-btn" title="Search everything" aria-label="Search"><i class="fas fa-search"></i></button>
-                <span id="header-stats" class="header-stats"></span>
-                <button onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
-                    <i class="fas fa-moon" id="theme-icon"></i>
-                </button>
-                <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
-            </nav>
         </header>
+
+        <nav id="main-nav">
+            <div class="sidebar-brand">
+                <span class="logo">Nomad Pi ✨</span>
+            </div>
+
+            <div class="mobile-nav-group-title">Main Library</div>
+            <button onclick="showSection('home')" class="active"><i class="fas fa-home"></i> Home</button>
+            <button onclick="showSection('movies')"><i class="fas fa-film"></i> Movies</button>
+            <button onclick="showSection('shows')"><i class="fas fa-tv"></i> Shows</button>
+            <button onclick="showSection('music')"><i class="fas fa-music"></i> Music</button>
+            <button onclick="showSection('books')"><i class="fas fa-book"></i> Books</button>
+            <button onclick="showSection('gallery')"><i class="fas fa-image"></i> Gallery</button>
+
+            <div class="mobile-nav-group-title">Tools &amp; Collections</div>
+            <button onclick="showSection('files')"><i class="fas fa-folder-open"></i> Files</button>
+            <button onclick="showSection('watchlist')"><i class="fas fa-heart"></i> Watchlist</button>
+            <button onclick="showSection('debrid')"><i class="fas fa-cloud-download-alt"></i> Debrid</button>
+
+            <div class="mobile-nav-group-title">System &amp; Profile</div>
+            <button onclick="showSection('admin')"><i class="fas fa-user-shield"></i> Admin</button>
+            <button onclick="showSection('settings')"><i class="fas fa-cog"></i> Settings</button>
+            <button onclick="openGlobalSearch()" class="search-nav-btn" title="Search everything" aria-label="Search"><i class="fas fa-search"></i> Search</button>
+            <span id="header-stats" class="header-stats"></span>
+            <button onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">
+                <i class="fas fa-moon" id="theme-icon"></i> Theme
+            </button>
+            <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+        </nav>
 
         <nav class="mobile-bottom-nav glass">
             <button onclick="showSection('home')" id="btn-home-mob" class="nav-item active" aria-label="Home" aria-current="page">
@@ -1172,7 +1177,7 @@
 
     </div><!-- /#comic-overlay -->
 
-    <script src="js/app.js?v=1780768732"></script>
+    <script src="js/app.js?v=1781983945"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

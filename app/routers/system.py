@@ -1382,9 +1382,9 @@ class WifiConnectRequest(BaseModel):
     
     @validator('ssid')
     def validate_ssid(cls, v):
-        # Allow only alphanumeric, spaces, hyphens, underscores, and dots
-        if not re.match(r'^[a-zA-Z0-9 _\-\.]+$', v):
-            raise ValueError("SSID contains invalid characters")
+        # Allow all printable ASCII characters (SSIDs may contain !@#$& etc.)
+        if not v or not all(0x20 <= ord(c) <= 0x7E for c in v):
+            raise ValueError("SSID must contain only printable ASCII characters")
         if len(v) > 32:
             raise ValueError("SSID too long (max 32 characters)")
         return v

@@ -1,4 +1,4 @@
-console.log("App v1.3.4 loaded - Continue Watching, Watchlist, Global Search, PiP, Subtitles & More");
+console.log("App v1.3.5 loaded - Desktop sidebar, iPad layout, WiFi warning, sleep timer fix");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -4175,10 +4175,15 @@ function closeWifiModal() {
 }
 
 async function connectToWifi(ssid, password) {
+    const confirmed = confirm(
+        `Connect to "${ssid}"?\n\n⚠️ Warning: If you are currently browsing via the Nomad Pi hotspot, you will lose connection while it switches to the new network. You may need to reconnect to the new WiFi or the hotspot to continue.`
+    );
+    if (!confirmed) return;
+
     const modal = document.getElementById('wifi-modal');
     const connectBtn = document.getElementById('modal-connect-btn');
     const originalText = connectBtn.textContent;
-    
+
     connectBtn.disabled = true;
     connectBtn.textContent = 'Connecting...';
 

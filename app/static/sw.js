@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.4.2';
+const CACHE_NAME = 'nomad-pi-v1.4.3';
 const APP_SHELL = [
   '/',
   '/index.html',
