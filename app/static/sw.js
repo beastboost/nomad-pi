@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v1.4.5';
+const CACHE_NAME = 'nomad-pi-v1.4.6';
 
 const APP_SHELL = [
   '/',
@@ -36,7 +36,7 @@ const API_CACHE_WHITELIST = [
   '/api/media/library',
   '/api/media/resume',
   '/api/media/watchlist',
-  '/api/user/settings',
+  '/api/system/settings',
 ];
 
 self.addEventListener('install', (event) => {
@@ -112,9 +112,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Local static assets (CSS, JS, icons by pathname)
+  // Local static assets (e.g. manifest.json — everything else is already
+  // routed by the destination checks above)
   const isLocalAsset = APP_SHELL.some(
-    (a) => !a.startsWith('http') && (url.pathname === a || url.href.endsWith(a))
+    (a) => !a.startsWith('http') && url.pathname === a
   );
   if (isLocalAsset) {
     event.respondWith(staleWhileRevalidate(event.request));
@@ -133,10 +134,12 @@ self.addEventListener('fetch', (event) => {
 
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cachedResponse = await cache.match(request, { ignoreSearch: true });
+  // Exact-URL match only: matching with ignoreSearch would return an OLD
+  // ?v= entry ahead of the freshly cached one, defeating cache busting.
+  const cachedResponse = await cache.match(request);
 
   const networkPromise = fetch(request)
-    .then((networkResponse) => {
+    .then(async (networkResponse) => {
       // Only cache non-opaque responses where we can confirm success.
       // Opaque responses (cross-origin no-cors) always show status 0 — we
       // cannot tell them apart from a CDN error page, so caching them risks
@@ -144,11 +147,16 @@ async function staleWhileRevalidate(request) {
       // CDN fonts/icons are pre-cached during install with mode:'cors' so
       // they arrive as real responses; don't need to re-cache them here.
       if (networkResponse && networkResponse.status === 200 && networkResponse.type !== 'opaque') {
+        await evictStaleVariants(cache, request);
         cache.put(request, networkResponse.clone());
       }
       return networkResponse;
     })
-    .catch(() => cachedResponse || Response.error());
+    .catch(async () => {
+      // Offline and no exact match: fall back to any version of this asset —
+      // a stale stylesheet beats a broken page.
+      return cachedResponse || (await cache.match(request, { ignoreSearch: true })) || Response.error();
+    });
 
   // Serve cached immediately if available; revalidate in background
   return cachedResponse || networkPromise;
@@ -159,13 +167,27 @@ async function networkFirst(request) {
   try {
     const networkResponse = await fetch(request);
     if (networkResponse && networkResponse.status === 200 && networkResponse.type !== 'opaque') {
+      await evictStaleVariants(cache, request);
       cache.put(request, networkResponse.clone());
     }
     return networkResponse;
   } catch {
-    const cachedResponse = await cache.match(request, { ignoreSearch: true });
+    // Offline: prefer the exact URL, fall back to any variant of it.
+    const cachedResponse = await cache.match(request) ||
+      await cache.match(request, { ignoreSearch: true });
     return cachedResponse || Response.error();
   }
+}
+
+// Remove previously cached entries for the same path with a different query
+// string (old ?v= versions) so they can never shadow the current one.
+async function evictStaleVariants(cache, request) {
+  try {
+    const url = new URL(request.url);
+    if (!url.search) return;
+    const stale = await cache.keys(request, { ignoreSearch: true });
+    await Promise.all(stale.filter((k) => k.url !== request.url).map((k) => cache.delete(k)));
+  } catch { /* eviction is best-effort */ }
 }
 
 self.addEventListener('message', (event) => {

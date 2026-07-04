@@ -1,4 +1,4 @@
-console.log("App v1.3.5 loaded - Desktop sidebar, iPad layout, WiFi warning, sleep timer fix");
+console.log("App v1.3.6 loaded - Code review fixes: SW cache versioning, keep-alive, cleanups");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -2332,14 +2332,9 @@ async function requestWakeLock() {
 
 function closeViewer() {
     releaseWakeLock();
-    // Cancel sleep timer silently on close (only show toast if timer was actually running)
-    if (_sleepTimerTimeout) {
-        setSleepTimer(0);
-    } else {
-        if (_sleepTimerInterval) clearInterval(_sleepTimerInterval);
-        _sleepTimerInterval = null;
-        _sleepTimerEndsAt = null;
-    }
+    // Cancel sleep timer, with a toast only if one was actually running
+    if (_sleepTimerTimeout) showToast('Sleep timer cancelled', 'info');
+    clearSleepTimer();
     document.getElementById('sleep-timer-picker')?.remove();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
@@ -2751,7 +2746,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         if (_stallTimer || video.paused || video.ended) return;
         _stallTimer = setTimeout(() => {
             _stallTimer = null;
-            if (activeVideoEl !== video) return; // viewer was closed
+            // _reconnectStream itself guards against the viewer having closed
             if (!video.paused && !video.ended && video.readyState < 3) {
                 _reconnectStream(video.currentTime);
             }
@@ -6426,21 +6421,28 @@ function openSleepTimer() {
     }, 50);
 }
 
-function setSleepTimer(minutes) {
-    // Clear existing timer
+// Stop the sleep timer and reset its UI without any toast.
+function clearSleepTimer() {
     if (_sleepTimerTimeout) clearTimeout(_sleepTimerTimeout);
     if (_sleepTimerInterval) clearInterval(_sleepTimerInterval);
     _sleepTimerTimeout = null;
     _sleepTimerInterval = null;
     _sleepTimerEndsAt = null;
+    const label = document.getElementById('sleep-timer-label');
+    const btn = document.getElementById('sleep-timer-btn');
+    if (label) label.textContent = 'Sleep';
+    if (btn) btn.style.color = '';
+}
+
+function setSleepTimer(minutes) {
+    const hadTimer = !!_sleepTimerTimeout;
+    clearSleepTimer();
 
     const label = document.getElementById('sleep-timer-label');
     const btn = document.getElementById('sleep-timer-btn');
 
     if (minutes === 0) {
-        if (label) label.textContent = 'Sleep';
-        if (btn) btn.style.color = '';
-        showToast('Sleep timer cancelled', 'info');
+        if (hadTimer) showToast('Sleep timer cancelled', 'info');
         return;
     }
 

@@ -1974,6 +1974,7 @@ namespace NomadTransferTool
                 var downloadWork = new List<(ActiveDownload DlTracker, MediaItem QueueItem, string DestPath, string Url)>();
                 string? targetDrive = null;
 
+                var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 Dispatcher.Invoke(() =>
                 {
                     TabTransfer.IsChecked = true;
@@ -1986,6 +1987,12 @@ namespace NomadTransferTool
                                 ? (SelectedDebridTorrent?.Name ?? "download") + ".mkv"
                                 : file.FileName);
                         var destPath = Path.Combine(tempRoot, fileName);
+                        // Uniquify: duplicate/blank filenames would make concurrent
+                        // downloads write to the same file and corrupt each other.
+                        var stem = Path.Combine(tempRoot, Path.GetFileNameWithoutExtension(fileName));
+                        var ext2 = Path.GetExtension(fileName);
+                        for (int n = 1; !usedPaths.Add(destPath); n++)
+                            destPath = $"{stem} ({n}){ext2}";
 
                         var queueItem = new MediaItem
                         {
@@ -2031,6 +2038,7 @@ namespace NomadTransferTool
                                 UpdateItemDuplicateStatus(work.QueueItem, targetDrive);
                             DebridActiveDownloads.Remove(work.DlTracker);
                         });
+                        return true;
                     }
                     catch (OperationCanceledException)
                     {
@@ -2039,6 +2047,7 @@ namespace NomadTransferTool
                             ReviewQueue.Remove(work.QueueItem);
                             DebridActiveDownloads.Remove(work.DlTracker);
                         });
+                        return false;
                     }
                     catch (Exception ex)
                     {
@@ -2048,14 +2057,13 @@ namespace NomadTransferTool
                             work.QueueItem.StatusMessage = $"Failed: {ex.Message}";
                             DebridActiveDownloads.Remove(work.DlTracker);
                         });
+                        return false;
                     }
                 }).ToList();
 
-                await Task.WhenAll(downloadTasks);
+                var outcomes = await Task.WhenAll(downloadTasks);
 
-                var succeeded = downloadWork.Count(w =>
-                    string.IsNullOrEmpty(w.QueueItem.StatusMessage) ||
-                    !w.QueueItem.StatusMessage.StartsWith("Failed"));
+                var succeeded = outcomes.Count(ok => ok);
                 DebridStatus = $"Done — {succeeded} of {downloadWork.Count} file(s) ready in Transfer Hub.";
             }
             catch (Exception ex)
@@ -2558,7 +2566,10 @@ namespace NomadTransferTool
 
             var items = ReviewQueue.Where(i => !i.IsDownloading && !i.StatusMessage.StartsWith("Failed")).ToList();
             if (items.Count == 0) return;
-            ReviewQueue.Clear();
+            // Remove only the items being processed — still-downloading items stay
+            // in the queue so they appear when their download completes.
+            foreach (var item in items)
+                ReviewQueue.Remove(item);
             
             _processingCts = new System.Threading.CancellationTokenSource();
             try
