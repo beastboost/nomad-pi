@@ -108,6 +108,13 @@ git log -1 --oneline --no-decorate || true
 chmod +x *.sh
 find . -name "*.sh" -exec chmod +x {} +
 
+# Stamp cache-busting versions with the current commit so browsers and the
+# PWA service worker always pick up this deploy (no more hand-bumped ?v=).
+STAMP=$(git rev-parse --short HEAD 2>/dev/null || date +%s)
+echo "Stamping static asset versions with $STAMP..."
+sed -i -E "s/\?v=[0-9a-zA-Z._-]+/?v=$STAMP/g" app/static/index.html
+sed -i -E "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = 'nomad-pi-$STAMP'/" app/static/sw.js
+
 update_status 50 "Installing system dependencies..."
 echo "Installing/Updating system dependencies..."
 # Ensure all required system packages are present

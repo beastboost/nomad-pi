@@ -333,6 +333,13 @@ if [ -n "$ADMIN_PASS_VALUE" ]; then
     sudo bash -c "umask 077; printf 'ADMIN_PASSWORD=%s\n' \"$ADMIN_PASS_VALUE\" >> \"$ENV_FILE\""
 fi
 
+# Stamp cache-busting versions with the current commit so browsers and the
+# PWA service worker always pick up this deploy (no more hand-bumped ?v=).
+STAMP=$(git -C "$CURRENT_DIR" rev-parse --short HEAD 2>/dev/null || date +%s)
+echo "Stamping static asset versions with $STAMP..."
+sed -i -E "s/\?v=[0-9a-zA-Z._-]+/?v=$STAMP/g" "$CURRENT_DIR/app/static/index.html"
+sed -i -E "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = 'nomad-pi-$STAMP'/" "$CURRENT_DIR/app/static/sw.js"
+
 # Create service file
 sudo bash -c "cat > $SERVICE_FILE" <<EOL
 [Unit]
@@ -343,7 +350,7 @@ After=network.target
 User=$USER_NAME
 WorkingDirectory=$CURRENT_DIR
 EnvironmentFile=-$ENV_FILE
-ExecStart=$CURRENT_DIR/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+ExecStart=$CURRENT_DIR/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --timeout-keep-alive 300
 Restart=always
 RestartSec=5
 TimeoutStartSec=60

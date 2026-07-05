@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=1781984500">
-    <link rel="manifest" href="manifest.json?v=1781984500">
+    <link rel="stylesheet" href="css/style.css?v=1781995000">
+    <link rel="manifest" href="manifest.json?v=1781995000">
     <meta name="theme-color" content="#3b82f6">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -481,6 +481,17 @@
             <section id="admin" class="hidden">
                 <div class="section-header">
                     <h2><i class="fas fa-user-shield"></i> Admin Dashboard</h2>
+                </div>
+
+                <div class="admin-panel">
+                    <h3><i class="fas fa-stethoscope"></i> Health Check</h3>
+                    <p class="admin-panel-hint">Checks for common problems — DNS conflicts (Pi-hole), low disk space, overheating, and missing tools.</p>
+                    <div class="button-grid">
+                        <button onclick="runDiagnostics()" class="primary" id="diagnostics-btn">
+                            <i class="fas fa-heartbeat"></i> Run Health Check
+                        </button>
+                    </div>
+                    <div id="diagnostics-results" class="diagnostics-results"></div>
                 </div>
 
                 <div class="admin-panel">
@@ -1177,7 +1188,7 @@
 
     </div><!-- /#comic-overlay -->
 
-    <script src="js/app.js?v=1781984500"></script>
+    <script src="js/app.js?v=1781995000"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

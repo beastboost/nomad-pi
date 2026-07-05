@@ -188,12 +188,7 @@ nav#main-nav::-webkit-scrollbar {
 nav#main-nav button:focus-visible {
     outline: 2px solid var(--accent-color);
     outline-offset: 2px;
-}
-
-header nav#main-nav button:focus-visible {
-    outline: 2px solid var(--accent-color);
-    outline-offset: -2px;
-    background: rgba(59, 130, 246, 0.25) !important;
+    background: rgba(59, 130, 246, 0.25);
 }
 
 nav button {
@@ -249,16 +244,10 @@ nav button.active {
         display: flex;
     }
 
-    /* Fixed mobile nav menu issues:
-       1. Move main-nav out of sticky header context if possible,
-          but since it's HTML-bound, we must override the sticky container effect.
-       2. The sticky header with backdrop-filter creates a new containing block,
-          causing 'position: fixed' to be relative to the header instead of the viewport.
-       3. We use a high z-index and ensure it's truly viewport-fixed.
-    */
-    /* nav#main-nav may be inside <header> or moved to <body> (JS re-parents it to escape
-       backdrop-filter stacking context on Android Chrome). Use nav#main-nav directly
-       so styles apply in both positions. */
+    /* Mobile slide-in drawer. nav#main-nav is a sibling of <header> (NOT a
+       child) — keep it that way: putting it inside an element that has
+       backdrop-filter/transform would turn that element into the containing
+       block for position:fixed and break the drawer. */
     nav#main-nav {
         position: fixed !important;
         top: 0 !important;
@@ -2152,12 +2141,14 @@ h1, h2, h3 {
 /* =========================================================
    Desktop Sidebar Layout (≥ 1025px)
    ========================================================= */
+/* This block is mutually exclusive with the ≤1024px mobile rules and comes
+   after the base rules it overrides, so plain specificity wins — no !important. */
 @media (min-width: 1025px) {
     /* Hide mobile-only controls */
-    .mobile-menu-btn { display: none !important; }
-    .mobile-bottom-nav { display: none !important; }
+    .mobile-menu-btn { display: none; }
+    .mobile-bottom-nav { display: none; }
     /* Hide the logo inside the header — sidebar-brand takes its place */
-    header .logo { display: none !important; }
+    header .logo { display: none; }
 
     /* Show sidebar brand */
     .sidebar-brand {
@@ -2171,104 +2162,104 @@ h1, h2, h3 {
 
     /* Fixed left sidebar */
     nav#main-nav {
-        position: fixed !important;
-        left: 0 !important;
-        top: 0 !important;
-        width: 220px !important;
-        height: 100vh !important;
-        flex-direction: column !important;
-        align-items: stretch !important;
-        justify-content: flex-start !important;
-        padding: 0 10px 16px !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        z-index: 100 !important;
-        border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 0 !important;
-        gap: 2px !important;
-        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3) !important;
-        background: #0c0f14 !important;
-        display: flex !important;
-        transform: none !important;
-        flex-wrap: nowrap !important;
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 220px;
+        height: 100vh;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        padding: 0 10px 16px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        z-index: 100;
+        border-right: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 0;
+        gap: 2px;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+        background: #0c0f14;
+        display: flex;
+        transform: none;
+        flex-wrap: nowrap;
     }
 
     /* Sidebar nav buttons */
     nav#main-nav button {
-        width: 100% !important;
-        text-align: left !important;
-        padding: 10px 12px !important;
-        border-radius: 8px !important;
-        font-size: 0.875rem !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 10px !important;
-        background: transparent !important;
-        border: none !important;
-        color: rgba(203, 213, 225, 0.85) !important;
-        min-height: 40px !important;
-        white-space: nowrap !important;
-        flex-shrink: 0 !important;
-        cursor: pointer !important;
-        transition: background 0.15s, color 0.15s !important;
+        width: 100%;
+        text-align: left;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: transparent;
+        border: none;
+        color: rgba(203, 213, 225, 0.85);
+        min-height: 40px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
     }
 
     nav#main-nav button:hover {
-        background: rgba(255, 255, 255, 0.07) !important;
-        color: #f1f5f9 !important;
+        background: rgba(255, 255, 255, 0.07);
+        color: #f1f5f9;
     }
 
     nav#main-nav button.active {
-        background: rgba(59, 130, 246, 0.18) !important;
-        color: #93c5fd !important;
+        background: rgba(59, 130, 246, 0.18);
+        color: #93c5fd;
     }
 
     nav#main-nav button i {
-        width: 18px !important;
-        text-align: center !important;
-        flex-shrink: 0 !important;
+        width: 18px;
+        text-align: center;
+        flex-shrink: 0;
     }
 
     nav#main-nav .logout-btn {
-        margin-top: auto !important;
-        background: rgba(239, 68, 68, 0.12) !important;
-        color: #fca5a5 !important;
-        border: 1px solid rgba(239, 68, 68, 0.2) !important;
+        margin-top: auto;
+        background: rgba(239, 68, 68, 0.12);
+        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.2);
     }
 
     nav#main-nav .logout-btn:hover {
-        background: rgba(239, 68, 68, 0.22) !important;
+        background: rgba(239, 68, 68, 0.22);
     }
 
     /* Section group labels */
     .mobile-nav-group-title {
-        display: block !important;
-        font-size: 0.65rem !important;
-        font-weight: 700 !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.06em !important;
-        color: rgba(148, 163, 184, 0.6) !important;
-        margin: 14px 0 4px 12px !important;
-        flex-shrink: 0 !important;
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: rgba(148, 163, 184, 0.6);
+        margin: 14px 0 4px 12px;
+        flex-shrink: 0;
     }
 
     /* Shift header and main content to the right of the sidebar */
     header {
-        margin-left: calc(220px + 12px) !important;
-        margin-right: 12px !important;
-        width: auto !important;
+        margin-left: calc(220px + 12px);
+        margin-right: 12px;
+        width: auto;
     }
 
     main {
-        padding-left: calc(220px + 20px) !important;
-        padding-right: 20px !important;
-        padding-bottom: 40px !important;
-        max-width: none !important;
+        padding-left: calc(220px + 20px);
+        padding-right: 20px;
+        padding-bottom: 40px;
+        max-width: none;
     }
 
-    /* Stats badge in sidebar */
+    /* Stats badge is hidden on desktop (it lives inside the sidebar nav) */
     #header-stats {
-        display: none !important;
+        display: none;
     }
 }
 
@@ -2889,6 +2880,50 @@ h1, h2, h3 {
     font-weight: 500;
     color: var(--text-color);
 }
+
+.admin-panel-hint {
+    margin: 6px 0 14px;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Health Check results */
+.diagnostics-results {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.diag-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+.diag-row .diag-icon {
+    flex-shrink: 0;
+    line-height: 1.5;
+}
+
+.diag-row .diag-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.diag-row .diag-body span {
+    color: var(--text-muted);
+}
+
+.diag-ok { border-color: rgba(16, 185, 129, 0.3); }
+.diag-warn { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.06); }
+.diag-fail { border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.06); }
 
 .admin-panel p {
     line-height: 1.6;
