@@ -244,16 +244,10 @@ nav button.active {
         display: flex;
     }
 
-    /* Fixed mobile nav menu issues:
-       1. Move main-nav out of sticky header context if possible,
-          but since it's HTML-bound, we must override the sticky container effect.
-       2. The sticky header with backdrop-filter creates a new containing block,
-          causing 'position: fixed' to be relative to the header instead of the viewport.
-       3. We use a high z-index and ensure it's truly viewport-fixed.
-    */
-    /* nav#main-nav may be inside <header> or moved to <body> (JS re-parents it to escape
-       backdrop-filter stacking context on Android Chrome). Use nav#main-nav directly
-       so styles apply in both positions. */
+    /* Mobile slide-in drawer. nav#main-nav is a sibling of <header> (NOT a
+       child) — keep it that way: putting it inside an element that has
+       backdrop-filter/transform would turn that element into the containing
+       block for position:fixed and break the drawer. */
     nav#main-nav {
         position: fixed !important;
         top: 0 !important;
@@ -2886,6 +2880,50 @@ h1, h2, h3 {
     font-weight: 500;
     color: var(--text-color);
 }
+
+.admin-panel-hint {
+    margin: 6px 0 14px;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Health Check results */
+.diagnostics-results {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.diag-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+.diag-row .diag-icon {
+    flex-shrink: 0;
+    line-height: 1.5;
+}
+
+.diag-row .diag-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.diag-row .diag-body span {
+    color: var(--text-muted);
+}
+
+.diag-ok { border-color: rgba(16, 185, 129, 0.3); }
+.diag-warn { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.06); }
+.diag-fail { border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.06); }
 
 .admin-panel p {
     line-height: 1.6;

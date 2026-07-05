@@ -2248,20 +2248,178 @@ def _ass_time_to_vtt(t: str) -> str:
         return '00:00:00.000'
 
 
+# ─── Remux-on-demand ─────────────────────────────────────────────────────────
+# Full transcoding is too slow on a Pi, but most MKVs carry H.264/HEVC video
+# that iOS plays natively — only the container is the problem. Remuxing
+# (ffmpeg -c copy) rewrites the container without re-encoding, so it runs at
+# disk speed. Incompatible audio (AC3/DTS/TrueHD) is converted to AAC, which
+# is an audio-only encode and still fast.
+
+REMUX_COPY_VIDEO = {"h264", "hevc", "mpeg4"}
+REMUX_COPY_AUDIO = {"aac", "mp3", "alac"}
+REMUX_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
 def _ffprobe_codecs(fs_path: str) -> tuple[str, str, float]:
-    return "", "", 0.0
+    """Return (video_codec, audio_codec, duration_seconds) of the first streams."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-of", "json",
+             "-show_entries", "format=duration",
+             "-show_entries", "stream=codec_type,codec_name",
+             fs_path],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        data = json.loads(result.stdout or "{}")
+        video, audio = "", ""
+        for s in data.get("streams", []):
+            if s.get("codec_type") == "video" and not video:
+                video = s.get("codec_name", "")
+            elif s.get("codec_type") == "audio" and not audio:
+                audio = s.get("codec_name", "")
+        duration = float(data.get("format", {}).get("duration", 0) or 0)
+        return video, audio, duration
+    except Exception as e:
+        logger.warning(f"ffprobe failed for {fs_path}: {e}")
+        return "", "", 0.0
 
-def _ios_output_paths(fs_path: str) -> tuple[str, str]:
-    return "", ""
 
-def _ios_transcode_worker(job_id: str, src_fs: str, out_fs: str) -> None:
-    pass
+def _remux_paths(fs_path: str) -> tuple[str, str]:
+    """Return (output_fs_path, output_web_path) for a source file.
+    Key includes size+mtime so a replaced source file gets a fresh remux."""
+    try:
+        st = os.stat(fs_path)
+        key = md5(f"{fs_path}|{st.st_size}|{int(st.st_mtime)}".encode()).hexdigest()[:16]
+    except OSError:
+        key = md5(fs_path.encode()).hexdigest()[:16]
+    out_fs = os.path.join(IOS_CACHE_DIR, f"{key}.mp4")
+    out_web = f"/data/.nomad_cache/ios/{key}.mp4"
+    return out_fs, out_web
 
 
+def _prune_remux_cache() -> None:
+    """Drop cached remuxes older than the TTL (best-effort)."""
+    try:
+        now = time_module.time()
+        for name in os.listdir(IOS_CACHE_DIR):
+            p = os.path.join(IOS_CACHE_DIR, name)
+            try:
+                if os.path.isfile(p) and now - os.path.getmtime(p) > REMUX_CACHE_TTL_SECONDS:
+                    os.remove(p)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _remux_worker(job_id: str, src_fs: str, out_fs: str, audio_copy: bool, duration: float) -> None:
+    tmp_out = out_fs + ".part.mp4"
+    cmd = [
+        "ffmpeg", "-y", "-i", src_fs,
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "copy", "-tag:v", "hvc1",  # hvc1 tag: no-op for h264, required for HEVC on iOS
+    ]
+    if audio_copy:
+        cmd += ["-c:a", "copy"]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
+    cmd += ["-sn", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", tmp_out]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        with _ios_transcodes_lock:
+            _ios_transcodes[job_id]["pid"] = proc.pid
+        for line in proc.stdout:
+            if line.startswith("out_time_ms=") and duration > 0:
+                try:
+                    done = int(line.split("=", 1)[1]) / 1_000_000
+                    pct = max(0.0, min(99.0, done / duration * 100))
+                    with _ios_transcodes_lock:
+                        _ios_transcodes[job_id]["progress"] = round(pct, 1)
+                except (ValueError, ZeroDivisionError):
+                    pass
+        proc.wait(timeout=3600)
+        if proc.returncode == 0 and os.path.getsize(tmp_out) > 0:
+            os.replace(tmp_out, out_fs)
+            with _ios_transcodes_lock:
+                _ios_transcodes[job_id].update({"status": "completed", "progress": 100.0})
+        else:
+            raise RuntimeError(f"ffmpeg exited with code {proc.returncode}")
+    except Exception as e:
+        logger.error(f"Remux failed for {src_fs}: {e}")
+        try:
+            os.remove(tmp_out)
+        except OSError:
+            pass
+        with _ios_transcodes_lock:
+            _ios_transcodes[job_id].update({"status": "failed", "error": str(e)})
+
+
+@router.post("/remux/start")
+def remux_start(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    """Rewrap a video into an iOS-friendly MP4 without re-encoding video.
+    Returns immediately with a job to poll, or 'completed' on cache hit."""
+    try:
+        src_fs = safe_fs_path_from_web_path(path)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not os.path.isfile(src_fs):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    _prune_remux_cache()
+    out_fs, out_web = _remux_paths(src_fs)
+    job_id = os.path.splitext(os.path.basename(out_fs))[0]
+
+    # Cache hit
+    if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
+        return {"status": "completed", "job_id": job_id, "progress": 100.0, "output_path": out_web}
+
+    # Already running?
+    with _ios_transcodes_lock:
+        job = _ios_transcodes.get(job_id)
+        if job and job["status"] == "running":
+            return {"status": "running", "job_id": job_id,
+                    "progress": job.get("progress", 0.0), "output_path": out_web}
+
+    video, audio, duration = _ffprobe_codecs(src_fs)
+    if video not in REMUX_COPY_VIDEO:
+        return {
+            "status": "unsupported",
+            "job_id": job_id,
+            "video_codec": video or "unknown",
+            "message": f"Video codec '{video or 'unknown'}' can't be rewrapped without a slow re-encode. Use VLC for this file.",
+        }
+
+    audio_copy = audio in REMUX_COPY_AUDIO
+    with _ios_transcodes_lock:
+        _ios_transcodes[job_id] = {"status": "running", "progress": 0.0,
+                                   "output_path": out_web, "error": ""}
+    threading.Thread(
+        target=_remux_worker, args=(job_id, src_fs, out_fs, audio_copy, duration),
+        daemon=True,
+    ).start()
+    return {"status": "running", "job_id": job_id, "progress": 0.0, "output_path": out_web}
+
+
+@router.get("/remux/status")
+def remux_status(job_id: str = Query(...), user_id: int = Depends(get_current_user_id)):
+    with _ios_transcodes_lock:
+        job = _ios_transcodes.get(job_id)
+        if job:
+            return {"status": job["status"], "progress": job.get("progress", 0.0),
+                    "output_path": job.get("output_path", ""), "error": job.get("error", "")}
+    # Server restarted mid-job or unknown id: report completed only if the file exists
+    out_fs = os.path.join(IOS_CACHE_DIR, f"{job_id}.mp4")
+    if os.path.isfile(out_fs) and os.path.getsize(out_fs) > 0:
+        return {"status": "completed", "progress": 100.0,
+                "output_path": f"/data/.nomad_cache/ios/{job_id}.mp4", "error": ""}
+    return {"status": "failed", "progress": 0.0, "output_path": "",
+            "error": "Job not found (server may have restarted). Start it again."}
+
+
+# Legacy endpoints kept for old cached clients — direct play passthrough.
 @router.post("/transcode/ios")
 def transcode_ios(path: str = Query(...), user_id: int = Depends(get_current_user_id)):
-    # Legacy endpoint: we no longer transcode on the server because it's too slow.
-    # Return direct play URL immediately.
     return {"status": "completed", "output_path": path}
 
 

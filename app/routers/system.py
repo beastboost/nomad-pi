@@ -2669,3 +2669,140 @@ def restore_backup(
     finally:
         if os.path.exists(temp_zip):
             os.remove(temp_zip)
+
+
+# ─── Diagnostics / Health Check ──────────────────────────────────────────────
+
+def _diag(check_id: str, name: str, status: str, message: str) -> dict:
+    """status: 'ok' | 'warn' | 'fail' | 'info'"""
+    return {"id": check_id, "name": name, "status": status, "message": message}
+
+
+@router.get("/diagnostics")
+def run_diagnostics(admin: dict = Depends(get_current_admin)):
+    """Health check with plain-English explanations, shown in the Admin panel."""
+    checks: List[dict] = []
+    is_linux = platform.system() == "Linux"
+
+    # 1. Disk space (data dir + root)
+    try:
+        for label, target in [("Storage (data)", os.path.abspath("data")), ("Storage (system)", "/")]:
+            if not os.path.exists(target):
+                continue
+            du = psutil.disk_usage(target)
+            free_gb = du.free / 1e9
+            if du.percent >= 95:
+                checks.append(_diag("disk", label, "fail",
+                    f"Almost full: {du.percent:.0f}% used, only {free_gb:.1f} GB free. Delete media or add a drive."))
+            elif du.percent >= 85:
+                checks.append(_diag("disk", label, "warn",
+                    f"{du.percent:.0f}% used, {free_gb:.1f} GB free. Consider freeing space soon."))
+            else:
+                checks.append(_diag("disk", label, "ok",
+                    f"{du.percent:.0f}% used, {free_gb:.1f} GB free."))
+    except Exception as e:
+        checks.append(_diag("disk", "Storage", "info", f"Could not read disk usage: {e}"))
+
+    # 2. Memory
+    try:
+        mem = psutil.virtual_memory()
+        avail_mb = mem.available / 1e6
+        if avail_mb < 100:
+            checks.append(_diag("memory", "Memory", "warn",
+                f"Only {avail_mb:.0f} MB free — the Pi may become sluggish. A reboot can help."))
+        else:
+            checks.append(_diag("memory", "Memory", "ok", f"{avail_mb:.0f} MB available."))
+    except Exception:
+        pass
+
+    # 3. CPU temperature (Pi-specific)
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            temp_c = int(f.read().strip()) / 1000
+        if temp_c >= 80:
+            checks.append(_diag("cputemp", "CPU temperature", "fail",
+                f"{temp_c:.0f}°C — throttling likely. Improve cooling/ventilation."))
+        elif temp_c >= 70:
+            checks.append(_diag("cputemp", "CPU temperature", "warn",
+                f"{temp_c:.0f}°C — getting warm. Check airflow around the Pi."))
+        else:
+            checks.append(_diag("cputemp", "CPU temperature", "ok", f"{temp_c:.0f}°C."))
+    except OSError:
+        pass  # not a Pi / no thermal zone
+
+    # 4. Port 53 conflict (the Pi-hole breaker)
+    if is_linux:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", "dnsmasq"],
+                capture_output=True, text=True, timeout=5)
+            if result.stdout.strip() == "active":
+                checks.append(_diag("port53", "DNS port 53", "fail",
+                    "The system dnsmasq service is running and hijacks DNS on your home network "
+                    "(breaks Pi-hole and other DNS servers). Re-run setup.sh to fix, or run: "
+                    "sudo systemctl disable --now dnsmasq && sudo systemctl mask dnsmasq"))
+            else:
+                checks.append(_diag("port53", "DNS port 53", "ok",
+                    "System dnsmasq is not running — no conflict with Pi-hole or other DNS servers on your network."))
+        except Exception:
+            checks.append(_diag("port53", "DNS port 53", "info", "Could not check dnsmasq status."))
+
+    # 5. Hotspot state
+    if is_linux:
+        try:
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"],
+                capture_output=True, text=True, timeout=10)
+            active = result.stdout.strip().splitlines()
+            hotspot_on = any(line.split(":")[0] == "NomadPi" for line in active if line)
+            wifi_client = [l.split(":")[0] for l in active
+                           if l and ":802-11-wireless:" in l and l.split(":")[0] != "NomadPi"]
+            if hotspot_on:
+                checks.append(_diag("hotspot", "Hotspot", "ok",
+                    "NomadPi hotspot is broadcasting (connect to it at http://10.42.0.1)."))
+            elif wifi_client:
+                checks.append(_diag("hotspot", "Hotspot", "info",
+                    f"Hotspot is off — connected to Wi-Fi network '{wifi_client[0]}' instead."))
+            else:
+                checks.append(_diag("hotspot", "Hotspot", "warn",
+                    "Hotspot is off and no Wi-Fi connection is active. If you're reading this over "
+                    "Ethernet that's fine; otherwise reboot to restore the hotspot."))
+        except Exception:
+            checks.append(_diag("hotspot", "Hotspot", "info", "Could not query NetworkManager."))
+
+    # 6. Internet reachability (informational — offline is normal when travelling)
+    try:
+        import socket as _socket
+        sock = _socket.create_connection(("1.1.1.1", 53), timeout=3)
+        sock.close()
+        checks.append(_diag("internet", "Internet", "ok",
+            "Online — debrid downloads and metadata lookups will work."))
+    except OSError:
+        checks.append(_diag("internet", "Internet", "info",
+            "Offline — the library still works; debrid and metadata need internet."))
+
+    # 7. ffmpeg available (needed for Convert-to-MP4 and subtitle conversion)
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        checks.append(_diag("ffmpeg", "ffmpeg", "ok", "Installed — video conversion and subtitles available."))
+    else:
+        checks.append(_diag("ffmpeg", "ffmpeg", "warn",
+            "Not installed — the Convert button and subtitle conversion won't work. "
+            "Install with: sudo apt install ffmpeg"))
+
+    # 8. App uptime
+    try:
+        proc = psutil.Process(os.getpid())
+        up_h = (datetime.now().timestamp() - proc.create_time()) / 3600
+        checks.append(_diag("uptime", "Server uptime", "info",
+            f"Running for {up_h:.1f} hours (v{VERSION})."))
+    except Exception:
+        pass
+
+    worst = "ok"
+    for c in checks:
+        if c["status"] == "fail":
+            worst = "fail"
+            break
+        if c["status"] == "warn":
+            worst = "warn"
+    return {"overall": worst, "checks": checks}

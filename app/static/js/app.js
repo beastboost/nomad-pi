@@ -1,4 +1,4 @@
-console.log("App v1.3.6 loaded - Code review fixes: SW cache versioning, keep-alive, cleanups");
+console.log("App v1.3.7 loaded - Convert-to-MP4, Health Check, auto cache stamping");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;
@@ -803,15 +803,10 @@ function toggleMobileMenu() {
     if (isOpen) {
         closeMobileMenu();
     } else if (nav) {
-        // Move nav to <body> before showing — the sticky header has backdrop-filter which
-        // creates a new stacking context on Android Chrome, causing position:fixed children
-        // to be offset relative to the header's document position instead of the viewport.
-        // Re-parenting to body fixes the menu being invisible when the page is scrolled down.
-        if (nav.parentElement !== document.body) {
-            nav._menuReturnParent = nav.parentElement;
-            nav._menuReturnSibling = nav.nextSibling;
-            document.body.appendChild(nav);
-        }
+        // Nav lives outside <header> (a plain sibling), so position:fixed is
+        // viewport-relative and no re-parenting is needed. (The old hack moved
+        // the nav to <body> to escape the header's backdrop-filter containing
+        // block — keep nav out of elements with transform/filter/backdrop-filter.)
         nav.classList.add('mobile-menu-open');
         backdrop.classList.add('show');
         if (menuBtn) menuBtn.textContent = '✕';
@@ -827,16 +822,6 @@ function closeMobileMenu() {
 
     if (nav) {
         nav.classList.remove('mobile-menu-open');
-        // Restore nav to its original position inside the header
-        if (nav._menuReturnParent) {
-            if (nav._menuReturnSibling) {
-                nav._menuReturnParent.insertBefore(nav, nav._menuReturnSibling);
-            } else {
-                nav._menuReturnParent.appendChild(nav);
-            }
-            nav._menuReturnParent = null;
-            nav._menuReturnSibling = null;
-        }
     }
     if (backdrop) backdrop.classList.remove('show');
     if (menuBtn) menuBtn.textContent = '☰';
@@ -2335,6 +2320,7 @@ function closeViewer() {
     // Cancel sleep timer, with a toast only if one was actually running
     if (_sleepTimerTimeout) showToast('Sleep timer cancelled', 'info');
     clearSleepTimer();
+    if (_remuxPollInterval) { clearInterval(_remuxPollInterval); _remuxPollInterval = null; }
     document.getElementById('sleep-timer-picker')?.remove();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
@@ -2605,6 +2591,8 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     const mimeType = getVideoMimeType(path);
     const { fullUrl, vlcUrl } = getExternalPlaybackUrls(streamUrl);
     const preferExternal = prefersExternalPlayback(ext, path);
+    // Containers worth rewrapping to MP4 (codec compatibility is checked server-side)
+    const canRemux = ['mkv', 'ts', 'm2ts', 'mts', 'avi', 'wmv', 'flv', 'mpg', 'mpeg'].includes(ext);
     const downloadName = (title ? String(title).replace(/[^a-z0-9]/gi, '_') : 'video') + safeExt;
 
     heading.innerHTML = `
@@ -2646,6 +2634,10 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
                 <button class="player-action-btn" title="Mark as watched" onclick="markAsWatched('${escapeHtml(path)}', 1)">
                     <span>✓</span><span class="btn-text">Watched</span>
                 </button>
+                ${canRemux ? `
+                <button class="player-action-btn" id="remux-btn" title="Convert to MP4 for iPhone/iPad — rewraps the file without quality loss" onclick="startRemux('${escapeHtml(path)}')">
+                    <span>📱</span><span class="btn-text">Convert</span>
+                </button>` : ''}
                 <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
                     <span>💾</span><span class="btn-text">Download</span>
                 </a>
@@ -2668,6 +2660,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     video.controls = true;
     video.preload = 'metadata';
     video.crossOrigin = 'anonymous';  // Enable CORS for better compatibility
+    video._streamUrl = streamUrl;     // current source; updated by remux swap
     const source = document.createElement('source');
     source.src = streamUrl;
     source.type = mimeType;
@@ -2733,8 +2726,9 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
         _reconnects++;
         const wasPlaying = !video.paused;
         showToast(`Stream dropped — reconnecting (${_reconnects}/${MAX_RECONNECTS})…`, 'warning', 3000);
-        // Cache-bust forces a fresh TCP connection to the server
-        video.src = streamUrl + '&_r=' + Date.now();
+        // Cache-bust forces a fresh TCP connection to the server.
+        // _streamUrl lives on the element so a remux swap redirects reconnects too.
+        video.src = (video._streamUrl || streamUrl) + '&_r=' + Date.now();
         video.load();
         video.addEventListener('loadedmetadata', () => {
             if (resumeAt > 1) video.currentTime = resumeAt;
@@ -2785,7 +2779,7 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
     // Detect iOS codec issues and offer VLC
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     if (isIOS && (ext === 'mkv' || path.toLowerCase().includes('hevc') || path.toLowerCase().includes('x265') || path.toLowerCase().includes('10bit'))) {
-        showToast('Format might have issues on iOS. Consider using VLC/Infuse.', 'warning', 6000);
+        showToast('Trouble playing this file? Tap 📱 Convert to rewrap it for iPhone/iPad (no quality loss).', 'info', 8000);
     }
 
     // Auto-detect and load subtitles
@@ -5195,6 +5189,36 @@ async function changePassword() {
     }
 }
 
+async function runDiagnostics() {
+    const btn = document.getElementById('diagnostics-btn');
+    const box = document.getElementById('diagnostics-results');
+    if (!box) return;
+    if (btn) btn.disabled = true;
+    box.innerHTML = '<div class="diag-row"><span class="diag-icon">⏳</span><span>Running checks…</span></div>';
+    try {
+        const res = await fetch(`${API_BASE}/system/diagnostics`, { headers: getAuthHeaders() });
+        if (res.status === 401) { logout(); return; }
+        if (res.status === 403) {
+            box.innerHTML = '<div class="diag-row diag-fail"><span class="diag-icon">🚫</span><span>Admin access required.</span></div>';
+            return;
+        }
+        const data = await res.json();
+        const icons = { ok: '✅', warn: '⚠️', fail: '❌', info: 'ℹ️' };
+        box.innerHTML = (data.checks || []).map(c => `
+            <div class="diag-row diag-${c.status}">
+                <span class="diag-icon">${icons[c.status] || 'ℹ️'}</span>
+                <div class="diag-body">
+                    <strong>${escapeHtml(c.name)}</strong>
+                    <span>${escapeHtml(c.message)}</span>
+                </div>
+            </div>`).join('') || '<div class="diag-row">No checks returned.</div>';
+    } catch (err) {
+        box.innerHTML = `<div class="diag-row diag-fail"><span class="diag-icon">❌</span><span>Health check failed: ${escapeHtml(String(err))}</span></div>`;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 async function rebuildLibrary() {
     try {
         const res = await fetch(`${API_BASE}/media/rebuild`, { 
@@ -6357,6 +6381,83 @@ function skipVideo(seconds) {
     const video = activeVideoEl;
     if (!video) return;
     video.currentTime = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + seconds));
+}
+
+// --- Remux-on-demand: rewrap MKV/TS to MP4 server-side without re-encoding ---
+let _remuxPollInterval = null;
+
+async function startRemux(path) {
+    const btn = document.getElementById('remux-btn');
+    const label = btn?.querySelector('.btn-text');
+    try {
+        const res = await fetch(`${API_BASE}/media/remux/start?path=${encodeURIComponent(path)}`, {
+            method: 'POST',
+            headers: getAuthHeaders()
+        });
+        if (res.status === 401) { logout(); return; }
+        const data = await res.json();
+
+        if (data.status === 'unsupported') {
+            showToast(data.message || 'This file needs a full re-encode — use the VLC button instead.', 'warning', 8000);
+            return;
+        }
+        if (data.status === 'failed') {
+            showToast('Convert failed: ' + (data.error || 'unknown error'), 'error', 6000);
+            return;
+        }
+        if (data.status === 'completed') {
+            swapToRemuxed(data.output_path);
+            return;
+        }
+
+        // Running: poll until done. The original stream keeps playing meanwhile.
+        if (btn) btn.disabled = true;
+        showToast('Converting in the background — playback continues meanwhile', 'info', 5000);
+        if (_remuxPollInterval) clearInterval(_remuxPollInterval);
+        _remuxPollInterval = setInterval(async () => {
+            try {
+                const r = await fetch(`${API_BASE}/media/remux/status?job_id=${encodeURIComponent(data.job_id)}`, {
+                    headers: getAuthHeaders()
+                });
+                const s = await r.json();
+                if (s.status === 'completed') {
+                    clearInterval(_remuxPollInterval);
+                    _remuxPollInterval = null;
+                    if (btn) btn.disabled = false;
+                    if (label) label.textContent = 'Convert';
+                    swapToRemuxed(s.output_path);
+                } else if (s.status === 'failed') {
+                    clearInterval(_remuxPollInterval);
+                    _remuxPollInterval = null;
+                    if (btn) btn.disabled = false;
+                    if (label) label.textContent = 'Convert';
+                    showToast('Convert failed: ' + (s.error || 'unknown error'), 'error', 6000);
+                } else if (label) {
+                    label.textContent = `${Math.round(s.progress || 0)}%`;
+                }
+            } catch (e) { /* transient poll failure — keep polling */ }
+        }, 2000);
+    } catch (e) {
+        showToast('Convert failed: ' + e.message, 'error', 6000);
+    }
+}
+
+function swapToRemuxed(outputPath) {
+    const video = activeVideoEl;
+    if (!video || !outputPath) return;
+    const token = getSessionToken();
+    let url = `${API_BASE}/media/stream?path=${encodeURIComponent(outputPath)}`;
+    if (token) url += '&token=' + token;
+    const t = video.currentTime;
+    const wasPlaying = !video.paused;
+    video._streamUrl = url; // future stall-reconnects use the MP4 too
+    video.src = url;
+    video.load();
+    video.addEventListener('loadedmetadata', () => {
+        if (t > 1) video.currentTime = t;
+        if (wasPlaying) video.play().catch(() => {});
+    }, { once: true });
+    showToast('Now playing the converted MP4 ✓', 'success', 4000);
 }
 
 function setSubtitleSize(pct) {

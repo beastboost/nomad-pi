@@ -631,3 +631,58 @@
 .ebook-reader-modal.fullscreen:hover .ebook-reader-controls {
     opacity: 1;
 }
+
+/* Search Panel */
+.ebook-search-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.ebook-search-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    background: inherit;
+    color: inherit;
+    font-size: 0.9rem;
+}
+
+.ebook-search-count {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    margin: 4px 0 8px;
+}
+
+.ebook-search-empty {
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+.ebook-search-result {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: rgba(128, 128, 128, 0.1);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    color: inherit;
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
+.ebook-search-result:hover {
+    background: rgba(128, 128, 128, 0.2);
+}
+
+.ebook-search-page {
+    display: inline-block;
+    font-weight: 700;
+    margin-right: 6px;
+    opacity: 0.8;
+}

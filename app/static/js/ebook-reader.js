@@ -37,6 +37,9 @@ class EBookReader {
                         </button>
                         <div class="ebook-title" id="ebook-title">Book Title</div>
                         <div class="ebook-header-actions">
+                            <button class="ebook-btn" onclick="ebookReader.toggleSearch()" title="Search (Ctrl+F)">
+                                <i class="fas fa-search"></i>
+                            </button>
                             <button class="ebook-btn" onclick="ebookReader.toggleBookmarks()" title="Bookmarks">
                                 <i class="fas fa-bookmark"></i>
                             </button>
@@ -136,6 +139,19 @@ class EBookReader {
                         </button>
                         <div id="ebook-bookmarks-list"></div>
                     </div>
+
+                    <!-- Search Panel -->
+                    <div id="ebook-search-panel" class="ebook-side-panel hidden">
+                        <h3>Search</h3>
+                        <div class="ebook-search-form">
+                            <input type="search" id="ebook-search-input" placeholder="Search in book…"
+                                   onkeydown="if (event.key === 'Enter') ebookReader.performSearch()">
+                            <button class="ebook-btn-primary" onclick="ebookReader.performSearch()">
+                                <i class="fas fa-search"></i> Search
+                            </button>
+                        </div>
+                        <div id="ebook-search-results"></div>
+                    </div>
                 </div>
             `;
             document.body.appendChild(modal);
@@ -143,12 +159,14 @@ class EBookReader {
             // Add keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 if (!modal.classList.contains('hidden')) {
+                    // Don't hijack keys while typing in the search box
+                    const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
                     switch(e.key) {
                         case 'ArrowLeft':
-                            this.previousPage();
+                            if (!typing) this.previousPage();
                             break;
                         case 'ArrowRight':
-                            this.nextPage();
+                            if (!typing) this.nextPage();
                             break;
                         case 'Escape':
                             this.close();
@@ -157,7 +175,7 @@ class EBookReader {
                         case 'F':
                             if (e.ctrlKey || e.metaKey) {
                                 e.preventDefault();
-                                // TODO: Add search functionality
+                                this.toggleSearch();
                             }
                             break;
                     }
@@ -542,6 +560,106 @@ class EBookReader {
         });
 
         panel.classList.toggle('hidden');
+    }
+
+    toggleSearch() {
+        this.togglePanel('ebook-search-panel');
+        const panel = document.getElementById('ebook-search-panel');
+        if (panel && !panel.classList.contains('hidden')) {
+            document.getElementById('ebook-search-input')?.focus();
+        }
+    }
+
+    async performSearch() {
+        const input = document.getElementById('ebook-search-input');
+        const resultsEl = document.getElementById('ebook-search-results');
+        const query = (input?.value || '').trim();
+        if (!query || !resultsEl) return;
+
+        if (this.bookType === 'comic') {
+            resultsEl.innerHTML = '<p class="ebook-search-empty">Comics have no text to search.</p>';
+            return;
+        }
+
+        resultsEl.innerHTML = '<p class="ebook-search-empty">Searching…</p>';
+        try {
+            const results = this.bookType === 'pdf'
+                ? await this.searchPDF(query)
+                : await this.searchEPUB(query);
+            this.renderSearchResults(results, query);
+        } catch (err) {
+            console.error('Search failed:', err);
+            resultsEl.innerHTML = '<p class="ebook-search-empty">Search failed. Try again.</p>';
+        }
+    }
+
+    async searchPDF(query) {
+        const needle = query.toLowerCase();
+        const results = [];
+        const MAX_RESULTS = 100;
+        for (let pageNum = 1; pageNum <= this.totalPages && results.length < MAX_RESULTS; pageNum++) {
+            const page = await this.pdfDoc.getPage(pageNum);
+            const content = await page.getTextContent();
+            const text = content.items.map(it => it.str).join(' ');
+            const haystack = text.toLowerCase();
+            let idx = haystack.indexOf(needle);
+            while (idx !== -1 && results.length < MAX_RESULTS) {
+                const start = Math.max(0, idx - 40);
+                const end = Math.min(text.length, idx + query.length + 40);
+                results.push({ page: pageNum, excerpt: (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '') });
+                idx = haystack.indexOf(needle, idx + needle.length);
+            }
+        }
+        return results;
+    }
+
+    async searchEPUB(query) {
+        if (!this.epubBook) return [];
+        const MAX_RESULTS = 100;
+        const spineItems = this.epubBook.spine?.spineItems || [];
+        const perItem = await Promise.all(spineItems.map(item =>
+            item.load(this.epubBook.load.bind(this.epubBook))
+                .then(() => {
+                    const found = item.find(query) || [];
+                    item.unload();
+                    return found;
+                })
+                .catch(() => [])
+        ));
+        return perItem.flat().slice(0, MAX_RESULTS)
+            .map(r => ({ cfi: r.cfi, excerpt: r.excerpt || '' }));
+    }
+
+    renderSearchResults(results, query) {
+        const resultsEl = document.getElementById('ebook-search-results');
+        if (!resultsEl) return;
+        if (!results.length) {
+            resultsEl.innerHTML = `<p class="ebook-search-empty">No matches for “${this.escapeText(query)}”.</p>`;
+            return;
+        }
+        this._searchResults = results;
+        resultsEl.innerHTML = `<p class="ebook-search-count">${results.length}${results.length >= 100 ? '+' : ''} match(es)</p>` +
+            results.map((r, i) => `
+                <button class="ebook-search-result" onclick="ebookReader.goToSearchResult(${i})">
+                    ${r.page ? `<span class="ebook-search-page">p. ${r.page}</span>` : ''}
+                    <span>${this.escapeText(r.excerpt)}</span>
+                </button>`).join('');
+    }
+
+    goToSearchResult(index) {
+        const r = this._searchResults?.[index];
+        if (!r) return;
+        if (this.bookType === 'pdf' && r.page) {
+            this.goToPage(r.page);
+        } else if (this.bookType === 'epub' && r.cfi && this.epubRendition) {
+            this.epubRendition.display(r.cfi);
+        }
+    }
+
+    escapeText(str) {
+        const div = document.createElement('div');
+        div.textContent = String(str);
+        return div.innerHTML;
     }
 
     loadTOC(toc) {
