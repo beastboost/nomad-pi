@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.7] - 2026-07-14
+
+### Added
+- **Convert to MP4 (📱 button)**: Rewraps MKV/TS/AVI files to iOS-friendly MP4 on the Pi without re-encoding video (`ffmpeg -c copy`). Incompatible audio (AC3/DTS/TrueHD) is converted to AAC. Playback continues during conversion and swaps over at the same position. Results cached for 7 days.
+- **Health Check panel (Admin)**: One-click diagnostics with plain-English results — port-53/Pi-hole conflict, disk space, memory, CPU temperature, hotspot state, internet reachability, ffmpeg presence, and uptime.
+- **Desktop sidebar layout**: Fixed left navigation sidebar on screens ≥1025px; iPads now get the mobile drawer menu instead of the cramped horizontal nav.
+- **Video stall auto-reconnect**: If a stream stalls for 10s, the player reconnects automatically and resumes from the same position (up to 8 attempts).
+- **WiFi switch warning**: Connecting to a new network now warns that hotspot users will be disconnected during the switch.
+
+### Fixed
+- **Pi-hole port 53 conflict**: The system dnsmasq service is now disabled and masked during setup — it was hijacking DNS on the home LAN. NetworkManager's own dnsmasq still serves the hotspot.
+- **Stale UI after updates**: Service worker now matches cached assets by exact URL and evicts old versions; `setup.sh`/`update.sh` stamp asset versions with the git commit automatically.
+- **Offline icons**: FontAwesome webfonts are pre-cached, so icons render offline instead of showing empty boxes.
+- **Mobile menu invisible**: Drawer CSS now targets the nav in its new position outside the header.
+- **Sleep timer toast spam**: "Sleep timer cancelled" only shows when a timer was actually running.
+- **SSID validation**: Networks with special characters (`!@#$&` etc.) can now be joined from the Admin panel.
+- **OS-image service**: `nomad-pi.service` in the OS builder used a wrong module path/working directory and could not start; keep-alive raised to 300s for long streams (also in setup.sh).
+- **NomadTransferTool**: Debrid queue shows items immediately with live progress; multi-file torrents download all files; cancelled downloads are no longer counted as successful; still-downloading items survive "Start Processing".
+
+### Removed
+- Stale debug session notes, one-off analysis docs, unreferenced screenshots, and debug probe artifacts from the repository root.
+
 ## [1.1.8] - 2026-03-14
 
 ### Added

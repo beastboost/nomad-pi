@@ -1,8 +1,0 @@
-[
-  {
-    "id": 1,
-    "username": "admin",
-    "is_admin": 1,
-    "must_change_password": 1
-  }
-]
