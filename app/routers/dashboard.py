@@ -430,8 +430,11 @@ last_network_check = {"time": 0, "bytes_sent": 0, "bytes_recv": 0}
 def get_system_stats() -> Dict:
     """Get current system statistics"""
     try:
-        # CPU
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+        # CPU — interval=None is non-blocking (returns % since the previous
+        # call). interval=0.1 blocks the asyncio event loop for 100ms per call;
+        # with multiple dashboard clients polling, that stalls all other
+        # requests. The dashboard polls frequently, so a baseline is always warm.
+        cpu_percent = psutil.cpu_percent(interval=None)
 
         # Temperature (Pi-specific)
         cpu_temp = None
@@ -724,10 +727,15 @@ async def get_session_commands(session_id: str, after_seq: int = 0, user_id: int
     return {"commands": cmds, "last_seq": last_seq}
 
 @router.post("/session/{session_id}/command")
-async def command_session(session_id: str, data: Dict):
+async def command_session(session_id: str, data: Dict, user_id: int = Depends(get_current_user_id)):
     action = (data or {}).get("action")
     if action not in ("pause", "resume", "stop"):
         raise HTTPException(status_code=400, detail="Invalid action")
+
+    # Only the session's owner may control it (siblings stop/resume enforce this).
+    existing = active_sessions.get(session_id)
+    if isinstance(existing, dict) and existing.get("user_id") not in (None, user_id):
+        raise HTTPException(status_code=403, detail="Not your session")
 
     if session_id in active_sessions:
         if action == "pause":

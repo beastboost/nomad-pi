@@ -1,10 +1,13 @@
 #!/bin/bash -e
 
-# Copy the service file
+# Copy the service files and first-boot script
 install -m 644 files/nomad-pi.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 644 files/nomad-pi-firstboot.service "${ROOTFS_DIR}/etc/systemd/system/"
+install -m 755 files/nomad-pi-firstboot.sh "${ROOTFS_DIR}/usr/local/sbin/"
 
 on_chroot << EOF
 systemctl enable nomad-pi.service
+systemctl enable nomad-pi-firstboot.service
 systemctl enable NetworkManager.service
 
 # Mask the system dnsmasq service so it never binds port 53 on all interfaces.

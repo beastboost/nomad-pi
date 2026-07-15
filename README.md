@@ -4,8 +4,6 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
 
 > **Note:** This project is a fork of [Jcorp Nomad](https://github.com/Jstudner/jcorp-nomad) by Jstudner, with significant enhancements and optimizations for mobile UX, PWA support, and additional features.
 
-> **Deprecation Notice:** AllDebrid's v4 API has been discontinued. Please migrate to the newest API. See [AllDebrid Documentation](https://docs.alldebrid.com) for details.
-
 ## 🚀 Key Features
 
 - **Modern Glassmorphism UI**: A stunning, responsive interface with dark mode and real-time glass effects.
@@ -20,6 +18,8 @@ A high-performance, sleek, and portable media server optimized for **Raspberry P
   - 🎵 **Music**: Full library indexing and web-based player.
   - 📚 **Books**: Integrated reader for PDF, EPUB, and Comic formats (CBR/CBZ).
   - 🖼️ **Gallery**: High-speed image and video browsing.
+- **📱 Convert to MP4**: One-tap rewrap of MKV/TS files for iPhone/iPad playback — no re-encoding, runs at disk speed on the Pi.
+- **🩺 Health Check**: Built-in diagnostics in the Admin panel detect common problems (Pi-hole/DNS conflicts, low disk, overheating) with plain-English fixes.
 
 ## 🛠️ Hardware Support
 
@@ -72,6 +72,8 @@ The system will automatically:
 1. Try to connect to any saved Wi-Fi networks
 2. Fall back to hotspot mode if no networks are available
 3. Allow you to manage Wi-Fi networks from the Admin panel
+
+> **Pi-hole friendly:** Setup disables the system `dnsmasq` service so Nomad Pi never hijacks DNS (port 53) on your home network. The hotspot uses NetworkManager's own DNS instance and is unaffected.
 
 ## 📂 File Transfer
 - **Web Upload**: Drag & drop files directly into the Admin panel.

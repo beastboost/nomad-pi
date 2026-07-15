@@ -33,3 +33,6 @@ apply_fixes.py
 
 # PlatformIO
 .pio/
+
+# Debug session artifacts
+.dbg/

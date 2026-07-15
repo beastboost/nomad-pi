@@ -1222,6 +1222,12 @@ def download_to_pi(api_key: str, download_url: str, filename: str,
     Returns the download_id for tracking progress.
     """
     from app.routers import media
+    # SSRF guard: the download URL is user-supplied. Block internal/loopback/
+    # link-local targets (e.g. cloud metadata at 169.254.169.254) BEFORE the
+    # worker fetches it. safe_head only ran for extension-less filenames, so a
+    # url with a normal extension bypassed all validation.
+    if not is_safe_external_url(download_url):
+        raise ValueError("Refusing to download from a non-public URL")
     raw_filename = str(filename or "").strip()
 
     def _cd_filename(cd: str) -> str:

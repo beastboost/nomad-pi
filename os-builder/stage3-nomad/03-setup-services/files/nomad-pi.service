@@ -5,9 +5,13 @@ After=network.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/opt/nomad-pi/app
+# Must run from the repo root: app/main.py uses absolute `from app import ...`
+# imports, which don't resolve when the working directory is app/ itself.
+WorkingDirectory=/opt/nomad-pi
 Environment="PATH=/opt/nomad-pi/venv/bin"
-ExecStart=/opt/nomad-pi/venv/bin/uvicorn main:app --host 0.0.0.0 --port 80 --timeout-keep-alive 300
+# Port 8000 matches setup.sh installs, the README, and mDNS URLs — and a
+# non-root user cannot bind port 80 anyway.
+ExecStart=/opt/nomad-pi/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 300
 Restart=always
 RestartSec=3
 
