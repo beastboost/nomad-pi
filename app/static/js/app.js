@@ -1,4 +1,5 @@
-console.log("App v1.3.7 loaded - Convert-to-MP4, Health Check, auto cache stamping");
+// Version lives in the VERSION file (served via the API); don't hardcode it here.
+console.log("Nomad Pi app loaded");
 const API_BASE = '/api';
 const UP_NEXT_QUEUE_KEY = 'nomadpi.upNextQueue';
 const UP_NEXT_QUEUE_LIMIT = 12;

@@ -2572,9 +2572,8 @@ def list_media_paged(
     if category not in ["movies", "shows", "music", "books", "gallery", "files"]:
         raise HTTPException(status_code=400, detail="Invalid category")
 
-    # Use cache if not rebuilding
+    # Use cache if not rebuilding (the lru_cache wrapper keys on its arguments)
     if not rebuild:
-        cache_key = build_cache_key(category, q, offset, limit, sort, genre, year)
         return _get_paged_data_cached(category, q, offset, limit, sort, genre, year, user_id)
 
     return _get_paged_data(category, q, offset, limit, sort, genre, year, rebuild, user_id)

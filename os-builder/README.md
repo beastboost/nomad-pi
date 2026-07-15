@@ -9,7 +9,9 @@ NomadOS is built on top of Raspberry Pi OS Lite (Debian Bookworm) and strips out
 1. **Python 3 & FFmpeg**: Native dependencies required for the backend.
 2. **Nomad Pi Backend**: The FastAPI backend is copied directly into `/opt/nomad-pi`.
 3. **Systemd Service**: `nomad-pi.service` is configured to launch the server instantly on boot.
-4. **NetworkManager & Hotspot**: If no known Wi-Fi network is found, the OS automatically broadcasts a `NomadPi-Setup` Wi-Fi hotspot so users can connect and configure it.
+4. **NetworkManager & Hotspot**: A first-boot service (`nomad-pi-firstboot.service`) creates the `NomadPi` hotspot (password `nomadpassword`), matching a setup.sh install. If no known Wi-Fi network is found, the hotspot broadcasts automatically; the web UI is at `http://10.42.0.1:8000`.
+
+> **Note:** The image path installs only the backend and hotspot. Extras that `setup.sh` configures (Samba shares, MiniDLNA, sudoers rules for the Admin panel's reboot/update buttons) are not baked in yet — run `setup.sh` on the booted image if you need those.
 
 ## How to Build (Windows)
 

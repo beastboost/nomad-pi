@@ -1,0 +1,13 @@
+[Unit]
+Description=Nomad Pi first-boot configuration (hotspot setup)
+After=NetworkManager.service
+Wants=NetworkManager.service
+ConditionPathExists=!/etc/nomad-pi/.firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nomad-pi-firstboot.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
