@@ -477,14 +477,19 @@ def _guess_show_dir_from_episode_path(ep_fs: str) -> str:
 
 _poster_cache = OrderedDict()
 _poster_cache_max = 2048
+# find_local_poster runs from both the background index-build thread and
+# Starlette's request threadpool; unsynchronized pop/popitem on the shared
+# OrderedDict can raise KeyError/RuntimeError. Guard every access with a lock.
+_poster_cache_lock = threading.Lock()
 
 def find_local_poster(dir_path: str, filename: str = None):
-    global _poster_cache
-    if dir_path in _poster_cache and not filename:
-        v = _poster_cache.pop(dir_path)
-        _poster_cache[dir_path] = v
-        return v
-    
+    if not filename:
+        with _poster_cache_lock:
+            if dir_path in _poster_cache:
+                v = _poster_cache.pop(dir_path)
+                _poster_cache[dir_path] = v  # move to MRU
+                return v
+
     candidates = ["poster.jpg", "poster.jpeg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "cover.png"]
     if filename:
         # Add {filename}.jpg and {filename}.png as candidates (used by NomadTransferTool for movies)
@@ -501,12 +506,13 @@ def find_local_poster(dir_path: str, filename: str = None):
                 break
             except Exception:
                 continue
-    
+
     # Only cache if we didn't use a specific filename (since filename-specific posters are not per-directory)
     if not filename:
-        _poster_cache[dir_path] = v
-        if len(_poster_cache) > _poster_cache_max:
-            _poster_cache.popitem(last=False)
+        with _poster_cache_lock:
+            _poster_cache[dir_path] = v
+            if len(_poster_cache) > _poster_cache_max:
+                _poster_cache.popitem(last=False)
     return v
 
 def infer_show_name(filename: str):
@@ -2073,7 +2079,12 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
             "-show_streams", 
             fs_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # timeout guards against a crafted/truncated file making ffprobe hang
+        # and pinning a threadpool worker forever.
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="ffprobe timed out")
         if result.returncode != 0:
             return {"error": "ffprobe failed", "details": result.stderr}
         
@@ -2121,19 +2132,23 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
     # The middleware already checks for token, but we can double check here if needed
     # However, if it got here, it's either authenticated or it's a path that doesn't start with /data or /api/media
 
-    # We should ensure the path is valid
+    # Resolve and validate the path. Every branch must go through
+    # safe_fs_path_from_web_path, which confines access to the data root and
+    # allowed external mounts (/media, /mnt). The previous `else: fs_path = path`
+    # fallthrough let any absolute path (e.g. /etc/passwd, the app DB) be read.
     if not os.path.isabs(path) and not path.startswith("/data/"):
-        # Try to resolve relative to BASE_DIR if it's not absolute
-        fs_path = os.path.abspath(os.path.join(BASE_DIR, path.lstrip("/")))
+        # Relative path — resolve under the data root, then confirm it stayed there
+        candidate = os.path.abspath(os.path.join(BASE_DIR, path.lstrip("/")))
+        if not (candidate + os.sep).startswith(os.path.abspath(BASE_DIR) + os.sep):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        fs_path = candidate
     else:
-        if path.startswith("/data/"):
-            try:
-                fs_path = safe_fs_path_from_web_path(path)
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid data path")
-        else:
-            # Absolute path (e.g. D:\Music)
-            fs_path = path
+        try:
+            fs_path = safe_fs_path_from_web_path(path)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path")
 
     if not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -4228,13 +4243,23 @@ async def download_subtitle(data: Dict = Body(...), user_id: int = Depends(get_c
             sub_r = await client.get(link, timeout=30)
             if sub_r.status_code != 200:
                 raise HTTPException(status_code=502, detail="Failed to fetch subtitle file")
-        # Save next to video file
-        video_fs = "/data" + video_path[5:] if video_path.startswith("/data/") else video_path
+        # Save next to the video file. Resolve through the path guard so a
+        # crafted video_path can't write outside the media tree, and sanitize
+        # the language tag (also user-controlled) to a short alphanumeric code.
+        try:
+            video_fs = safe_fs_path_from_web_path(video_path)
+        except HTTPException:
+            raise HTTPException(status_code=400, detail="Invalid video_path")
+        lang = re.sub(r'[^a-zA-Z0-9_-]', '', str(data.get("lang") or "en"))[:8] or "en"
         base = os.path.splitext(video_fs)[0]
-        sub_path = base + "." + (data.get("lang") or "en") + ".srt"
+        sub_path = base + "." + lang + ".srt"
         with open(sub_path, "wb") as f:
             f.write(sub_r.content)
-        web_path = "/data" + sub_path.replace("/data", "", 1) if sub_path.startswith("/data") else sub_path
+        # Map the filesystem path back to a /data web path for the client
+        try:
+            web_path = fs_path_to_web_path(sub_path)
+        except Exception:
+            web_path = None
         return {"status": "ok", "path": web_path}
     except HTTPException:
         raise

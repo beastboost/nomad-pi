@@ -1622,7 +1622,7 @@ function renderMediaList(category, files) {
                 <div class="track-actions">
                     ${canEdit ? '<button class="icon-btn rename-btn" title="Rename">✏</button>' : ''}
                     <button class="btn-play-track music-play" title="Play">▶</button>
-                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
+                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem('${jsAttr(file.path)}')">🗑</button>` : ''}
                 </div>
             `;
             const playBtn = div.querySelector('.music-play');
@@ -1645,7 +1645,7 @@ function renderMediaList(category, files) {
                 <div class="file-actions">
                     ${canEdit ? '<button class="icon-btn rename-btn" title="Rename">✏</button>' : ''}
                     <a href="${escapeHtml(file.path)}" target="_blank" class="btn-open-file">Open</a>
-                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem(${JSON.stringify(file.path)})">🗑</button>` : ''}
+                    ${canEdit ? `<button class="icon-btn" title="Delete" onclick="deleteItem('${jsAttr(file.path)}')">🗑</button>` : ''}
                 </div>
             `;
             const renameBtn = div.querySelector('.rename-btn');
@@ -1714,7 +1714,7 @@ function renderMediaList(category, files) {
                         <a href="${escapeHtml(file.path)}" download class="book-action-btn" title="Download"><i class="fas fa-download"></i></a>
                         ${canView ? '<button class="book-action-btn book-view-btn" title="Read"><i class="fas fa-eye"></i> Read</button>' : ''}
                         ${canEdit ? '<button class="book-action-btn book-rename-btn" title="Rename"><i class="fas fa-pen"></i></button>' : ''}
-                        ${canEdit ? `<button class="book-action-btn book-del-btn" title="Delete" onclick="event.stopPropagation();deleteItem(${JSON.stringify(file.path)})"><i class="fas fa-trash"></i></button>` : ''}
+                        ${canEdit ? `<button class="book-action-btn book-del-btn" title="Delete" onclick="event.stopPropagation();deleteItem('${jsAttr(file.path)}')"><i class="fas fa-trash"></i></button>` : ''}
                     </div>
                 </div>
             `;
@@ -1958,12 +1958,16 @@ async function confirmRenameModal() {
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Renaming…'; }
     try {
         await renameMediaPath(renameModalState.oldPath, newPath);
+        // Capture state before closeRenameModal() resets it
+        const refreshCallback = renameModalState.refreshCallback;
+        const isShowPart = renameModalState.isShowPart;
+        const oldName = renameModalState.oldName;
         closeRenameModal();
-        if (renameModalState.refreshCallback) renameModalState.refreshCallback();
-        if (renameModalState.isShowPart) {
-            if (showsState.level !== 'shows' && showsState.showName === renameModalState.oldName) {
+        if (refreshCallback) refreshCallback();
+        if (isShowPart) {
+            if (showsState.level !== 'shows' && showsState.showName === oldName) {
                 showsState.showName = newBase;
-            } else if (showsState.level === 'episodes' && showsState.seasonName === renameModalState.oldName) {
+            } else if (showsState.level === 'episodes' && showsState.seasonName === oldName) {
                 showsState.seasonName = newBase;
             }
             await loadShowsLibrary();
@@ -2322,6 +2326,7 @@ function closeViewer() {
     if (_sleepTimerTimeout) showToast('Sleep timer cancelled', 'info');
     clearSleepTimer();
     if (_remuxPollInterval) { clearInterval(_remuxPollInterval); _remuxPollInterval = null; }
+    cancelNextEpisodeCountdown(); // don't auto-play the next episode after an explicit close
     document.getElementById('sleep-timer-picker')?.remove();
     if (activeVideoProgressInterval) {
         clearInterval(activeVideoProgressInterval);
@@ -2629,14 +2634,14 @@ function openVideoViewer(path, title, startSeconds = 0, posterUrl = null) {
                 <button class="player-action-btn" id="sleep-timer-btn" title="Sleep timer — stop playback after a set time" onclick="openSleepTimer()">
                     <i class="fas fa-moon"></i><span class="btn-text" id="sleep-timer-label">Sleep</span>
                 </button>
-                <button class="player-action-btn" title="Subtitles" onclick="openSubtitleSearch('${escapeHtml(path)}', '${safeTitle}')">
+                <button class="player-action-btn" title="Subtitles" onclick="openSubtitleSearch('${jsAttr(path)}', '${jsAttr(title || 'Video')}')">
                     <span>💬</span><span class="btn-text">Subs</span>
                 </button>
-                <button class="player-action-btn" title="Mark as watched" onclick="markAsWatched('${escapeHtml(path)}', 1)">
+                <button class="player-action-btn" title="Mark as watched" onclick="markAsWatched('${jsAttr(path)}', 1)">
                     <span>✓</span><span class="btn-text">Watched</span>
                 </button>
                 ${canRemux ? `
-                <button class="player-action-btn" id="remux-btn" title="Convert to MP4 for iPhone/iPad — rewraps the file without quality loss" onclick="startRemux('${escapeHtml(path)}')">
+                <button class="player-action-btn" id="remux-btn" title="Convert to MP4 for iPhone/iPad — rewraps the file without quality loss" onclick="startRemux('${jsAttr(path)}')">
                     <span>📱</span><span class="btn-text">Convert</span>
                 </button>` : ''}
                 <a href="${streamUrl}&download=true" class="player-action-btn" title="Download for offline playback">
@@ -3725,6 +3730,24 @@ function escapeHtml(str) {
         .replaceAll("'", '&#039;');
 }
 
+// Safely embed an arbitrary string as a single-quoted JS string literal inside
+// an inline HTML handler, e.g. onclick="fn('${jsAttr(path)}')".
+// escapeHtml() alone is WRONG here: the HTML parser decodes &#039; back to a raw
+// apostrophe before the JS runs, so a path like "Ocean's Eleven.mkv" breaks the
+// literal (SyntaxError) and a crafted name becomes an XSS vector. We first
+// JS-escape backslashes/quotes/newlines, then HTML-escape the attribute context.
+function jsAttr(value) {
+    return String(value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 async function updateDashboardSession(sessionId, path, title, state, currentTime, duration, posterUrl) {
     if (!sessionId || !path) return;
     const headers = getAuthHeaders();
@@ -4091,10 +4114,10 @@ async function loadWifiStatus() {
                     const info = await infoRes.json();
                     if (details) {
                         if (info.mode === 'wifi' && info.ssid) {
-                            let detailStr = `Connected to: <strong>${info.ssid}</strong>`;
-                            if (info.ip) detailStr += ` • IP: ${info.ip}`;
-                            if (info.bitrate) detailStr += ` • ${info.bitrate}`;
-                            if (info.frequency) detailStr += ` • ${info.frequency}`;
+                            let detailStr = `Connected to: <strong>${escapeHtml(info.ssid)}</strong>`;
+                            if (info.ip) detailStr += ` • IP: ${escapeHtml(info.ip)}`;
+                            if (info.bitrate) detailStr += ` • ${escapeHtml(info.bitrate)}`;
+                            if (info.frequency) detailStr += ` • ${escapeHtml(info.frequency)}`;
                             details.innerHTML = detailStr;
                             if (icon) icon.textContent = '📶';
                         } else if (info.mode === 'hotspot') {
@@ -4151,8 +4174,8 @@ async function scanWifi() {
                 const info = document.createElement('div');
                 info.innerHTML = `
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-weight:600; font-size:1.05em;">${net.ssid}</span>
-                        ${isEncrypted ? '<span style="font-size:0.8em; opacity:0.6;" title="' + net.security + '">🔒</span>' : ''}
+                        <span style="font-weight:600; font-size:1.05em;">${escapeHtml(net.ssid)}</span>
+                        ${isEncrypted ? '<span style="font-size:0.8em; opacity:0.6;" title="' + escapeHtml(net.security) + '">🔒</span>' : ''}
                     </div>
                     <div style="font-size:0.85em; color:var(--text-muted); margin-top:4px;">
                         <span style="color:${signalColor}; font-weight:bold;">${net.signal}%</span> ${signalIcon} 
@@ -5611,70 +5634,6 @@ async function unmountDrive(mountpoint) {
     }
 }
 
-async function changePassword() {
-    const current = document.getElementById('change-pwd-current').value;
-    const newPass = document.getElementById('change-pwd-new').value;
-    const confirm = document.getElementById('change-pwd-confirm').value;
-
-    if (!current || !newPass || !confirm) {
-        alert('Please fill in all password fields.');
-        return;
-    }
-
-    if (newPass !== confirm) {
-        alert('New passwords do not match.');
-        return;
-    }
-
-    if (newPass.length < 8) {
-        alert('New password must be at least 8 characters long.');
-        return;
-    }
-
-    if (!/[A-Z]/.test(newPass)) {
-        alert('New password must contain at least one uppercase letter.');
-        return;
-    }
-
-    if (!/[a-z]/.test(newPass)) {
-        alert('New password must contain at least one lowercase letter.');
-        return;
-    }
-
-    if (!/[0-9]/.test(newPass)) {
-        alert('New password must contain at least one digit.');
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/change-password`, {
-            method: 'POST',
-            headers: { 
-                ...getAuthHeaders(),
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({
-                current_password: current,
-                new_password: newPass
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-            alert('Password updated successfully!');
-            // Clear fields
-            document.getElementById('change-pwd-current').value = '';
-            document.getElementById('change-pwd-new').value = '';
-            document.getElementById('change-pwd-confirm').value = '';
-        } else {
-            alert(data.detail || 'Failed to update password.');
-        }
-    } catch (e) {
-        console.error('Error updating password:', e);
-        alert('Error updating password. See console for details.');
-    }
-}
-
 async function loadProfileUI() {
     const nameEl = document.getElementById('profile-name');
     const avatarEl = document.getElementById('profile-avatar');
@@ -6195,7 +6154,18 @@ function parseEpisodeNumber(filename) {
 }
 
 // Show countdown modal for next episode
+let _nextEpisodeCountdown = null;
+
+// Cancel an in-progress "Next Episode" countdown and remove its overlay.
+function cancelNextEpisodeCountdown() {
+    if (!_nextEpisodeCountdown) return;
+    clearInterval(_nextEpisodeCountdown.interval);
+    _nextEpisodeCountdown.overlay?.remove();
+    _nextEpisodeCountdown = null;
+}
+
 function showNextEpisodeCountdown(nextEpisode, onPlay) {
+    cancelNextEpisodeCountdown(); // never stack two countdowns
     const overlay = document.createElement('div');
     overlay.style.cssText = `
         position: fixed;
@@ -6239,20 +6209,19 @@ function showNextEpisodeCountdown(nextEpisode, onPlay) {
         countdown--;
         if (timer) timer.textContent = countdown;
         if (countdown <= 0) {
-            clearInterval(interval);
-            document.body.removeChild(overlay);
+            cancelNextEpisodeCountdown();
             onPlay();
         }
     }, 1000);
 
+    _nextEpisodeCountdown = { interval, overlay };
+
     document.getElementById('cancel-autoplay').onclick = () => {
-        clearInterval(interval);
-        document.body.removeChild(overlay);
+        cancelNextEpisodeCountdown();
     };
 
     document.getElementById('play-now').onclick = () => {
-        clearInterval(interval);
-        document.body.removeChild(overlay);
+        cancelNextEpisodeCountdown();
         onPlay();
     };
 }
@@ -6286,11 +6255,11 @@ async function findDuplicates() {
             html += `<h4 style="margin-top:20px; margin-bottom:10px; color:var(--accent-color);">File Duplicates (${fileCount})</h4>`;
             data.file_duplicates.forEach(dup => {
                 html += `<div style="margin-bottom:15px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
-                    <div style="font-weight:600; margin-bottom:5px;">${dup.name}</div>
+                    <div style="font-weight:600; margin-bottom:5px;">${escapeHtml(dup.name)}</div>
                     <div style="font-size:0.85em; color:var(--text-muted);">Size: ${(dup.size / 1024 / 1024).toFixed(2)} MB • ${dup.count} copies</div>
                     <div style="margin-top:8px; font-size:0.85em;">`;
                 dup.paths.forEach((path, i) => {
-                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${path}</div>`;
+                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${escapeHtml(path)}</div>`;
                 });
                 html += `</div></div>`;
             });
@@ -6300,11 +6269,11 @@ async function findDuplicates() {
             html += `<h4 style="margin-top:20px; margin-bottom:10px; color:var(--accent-color);">Content Duplicates (${contentCount})</h4>`;
             data.content_duplicates.forEach(dup => {
                 html += `<div style="margin-bottom:15px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px;">
-                    <div style="font-weight:600; margin-bottom:5px;">${dup.title || 'Unknown'}</div>
-                    <div style="font-size:0.85em; color:var(--text-muted);">IMDb: ${dup.imdb_id} • ${dup.count} copies</div>
+                    <div style="font-weight:600; margin-bottom:5px;">${escapeHtml(dup.title || 'Unknown')}</div>
+                    <div style="font-size:0.85em; color:var(--text-muted);">IMDb: ${escapeHtml(dup.imdb_id)} • ${dup.count} copies</div>
                     <div style="margin-top:8px; font-size:0.85em;">`;
                 dup.paths.forEach((path, i) => {
-                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${path}</div>`;
+                    html += `<div style="padding:4px 0; opacity:${i === 0 ? '1' : '0.6'};">${i === 0 ? '✓' : '✕'} ${escapeHtml(path)}</div>`;
                 });
                 html += `</div></div>`;
             });
@@ -6633,7 +6602,7 @@ function renderHomeCard(item, type) {
         `<div class="home-card-progress"><div class="home-card-progress-fill" style="width:${pct}%"></div></div>` : '';
     const watched = item.watched ? '<div class="watched-badge"><i class="fas fa-check"></i></div>' : '';
     const yearLabel = item.year ? `<span class="home-card-year">${item.year}</span>` : '';
-    return `<div class="home-card" onclick="openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', ${item.progress?.current_time || 0})">
+    return `<div class="home-card" onclick="openVideoViewer('${jsAttr(path)}', '${jsAttr(title)}', ${item.progress?.current_time || 0})">
         <div class="home-card-poster">
             ${poster ? `<img src="${escapeHtml(poster)}" loading="lazy" onerror="this.style.display='none'">` : '<div class="home-card-no-poster"><i class="fas fa-film"></i></div>'}
             <div class="home-card-play-icon"><i class="fas fa-play"></i></div>
@@ -6709,12 +6678,12 @@ function renderWatchlistCard(item) {
     const checkBadge = (path.startsWith('http') || path.includes('magnet')) ?
         `<div class="cached-check-badge" id="check-${md5(path)}">Checking...</div>` : '';
 
-    return `<div class="media-item" onclick="openVideoViewer('${escapeHtml(path)}', '${title.replace(/'/g,"\\'")}', 0)">
+    return `<div class="media-item" onclick="openVideoViewer('${jsAttr(path)}', '${jsAttr(title)}', 0)">
         <div class="poster-shell">
             ${poster ? `<img class="poster-img" src="${escapeHtml(poster)}" loading="lazy" onerror="this.style.display='none'">` : ''}
             <div class="poster-play"></div>
             ${checkBadge}
-            <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${escapeHtml(path)}', '${escapeHtml(category)}', '${title.replace(/'/g,"\\'")}', '${escapeHtml(poster)}')">
+            <button class="watchlist-btn active" title="Remove from watchlist" onclick="event.stopPropagation(); toggleWatchlist('${jsAttr(path)}', '${jsAttr(category)}', '${jsAttr(title)}', '${jsAttr(poster)}')">
                 <i class="fas fa-heart"></i>
             </button>
         </div>
@@ -6875,8 +6844,8 @@ async function performGlobalSearch(q) {
             const path = escapeHtml(item.path || '');
             const cat = escapeHtml(item.category || item.type || '');
             const poster = item.poster ? escapeHtml(item.poster) : '';
-            return `<div class="search-result-item" onclick="closeGlobalSearch(); openVideoViewer('${path}', '${title.replace(/'/g,"\\'")}', 0)">
-                ${poster ? `<img class="search-result-poster" src="${poster}" onerror="this.style.display='none'">` : '<div class="search-result-poster search-result-no-poster"><i class="fas fa-film"></i></div>'}
+            return `<div class="search-result-item" onclick="closeGlobalSearch(); openVideoViewer('${jsAttr(path)}', '${jsAttr(title)}', 0)">
+                ${poster ? `<img class="search-result-poster" src="${escapeHtml(poster)}" onerror="this.style.display='none'">` : '<div class="search-result-poster search-result-no-poster"><i class="fas fa-film"></i></div>'}
                 <div class="search-result-info">
                     <div class="search-result-title">${title}</div>
                     <div class="search-result-cat">${cat}</div>
@@ -7518,8 +7487,8 @@ async function debridSearch() {
         }
         resultsList.innerHTML = data.results.map(r => `
             <div class="glass-card" style="padding:1rem;margin-bottom:.5rem;cursor:pointer;display:flex;gap:1rem;align-items:center"
-                 onclick="debridSelectTitle('${r.imdb_id}','${escapeHtml(r.title).replace(/'/g, "\\'") }','${mediaType}','${r.year || ''}')">
-                ${r.poster ? `<img src="${r.poster}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
+                 onclick="debridSelectTitle('${jsAttr(r.imdb_id)}','${jsAttr(r.title)}','${jsAttr(mediaType)}','${jsAttr(r.year || '')}')">
+                ${r.poster ? `<img src="${escapeHtml(r.poster)}" style="width:50px;height:75px;object-fit:cover;border-radius:4px" alt="">` : '<div style="width:50px;height:75px;background:var(--glass-bg);border-radius:4px;display:flex;align-items:center;justify-content:center"><i class="fas fa-film" style="color:var(--text-secondary)"></i></div>'}
                 <div>
                     <strong>${escapeHtml(r.title)}</strong> <span style="color:var(--text-secondary)">(${r.year || '?'})</span>
                     <div style="font-size:.8rem;color:var(--text-secondary)">${r.imdb_id} &middot; ${r.type || mediaType}</div>
@@ -7629,7 +7598,7 @@ async function renderTorrentResults(results, imdbId) {
         const warningLine = isRD && t.rd_warning
             ? `<div style="font-size:.78rem;color:${t.rd_status === 'likely_blocked' ? '#ff8a80' : 'var(--text-muted)'};margin-top:.35rem">${escapeHtml(t.rd_warning)}</div>`
             : '';
-        const escapedName = escapeHtml(t.name).replace(/'/g, "\\'");
+        const escapedName = jsAttr(t.name);
         return `
             <div class="glass-card debrid-torrent-card">
                 <div class="debrid-torrent-info">
@@ -7643,7 +7612,7 @@ async function renderTorrentResults(results, imdbId) {
                     ${warningLine}
                 </div>
                 <div class="debrid-torrent-actions">
-                    <button onclick="debridAddMagnet('${t.info_hash}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
+                    <button onclick="debridAddMagnet('${jsAttr(t.info_hash)}',${t.file_idx != null ? t.file_idx : 'null'},'${escapedName}')" class="primary small" title="${isRD && t.rd_warning ? escapeHtml(t.rd_warning) : (isCached ? 'Instantly available — stream or download' : addTitle)}">
                         <i class="fas ${isCached ? 'fa-play' : 'fa-magnet'}"></i> ${isCached ? 'Watch' : 'Add'}
                     </button>
                 </div>

@@ -52,6 +52,35 @@ def test_diagnostics_requires_admin(client):
     assert res.status_code in (401, 403)
 
 
+def test_settings_get_not_readable_unauthenticated(client):
+    """GET /settings returns provider secrets — must never be open."""
+    res = client.get("/api/system/settings")
+    assert res.status_code in (401, 403)
+
+
+def test_settings_omdb_requires_auth(client):
+    res = client.get("/api/system/settings/omdb")
+    assert res.status_code in (401, 403)
+
+
+def test_dashboard_command_requires_auth(client):
+    """The session command endpoint must not be anonymous (it can stop
+    anyone's playback)."""
+    res = client.post("/api/dashboard/session/whatever/command", json={"action": "stop"})
+    assert res.status_code in (401, 403)
+
+
+def test_single_settings_post_route():
+    """Exactly one POST /settings handler must be registered — a permissive
+    duplicate previously shadowed the allowlisted one."""
+    from app.routers import system as system_router
+    posts = [
+        r for r in system_router.router.routes
+        if getattr(r, "path", "") == "/settings" and "POST" in getattr(r, "methods", set())
+    ]
+    assert len(posts) == 1
+
+
 def test_login_rejects_bad_credentials(client):
     res = client.post("/api/auth/login", json={"username": "admin", "password": "definitely-wrong-password"})
     assert res.status_code in (400, 401, 403)

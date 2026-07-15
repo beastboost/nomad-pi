@@ -45,12 +45,12 @@ class FormatDriveRequest(BaseModel):
     fstype: str = "ext4"
 
 @router.get("/settings/omdb")
-def get_omdb_key(user_id: int = Depends(get_current_user_id)):
+def get_omdb_key(admin: dict = Depends(get_current_admin)):
     key = database.get_setting("omdb_api_key")
     return {"key": key or ""}
 
 @router.post("/settings/omdb")
-def save_omdb_key(request: OmdbKeyRequest, user_id: int = Depends(get_current_user_id)):
+def save_omdb_key(request: OmdbKeyRequest, admin: dict = Depends(get_current_admin)):
     logger.info(f"Saving OMDb key: {request.key[:4]}... (len={len(request.key)})")
     try:
         database.set_setting("omdb_api_key", request.key)
@@ -66,22 +66,19 @@ class SettingRequest(BaseModel):
     value: str
 
 @router.get("/settings")
-def get_settings(user_id: int = Depends(get_current_user_id)):
-    """Get all settings (admin only)"""
+def get_settings(admin: dict = Depends(get_current_admin)):
+    """Get all settings — ADMIN ONLY: the response includes secret API keys
+    (Real-Debrid, AllDebrid, TorBox, Tailscale, OpenSubtitles). This was
+    previously readable by any authenticated user."""
     return database.get_all_settings()
 
 # NOTE: /storage/info is defined further down (the detailed version with a
 # per-drive breakdown). A duplicate stub here used to shadow it and return a
 # raw tuple, breaking the admin storage chart and disk-full warnings.
-
-@router.post("/settings")
-def save_setting(request: SettingRequest, user_id: int = Depends(get_current_user_id)):
-    """Save a setting (admin only)"""
-    try:
-        database.set_setting(request.key, request.value)
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#
+# NOTE: POST /settings lives further down (save_setting_endpoint) with an
+# allowlist of settable key prefixes. A permissive duplicate here used to
+# shadow it and let any authenticated user write ANY setting key.
 
 @public_router.get("/status")
 def get_system_status():
@@ -2500,14 +2497,17 @@ def download_backup(admin: dict = Depends(get_current_admin)):
 
 # ── Settings (generic key/value save) ─────────────────────────────────────────
 @router.post("/settings")
-def save_setting_endpoint(data: dict = Body(...), user_id: int = Depends(get_current_user_id)):
-    """Save a single settings key/value pair."""
+def save_setting_endpoint(data: dict = Body(...), admin: dict = Depends(get_current_admin)):
+    """Save a single settings key/value pair (admin only).
+
+    Settings here are server-global (storage targets, provider keys, UI
+    defaults), so writes are restricted to admins and to a known allowlist of
+    key prefixes — never an arbitrary key, which could clobber internal state."""
     key = data.get("key")
     value = data.get("value", "")
     if not key:
         raise HTTPException(status_code=400, detail="key is required")
-    # Restrict which keys can be set via this generic endpoint
-    allowed_prefixes = ("opensubtitles_", "ui.", "player.", "dlna.", "theme")
+    allowed_prefixes = ("opensubtitles_", "ui.", "player.", "dlna.", "theme", "storage.")
     if not any(str(key).startswith(p) for p in allowed_prefixes):
         raise HTTPException(status_code=403, detail="Key not allowed via this endpoint")
     database.set_setting(str(key), str(value))

@@ -791,6 +791,9 @@ def download_to_pi(body: DownloadBody, user_id: int = Depends(get_current_user_i
             body.url, body.filename, body.category, body.is_show,
         )
         return {"ok": True, "download_id": download_id}
+    except ValueError as e:
+        # e.g. SSRF guard rejected the URL — a client error, not a server fault
+        raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Download failed: {e}")
 
