@@ -115,6 +115,11 @@ echo "Stamping static asset versions with $STAMP..."
 sed -i -E "s/\?v=[0-9a-zA-Z._-]+/?v=$STAMP/g" app/static/index.html
 sed -i -E "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = 'nomad-pi-$STAMP'/" app/static/sw.js
 
+# Vendor the front-end's icon font and typeface so the box works offline.
+if [ -x scripts/vendor-assets.sh ]; then
+    bash scripts/vendor-assets.sh || true
+fi
+
 update_status 50 "Installing system dependencies..."
 echo "Installing/Updating system dependencies..."
 # Ensure all required system packages are present

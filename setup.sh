@@ -340,6 +340,11 @@ echo "Stamping static asset versions with $STAMP..."
 sed -i -E "s/\?v=[0-9a-zA-Z._-]+/?v=$STAMP/g" "$CURRENT_DIR/app/static/index.html"
 sed -i -E "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = 'nomad-pi-$STAMP'/" "$CURRENT_DIR/app/static/sw.js"
 
+# Vendor the front-end's icon font and typeface so the box works offline.
+if [ -x "$CURRENT_DIR/scripts/vendor-assets.sh" ]; then
+    bash "$CURRENT_DIR/scripts/vendor-assets.sh" || true
+fi
+
 # Create service file
 sudo bash -c "cat > $SERVICE_FILE" <<EOL
 [Unit]
