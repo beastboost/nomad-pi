@@ -395,9 +395,11 @@ img { display: block; max-width: 100%; }
     overflow-x: auto;
     padding: 0 20px 4px;
 }
-.rail-item { flex: 0 0 110px; cursor: pointer; background: none; border: none; padding: 0; text-align: left; color: inherit; }
+.rail-item { flex: 0 0 110px; min-width: 0; cursor: pointer; background: none; border: none; padding: 0; text-align: left; color: inherit; }
 .rail-item .art { width: 110px; height: 165px; }
 .tile-title {
+    min-width: 0;
+    max-width: 100%;
     font-size: 12.5px;
     margin-top: 7px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -411,10 +413,10 @@ img { display: block; max-width: 100%; }
 /* Poster grid */
 .grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
 }
-.grid-item { cursor: pointer; background: none; border: none; padding: 0; text-align: left; color: inherit; }
+.grid-item { cursor: pointer; background: none; border: none; padding: 0; text-align: left; color: inherit; min-width: 0; }
 .grid-item .art { width: 100%; aspect-ratio: 2 / 3; }
 .grid-item .art i { font-size: 28px; }
 .grid-item .tile-title { font-size: 13px; margin-top: 8px; line-height: 1.3; }
@@ -759,7 +761,7 @@ img { display: block; max-width: 100%; }
    Server
    ══════════════════════════════════════════════════════════════════════════ */
 
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .stat {
     border-radius: var(--radius-md);
     background: var(--color-surface);
@@ -1086,6 +1088,7 @@ img { display: block; max-width: 100%; }
     .detail-art { max-width: 900px; }
     .detail-actions, .detail-note, .screen-scroll > div { max-width: 900px; }
     .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .grid-item { min-width: 0; }
     .rail { max-width: 900px; }
 
     .mini-player {
@@ -1280,7 +1283,7 @@ img { display: block; max-width: 100%; }
 /* Home quick-links when the rails are thin */
 .quick-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     padding: 0 20px;
 }
