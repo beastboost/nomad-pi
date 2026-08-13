@@ -2230,8 +2230,10 @@ def get_system_info(user_id: int = Depends(get_current_user_id)):
     
     return info
 
-@router.get("/diagnostics")
-def get_system_diagnostics(user_id: int = Depends(get_current_user_id)):
+# Dependency checks. Called by run_diagnostics() below, which is the single
+# public /diagnostics endpoint — this used to carry its own @router.get
+# decorator and shadowed that endpoint, so the richer checks never ran.
+def _dependency_diagnostics() -> dict:
     """Check system for missing dependencies and common issues"""
     diagnostics = {
         "status": "healthy",
@@ -2796,6 +2798,22 @@ def run_diagnostics(admin: dict = Depends(get_current_admin)):
             f"Running for {up_h:.1f} hours (v{VERSION})."))
     except Exception:
         pass
+
+    # 9. Optional dependencies (comic extraction, MiniDLNA, …). These used to
+    # live behind a duplicate /diagnostics route that shadowed this one, so
+    # they never reached the client; fold them into the same check list.
+    try:
+        dep = _dependency_diagnostics()
+        for issue in dep.get("issues", []):
+            checks.append(_diag(
+                "dependency", issue.get("component", "Dependency"), "fail",
+                f"{issue.get('message', '')} {issue.get('fix', '')}".strip()))
+        for warn in dep.get("warnings", []):
+            checks.append(_diag(
+                "dependency", warn.get("component", "Dependency"), "warn",
+                f"{warn.get('message', '')} {warn.get('fix', '')}".strip()))
+    except Exception as e:
+        logger.warning(f"Dependency diagnostics failed: {e}")
 
     worst = "ok"
     for c in checks:

@@ -1,10 +1,10 @@
-const CACHE_NAME = 'nomad-pi-v1.4.6';
+const CACHE_NAME = 'nomad-pi-v2.0.0';
 
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/css/style.css',
+  '/css/nocturne.css',
   '/js/app.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -12,15 +12,11 @@ const APP_SHELL = [
   '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
-  // FontAwesome CSS
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  // FontAwesome webfonts — these are what the CSS references for icons to render
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.ttf',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-regular-400.woff2',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-regular-400.ttf',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-brands-400.woff2',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-brands-400.ttf',
+  // Phosphor icon CSS + webfonts (the design system's icon set)
+  'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css',
+  'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css',
+  'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/Phosphor.woff2',
+  'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/Phosphor-Fill.woff2',
   // Google Fonts CSS (font files are cached on first use via stale-while-revalidate)
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
 ];
@@ -97,7 +93,7 @@ self.addEventListener('fetch', (event) => {
 
   // Static assets + fonts + images + CDN resources: stale-while-revalidate
   const isCdnAsset =
-    url.hostname.includes('cdnjs.cloudflare.com') ||
+    url.hostname.includes('unpkg.com') ||
     url.hostname.includes('fonts.googleapis.com') ||
     url.hostname.includes('fonts.gstatic.com');
 
