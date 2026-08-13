@@ -6,12 +6,17 @@
     <meta name="robots" content="noindex, nofollow">
     <title>Nomad Pi</title>
     <link rel="icon" href="data:,">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
-    <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
-    <link rel="stylesheet" href="css/nocturne.css?v=1782010000">
-    <link rel="manifest" href="manifest.json?v=1782010000">
+    <!-- Vendored first so an offline Pi renders fully; scripts/vendor-assets.sh
+         populates /vendor at setup and update time. If it has not run, each
+         link falls back to the CDN via onerror. -->
+    <link rel="stylesheet" href="vendor/phosphor/regular.css"
+          onerror="this.onerror=null;this.href='https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css'">
+    <link rel="stylesheet" href="vendor/phosphor/fill.css"
+          onerror="this.onerror=null;this.href='https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css'">
+    <link rel="stylesheet" href="vendor/inter/inter.css"
+          onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'">
+    <link rel="stylesheet" href="css/nocturne.css?v=1782012000">
+    <link rel="manifest" href="manifest.json?v=1782012000">
     <meta name="theme-color" content="#161826">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -268,6 +273,6 @@
     </nav>
 </div>
 
-<script src="js/app.js?v=1782010000"></script>
+<script src="js/app.js?v=1782012000"></script>
 </body>
 </html>

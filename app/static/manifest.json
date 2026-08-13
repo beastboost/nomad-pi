@@ -1,13 +1,13 @@
 {
   "name": "Nomad Pi Media Server",
   "short_name": "Nomad Pi",
-  "version": "1.3.3",
+  "version": "2.0.0",
   "description": "Your portable media server for movies, shows, music and more.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#3b82f6",
-  "orientation": "any",
+  "background_color": "#161826",
+  "theme_color": "#161826",
+  "orientation": "portrait-primary",
   "id": "nomad-pi-media-server",
   "scope": "/",
   "icons": [
@@ -45,28 +45,27 @@
   "categories": ["entertainment", "utilities"],
   "shortcuts": [
     {
-      "name": "Movies",
-      "url": "/#movies",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Shows",
-      "url": "/#shows",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
-    },
-    {
-      "name": "Music",
-      "url": "/#music",
+      "name": "Library",
+      "short_name": "Library",
+      "url": "/#library",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Downloads",
-      "url": "/#debrid",
+      "short_name": "Downloads",
+      "url": "/#downloads",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Admin",
-      "url": "/#admin",
+      "name": "Server",
+      "short_name": "Server",
+      "url": "/#server",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "url": "/#search",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]

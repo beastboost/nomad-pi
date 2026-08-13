@@ -12,6 +12,12 @@ const APP_SHELL = [
   '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
+  // Vendored icon + type assets (scripts/vendor-assets.sh). Same-origin, so
+  // these are the ones that actually matter for an offline first load.
+  '/vendor/phosphor/regular.css',
+  '/vendor/phosphor/fill.css',
+  '/vendor/inter/inter.css',
+  // CDN fallbacks — fetched opportunistically, never block activation
   // Phosphor icon CSS + webfonts (the design system's icon set)
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css',
@@ -36,19 +42,26 @@ const API_CACHE_WHITELIST = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Only same-origin assets block activation. Cross-origin CDN requests are
+  // fetched opportunistically outside waitUntil: on a Pi with no internet
+  // (the normal travel case) they hang until the socket gives up, which used
+  // to stall activation ~16s and delay offline support exactly when it is
+  // needed most.
+  const local = APP_SHELL.filter((a) => !a.startsWith('http'));
+  const remote = APP_SHELL.filter((a) => a.startsWith('http'));
+
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Pre-caching app shell and fonts');
-      // allSettled so a single CDN miss doesn't abort everything
-      return Promise.allSettled(
-        APP_SHELL.map((asset) =>
-          cache.add(new Request(asset, { mode: 'cors' })).catch((err) => {
-            console.warn('[SW] Failed to pre-cache:', asset, err);
-          })
-        )
-      );
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(local.map((asset) => cache.add(asset)))
+    )
   );
+
+  // Best-effort, non-blocking; failures are expected and harmless offline.
+  caches.open(CACHE_NAME).then((cache) => {
+    remote.forEach((asset) => {
+      cache.add(new Request(asset, { mode: 'cors' })).catch(() => {});
+    });
+  });
 });
 
 self.addEventListener('activate', (event) => {

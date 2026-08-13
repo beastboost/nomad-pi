@@ -1373,6 +1373,61 @@ async function runSearch(q) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   Install (PWA)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let _installPrompt = null;
+
+const isStandalone = () =>
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true;
+
+const isIOS = () =>
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function canOfferInstall() {
+    return !isStandalone() && (!!_installPrompt || isIOS());
+}
+
+async function runInstall() {
+    if (_installPrompt) {
+        _installPrompt.prompt();
+        try {
+            const { outcome } = await _installPrompt.userChoice;
+            if (outcome === 'accepted') toast('Installing Nomad Pi…', 'success');
+        } catch {}
+        _installPrompt = null;
+        loadSettings();
+        return;
+    }
+    if (isIOS()) {
+        openSheet(`
+          <div class="kicker" style="margin-bottom:12px">Add to Home Screen</div>
+          <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:var(--text-70)">
+            iOS installs web apps from the Share menu rather than a prompt.
+          </p>
+          <div class="list">
+            <div class="list-row row-rule">
+              <i class="ph ph-export list-icon"></i>
+              <div class="list-body"><div class="list-title">1 · Tap Share</div>
+              <div class="list-sub">The square with an arrow, in the Safari toolbar</div></div>
+            </div>
+            <div class="list-row row-rule">
+              <i class="ph ph-plus-square list-icon"></i>
+              <div class="list-body"><div class="list-title">2 · Add to Home Screen</div>
+              <div class="list-sub">Scroll down the share sheet to find it</div></div>
+            </div>
+            <div class="list-row row-rule">
+              <i class="ph ph-check list-icon"></i>
+              <div class="list-body"><div class="list-title">3 · Add</div>
+              <div class="list-sub">Nomad Pi opens full screen, without the browser bars</div></div>
+            </div>
+          </div>`);
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    Settings
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -1389,6 +1444,21 @@ function loadSettings() {
         </div>
       </div>
       <div class="list" style="margin-top:18px">
+        ${canOfferInstall() ? `
+          <button class="list-row list-row-tall row-rule" data-set="install">
+            <i class="ph ph-device-mobile list-icon"></i>
+            <div class="list-body">
+              <div class="list-title">Install Nomad Pi</div>
+              <div class="list-sub">Run full screen, without the browser bars</div>
+            </div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>` : ''}
+        ${isStandalone() ? `
+          <div class="list-row list-row-tall row-rule">
+            <i class="ph ph-check-circle list-icon" style="color:var(--color-accent)"></i>
+            <div class="list-body"><div class="list-title">Installed</div>
+            <div class="list-sub">Running as an app on this device</div></div>
+          </div>` : ''}
         <button class="list-row list-row-tall row-rule" data-set="password">
           <i class="ph ph-lock-key list-icon"></i>
           <div class="list-body"><div class="list-title">Change password</div></div>
@@ -1477,6 +1547,7 @@ document.addEventListener('click', async (e) => {
     if (t.dataset.act) { serverAction(t.dataset.act); return; }
     if (t.dataset.net) { toast('Manage this from the Server tab on a desktop browser for now.', 'info'); return; }
     if (t.dataset.set === 'password') { openPasswordSheet(); return; }
+    if (t.dataset.set === 'install') { runInstall(); return; }
 
     if (t.dataset.remux) { startRemux(t.dataset.remux); return; }
 
@@ -1598,13 +1669,29 @@ function wire() {
    Boot
    ══════════════════════════════════════════════════════════════════════════ */
 
+/* Manifest shortcuts and shared links arrive as /#library, /#downloads,
+   /#server, /#search — route them instead of dumping the user on Home. */
+function routeFromHash() {
+    const h = (location.hash || '').replace(/^#/, '').toLowerCase();
+    if (!h) return false;
+    if (TAB_SCREENS[h]) { goTab(h); return true; }
+    if (h === 'search') {
+        goTab('home');
+        push('search');
+        setTimeout(() => $('#search-input')?.focus(), 80);
+        return true;
+    }
+    if (h === 'settings') { goTab('server'); push('settings'); loadSettings(); return true; }
+    return false;
+}
+
 async function startApp() {
     $('#login-screen').classList.add('hidden');
     $('#app-shell').classList.remove('hidden');
     try { S.profile = await api('/auth/profile'); } catch { S.profile = null; }
     const dev = $('#home-device');
     if (dev) dev.textContent = 'Nomad Pi';
-    goTab('home');
+    if (!routeFromHash()) goTab('home');
 }
 
 async function boot() {
@@ -1631,6 +1718,19 @@ async function boot() {
         $('#login-screen').classList.remove('hidden');
     }
 }
+
+// Chrome/Edge fire this instead of showing their own prompt; stash it so the
+// Settings row can trigger the real install dialog on demand.
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    _installPrompt = e;
+    if (S.screen === 'settings') loadSettings();
+});
+window.addEventListener('appinstalled', () => {
+    _installPrompt = null;
+    toast('Nomad Pi installed', 'success');
+    if (S.screen === 'settings') loadSettings();
+});
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));

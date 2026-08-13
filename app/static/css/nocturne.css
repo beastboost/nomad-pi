@@ -5,7 +5,8 @@
    value that a variable already carries. See _ds readme (Nocturne).
    ══════════════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Inter is loaded by index.html (vendored first, CDN fallback) — no @import
+   here, so an offline Pi never blocks stylesheet parsing on a CDN request. */
 
 :root {
     --color-bg: #161826;
