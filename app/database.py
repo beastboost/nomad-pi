@@ -101,7 +101,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS progress (
                 user_id INTEGER,
                 path TEXT,
-                current_time REAL,
+                "current_time" REAL,
                 duration REAL,
                 play_count INTEGER DEFAULT 0,
                 last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -465,10 +465,10 @@ def update_progress(user_id: int, path: str, current_time: float, duration: floa
     try:
         c = conn.cursor()
         c.execute('''
-            INSERT INTO progress (user_id, path, current_time, duration, last_played, play_count)
+            INSERT INTO progress (user_id, path, "current_time", duration, last_played, play_count)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 0)
             ON CONFLICT(user_id, path) DO UPDATE SET
-                current_time = excluded.current_time,
+                "current_time" = excluded."current_time",
                 duration = COALESCE(NULLIF(excluded.duration, 0), progress.duration),
                 last_played = CURRENT_TIMESTAMP
         ''', (user_id, path, current_time, duration))
@@ -486,7 +486,7 @@ def increment_play_count(user_id: int, path: str):
         ''', (user_id, path))
         if c.rowcount == 0:
             c.execute('''
-                INSERT INTO progress (user_id, path, current_time, duration, play_count, last_played)
+                INSERT INTO progress (user_id, path, "current_time", duration, play_count, last_played)
                 VALUES (?, ?, 0, 0, 1, CURRENT_TIMESTAMP)
             ''', (user_id, path))
         conn.commit()
@@ -498,7 +498,7 @@ def get_progress(user_id: int, path: str) -> Optional[dict]:
     try:
         c = conn.cursor()
         c.execute('''
-            SELECT current_time, duration, last_played 
+            SELECT "current_time", duration, last_played 
             FROM progress 
             WHERE user_id = ? AND path = ?
         ''', (user_id, path))
@@ -514,7 +514,7 @@ def get_all_progress(user_id: int):
     try:
         c = conn.cursor()
         c.execute('''
-            SELECT path, current_time, duration, last_played 
+            SELECT path, "current_time", duration, last_played 
             FROM progress 
             WHERE user_id = ?
         ''', (user_id,))
@@ -900,7 +900,7 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
         # We always join or simulate progress to keep sorting logic consistent
         if user_id is not None:
             sql = '''
-                SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
+                SELECT l.*, p."current_time", p.duration, p.play_count, p.last_played
                 FROM library_index l
                 LEFT JOIN progress p ON l.path = p.path AND p.user_id = ?
                 WHERE l.category = ?
@@ -908,9 +908,9 @@ def query_library_index(category: str, q: str = None, offset: int = 0, limit: in
             params = [user_id, category]
         else:
             sql = '''
-                SELECT l.*, p.current_time, p.duration, p.play_count, p.last_played
+                SELECT l.*, p."current_time", p.duration, p.play_count, p.last_played
                 FROM library_index l
-                LEFT JOIN (SELECT NULL as path, NULL as current_time, NULL as duration, 0 as play_count, NULL as last_played) p ON 1=0
+                LEFT JOIN (SELECT NULL as path, NULL as "current_time", NULL as duration, 0 as play_count, NULL as last_played) p ON 1=0
                 WHERE l.category = ?
             '''
             params = [category]
@@ -1306,7 +1306,7 @@ def get_recently_watched(user_id: int, limit: int = 20) -> List[Dict]:
     try:
         c = conn.cursor()
         c.execute('''
-            SELECT p.path, p.current_time, p.duration, p.play_count, p.last_played,
+            SELECT p.path, p."current_time", p.duration, p.play_count, p.last_played,
                    fm.title, fm.year, fm.poster, fm.media_type, fm.plot, fm.rated, fm.genre
             FROM progress p
             LEFT JOIN file_metadata fm ON p.path = fm.path
@@ -1347,7 +1347,7 @@ def get_most_watched(user_id: int, limit: int = 20) -> List[Dict]:
     try:
         c = conn.cursor()
         c.execute('''
-            SELECT p.path, p.current_time, p.duration, p.play_count, p.last_played,
+            SELECT p.path, p."current_time", p.duration, p.play_count, p.last_played,
                    fm.title, fm.year, fm.poster, fm.media_type, fm.plot, fm.rated, fm.genre
             FROM progress p
             LEFT JOIN file_metadata fm ON p.path = fm.path
@@ -1435,7 +1435,7 @@ def mark_watched(user_id: int, path: str, watched: bool = True):
         c = conn.cursor()
         if watched:
             c.execute('''
-                INSERT INTO progress (user_id, path, current_time, duration, play_count, watched, last_played)
+                INSERT INTO progress (user_id, path, "current_time", duration, play_count, watched, last_played)
                 VALUES (?, ?, 0, 0, 1, 1, CURRENT_TIMESTAMP)
                 ON CONFLICT(user_id, path) DO UPDATE SET
                     watched = 1,
@@ -1444,7 +1444,7 @@ def mark_watched(user_id: int, path: str, watched: bool = True):
             ''', (user_id, path))
         else:
             c.execute('''
-                UPDATE progress SET watched = 0, current_time = 0 WHERE user_id=? AND path=?
+                UPDATE progress SET watched = 0, "current_time" = 0 WHERE user_id=? AND path=?
             ''', (user_id, path))
         conn.commit()
     finally:

@@ -132,6 +132,25 @@ def migrate():
             )
         ''')
     
+    # ── Repair progress rows corrupted by the CURRENT_TIME keyword bug ──
+    # "current_time" was written unquoted in SQL, so SQLite substituted its
+    # CURRENT_TIME keyword and stored a clock string ("18:26:57") instead of
+    # the playback offset. Those rows make float() throw in /media/resume, so
+    # Continue watching silently showed nothing. Clear the bad values; the
+    # duration survives, and progress rebuilds as things are watched again.
+    try:
+        c.execute("""SELECT COUNT(*) FROM progress
+                     WHERE typeof("current_time") = 'text'
+                       AND "current_time" LIKE '__:__:__'""")
+        bad = c.fetchone()[0]
+        if bad:
+            print(f"Repairing {bad} progress row(s) corrupted by the CURRENT_TIME bug...")
+            c.execute("""UPDATE progress SET "current_time" = 0
+                         WHERE typeof("current_time") = 'text'
+                           AND "current_time" LIKE '__:__:__'""")
+    except sqlite3.Error as e:
+        print(f"Progress repair skipped: {e}")
+
     conn.commit()
     conn.close()
     print("Migration completed.")

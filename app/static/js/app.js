@@ -364,9 +364,11 @@ async function loadHome() {
     }
 
     // Recently added
+    let recentCount = 0;
     try {
         const data = await api('/media/recently_added?limit=12');
         const items = (data.items || []).filter(i => i.path);
+        recentCount = items.length;
         $('#home-recent-wrap').classList.toggle('hidden', items.length === 0);
         $('#home-recent').innerHTML = items.map(i => railCard({
             path: i.path,
@@ -377,6 +379,45 @@ async function loadHome() {
     } catch {
         $('#home-recent-wrap').classList.add('hidden');
     }
+
+    renderHomeExtras(recentCount);
+}
+
+/* Home should never be a greeting over an empty page. Below the rails sit
+   jump-off points into every library, and — when the box has nothing indexed
+   at all — a direct route to fixing that. */
+async function renderHomeExtras(recentCount) {
+    let wrap = $('#home-extras');
+    if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'home-extras';
+        wrap.className = 'section';
+        $('#screen-home .screen-scroll').appendChild(wrap);
+    }
+
+    const hasResume = !$('#home-hero-wrap').classList.contains('hidden');
+    const empty = !hasResume && !recentCount;
+
+    wrap.innerHTML = `
+      <div class="section-head"><div class="kicker">Jump in</div></div>
+      <div class="quick-grid">
+        ${LIB_TABS.map(t => `
+          <button class="quick" data-quick="${t.key}">
+            <i class="${escapeHtml(t.icon)}"></i>${escapeHtml(t.label)}
+          </button>`).join('')}
+      </div>
+      ${empty ? `
+        <div class="card card-lg" style="margin:22px 20px 0">
+          <div class="health-title">Nothing indexed yet</div>
+          <div class="health-note" style="margin-bottom:12px">
+            Add media to the Pi, pull something in from Downloads, or run a scan
+            if the files are already there.
+          </div>
+          <div class="btn-row">
+            <button class="btn" data-tab="downloads"><i class="ph ph-arrow-circle-down"></i>Downloads</button>
+            <button class="btn btn-primary" data-act="scan"><i class="ph ph-arrows-clockwise"></i>Scan now</button>
+          </div>
+        </div>` : ''}`;
 }
 
 function renderHero(item) {
@@ -722,7 +763,10 @@ function playVideo(path, at = 0) {
     });
     video.addEventListener('play',  () => { setPlayIcon(true); requestWake(); throttledSession('playing', true); });
     video.addEventListener('pause', () => { setPlayIcon(false); releaseWake(); saveProgress(); throttledSession('paused', true); });
-    video.addEventListener('ended', () => { setPlayIcon(false); saveProgress(true); throttledSession('stopped', true); });
+    video.addEventListener('ended', () => {
+        setPlayIcon(false); saveProgress(true); throttledSession('stopped', true);
+        if (typeof offerNextEpisode === 'function') offerNextEpisode(V.path);
+    });
 
     // Stall detection → reconnect. 'waiting' fires on normal buffering too, so
     // only a stall that has not resolved after 10s is treated as a dead stream.
@@ -789,6 +833,7 @@ function reconnectVideo() {
 }
 
 function stopVideo() {
+    if (typeof cancelNextEpisode === 'function') cancelNextEpisode();
     clearInterval(V.saveTimer); V.saveTimer = null;
     if (V.stallTimer) { clearTimeout(V.stallTimer); V.stallTimer = null; }
     clearInterval(_remuxPoll); _remuxPoll = null;
@@ -1101,28 +1146,89 @@ async function renderTorrents() {
     }
 }
 
+/* Grabbing a release is a three-step chain, not one call:
+     1. /debrid/magnet   — adds it to the provider and returns restricted links
+     2. /debrid/unrestrict — turns a link into a direct URL
+     3. /debrid/download   — tells the Pi to actually fetch that URL
+   Stopping after step 1 (as this used to) leaves the file sitting on the
+   provider with nothing queued on the Pi and no error to show for it. */
+
 async function grabTorrent(index) {
     const r = (S.debrid.results || [])[index];
     const t = S.debrid.title;
     if (!r || !r.info_hash) { toast('That release has no usable hash', 'error'); return; }
+
+    const isShow = !!(t && t.type === 'series');
+    openSheet(`
+      <div class="kicker" style="margin-bottom:10px">Adding to the Pi</div>
+      <div style="font-size:14px;line-height:1.5;margin-bottom:14px;word-break:break-word">${escapeHtml(r.name || '')}</div>
+      <div class="bar bar-lg"><span id="grab-bar" style="width:8%"></span></div>
+      <div id="grab-status" style="font-size:13px;color:var(--text-70);margin-top:10px">Asking the provider for this release…</div>`);
+
+    const setStatus = (msg, pct) => {
+        const s = $('#grab-status'), b = $('#grab-bar');
+        if (s) s.textContent = msg;
+        if (b && pct != null) b.style.width = `${pct}%`;
+    };
+
     try {
-        toast('Sending to the Pi…', 'info');
-        await api('/debrid/magnet', {
+        const m = await api('/debrid/magnet', {
             method: 'POST',
             body: JSON.stringify({
                 info_hash: r.info_hash,
                 title: (t && t.title) || r.name || '',
                 year: String((t && t.year) || ''),
-                media_type: t && t.type === 'series' ? 'series' : 'movie',
-                season: 0,
-                episode: 0,
+                media_type: isShow ? 'series' : 'movie',
+                season: 0, episode: 0,
             }),
         });
-        toast('Added to the download queue', 'success');
-        S.dl = 'active';
-        loadDownloads();
+
+        const links = m.links || [];
+        if (!links.length) {
+            const why = m.status === 'processing'
+                ? 'The provider is still caching this release. It is not instantly available — try a cached result, or add it again in a few minutes.'
+                : (m.message || 'The provider returned no downloadable links for this release.');
+            setStatus(why, 100);
+            $('#grab-bar').style.background = 'var(--color-accent-400)';
+            toast('Nothing to download yet', 'warn', 7000);
+            return;
+        }
+
+        setStatus(`Resolving ${links.length} file${links.length === 1 ? '' : 's'}…`, 35);
+
+        let queued = 0, failed = 0;
+        for (let i = 0; i < links.length; i++) {
+            try {
+                const u = await api('/debrid/unrestrict', {
+                    method: 'POST', body: JSON.stringify({ link: links[i] }),
+                });
+                if (!u.url) { failed++; continue; }
+                await api('/debrid/download', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        url: u.url,
+                        filename: u.filename || m.filename || r.name || 'download',
+                        category: isShow ? 'shows' : 'movies',
+                        is_show: isShow,
+                    }),
+                });
+                queued++;
+            } catch { failed++; }
+            setStatus(`Queued ${queued} of ${links.length}…`, 35 + Math.round((i + 1) / links.length * 60));
+        }
+
+        if (queued) {
+            closeSheet();
+            toast(`${queued} file${queued === 1 ? '' : 's'} downloading to the Pi`, 'success', 5000);
+            S.dl = 'active';
+            goTab('downloads');
+        } else {
+            setStatus(`Could not start any downloads (${failed} failed). Check the provider key in Server › API keys.`, 100);
+            toast('Download could not be started', 'error', 7000);
+        }
     } catch (e) {
-        toast(e.message || 'Could not add that release', 'error');
+        setStatus(e.message || 'Could not add that release.', 100);
+        toast(e.message || 'Could not add that release', 'error', 7000);
     }
 }
 
@@ -1577,7 +1683,7 @@ function openPasswordSheet() {
    ══════════════════════════════════════════════════════════════════════════ */
 
 document.addEventListener('click', async (e) => {
-    const t = e.target.closest('[data-tab],[data-go],[data-back],[data-open],[data-play],[data-lib],[data-sort],[data-view],[data-dl],[data-title],[data-grab],[data-dlcancel],[data-act],[data-net],[data-set],[data-remux],[data-watchlist],[data-watched]');
+    const t = e.target.closest('[data-tab],[data-go],[data-back],[data-quick],[data-open],[data-play],[data-lib],[data-sort],[data-view],[data-dl],[data-title],[data-grab],[data-dlcancel],[data-act],[data-net],[data-set],[data-remux],[data-watchlist],[data-watched]');
     if (!t) return;
 
     if (t.dataset.back !== undefined) { back(); return; }
@@ -1605,6 +1711,11 @@ document.addEventListener('click', async (e) => {
     }
     if (t.dataset.play) { playVideo(t.dataset.play, Number(t.dataset.at || 0)); return; }
 
+    if (t.dataset.quick) {
+        const k = t.dataset.quick;
+        if (k === 'files') { goTab('library'); renderLibTabs(); openFiles('/data'); return; }
+        S.lib = k; S.libView = 'grid'; goTab('library'); return;
+    }
     if (t.dataset.lib) {
         if (t.dataset.lib === 'files') { renderLibTabs(); openFiles('/data'); return; }
         S.lib = t.dataset.lib; S.libView = 'grid'; loadLibrary(); return;
@@ -1679,6 +1790,26 @@ function wire() {
         const r = track.getBoundingClientRect();
         v.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * v.duration;
     });
+    $('#player-full')?.addEventListener('click', async () => {
+        const wrap = $('#screen-player');
+        try {
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+                await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+            } else if (V.el?.webkitEnterFullscreen && !wrap.requestFullscreen) {
+                V.el.webkitEnterFullscreen();          // iPhone: video-element only
+            } else {
+                await (wrap.requestFullscreen?.() || wrap.webkitRequestFullscreen?.());
+                try { await screen.orientation?.lock?.('landscape'); } catch {}
+            }
+        } catch { toast('Fullscreen is not available here', 'warn'); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+        const on = !!document.fullscreenElement;
+        const i = $('#player-full i');
+        if (i) i.className = on ? 'ph ph-corners-in' : 'ph ph-corners-out';
+        if (!on) { try { screen.orientation?.unlock?.(); } catch {} }
+    });
+
     $('#player-cast')?.addEventListener('click', async () => {
         const v = V.el; if (!v) return;
         try {

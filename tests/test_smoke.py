@@ -154,3 +154,46 @@ class TestRemuxHelpers:
         assert out1a == out1b, "same source must map to same cache file"
         assert out1a != out2, "different sources must not collide"
         assert out1a.endswith(".mp4") and web1.startswith("/data/")
+
+
+class TestProgressStorage:
+    """`current_time` is a reserved SQLite keyword (CURRENT_TIME). Written
+    unquoted in SQL, SQLite substitutes the clock value, so playback offsets
+    were stored as '18:26:57' and every Continue-watching item was silently
+    dropped when float() threw. Guard both the write and the read."""
+
+    def test_progress_roundtrip_is_numeric(self, tmp_path, monkeypatch):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            'CREATE TABLE progress (user_id INT, path TEXT, "current_time" REAL,'
+            ' duration REAL, last_played TIMESTAMP, play_count INT,'
+            ' UNIQUE(user_id, path))'
+        )
+        # The quoted form used by database.update_progress
+        q = ('INSERT INTO progress (user_id, path, "current_time", duration, last_played, play_count)'
+             ' VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 0)'
+             ' ON CONFLICT(user_id, path) DO UPDATE SET'
+             '   "current_time" = excluded."current_time",'
+             '   duration = COALESCE(NULLIF(excluded.duration, 0), progress.duration),'
+             '   last_played = CURRENT_TIMESTAMP')
+        conn.execute(q, (1, "/data/movies/x.mp4", 300.0, 1800.0))
+        got = conn.execute('SELECT "current_time" FROM progress').fetchone()[0]
+        assert got == 300.0, f"insert stored {got!r} instead of the offset"
+
+        conn.execute(q, (1, "/data/movies/x.mp4", 450.0, 1800.0))
+        got = conn.execute('SELECT "current_time" FROM progress').fetchone()[0]
+        assert got == 450.0, f"upsert stored {got!r} instead of the offset"
+
+    def test_database_sql_quotes_current_time(self):
+        """No SQL statement in database.py may reference current_time unquoted."""
+        import re
+        src = open("app/database.py").read()
+        # Strip the python signature/kwarg uses; look only at SQL string bodies
+        sql_blocks = re.findall(r"'''(.*?)'''", src, re.S) + re.findall(r'"""(.*?)"""', src, re.S)
+        offenders = []
+        for block in sql_blocks:
+            for line in block.splitlines():
+                if re.search(r'(?<!["\w.])current_time(?!["\w])', line):
+                    offenders.append(line.strip())
+        assert not offenders, "unquoted current_time in SQL:\n" + "\n".join(offenders)
