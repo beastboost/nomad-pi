@@ -24,7 +24,8 @@ function renderShowsGrid(body) {
         body.innerHTML = `<div class="empty"><i class="ph ph-television"></i>No shows indexed yet.<br>Add media, then run a scan from the Server tab.</div>`;
         return;
     }
-    body.innerHTML = `<div class="grid">${SHOWS.list.map((s, i) => {
+    body.innerHTML = (typeof artworkHint === 'function' ? artworkHint(SHOWS.list) : '')
+        + `<div class="grid">${SHOWS.list.map((s, i) => {
         const poster = posterUrl(s.poster);
         const seasonList = s.seasons || [];
         const seasons = seasonList.length;
@@ -335,7 +336,11 @@ function pollUpdate() {
             if (bar) bar.style.width = `${pct}%`;
             if (msg) msg.textContent = s.message || 'Working…';
             if (p) p.textContent = `${pct}%`;
-            if (pct >= 100) { clearInterval(_updatePoll); _updatePoll = null; toast('Update complete — restarting', 'success', 8000); }
+            if (pct >= 100) {
+                clearInterval(_updatePoll); _updatePoll = null;
+                toast('Update complete — reconnecting…', 'success', 8000);
+                waitForServerThenReload();
+            }
         } catch {}
         try {
             const l = await api('/system/update/log');
@@ -344,6 +349,46 @@ function pollUpdate() {
             if (box && text) { box.textContent = text; box.scrollTop = box.scrollHeight; }
         } catch {}
     }, 2000);
+}
+
+/* After an update the server restarts, so the open page is running the old
+   bundle against a new backend. Poll until it answers again, then reload —
+   the app used to just sit there until the user refreshed by hand. */
+async function waitForServerThenReload(maxWaitMs = 180000) {
+    const started = Date.now();
+    const box = $('#up-msg');
+    let sawDown = false;
+
+    const tick = async () => {
+        if (Date.now() - started > maxWaitMs) {
+            if (box) box.textContent = 'Server is taking a while — refresh when it is back.';
+            return;
+        }
+        let up = false;
+        try {
+            const r = await fetch(`${API}/system/status`, { cache: 'no-store' });
+            up = r.ok;
+        } catch { up = false; }
+
+        if (!up) {
+            sawDown = true;
+            if (box) box.textContent = 'Server restarting…';
+        } else if (sawDown) {
+            // Came back after going away — this is the new build.
+            if (box) box.textContent = 'Back up. Reloading…';
+            // Drop caches so the reload picks up the new bundle, not the old one.
+            try {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+                const reg = await navigator.serviceWorker?.getRegistration();
+                await reg?.update();
+            } catch {}
+            setTimeout(() => location.reload(true), 800);
+            return;
+        }
+        setTimeout(tick, 2000);
+    };
+    setTimeout(tick, 3000);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
