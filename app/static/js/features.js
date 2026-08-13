@@ -395,3 +395,55 @@ function refreshSubWith(renderFn) {
     _subRender = renderFn;
     refreshSub();
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Auto-play the next episode
+
+   On 'ended', ask the server what comes next in the same show and offer it
+   with a countdown. Cancelling stops the chain; closing the player kills it.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+let _nextTimer = null;
+
+function cancelNextEpisode() {
+    if (_nextTimer) { clearInterval(_nextTimer); _nextTimer = null; }
+    document.getElementById('next-ep')?.remove();
+}
+
+async function offerNextEpisode(path) {
+    if (!path) return;
+    let next = null;
+    try {
+        const r = await api(`/media/shows/next?path=${encodeURIComponent(path)}`);
+        next = r.next;
+    } catch { return; }
+    if (!next || !next.path) return;
+    if (S.screen !== 'player') return;   // user already left
+
+    cancelNextEpisode();
+    const title = stripExt(next.name || baseName(next.path));
+    const card = document.createElement('div');
+    card.id = 'next-ep';
+    card.className = 'next-ep';
+    card.innerHTML = `
+      <div class="kicker" style="margin-bottom:6px">Up next</div>
+      <div class="next-ep-title">${escapeHtml(title)}</div>
+      <div class="next-ep-count">Playing in <span id="next-ep-n">10</span>s</div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" id="next-ep-cancel">Cancel</button>
+        <button class="btn btn-primary" id="next-ep-now">Play now</button>
+      </div>`;
+    $('#screen-player').appendChild(card);
+
+    let n = 10;
+    const go = () => { cancelNextEpisode(); playVideo(next.path, 0); };
+    _nextTimer = setInterval(() => {
+        n--;
+        const el = document.getElementById('next-ep-n');
+        if (el) el.textContent = String(n);
+        if (n <= 0) go();
+    }, 1000);
+
+    document.getElementById('next-ep-cancel').onclick = cancelNextEpisode;
+    document.getElementById('next-ep-now').onclick = go;
+}
