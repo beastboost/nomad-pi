@@ -29,6 +29,8 @@ const S = {
     dl: 'active',
     debrid: { provider: null, query: '', titles: [], title: null, results: [] },
     health: null,
+    remux: null,
+    omdb: null,
     healthRunning: false,
     audio: { el: null, queue: [], index: -1, playing: false },
 };
@@ -76,6 +78,27 @@ function authHeaders() {
     return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+/* FastAPI reports validation failures as detail: [{loc, msg, type}, ...].
+   Rendering that object directly is where "[object Object]" came from. */
+async function readError(res) {
+    const fallback = `Request failed (${res.status})`;
+    let j;
+    try { j = await res.json(); } catch { return fallback; }
+    const d = j?.detail ?? j?.message;
+    if (!d) return fallback;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) {
+        const parts = d.map(e => {
+            if (typeof e === 'string') return e;
+            const field = Array.isArray(e?.loc) ? e.loc.filter(x => x !== 'body').join('.') : '';
+            return field ? `${field}: ${e?.msg || 'invalid'}` : (e?.msg || 'invalid');
+        }).filter(Boolean);
+        return parts.length ? parts.join('\n') : fallback;
+    }
+    if (typeof d === 'object') return d.msg || d.message || JSON.stringify(d);
+    return String(d);
+}
+
 async function api(path, opts = {}) {
     const res = await fetch(API + path, {
         ...opts,
@@ -87,9 +110,7 @@ async function api(path, opts = {}) {
     });
     if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
     if (!res.ok) {
-        let detail = `Request failed (${res.status})`;
-        try { const j = await res.json(); detail = j.detail || j.message || detail; } catch {}
-        const err = new Error(detail);
+        const err = new Error(await readError(res));
         err.status = res.status;
         throw err;
     }
@@ -144,6 +165,27 @@ function streamUrl(path, extra = '') {
     const t = token();
     return `${API}/media/stream?path=${encodeURIComponent(path)}${t ? `&token=${encodeURIComponent(t)}` : ''}${extra}`;
 }
+/* VLC's handler wants an absolute http(s) URL after the scheme. */
+function vlcUrl(path) {
+    const abs = new URL(streamUrl(path), location.origin).href;
+    return `vlc://${abs.replace(/^https?:\/\//, '')}`;
+}
+
+/* In a standalone PWA a plain <a href> can be swallowed by the service
+   worker scope, so the file never lands. Open it out of the app context. */
+function downloadFile(path) {
+    const url = streamUrl(path, '&download=true');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = baseName(path);
+    a.rel = 'noopener';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast('Download started', 'info', 2500);
+}
+
 function posterUrl(p) {
     if (!p) return '';
     if (/^https?:/i.test(p)) return p;
@@ -204,6 +246,13 @@ function openSheet(html) {
 function closeSheet() {
     $('#sheet').classList.add('hidden');
     $('#sheet-scrim').classList.add('hidden');
+}
+
+function setToggle(btn, on, icon) {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('btn-primary', on);
+    const i = btn.querySelector('i');
+    if (i) i.className = `${on ? 'ph-fill' : 'ph'} ${icon}`;
 }
 
 /* ── Navigation ────────────────────────────────────────────────────────── */
@@ -515,6 +564,24 @@ function sortedLibItems() {
     return items;
 }
 
+/* Posters come from OMDb (or a local poster.jpg). With no key configured the
+   grid is just placeholder glyphs and nothing says why — so say why. */
+function artworkHint(items) {
+    if (S.omdb !== false) return '';
+    const withArt = items.filter(i => i.poster).length;
+    if (withArt > items.length / 2) return '';
+    return `
+      <div class="card" style="margin-bottom:14px">
+        <div class="dl-title">No artwork?</div>
+        <div class="dl-meta" style="margin:4px 0 10px">
+          Posters need an OMDb API key. It is free and takes a minute.
+        </div>
+        <button class="btn" data-admin="keys" style="min-height:40px">
+          <i class="ph ph-key"></i>Add an OMDb key
+        </button>
+      </div>`;
+}
+
 function renderLibItems() {
     const items = sortedLibItems();
     const def = LIB_TABS.find(t => t.key === S.lib) || LIB_TABS[0];
@@ -528,7 +595,7 @@ function renderLibItems() {
     }
 
     if (grid) {
-        body.innerHTML = `<div class="grid">${items.map(i => {
+        body.innerHTML = artworkHint(items) + `<div class="grid">${items.map(i => {
             const poster = posterUrl(i.poster);
             const title = stripExt(i.title || i.name || baseName(i.path));
             const meta = i.year || (i.size ? fmtSize(i.size) : '');
@@ -614,6 +681,12 @@ async function openDetail(path) {
     const dur = Number(prog.duration || 0);
     const metaLine = [year, runtime, meta.size ? fmtSize(meta.size) : ''].filter(Boolean).join(' · ');
     const canRemux = kind === 'video' && REMUXABLE.includes(ext(path));
+    const isWatched = !!(meta.watched || prog.watched || (dur > 0 && cur / dur >= 0.95));
+    let inWatchlist = false;
+    try {
+        const wl = await api('/media/watchlist');
+        inWatchlist = (wl.items || []).some(w => (w.path || w) === path);
+    } catch {}
     const playLabel = cur > 30 ? `Resume · ${fmtTime(cur)}` : (kind === 'video' ? 'Play' : kind === 'audio' ? 'Play' : 'Open');
 
     body.innerHTML = `
@@ -630,11 +703,13 @@ async function openDetail(path) {
         <button class="btn btn-primary btn-lg" data-play="${escapeHtml(path)}" data-at="${cur}">
           <i class="ph-fill ph-play"></i> ${escapeHtml(playLabel)}
         </button>
-        <button class="btn btn-icon" data-watchlist="${escapeHtml(path)}" aria-label="Watchlist">
-          <i class="ph ph-heart"></i>
+        <button class="btn btn-icon${inWatchlist ? ' btn-primary' : ''}" data-watchlist="${escapeHtml(path)}"
+                aria-pressed="${inWatchlist}" aria-label="Watchlist">
+          <i class="${inWatchlist ? 'ph-fill' : 'ph'} ph-heart"></i>
         </button>
-        <button class="btn btn-icon" data-watched="${escapeHtml(path)}" aria-label="Mark watched">
-          <i class="ph ph-check-circle"></i>
+        <button class="btn btn-icon${isWatched ? ' btn-primary' : ''}" data-watched="${escapeHtml(path)}"
+                aria-pressed="${isWatched}" aria-label="Mark watched">
+          <i class="${isWatched ? 'ph-fill' : 'ph'} ph-check-circle"></i>
         </button>
       </div>
 
@@ -654,14 +729,20 @@ async function openDetail(path) {
             <div class="fact"><span class="fact-key">Path</span><span class="fact-val" style="color:var(--text-70)">${escapeHtml(path)}</span></div>
             ${canRemux ? `
               <div class="facts-divider"></div>
-              <button class="btn" id="remux-btn" data-remux="${escapeHtml(path)}">
-                <i class="ph ph-arrows-clockwise" style="font-size:16px"></i><span>Convert to MP4</span>
+              <button class="btn" id="remux-btn" ${S.remux?.path === path ? 'disabled' : `data-remux="${escapeHtml(path)}"`}>
+                <i class="ph ph-arrows-clockwise" style="font-size:16px"></i><span>${
+                  S.remux?.path === path ? `Converting — ${S.remux.pct}%` : 'Convert to MP4'}</span>
               </button>
               <div class="facts-note">Rewraps to MP4 for iPhone playback. No re-encode.</div>` : ''}
             <div class="facts-divider"></div>
-            <a class="btn" href="${escapeHtml(streamUrl(path, '&download=true'))}">
+            <button class="btn" data-download="${escapeHtml(path)}">
               <i class="ph ph-download-simple" style="font-size:16px"></i>Download file
-            </a>
+            </button>
+            ${kind === 'video' ? `
+              <a class="btn" href="${escapeHtml(vlcUrl(path))}">
+                <i class="ph ph-vinyl-record" style="font-size:16px"></i>Open in VLC
+              </a>
+              <div class="facts-note">VLC plays anything the browser will not — HEVC, DTS, odd containers.</div>` : ''}
           </div>
         </div>
       </div>`;
@@ -681,26 +762,38 @@ async function startRemux(path) {
         if (data.status === 'completed')   { toast('Already converted — playing MP4', 'success'); playVideo(data.output_path, 0); return; }
 
         if (btn) btn.disabled = true;
-        toast('Converting in the background…', 'info', 5000);
+        toast('Converting in the background — you can keep browsing', 'info', 5000);
+        S.remux = { job: data.job_id, path, pct: 0 };
         clearInterval(_remuxPoll);
         _remuxPoll = setInterval(async () => {
-            try {
-                const s = await api(`/media/remux/status?job_id=${encodeURIComponent(data.job_id)}`);
-                if (s.status === 'completed') {
-                    clearInterval(_remuxPoll); _remuxPoll = null;
-                    if (btn) btn.disabled = false;
-                    if (label) label.textContent = 'Play converted MP4';
-                    if (btn) { btn.dataset.remux = ''; btn.dataset.play = s.output_path; btn.dataset.at = '0'; }
-                    toast('Converted ✓', 'success');
-                } else if (s.status === 'failed') {
-                    clearInterval(_remuxPoll); _remuxPoll = null;
-                    if (btn) btn.disabled = false;
-                    if (label) label.textContent = 'Convert to MP4';
-                    toast(s.error || 'Convert failed', 'error');
-                } else if (label) {
-                    label.textContent = `Converting — ${Math.round(s.progress || 0)}%`;
+            let st;
+            try { st = await api(`/media/remux/status?job_id=${encodeURIComponent(data.job_id)}`); }
+            catch { return; }               // transient — keep polling
+
+            S.remux.pct = Math.round(st.progress || 0);
+            // The detail page may have been left; only paint if it is still there.
+            const liveBtn = $('#remux-btn');
+            const liveLabel = liveBtn?.querySelector('span');
+
+            if (st.status === 'completed') {
+                clearInterval(_remuxPoll); _remuxPoll = null;
+                S.remux = null;
+                if (liveBtn) {
+                    liveBtn.disabled = false;
+                    if (liveLabel) liveLabel.textContent = 'Play converted MP4';
+                    delete liveBtn.dataset.remux;
+                    liveBtn.dataset.play = st.output_path;
+                    liveBtn.dataset.at = '0';
                 }
-            } catch {}
+                toast('Converted to MP4 ✓ — play it from the file card', 'success', 6000);
+            } else if (st.status === 'failed') {
+                clearInterval(_remuxPoll); _remuxPoll = null;
+                S.remux = null;
+                if (liveBtn) { liveBtn.disabled = false; if (liveLabel) liveLabel.textContent = 'Convert to MP4'; }
+                toast(st.error || 'Convert failed', 'error', 6000);
+            } else if (liveLabel) {
+                liveLabel.textContent = `Converting — ${S.remux.pct}%`;
+            }
         }, 2000);
     } catch (e) {
         toast(e.message || 'Convert failed', 'error');
@@ -761,8 +854,8 @@ function playVideo(path, at = 0) {
     video.addEventListener('timeupdate', () => {
         if (!video.paused) throttledSession('playing');
     });
-    video.addEventListener('play',  () => { setPlayIcon(true); requestWake(); throttledSession('playing', true); });
-    video.addEventListener('pause', () => { setPlayIcon(false); releaseWake(); saveProgress(); throttledSession('paused', true); });
+    video.addEventListener('play',  () => { setPlayIcon(true); requestWake(); throttledSession('playing', true); showChrome(); });
+    video.addEventListener('pause', () => { setPlayIcon(false); releaseWake(); saveProgress(); throttledSession('paused', true); releaseChrome(); });
     video.addEventListener('ended', () => {
         setPlayIcon(false); saveProgress(true); throttledSession('stopped', true);
         if (typeof offerNextEpisode === 'function') offerNextEpisode(V.path);
@@ -798,8 +891,41 @@ function playVideo(path, at = 0) {
     });
 
     video.play().catch(() => {});
+    armChrome();
     clearInterval(V.saveTimer);
     V.saveTimer = setInterval(() => saveProgress(), 5000);
+}
+
+/* Controls fade after 3s of no input while playing, and come back on any
+   tap, move or key. Without this, fullscreen showed the same permanent
+   control slab and gained nothing. */
+let _chromeTimer = null;
+
+function showChrome() {
+    const scr = $('#screen-player');
+    if (!scr) return;
+    scr.classList.remove('chrome-hidden');
+    clearTimeout(_chromeTimer);
+    _chromeTimer = setTimeout(() => {
+        if (V.el && !V.el.paused && !document.querySelector('#next-ep')) {
+            scr.classList.add('chrome-hidden');
+        }
+    }, 3000);
+}
+
+function armChrome() {
+    const scr = $('#screen-player');
+    if (!scr || scr._chromeBound) { showChrome(); return; }
+    ['pointerdown', 'pointermove', 'keydown'].forEach(ev =>
+        scr.addEventListener(ev, showChrome, { passive: true }));
+    scr._chromeBound = true;
+    showChrome();
+}
+
+function releaseChrome() {
+    clearTimeout(_chromeTimer);
+    _chromeTimer = null;
+    $('#screen-player')?.classList.remove('chrome-hidden');
 }
 
 let _lastSession = 0;
@@ -833,10 +959,10 @@ function reconnectVideo() {
 }
 
 function stopVideo() {
+    releaseChrome();
     if (typeof cancelNextEpisode === 'function') cancelNextEpisode();
     clearInterval(V.saveTimer); V.saveTimer = null;
     if (V.stallTimer) { clearTimeout(V.stallTimer); V.stallTimer = null; }
-    clearInterval(_remuxPoll); _remuxPoll = null;
     if (V.el) {
         saveProgress();
         V.el.pause();
@@ -1683,7 +1809,7 @@ function openPasswordSheet() {
    ══════════════════════════════════════════════════════════════════════════ */
 
 document.addEventListener('click', async (e) => {
-    const t = e.target.closest('[data-tab],[data-go],[data-back],[data-quick],[data-open],[data-play],[data-lib],[data-sort],[data-view],[data-dl],[data-title],[data-grab],[data-dlcancel],[data-act],[data-net],[data-set],[data-remux],[data-watchlist],[data-watched]');
+    const t = e.target.closest('[data-tab],[data-go],[data-back],[data-quick],[data-open],[data-play],[data-lib],[data-sort],[data-view],[data-dl],[data-title],[data-grab],[data-dlcancel],[data-act],[data-net],[data-set],[data-remux],[data-download],[data-watchlist],[data-watched]');
     if (!t) return;
 
     if (t.dataset.back !== undefined) { back(); return; }
@@ -1738,22 +1864,29 @@ document.addEventListener('click', async (e) => {
     if (t.dataset.set === 'install') { runInstall(); return; }
 
     if (t.dataset.remux) { startRemux(t.dataset.remux); return; }
+    if (t.dataset.download) { downloadFile(t.dataset.download); return; }
 
     if (t.dataset.watchlist) {
+        const on = t.getAttribute('aria-pressed') === 'true';
         try {
-            await api('/media/watchlist', { method: 'POST', body: JSON.stringify({ path: t.dataset.watchlist }) });
-            const i = t.querySelector('i');
-            if (i) i.className = 'ph-fill ph-heart';
-            toast('Added to watchlist', 'success', 2500);
+            await api('/media/watchlist', {
+                method: on ? 'DELETE' : 'POST',
+                body: JSON.stringify({ path: t.dataset.watchlist }),
+            });
+            setToggle(t, !on, 'ph-heart');
+            toast(on ? 'Removed from watchlist' : 'Added to watchlist', 'success', 2200);
         } catch (err) { toast(err.message || 'Could not update watchlist', 'error'); }
         return;
     }
     if (t.dataset.watched) {
+        const on = t.getAttribute('aria-pressed') === 'true';
         try {
-            await api('/media/mark_watched', { method: 'POST', body: JSON.stringify({ path: t.dataset.watched, watched: 1 }) });
-            const i = t.querySelector('i');
-            if (i) i.className = 'ph-fill ph-check-circle';
-            toast('Marked as watched', 'success', 2500);
+            await api('/media/mark_watched', {
+                method: 'POST',
+                body: JSON.stringify({ path: t.dataset.watched, watched: on ? 0 : 1 }),
+            });
+            setToggle(t, !on, 'ph-check-circle');
+            toast(on ? 'Marked as unwatched' : 'Marked as watched', 'success', 2200);
         } catch (err) { toast(err.message || 'Could not mark watched', 'error'); }
     }
 });
@@ -1897,6 +2030,10 @@ async function startApp() {
     $('#login-screen').classList.add('hidden');
     $('#app-shell').classList.remove('hidden');
     try { S.profile = await api('/auth/profile'); } catch { S.profile = null; }
+    try {
+        const st = await (await fetch(`${API}/system/setup/status`)).json();
+        S.omdb = !!st.omdb_configured;
+    } catch { S.omdb = null; }
     const dev = $('#home-device');
     if (dev) dev.textContent = 'Nomad Pi';
     if (!routeFromHash()) goTab('home');

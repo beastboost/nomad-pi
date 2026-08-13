@@ -1095,7 +1095,7 @@ img { display: block; max-width: 100%; }
         bottom: 24px;
     }
     #toast-stack { left: auto; right: 24px; width: 340px; bottom: 100px; }
-    #now-playing-sheet, #screen-player { left: 232px; }
+    #now-playing-sheet { left: 232px; }
     .sheet { left: 232px; }
     .dialog { max-width: 440px; }
 }
@@ -1257,7 +1257,8 @@ img { display: block; max-width: 100%; }
 }
 
 @media (min-width: 900px) {
-    /* The reader and sub-pages sit beside the rail, not under it */
+    /* The reader sits beside the rail; the player never does — it is
+       fullscreen at every size. */
     #screen-reader { left: 232px; }
     .reader-page img { max-height: calc(100dvh - 220px); }
 }
@@ -1296,3 +1297,63 @@ img { display: block; max-width: 100%; }
 }
 .quick i { font-size: 22px; color: var(--color-accent); }
 .quick:hover { background: var(--color-neutral-900); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Player — immersive at every size and orientation
+
+   The player is a true overlay: it ignores the desktop rail and the tab bar
+   entirely. Rotating a phone or tablet past the 900px breakpoint used to
+   apply the desktop offset, which letterboxed the video into a strip beside
+   the sidebar.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+#screen-player {
+    position: fixed !important;
+    inset: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    margin: 0 !important;
+    z-index: 200;
+    background: #0d0e18;
+}
+
+.player-stage { flex: 1 1 auto; min-height: 0; }
+.player-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+/* Chrome fades out during playback and returns on any input */
+#screen-player .player-top,
+#screen-player .player-controls {
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#screen-player.chrome-hidden .player-top {
+    opacity: 0; transform: translateY(-8px); pointer-events: none;
+}
+#screen-player.chrome-hidden .player-controls {
+    opacity: 0; transform: translateY(12px); pointer-events: none;
+}
+#screen-player.chrome-hidden { cursor: none; }
+
+/* Landscape: the video takes the room, controls overlay it rather than
+   stacking below and squeezing it into a letterbox. */
+@media (orientation: landscape) and (max-height: 560px) {
+    .player-stage { position: absolute; inset: 0; }
+    .player-controls {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        padding: 10px 20px calc(12px + var(--safe-bottom));
+        gap: 10px;
+        background: linear-gradient(to top, rgba(13, 14, 24, 0.92), transparent);
+        z-index: 3;
+    }
+    .transport { gap: 16px; }
+    .transport-btn { width: 52px; height: 52px; font-size: 20px; }
+    .transport-play { width: 60px; height: 60px; font-size: 24px; }
+    .player-extras .btn { min-height: 40px; font-size: 12px; }
+    .scrubber { padding: 8px 0; margin: -8px 0; }
+}
+
+/* When the browser is genuinely fullscreen, drop the safe-area padding */
+#screen-player:fullscreen .player-top { padding-top: 14px; }
+#screen-player:fullscreen .player-controls { padding-bottom: 20px; }
