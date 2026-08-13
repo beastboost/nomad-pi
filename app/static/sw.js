@@ -7,6 +7,7 @@ const APP_SHELL = [
   '/css/nocturne.css',
   '/js/app.js',
   '/js/admin.js',
+  '/js/features.js',
   '/js/reader.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

@@ -445,6 +445,12 @@ async function loadLibrary() {
     body.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
     $('#lib-sort-label').textContent = SORTS.find(s => s.key === S.libSort)?.label.replace(/ \(.*\)/, '') || 'Name';
     try {
+        if (S.lib === 'shows') {
+            await loadShows();
+            $('#lib-count').textContent = `${SHOWS.list.length} show${SHOWS.list.length === 1 ? '' : 's'}`;
+            renderShowsGrid(body);
+            return;
+        }
         const data = await api(`/media/library/${S.lib}`);
         S.libItems = (data.items || []).filter(i => i && i.path);
         renderLibItems();
@@ -711,9 +717,12 @@ function playVideo(path, at = 0) {
     }, { once: true });
 
     video.addEventListener('timeupdate', updateScrub);
-    video.addEventListener('play',  () => { setPlayIcon(true); requestWake(); });
-    video.addEventListener('pause', () => { setPlayIcon(false); releaseWake(); saveProgress(); });
-    video.addEventListener('ended', () => { setPlayIcon(false); saveProgress(true); });
+    video.addEventListener('timeupdate', () => {
+        if (!video.paused) throttledSession('playing');
+    });
+    video.addEventListener('play',  () => { setPlayIcon(true); requestWake(); throttledSession('playing', true); });
+    video.addEventListener('pause', () => { setPlayIcon(false); releaseWake(); saveProgress(); throttledSession('paused', true); });
+    video.addEventListener('ended', () => { setPlayIcon(false); saveProgress(true); throttledSession('stopped', true); });
 
     // Stall detection → reconnect. 'waiting' fires on normal buffering too, so
     // only a stall that has not resolved after 10s is treated as a dead stream.
@@ -747,6 +756,16 @@ function playVideo(path, at = 0) {
     video.play().catch(() => {});
     clearInterval(V.saveTimer);
     V.saveTimer = setInterval(() => saveProgress(), 5000);
+}
+
+let _lastSession = 0;
+function throttledSession(state, force = false) {
+    const now = Date.now();
+    if (!force && now - _lastSession < 5000) return;
+    _lastSession = now;
+    const v = V.el;
+    if (!v || !V.path || typeof dashboardSession !== 'function') return;
+    dashboardSession(V.path, stripExt(baseName(V.path)), state, v.currentTime, v.duration);
 }
 
 function reconnectVideo() {
@@ -783,6 +802,7 @@ function stopVideo() {
     }
     $('#player-ghost')?.classList.remove('hidden');
     releaseWake();
+    if (V.path) throttledSession('stopped', true);
     V.path = null;
 }
 
@@ -1353,8 +1373,10 @@ async function serverAction(act) {
         const ok = await confirmDialog('Update from GitHub?',
             'The server pulls the latest version, installs dependencies and restarts. It will be unavailable for a minute or two.', 'Update');
         if (!ok) return;
-        try { await api('/system/control/update', { method: 'POST' }); toast('Update started — the server will restart', 'success', 8000); }
-        catch (e) { toast(e.message || 'Update failed to start', 'error'); }
+        try {
+            await api('/system/control/update', { method: 'POST' });
+            openUpdateProgress();
+        } catch (e) { toast(e.message || 'Update failed to start', 'error'); }
         return;
     }
     if (act === 'reboot' || act === 'shutdown') {
@@ -1583,7 +1605,10 @@ document.addEventListener('click', async (e) => {
     }
     if (t.dataset.play) { playVideo(t.dataset.play, Number(t.dataset.at || 0)); return; }
 
-    if (t.dataset.lib) { S.lib = t.dataset.lib; S.libView = 'grid'; loadLibrary(); return; }
+    if (t.dataset.lib) {
+        if (t.dataset.lib === 'files') { renderLibTabs(); openFiles('/data'); return; }
+        S.lib = t.dataset.lib; S.libView = 'grid'; loadLibrary(); return;
+    }
     if (t.dataset.sort) { S.libSort = t.dataset.sort; closeSheet(); renderLibItems(); $('#lib-sort-label').textContent = SORTS.find(s => s.key === S.libSort)?.label.replace(/ \(.*\)/, ''); return; }
     if (t.dataset.view) { S.libView = t.dataset.view; closeSheet(); renderLibItems(); return; }
 
@@ -1662,7 +1687,7 @@ function wire() {
             else toast('Picture-in-picture is not supported here', 'warn');
         } catch { toast('Picture-in-picture is not available', 'warn'); }
     });
-    $('#player-subs')?.addEventListener('click', () => toast('Subtitle tracks embedded in the file are picked up automatically.', 'info', 5000));
+    $('#player-subs')?.addEventListener('click', () => openSubtitlePicker());
     $('#player-audio')?.addEventListener('click', () => toast('Audio track switching needs the desktop player for now.', 'info', 5000));
     $('#player-speed')?.addEventListener('click', () => {
         const v = V.el; if (!v) return;
