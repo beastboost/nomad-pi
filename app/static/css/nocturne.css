@@ -1106,3 +1106,158 @@ img { display: block; max-width: 100%; }
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Forms (admin screens)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.field { display: block; }
+.field > span {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 5px;
+    color: var(--text-70);
+}
+.field + .field { margin-top: 12px; }
+
+.logbox {
+    margin: 0;
+    padding: 14px;
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--text-70);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 70vh;
+    overflow: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Reader
+   ══════════════════════════════════════════════════════════════════════════ */
+
+#screen-reader {
+    position: absolute;
+    inset: 0;
+    background: var(--color-bg);
+    z-index: 30;
+}
+
+.reader-top {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(var(--safe-top) + 12px) 16px 12px;
+    background: var(--color-bg);
+    border-bottom: 1px solid rgba(233, 233, 237, 0.08);
+}
+
+.reader-stage {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: #0d0e18;
+}
+
+.reader-page {
+    width: 100%;
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.reader-page img {
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+.reader-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #0d0e18;
+}
+
+.reader-epub {
+    width: 100%;
+    height: 100%;
+    background: var(--color-bg);
+}
+
+.reader-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px calc(10px + var(--safe-bottom));
+    background: var(--color-bg);
+    border-top: 1px solid rgba(233, 233, 237, 0.08);
+}
+.reader-count {
+    font-size: 12px;
+    color: var(--text-50);
+    min-width: 62px;
+    text-align: right;
+    flex: none;
+}
+.reader-range {
+    flex: 1;
+    min-width: 0;
+    height: 44px;                 /* thumb-sized grab band */
+    background: transparent;
+    accent-color: var(--color-accent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Density / DPI
+   The layout is authored in px against a 390pt phone. On high-DPI screens the
+   browser already scales CSS px correctly, so the work here is giving wide,
+   dense displays more room rather than a stretched phone — and keeping hit
+   targets honest on coarse pointers.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (pointer: coarse) {
+    /* Never shrink a touch target below the platform minimum */
+    .btn, .chip, .list-row, .tab, .sheet-option { min-height: 44px; }
+    .list-row { padding-block: 13px; }
+}
+
+@media (pointer: fine) {
+    /* Mouse users get tighter rows and real hover feedback */
+    .list-row:hover { background: rgba(233, 233, 237, 0.04); }
+    .rail-item:hover .art, .grid-item:hover .art { outline: 1px solid var(--color-accent); }
+    .rail-item, .grid-item { transition: transform 0.12s ease; }
+    .rail-item:hover, .grid-item:hover { transform: translateY(-2px); }
+}
+
+/* Crisper artwork on retina-class displays: ask for a larger intrinsic size
+   so posters are not upscaled from a phone-sized bitmap. */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    .art img, .list-thumb img { image-rendering: -webkit-optimize-contrast; }
+}
+
+/* Very wide displays: more columns, wider reading measure */
+@media (min-width: 1400px) {
+    .screen-head, .section-head, .lib-meta, .chip-scroller,
+    .lib-body, .dl-body, .screen-scroll > .section-pad,
+    .rail, .detail-art, .detail-actions, .detail-note { max-width: 1180px; }
+    .status-pill { max-width: calc(1180px - 40px); }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+    .stat-grid { grid-template-columns: repeat(4, 1fr); }
+    .detail-overview { max-width: 70ch; }
+}
+
+@media (min-width: 900px) {
+    /* The reader and sub-pages sit beside the rail, not under it */
+    #screen-reader { left: 232px; }
+    .reader-page img { max-height: calc(100dvh - 220px); }
+}

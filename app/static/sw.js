@@ -6,6 +6,8 @@ const APP_SHELL = [
   '/manifest.json',
   '/css/nocturne.css',
   '/js/app.js',
+  '/js/admin.js',
+  '/js/reader.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/maskable-192.png',
@@ -17,6 +19,7 @@ const APP_SHELL = [
   '/vendor/phosphor/regular.css',
   '/vendor/phosphor/fill.css',
   '/vendor/inter/inter.css',
+  '/vendor/epub/epub.min.js',
   // CDN fallbacks — fetched opportunistically, never block activation
   // Phosphor icon CSS + webfonts (the design system's icon set)
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css',

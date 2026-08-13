@@ -64,6 +64,22 @@ else
     ok=0
 fi
 
+echo "Vendoring epub.js (EPUB reader)…"
+mkdir -p "$VENDOR/epub" || true
+# epub.js needs JSZip present first; concatenate both into one file so the
+# page only has to load a single script.
+JSZIP="$VENDOR/epub/.jszip.js"
+EPUBJS="$VENDOR/epub/.epub.js"
+if fetch "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" "$JSZIP" \
+   && fetch "https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js" "$EPUBJS"; then
+    cat "$JSZIP" "$EPUBJS" > "$VENDOR/epub/epub.min.js"
+    rm -f "$JSZIP" "$EPUBJS"
+else
+    echo "  ! could not fetch epub.js — EPUBs will offer a download instead"
+    rm -f "$JSZIP" "$EPUBJS"
+    ok=0
+fi
+
 if [ "$ok" = "1" ]; then
     echo "Vendored assets ready in app/static/vendor/ — the UI no longer needs a CDN."
 else

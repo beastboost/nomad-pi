@@ -213,8 +213,9 @@ const TAB_SCREENS = { home: 'home', library: 'library', downloads: 'downloads', 
 function showScreen(name) {
     S.screen = name;
     $$('.screen').forEach(el => el.classList.toggle('active', el.dataset.screen === name));
+    const immersive = name === 'player' || name === 'reader';
+    $('#tabbar').classList.toggle('hidden', immersive);
     const isPlayer = name === 'player';
-    $('#tabbar').classList.toggle('hidden', isPlayer);
     const mini = $('#mini-player');
     if (mini && !mini.classList.contains('hidden')) {
         mini.style.bottom = isPlayer ? '20px' : '';
@@ -245,6 +246,7 @@ function push(screen) {
 
 function back() {
     if (S.screen === 'player') stopVideo();
+    if (S.screen === 'reader' && typeof closeReader === 'function') closeReader();
     const prev = S.stack.pop();
     showScreen(prev || TAB_SCREENS[S.tab] || 'home');
 }
@@ -672,8 +674,8 @@ function playVideo(path, at = 0) {
     const kind = kindOf(path);
     if (kind === 'audio') { playAudio(path); return; }
     if (kind !== 'video') {
-        // Images, books and anything else: hand off to the browser in a new tab.
-        window.open(streamUrl(path), '_blank', 'noopener');
+        // Books, comics, PDFs and images all open in the in-app reader.
+        openReader(path, at);
         return;
     }
 
@@ -842,7 +844,9 @@ function playAudio(path) {
     a.el.play().catch(() => {});
     const title = stripExt(baseName(path));
     $('#mini-title').textContent = title;
-    $('#mini-sub').textContent = 'Nomad Pi';
+    const q = S.audio.queue;
+    $('#mini-sub').textContent = q.length > 1
+        ? `${S.audio.index + 1} of ${q.length}` : 'Nomad Pi';
     $('#np-title').textContent = title;
     $('#np-artist').textContent = 'Nomad Pi';
     $('#mini-player').classList.remove('hidden');
@@ -1168,19 +1172,19 @@ async function loadServer() {
 
       <div style="margin-top:24px">
         <div class="kicker" style="margin-bottom:6px">Network</div>
-        <div class="list" id="network-rows">
-          <div class="list-row list-row-tall row-rule" data-net="wifi">
+        <div class="list">
+          <button class="list-row list-row-tall row-rule" data-admin="wifi">
             <i class="ph ph-wifi-high list-icon"></i>
             <div class="list-body"><div class="list-title">Wi-Fi</div></div>
             <span class="list-value" id="net-wifi">—</span>
             <i class="ph ph-caret-right list-caret"></i>
-          </div>
-          <div class="list-row list-row-tall row-rule" data-net="tailscale">
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="tailscale">
             <i class="ph ph-shield-check list-icon"></i>
             <div class="list-body"><div class="list-title">Tailscale</div></div>
             <span class="list-value" id="net-ts">—</span>
             <i class="ph ph-caret-right list-caret"></i>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -1192,14 +1196,50 @@ async function loadServer() {
             <div class="list-body"><div class="list-title">Scan library</div><div class="list-sub">Index new and changed files</div></div>
             <i class="ph ph-caret-right list-caret"></i>
           </button>
-          <button class="list-row list-row-tall row-rule" data-act="duplicates">
+          <button class="list-row list-row-tall row-rule" data-admin="organize">
+            <i class="ph ph-folders list-icon"></i>
+            <div class="list-body"><div class="list-title">Organize media</div><div class="list-sub">Preview or apply moves and renames</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="duplicates">
             <i class="ph ph-copy list-icon"></i>
             <div class="list-body"><div class="list-title">Find duplicates</div><div class="list-sub">By name, size, or IMDb ID</div></div>
             <i class="ph ph-caret-right list-caret"></i>
           </button>
-          <button class="list-row list-row-tall row-rule" data-act="storage">
+          <button class="list-row list-row-tall row-rule" data-admin="upload">
+            <i class="ph ph-upload-simple list-icon"></i>
+            <div class="list-body"><div class="list-title">Upload from phone</div><div class="list-sub">Photos, video, or any file</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="storage">
             <i class="ph ph-hard-drive list-icon"></i>
-            <div class="list-body"><div class="list-title">Storage &amp; drives</div><div class="list-sub">Mounted volumes and free space</div></div>
+            <div class="list-body"><div class="list-title">Storage &amp; drives</div><div class="list-sub">Mount, eject and free space</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+        </div>
+      </div>
+
+      <div style="margin-top:24px">
+        <div class="kicker" style="margin-bottom:6px">People &amp; data</div>
+        <div class="list">
+          <button class="list-row list-row-tall row-rule" data-admin="users">
+            <i class="ph ph-users-three list-icon"></i>
+            <div class="list-body"><div class="list-title">Users</div><div class="list-sub">Accounts and administrators</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="backup">
+            <i class="ph ph-file-archive list-icon"></i>
+            <div class="list-body"><div class="list-title">Backup &amp; restore</div><div class="list-sub">Database, mounts and settings</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="keys">
+            <i class="ph ph-key list-icon"></i>
+            <div class="list-body"><div class="list-title">API keys</div><div class="list-sub">OMDb, OpenSubtitles, Debrid</div></div>
+            <i class="ph ph-caret-right list-caret"></i>
+          </button>
+          <button class="list-row list-row-tall row-rule" data-admin="logs">
+            <i class="ph ph-file-text list-icon"></i>
+            <div class="list-body"><div class="list-title">Server logs</div><div class="list-sub">Recent journal output</div></div>
             <i class="ph ph-caret-right list-caret"></i>
           </button>
         </div>
@@ -1528,7 +1568,19 @@ document.addEventListener('click', async (e) => {
     }
     if (t.dataset.go === 'settings') { push('settings'); loadSettings(); return; }
 
-    if (t.dataset.open) { openDetail(t.dataset.open); return; }
+    if (t.dataset.open) {
+        const p = t.dataset.open;
+        // Audio in a library list plays straight away and queues its siblings
+        if (S.screen === 'library' && kindOf(p, S.lib) === 'audio') {
+            const tracks = sortedLibItems().map(i => i.path).filter(x => kindOf(x, S.lib) === 'audio');
+            S.audio.queue = tracks;
+            S.audio.index = Math.max(0, tracks.indexOf(p));
+            playAudio(p);
+            return;
+        }
+        openDetail(p);
+        return;
+    }
     if (t.dataset.play) { playVideo(t.dataset.play, Number(t.dataset.at || 0)); return; }
 
     if (t.dataset.lib) { S.lib = t.dataset.lib; S.libView = 'grid'; loadLibrary(); return; }

@@ -15,8 +15,8 @@
           onerror="this.onerror=null;this.href='https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css'">
     <link rel="stylesheet" href="vendor/inter/inter.css"
           onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'">
-    <link rel="stylesheet" href="css/nocturne.css?v=1782012000">
-    <link rel="manifest" href="manifest.json?v=1782012000">
+    <link rel="stylesheet" href="css/nocturne.css?v=1782014000">
+    <link rel="manifest" href="manifest.json?v=1782014000">
     <meta name="theme-color" content="#161826">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -160,6 +160,38 @@
         <div class="screen-scroll pv" style="padding:20px 20px 96px" id="settings-body"></div>
     </section>
 
+    <!-- ── Generic sub-page (admin screens, shows, playlists) ───── -->
+    <section class="screen" id="screen-sub" data-screen="sub">
+        <div class="screen-head" style="display:flex;align-items:center;gap:12px">
+            <button class="btn btn-icon" data-back aria-label="Back"><i class="ph ph-arrow-left"></i></button>
+            <div style="min-width:0;flex:1">
+                <h1 id="sub-title" style="font-size:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</h1>
+                <div class="head-sub" id="sub-desc" style="margin-top:2px"></div>
+            </div>
+            <button class="btn btn-icon hidden" id="sub-action" aria-label="Action"><i class="ph ph-plus"></i></button>
+        </div>
+        <div class="screen-scroll pv" style="padding:18px 20px 96px" id="sub-body"></div>
+    </section>
+
+    <!-- ── Reader (books, comics, PDF, images) ──────────────────── -->
+    <section class="screen" id="screen-reader" data-screen="reader">
+        <div class="reader-top" id="reader-top">
+            <button class="btn btn-icon" data-back aria-label="Close"><i class="ph ph-arrow-left"></i></button>
+            <div class="player-heading">
+                <div class="t" id="reader-title">—</div>
+                <div class="s" id="reader-sub"></div>
+            </div>
+            <button class="btn btn-icon" id="reader-menu" aria-label="Reader options"><i class="ph ph-list"></i></button>
+        </div>
+        <div class="reader-stage" id="reader-stage"></div>
+        <div class="reader-bar" id="reader-bar">
+            <button class="btn btn-icon" id="reader-prev" aria-label="Previous page"><i class="ph ph-caret-left"></i></button>
+            <input type="range" id="reader-range" min="1" max="1" value="1" class="reader-range" aria-label="Page">
+            <span class="reader-count" id="reader-count">1 / 1</span>
+            <button class="btn btn-icon" id="reader-next" aria-label="Next page"><i class="ph ph-caret-right"></i></button>
+        </div>
+    </section>
+
     <!-- ── Player ───────────────────────────────────────────────── -->
     <section class="screen" id="screen-player" data-screen="player">
         <div class="player-stage" id="player-stage">
@@ -273,6 +305,9 @@
     </nav>
 </div>
 
-<script src="js/app.js?v=1782012000"></script>
+<script src="vendor/epub/epub.min.js" onerror="this.remove()"></script>
+<script src="js/reader.js?v=1782014000"></script>
+<script src="js/admin.js?v=1782014000"></script>
+<script src="js/app.js?v=1782014000"></script>
 </body>
 </html>
