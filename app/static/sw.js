@@ -9,6 +9,7 @@ const APP_SHELL = [
   '/js/app_legacy.js',
   '/js/playback-core.js',
   '/js/track-control.js',
+  '/js/subtitle-control.js',
   '/js/admin.js',
   '/js/features.js',
   '/js/reader.js',
@@ -81,10 +82,6 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
-  // Playback traffic is intentionally network-only. It contains Range
-  // requests, expiring stream tickets, and HLS state tied to a particular
-  // playback/seek session; caching any of it can replay stale credentials or
-  // obsolete segments.
   if (
     url.pathname.startsWith('/api/playback/') ||
     url.pathname.includes('/media/stream') ||
