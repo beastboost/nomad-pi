@@ -1,23 +1,38 @@
 """Compatibility facade for the Nomad 2.x playback routers."""
 
 import sys
+from urllib.parse import quote
 
 from app.routers import playback_core as _core
 from app.routers.playback_tracks import router as _tracks_router
 from app.routers.playback_quality import router as _quality_router
 from app.routers.playback_health import router as _health_router
 from app.routers.playback_subtitles import router as _subtitle_router
+from app.routers.playback_abr import (
+    abr_manager as _abr_manager,
+    ensure_adaptive_session as _ensure_adaptive_session,
+    router as _abr_router,
+)
+from app.services.playback.abr import ABRJobError
 from app.services.playback.hls import HLSJobError
 
 
-def _ensure_hls_with_selected_streams(session, fs_path=None):
-    """Rebuild HLS while preserving alternate audio and burned subtitles.
+_original_playback_urls = _core._playback_urls
+_original_hls_stop = _core.hls_manager.stop
+_original_hls_status = _core.hls_manager.status
 
-    The original core helper predates track switching. Keeping this override in
-    the facade avoids rewriting the large core router while ensuring seeks,
-    restart recovery and playlist regeneration retain the selected streams.
-    """
+
+def _ensure_hls_with_selected_streams(session, fs_path=None):
+    """Rebuild the correct HLS engine while preserving selected streams."""
     metadata = session.metadata or {}
+    if metadata.get("abr"):
+        try:
+            return _ensure_adaptive_session(session, fs_path=fs_path)
+        except ABRJobError as exc:
+            # Core seek/recovery paths already understand HLSJobError, so keep
+            # the public failure semantics identical for adaptive sessions.
+            raise HLSJobError(str(exc)) from exc
+
     source = metadata.get("source") or {}
     target = metadata.get("target") or {}
     caps = metadata.get("capabilities") or {}
@@ -48,11 +63,38 @@ def _ensure_hls_with_selected_streams(session, fs_path=None):
     return _core.hls_manager.wait_until_ready(session.id)
 
 
+def _playback_urls_with_adaptive(session, ticket: str) -> dict:
+    if (session.metadata or {}).get("abr"):
+        return {
+            "type": "hls",
+            "adaptive": True,
+            "url": f"/api/playback/abr/{session.id}/master.m3u8?ticket={quote(ticket, safe='')}",
+        }
+    return _original_playback_urls(session, ticket)
+
+
+def _stop_all_hls(session_id: str, *, remove_cache: bool = False) -> None:
+    _original_hls_stop(session_id, remove_cache=remove_cache)
+    _abr_manager.stop(session_id, remove_cache=remove_cache)
+
+
+def _status_all_hls(session_id: str) -> dict:
+    session = _core.session_store.get(session_id)
+    if session and (session.metadata or {}).get("abr"):
+        return {"adaptive": True, **_abr_manager.status(session_id)}
+    return _original_hls_status(session_id)
+
+
 _core._ensure_hls = _ensure_hls_with_selected_streams
+_core._playback_urls = _playback_urls_with_adaptive
+_core.hls_manager.stop = _stop_all_hls
+_core.hls_manager.status = _status_all_hls
+
 _core.router.include_router(_tracks_router)
 _core.router.include_router(_quality_router)
 _core.router.include_router(_health_router)
 _core.router.include_router(_subtitle_router)
+_core.router.include_router(_abr_router)
 
 # Preserve imports such as ``from app.routers import playback`` while keeping
 # the main playback implementation and optional controls modular.
