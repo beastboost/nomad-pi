@@ -104,6 +104,7 @@ def _plan_dict(source, plan) -> dict:
             "width": source.width,
             "height": source.height,
             "bitrate": source.bitrate,
+            "duration": source.duration,
         },
         "target": {
             "container": plan.target_container,
@@ -122,6 +123,7 @@ def _metadata_for_session(source, plan, caps: ClientCapabilitiesRequest) -> dict
             "width": source.width,
             "height": source.height,
             "bitrate": source.bitrate,
+            "duration": source.duration,
         },
         "target": {
             "container": plan.target_container,
@@ -220,6 +222,7 @@ def start_playback(
         user_id=user_id,
         path=request.path,
         mode=plan.mode.value,
+        duration=float(source.duration or 0),
         position=request.position,
         audio_track=request.audio_track,
         subtitle_track=request.subtitle_track,
