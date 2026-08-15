@@ -1,7 +1,8 @@
 """Small ffprobe adapter used by the playback planner.
 
-Only extracts information needed by playback planning/session timing. Richer
-track metadata lives separately in tracks.py.
+Extracts the fields needed to decide whether a nominally supported codec is
+actually browser-compatible (for example hvc1 vs hev1 and 8-bit vs 10-bit
+H.264). Richer track metadata lives separately in tracks.py.
 """
 
 import json
@@ -25,7 +26,7 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
         "-v", "error",
         "-print_format", "json",
         "-show_entries", "format=format_name,bit_rate,duration",
-        "-show_entries", "stream=codec_type,codec_name,width,height,bit_rate",
+        "-show_entries", "stream=codec_type,codec_name,profile,pix_fmt,codec_tag_string,width,height,bit_rate",
         path,
     ]
 
@@ -77,6 +78,9 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
             or _positive_int((audio or {}).get("bit_rate"))
         ),
         duration=_positive_float(fmt.get("duration")),
+        video_profile=(video or {}).get("profile"),
+        pixel_format=(video or {}).get("pix_fmt"),
+        codec_tag=(video or {}).get("codec_tag_string"),
     )
 
 
