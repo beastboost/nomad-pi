@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from app.services.playback.probe import probe_media
 
 
-def test_probe_media_captures_source_duration(tmp_path, monkeypatch):
+def test_probe_media_captures_source_duration_and_video_compatibility(tmp_path, monkeypatch):
     media = tmp_path / "movie.mkv"
     media.write_bytes(b"fixture")
     payload = {
@@ -17,6 +17,9 @@ def test_probe_media_captures_source_duration(tmp_path, monkeypatch):
             {
                 "codec_type": "video",
                 "codec_name": "h264",
+                "profile": "High 10",
+                "pix_fmt": "yuv420p10le",
+                "codec_tag_string": "avc1",
                 "width": 1920,
                 "height": 1080,
                 "bit_rate": "10000000",
@@ -44,3 +47,6 @@ def test_probe_media_captures_source_duration(tmp_path, monkeypatch):
     assert result.audio_codec == "aac"
     assert result.duration == 7265.432
     assert result.bitrate == 12_000_000
+    assert result.video_profile == "high 10"
+    assert result.pixel_format == "yuv420p10le"
+    assert result.codec_tag == "avc1"
