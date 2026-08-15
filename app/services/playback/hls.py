@@ -223,7 +223,12 @@ class HLSManager:
             self._jobs[session_id] = job
             return job
 
-    def wait_until_ready(self, session_id: str, timeout: float = 8.0) -> Path:
+    def wait_until_ready(self, session_id: str, timeout: Optional[float] = None) -> Path:
+        if timeout is None:
+            try:
+                timeout = float(os.environ.get("NOMAD_HLS_START_TIMEOUT", "20"))
+            except (TypeError, ValueError):
+                timeout = 20.0
         deadline = time.monotonic() + max(0.1, float(timeout))
         playlist = self.playlist_path(session_id)
         while time.monotonic() < deadline:
@@ -235,7 +240,7 @@ class HLSManager:
                 message = self.log_tail(session_id)
                 raise HLSJobError(message or f"ffmpeg exited with code {job.process.returncode}")
             time.sleep(0.1)
-        raise HLSJobError("Timed out waiting for the HLS playlist")
+        raise HLSJobError(f"Timed out after {float(timeout):.1f}s waiting for the HLS playlist")
 
     def status(self, session_id: str) -> dict:
         playlist = self.playlist_path(session_id)
