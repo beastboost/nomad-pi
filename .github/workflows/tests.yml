@@ -1,6 +1,7 @@
 name: Nomad Pi Tests
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -24,10 +25,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # One-time repair for the legacy body-form system-control route.  The
-      # source file predates the modular playback work and is very large; this
-      # exact replacement commits the narrow fix to the feature branch.  The
-      # step is skipped for the bot's follow-up push, preventing recursion.
+      # One-time repair for the legacy body-form system-control route. The
+      # exact replacement commits the narrow fix to this feature branch. The
+      # bot's follow-up push skips this step to prevent recursion.
       - name: Repair system control body route
         if: github.ref == 'refs/heads/agent/nomad-2-playback-core-foundation' && github.actor != 'github-actions[bot]'
         shell: bash
