@@ -161,6 +161,52 @@ class HLSManager:
         except OSError:
             return False
 
+    def cleanup_cache(self, ttl_seconds: Optional[float] = None) -> int:
+        """Remove inactive HLS cache directories older than the configured TTL.
+
+        Active FFmpeg jobs are never touched. Cleanup is opportunistic when a
+        new HLS job starts, avoiding another background thread on small SBCs.
+        """
+        if ttl_seconds is None:
+            try:
+                ttl_seconds = float(os.environ.get("NOMAD_HLS_CACHE_TTL", "86400"))
+            except (TypeError, ValueError):
+                ttl_seconds = 86400.0
+        ttl_seconds = max(300.0, float(ttl_seconds))
+        cutoff = time.time() - ttl_seconds
+
+        with self._lock:
+            active_ids = {
+                session_id
+                for session_id, job in self._jobs.items()
+                if job.process and job.process.poll() is None
+            }
+
+        removed = 0
+        try:
+            children = list(self.root.iterdir())
+        except OSError:
+            return 0
+
+        for directory in children:
+            if not directory.is_dir() or directory.name in active_ids:
+                continue
+            try:
+                newest_mtime = directory.stat().st_mtime
+                for item in directory.iterdir():
+                    try:
+                        newest_mtime = max(newest_mtime, item.stat().st_mtime)
+                    except OSError:
+                        continue
+                if newest_mtime >= cutoff:
+                    continue
+                shutil.rmtree(directory, ignore_errors=True)
+                if not directory.exists():
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
     def ensure_job(
         self,
         *,
@@ -179,6 +225,8 @@ class HLSManager:
     ) -> HLSJob:
         if not shutil.which("ffmpeg"):
             raise HLSJobError("ffmpeg is not installed")
+
+        self.cleanup_cache()
 
         with self._lock:
             existing = self._jobs.get(session_id)
