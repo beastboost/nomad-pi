@@ -25,7 +25,7 @@
     function deviceId() {
         let id = localStorage.getItem(DEVICE_KEY);
         if (!id) {
-            id = (crypto?.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+            id = (window.crypto?.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(16).slice(2)}`);
             localStorage.setItem(DEVICE_KEY, id);
         }
         return id;
@@ -130,6 +130,8 @@
     }
 
     function absoluteDuration() {
+        const canonical = Number(Core.current?.sourceDuration || 0);
+        if (canonical > 0 && isFinite(canonical)) return canonical;
         const v = V?.el;
         if (!v || !isFinite(v.duration)) return 0;
         return Number(Core.current?.offset || 0) + Number(v.duration || 0);
@@ -147,7 +149,7 @@
         const v = V?.el;
         if (!current || !v) return;
         try {
-            await api(`/playback/sessions/${encodeURIComponent(current.id)}/heartbeat`, {
+            const result = await api(`/playback/sessions/${encodeURIComponent(current.id)}/heartbeat`, {
                 method: 'POST',
                 body: JSON.stringify({
                     position: absolutePosition(),
@@ -155,6 +157,10 @@
                     state: state || (v.paused ? 'paused' : 'playing'),
                 }),
             });
+            if (Core.current === current && !current.sourceDuration) {
+                const duration = Number(result?.session?.duration || 0);
+                if (duration > 0 && isFinite(duration)) current.sourceDuration = duration;
+            }
         } catch {
             // Heartbeats must never interrupt playback.
         }
@@ -253,6 +259,7 @@
             const legacyStart = isHls ? 0 : Math.max(0, Number(at) || 0);
             runLegacyPlayer(path, result.playback.url, legacyStart);
 
+            const sourceDuration = Number(result.session?.duration || result.plan?.source?.duration || 0);
             const current = {
                 id: result.session.id,
                 path,
@@ -260,6 +267,7 @@
                 mode: result.plan?.mode,
                 url: result.playback.url,
                 offset: isHls ? Math.max(0, Number(at) || 0) : 0,
+                sourceDuration: sourceDuration > 0 && isFinite(sourceDuration) ? sourceDuration : 0,
                 hls: null,
                 heartbeatTimer: null,
             };
@@ -312,12 +320,12 @@
         updateScrub = function nomadUpdateScrub() {
             const current = Core.current;
             const v = V?.el;
-            if (!current?.offset || !v || !v.duration || !isFinite(v.duration)) {
+            const total = absoluteDuration();
+            if (!current || current.type !== 'hls' || !v || total <= 0) {
                 return legacyUpdateScrub();
             }
             const elapsed = absolutePosition();
-            const total = absoluteDuration();
-            const pct = total > 0 ? (elapsed / total) * 100 : 0;
+            const pct = Math.max(0, Math.min(100, (elapsed / total) * 100));
             $('#player-fill').style.width = `${pct}%`;
             $('#player-knob').style.left = `${pct}%`;
             $('#player-elapsed').textContent = fmtTime(elapsed);
@@ -329,10 +337,10 @@
         saveProgress = async function nomadSaveProgress(finished = false) {
             const current = Core.current;
             const v = V?.el;
-            if (!current?.offset || !v || !V.path || !v.duration || !isFinite(v.duration)) {
+            const duration = absoluteDuration();
+            if (!current || current.type !== 'hls' || !v || !V.path || duration <= 0) {
                 return legacySaveProgress(finished);
             }
-            const duration = absoluteDuration();
             const currentTime = finished ? duration : absolutePosition();
             try {
                 await fetch(`${API}/media/progress`, {
@@ -358,6 +366,8 @@
             });
             if (Core.current !== current) return;
             current.offset = Number(result.source_offset || 0);
+            const duration = Number(result.session?.duration || 0);
+            if (duration > 0 && isFinite(duration)) current.sourceDuration = duration;
             current.url = result.playback.url;
             V.url = current.url;
             V.nomadOffset = current.offset;
@@ -376,13 +386,13 @@
         scrubber.addEventListener('click', (event) => {
             const current = Core.current;
             const video = V?.el;
-            if (!current || current.type !== 'hls' || !video || !video.duration) return;
+            const total = absoluteDuration();
+            if (!current || current.type !== 'hls' || !video || total <= 0) return;
             event.preventDefault();
             event.stopImmediatePropagation();
             const track = $('#player-scrubber .scrub-track');
             const rect = track.getBoundingClientRect();
             const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-            const total = absoluteDuration();
             seekHls(total * fraction);
         }, true);
     }
