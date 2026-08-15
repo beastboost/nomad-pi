@@ -96,21 +96,40 @@ def test_storage_info_shape():
 
 
 class TestSsidValidation:
+    """802.11 SSIDs are up to 32 *bytes* of arbitrary data, in practice UTF-8.
+    An ASCII-only rule here made real networks unjoinable — notably every
+    iPhone hotspot, which is named with U+2019 ("Conner\u2019s iPhone")."""
+
     def _model(self):
         from app.routers.system import WifiConnectRequest
         return WifiConnectRequest
 
-    def test_accepts_special_characters(self):
-        req = self._model()(ssid="Bob's WiFi! #5G & more", password="pw12345678")
-        assert req.ssid == "Bob's WiFi! #5G & more"
+    @pytest.mark.parametrize("ssid", [
+        "Conner\u2019s iPhone",   # the reported failure — typographic apostrophe
+        "Conner's iPhone",        # straight apostrophe
+        "Bob's WiFi! #5G & more", # punctuation
+        "caf\u00e9 wifi",          # accented latin
+        "\u6211\u7684\u7f51\u7edc",              # CJK
+        "\U0001F4F6 hotspot",         # emoji
+        "RUT200_EC4B",
+        "x" * 32,                 # exactly at the byte limit
+    ])
+    def test_accepts_real_world_ssids(self, ssid):
+        assert self._model()(ssid=ssid, password="pw12345678").ssid == ssid
 
-    def test_rejects_too_long(self):
+    def test_rejects_over_32_bytes(self):
         with pytest.raises(ValueError):
             self._model()(ssid="x" * 33, password="pw12345678")
 
-    def test_rejects_non_printable(self):
+    def test_limit_is_bytes_not_characters(self):
+        """11 CJK characters are only 11 chars but 33 UTF-8 bytes."""
         with pytest.raises(ValueError):
-            self._model()(ssid="evil\x00ssid", password="pw12345678")
+            self._model()(ssid="\u4e2d" * 11, password="pw12345678")
+
+    @pytest.mark.parametrize("ssid", ["evil\x00ssid", "bad\nssid", "tab\tssid"])
+    def test_rejects_control_characters(self, ssid):
+        with pytest.raises(ValueError):
+            self._model()(ssid=ssid, password="pw12345678")
 
     def test_rejects_empty(self):
         with pytest.raises(ValueError):
