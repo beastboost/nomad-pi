@@ -11,6 +11,8 @@ import threading
 import time
 from typing import Dict, Optional, Tuple
 
+import psutil
+
 from .encoders import (
     SOFTWARE_VIDEO_ENCODERS,
     is_hardware_encoder,
@@ -66,6 +68,36 @@ def fit_dimensions(
     return out_w, out_h
 
 
+def streaming_input_readrate(mode: str | PlaybackMode) -> Optional[float]:
+    """Cap cheap stream-copy jobs on small appliances so they do not saturate I/O.
+
+    A remux/audio-only transcode can otherwise consume a multi-gigabyte movie as
+    fast as storage allows while the same device is serving the growing HLS
+    cache. On <2 GiB appliances we default to 2x media rate: enough headroom for
+    playback without racing through the whole source. Set NOMAD_HLS_READRATE to
+    ``off``/``0`` to disable or a positive number to override.
+    """
+    playback_mode = mode if isinstance(mode, PlaybackMode) else PlaybackMode(mode)
+    if playback_mode not in {PlaybackMode.REMUX, PlaybackMode.TRANSCODE_AUDIO}:
+        return None
+
+    raw = str(os.environ.get("NOMAD_HLS_READRATE", "auto")).strip().lower()
+    if raw in {"off", "false", "no", "0"}:
+        return None
+    if raw not in {"", "auto"}:
+        try:
+            value = float(raw)
+            return max(0.5, min(8.0, value)) if value > 0 else None
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        total_ram = int(psutil.virtual_memory().total)
+    except Exception:
+        return None
+    return 2.0 if total_ram < 2 * 1024 * 1024 * 1024 else None
+
+
 def build_hls_command(
     *,
     source_path: str,
@@ -83,6 +115,7 @@ def build_hls_command(
     max_height: Optional[int] = None,
     max_bitrate: Optional[int] = None,
     start_position: float = 0,
+    input_readrate: Optional[float] = None,
 ) -> list[str]:
     ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
     output_dir = Path(output_dir)
@@ -99,6 +132,8 @@ def build_hls_command(
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-y"]
     if start_position and start_position > 0:
         cmd += ["-ss", f"{float(start_position):.3f}"]
+    if input_readrate:
+        cmd += ["-readrate", f"{float(input_readrate):.3f}"]
     cmd += ["-i", source_path]
 
     # Graphic subtitle streams (PGS/DVD/DVB) are decoded as bitmap frames.
@@ -164,9 +199,11 @@ def build_hls_command(
         raise HLSJobError(f"Playback mode {mode!r} does not require HLS")
 
     cmd += [
+        "-avoid_negative_ts", "make_zero",
         "-f", "hls",
         "-hls_time", "4",
         "-hls_list_size", "0",
+        "-hls_playlist_type", "event",
         "-hls_segment_type", "fmp4",
         "-hls_fmp4_init_filename", init_name,
         "-hls_flags", "independent_segments+temp_file",
@@ -328,6 +365,7 @@ class HLSManager:
                 max_height=max_height,
                 max_bitrate=max_bitrate,
                 start_position=start_position,
+                input_readrate=streaming_input_readrate(playback_mode),
             )
             cmd = build_hls_command(
                 **common,
