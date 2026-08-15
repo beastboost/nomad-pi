@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 import time
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from .planner import PlaybackMode
 
@@ -23,7 +23,7 @@ class HLSJob:
     session_id: str
     source_path: str
     directory: Path
-    process: subprocess.Popen
+    process: Optional[subprocess.Popen]
     log_path: Path
 
 
@@ -176,15 +176,12 @@ class HLSManager:
 
         with self._lock:
             existing = self._jobs.get(session_id)
-            if existing and existing.process.poll() is None:
+            if existing and existing.process and existing.process.poll() is None:
                 return existing
 
             directory = self.session_dir(session_id)
             if self._playlist_complete(session_id):
-                # Completed cache can be served without starting ffmpeg again.
-                process = subprocess.Popen(["true"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                process.wait()
-                job = HLSJob(session_id, source_path, directory, process, directory / "ffmpeg.log")
+                job = HLSJob(session_id, source_path, directory, None, directory / "ffmpeg.log")
                 self._jobs[session_id] = job
                 return job
 
@@ -227,7 +224,7 @@ class HLSManager:
                 return playlist
             with self._lock:
                 job = self._jobs.get(session_id)
-            if job and job.process.poll() is not None:
+            if job and job.process and job.process.poll() is not None:
                 message = self.log_tail(session_id)
                 raise HLSJobError(message or f"ffmpeg exited with code {job.process.returncode}")
             time.sleep(0.1)
@@ -237,18 +234,18 @@ class HLSManager:
         playlist = self.playlist_path(session_id)
         with self._lock:
             job = self._jobs.get(session_id)
-        running = bool(job and job.process.poll() is None)
+        running = bool(job and job.process and job.process.poll() is None)
         return {
             "running": running,
             "playlist_ready": playlist.exists() and playlist.stat().st_size > 0,
             "complete": self._playlist_complete(session_id),
-            "returncode": None if not job or running else job.process.returncode,
+            "returncode": None if not job or not job.process or running else job.process.returncode,
         }
 
     def stop(self, session_id: str, *, remove_cache: bool = False) -> None:
         with self._lock:
             job = self._jobs.pop(session_id, None)
-        if job and job.process.poll() is None:
+        if job and job.process and job.process.poll() is None:
             job.process.terminate()
             try:
                 job.process.wait(timeout=3)
