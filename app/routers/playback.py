@@ -9,6 +9,7 @@ from app.routers.playback_quality import router as _quality_router
 from app.routers.playback_health import router as _health_router
 from app.routers.playback_subtitles import router as _subtitle_router
 from app.routers.playback_devices import router as _devices_router
+from app.routers.playback_music import router as _music_router
 from app.routers.playback_abr import (
     abr_manager as _abr_manager,
     ensure_adaptive_session as _ensure_adaptive_session,
@@ -95,6 +96,7 @@ _core.router.include_router(_health_router)
 _core.router.include_router(_subtitle_router)
 _core.router.include_router(_abr_router)
 _core.router.include_router(_devices_router)
+_core.router.include_router(_music_router)
 
 # Preserve imports such as ``from app.routers import playback`` while keeping
 # the main playback implementation and optional controls modular.
