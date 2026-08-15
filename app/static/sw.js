@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v2.0.11-radxa-hotfix';
+const CACHE_NAME = 'nomad-pi-v2.0.12-radxa-hotfix';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css',
@@ -30,17 +30,19 @@ self.addEventListener('install', (event) => {
   const remote = APP_SHELL.filter((a) => a.startsWith('http'));
   event.waitUntil(caches.open(CACHE_NAME).then((cache) =>
     Promise.allSettled(local.map((asset) => cache.add(asset)))
-  ));
+  ).then(() => self.skipWaiting()));
   caches.open(CACHE_NAME).then((cache) => {
     remote.forEach((asset) => cache.add(new Request(asset, { mode: 'cors' })).catch(() => {}));
   });
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((cacheNames) => Promise.all(
-    cacheNames.map((name) => name !== CACHE_NAME ? caches.delete(name) : undefined)
-  )));
-  self.clients.claim();
+  event.waitUntil(Promise.all([
+    caches.keys().then((cacheNames) => Promise.all(
+      cacheNames.map((name) => name !== CACHE_NAME ? caches.delete(name) : undefined)
+    )),
+    self.clients.claim(),
+  ]));
 });
 
 self.addEventListener('fetch', (event) => {
@@ -55,7 +57,7 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('.mp3') || url.pathname.endsWith('.flac')
   ) return;
 
-  if (event.request.destination === 'document' || url.pathname === '/') {
+  if (event.request.destination === 'document' || url.pathname === '/' || url.pathname === '/js/app.js') {
     event.respondWith(networkFirst(event.request));
     return;
   }
