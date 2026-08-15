@@ -14,27 +14,19 @@ import psutil
 
 from app.routers.auth import get_current_user_id
 from app.routers import playback_core as core
+from app.services.playback.encoders import (
+    ALL_KNOWN_HARDWARE_ENCODERS,
+    HARDWARE_VIDEO_ENCODERS,
+    SOFTWARE_VIDEO_ENCODERS,
+    hardware_policy,
+    video_encoder_candidates,
+)
 
 
 router = APIRouter()
 
-SOFTWARE_VIDEO_ENCODERS = {
-    "h264": "libx264",
-    "hevc": "libx265",
-    "vp9": "libvpx-vp9",
-    "av1": "libaom-av1",
-}
-RELEVANT_VIDEO_ENCODERS = set(SOFTWARE_VIDEO_ENCODERS.values()) | {
-    "h264_v4l2m2m", "hevc_v4l2m2m", "h264_vaapi", "hevc_vaapi",
-    "h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv",
-    "h264_videotoolbox", "hevc_videotoolbox",
-}
+RELEVANT_VIDEO_ENCODERS = set(SOFTWARE_VIDEO_ENCODERS.values()) | ALL_KNOWN_HARDWARE_ENCODERS
 RELEVANT_AUDIO_ENCODERS = {"aac", "libopus", "libmp3lame", "libvorbis", "alac"}
-HARDWARE_ENCODERS = {
-    "h264_v4l2m2m", "hevc_v4l2m2m", "h264_vaapi", "hevc_vaapi",
-    "h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv",
-    "h264_videotoolbox", "hevc_videotoolbox",
-}
 
 
 def _run(args: list[str], timeout: int = 10) -> tuple[int, str]:
@@ -114,21 +106,37 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     encoders: set[str] = set()
     hwaccels: list[str] = []
     executable_video = {}
+    h264_candidates: list[str] = []
+    hevc_candidates: list[str] = []
+    policy = hardware_policy()
     if ffmpeg:
         encoders = _ffmpeg_encoders(ffmpeg)
         hwaccels = _ffmpeg_hwaccels(ffmpeg)
         executable_video = {
             codec: encoder in encoders
             for codec, encoder in SOFTWARE_VIDEO_ENCODERS.items()
+            if codec in {"h264", "hevc", "vp9", "av1"}
         }
+        h264_candidates = video_encoder_candidates("h264", available=encoders, policy=policy)
+        hevc_candidates = video_encoder_candidates("hevc", available=encoders, policy=policy)
+        h264_hw = [x for x in h264_candidates if x in ALL_KNOWN_HARDWARE_ENCODERS]
         checks.append(_check(
-            "H.264 software encoder",
-            executable_video.get("h264", False),
-            "libx264 is available and matches the current HLS executor"
-            if executable_video.get("h264") else
-            "libx264 is missing; the current executor cannot produce H.264 even if separate hardware encoders are detected",
+            "H.264 encoder path",
+            bool(h264_candidates),
+            (
+                f"Nomad will try {h264_candidates[0]}"
+                + (f" and fall back to {h264_candidates[1]}" if len(h264_candidates) > 1 else "")
+            ) if h264_candidates else
+            "No H.264 encoder is available under the current hardware policy",
             severity="warn",
         ))
+        if h264_hw:
+            checks.append(_check(
+                "SBC hardware acceleration",
+                True,
+                f"Hardware encoder eligible for execution: {h264_hw[0]}",
+                severity="warn",
+            ))
         checks.append(_check(
             "AAC encoder",
             "aac" in encoders,
@@ -168,7 +176,13 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     statuses = {item["status"] for item in checks}
     overall = "fail" if "fail" in statuses else "warn" if "warn" in statuses else "ok"
     memory = psutil.virtual_memory()
-    any_video_encoder = any(executable_video.values())
+    any_video_encoder = bool(h264_candidates or hevc_candidates or executable_video.get("vp9") or executable_video.get("av1"))
+    executable_hardware = sorted({
+        encoder
+        for codec in ("h264", "hevc")
+        for encoder in video_encoder_candidates(codec, available=encoders, policy=policy)
+        if encoder in ALL_KNOWN_HARDWARE_ENCODERS
+    }) if ffmpeg else []
 
     return {
         "status": overall,
@@ -184,10 +198,18 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "ffprobe_path": ffprobe,
             "video_encoders": sorted(encoders & RELEVANT_VIDEO_ENCODERS),
             "audio_encoders": sorted(encoders & RELEVANT_AUDIO_ENCODERS),
-            "hardware_encoders_detected": sorted(encoders & HARDWARE_ENCODERS),
+            "hardware_encoders_detected": sorted(encoders & ALL_KNOWN_HARDWARE_ENCODERS),
             "hardware_accels_detected": sorted(set(hwaccels)),
             "executor_video_codecs": executable_video,
-            "hardware_acceleration_enabled": False,
+            "hardware_policy": policy,
+            "hardware_acceleration_enabled": bool(executable_hardware and policy != "off"),
+            "executor_hardware_encoders": executable_hardware,
+            "h264_encoder_candidates": h264_candidates,
+            "hevc_encoder_candidates": hevc_candidates,
+            "supported_sbc_hardware_families": {
+                codec: list(values) for codec, values in HARDWARE_VIDEO_ENCODERS.items()
+                if codec in {"h264", "hevc"}
+            },
         },
         "playback_modes": {
             "direct_play": True,
