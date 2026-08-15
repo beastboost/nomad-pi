@@ -53,13 +53,15 @@ def _capabilities(metadata: dict, profile: dict) -> ClientCapabilities:
 
 def _media_probe(metadata: dict) -> MediaProbe:
     source = metadata.get("source") or {}
+    selected_audio = metadata.get("selected_audio") or {}
     return MediaProbe(
         container=str(source.get("container") or ""),
         video_codec=source.get("video_codec"),
-        audio_codec=source.get("audio_codec"),
+        audio_codec=selected_audio.get("codec") or source.get("audio_codec"),
         width=source.get("width"),
         height=source.get("height"),
         bitrate=source.get("bitrate"),
+        duration=source.get("duration"),
     )
 
 
@@ -73,6 +75,18 @@ def _cap_dict(caps: ClientCapabilities) -> dict:
         "max_height": caps.max_height,
         "max_bitrate": caps.max_bitrate,
     }
+
+
+def _burn_video_codec(caps: ClientCapabilities, planned: Optional[str], source: MediaProbe) -> str:
+    if planned in {"h264", "hevc"}:
+        return planned
+    if "h264" in caps.video_codecs or "avc" in caps.video_codecs:
+        return "h264"
+    if "hevc" in caps.video_codecs or "h265" in caps.video_codecs:
+        return "hevc"
+    if source.video_codec in {"h264", "hevc"} and source.video_codec in caps.video_codecs:
+        return source.video_codec
+    raise HTTPException(status_code=422, detail="No HLS-compatible video codec is available for burned subtitles")
 
 
 @router.get("/quality-profiles")
@@ -112,14 +126,13 @@ def switch_quality(
             "reasons": list(plan.reasons),
         })
 
-    # An explicitly selected alternate audio stream cannot be represented by a
-    # plain direct-file URL. Keep it on HLS and map the chosen stream.
     mode = plan.mode
+    target_video = plan.target_video_codec
     target_audio = plan.target_audio_codec
     selected_audio = metadata.get("selected_audio") or {}
     if old.audio_track is not None and mode == PlaybackMode.DIRECT_PLAY:
         selected_codec = str(selected_audio.get("codec") or "").lower()
-        if selected_codec == "aac":
+        if selected_codec == "aac" or selected_codec in caps.audio_codecs:
             mode = PlaybackMode.REMUX
             target_audio = None
         elif "aac" in caps.audio_codecs:
@@ -128,10 +141,23 @@ def switch_quality(
         else:
             raise HTTPException(status_code=422, detail="Selected audio cannot be represented at this quality")
 
+    # Burned bitmap subtitles necessarily require decoded video frames. Keep
+    # the burn-in active when quality changes and force a browser-safe HLS video
+    # codec even if the un-subtitled source could otherwise remux/direct-play.
+    burn_subtitle = metadata.get("burn_subtitle")
+    if burn_subtitle:
+        mode = PlaybackMode.TRANSCODE_VIDEO
+        target_video = _burn_video_codec(caps, target_video, source)
+        selected_codec = str(selected_audio.get("codec") or source.audio_codec or "").lower()
+        if selected_codec and selected_codec not in caps.audio_codecs:
+            if "aac" not in caps.audio_codecs:
+                raise HTTPException(status_code=422, detail="Selected audio cannot be represented with burned subtitles")
+            target_audio = "aac"
+
     metadata["capabilities"] = _cap_dict(caps)
     metadata["target"] = {
-        "container": plan.target_container,
-        "video_codec": plan.target_video_codec,
+        "container": plan.target_container or "mp4",
+        "video_codec": target_video,
         "audio_codec": target_audio,
     }
     metadata["reasons"] = list(plan.reasons)
@@ -142,6 +168,7 @@ def switch_quality(
         user_id=user_id,
         path=old.path,
         mode=mode.value,
+        duration=old.duration,
         position=position,
         audio_track=old.audio_track,
         subtitle_track=old.subtitle_track,
@@ -161,9 +188,10 @@ def switch_quality(
                 session_id=replacement.id,
                 source_path=fs_path,
                 mode=replacement.mode,
-                target_video_codec=plan.target_video_codec,
+                target_video_codec=target_video,
                 target_audio_codec=target_audio,
                 audio_stream_index=old.audio_track,
+                subtitle_stream_index=(old.subtitle_track if burn_subtitle else None),
                 source_width=source.width,
                 source_height=source.height,
                 max_width=caps.max_width,
@@ -180,8 +208,6 @@ def switch_quality(
         core.session_store.update(replacement.id, user_id=user_id, state="failed")
         raise HTTPException(status_code=503, detail=f"Quality switch failed: {exc}")
 
-    # New playback is prepared successfully. Retire the old session only now,
-    # so a failed transcode does not interrupt the video already on screen.
     core.hls_manager.stop(old.id, remove_cache=True)
     core.session_store.update(old.id, user_id=user_id, state="stopped")
 
