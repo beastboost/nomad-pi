@@ -12,4 +12,8 @@
     document.write(`<script src="js/music2-fallback.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/media-exclusivity.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/stream-keep-control.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/offline-control.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/library-health.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/profile-context.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/reader-state.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
