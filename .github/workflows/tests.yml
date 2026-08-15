@@ -49,6 +49,7 @@ jobs:
           node --check app/static/js/playback-core.js
           node --check app/static/js/track-control.js
           node --check app/static/js/subtitle-control.js
+          node --check app/static/js/quality-control.js
           node --check app/static/sw.js
 
       - name: Check shell scripts
