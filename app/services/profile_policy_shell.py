@@ -51,6 +51,13 @@ def enforce_request_policy_shell(request: Request, user_id: int, token: str):
             detail="This login session is bound to another profile; use the profile switch action",
         )
 
+    # A login has already proven the account password. If a client has never
+    # selected a household profile, bind the account's default immediately so
+    # API clients cannot bypass policy simply by omitting the profile header.
+    if bound is None and requested_id is None:
+        default = household.default(int(user_id))
+        bound = household.bind(user_id=int(user_id), token=token, profile_id=default.id)
+
     active_id = bound.id if bound else requested_id
     if active_id is None:
         return None
