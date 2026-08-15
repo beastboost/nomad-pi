@@ -61,16 +61,21 @@ def _ticketed_url(session_id: str, user_id: int) -> tuple[str, int]:
     )
 
 
-def _subtitle_cache_path(fs_path: str, stream_index: int) -> Path:
+def _subtitle_cache_path(fs_path: str, stream_index: int, offset: float = 0) -> Path:
     st = os.stat(fs_path)
-    identity = f"{os.path.abspath(fs_path)}|{st.st_size}|{st.st_mtime_ns}|{stream_index}"
+    rounded_offset = round(max(0.0, float(offset or 0)), 3)
+    identity = (
+        f"{os.path.abspath(fs_path)}|{st.st_size}|{st.st_mtime_ns}|"
+        f"{stream_index}|{rounded_offset:.3f}"
+    )
     digest = hashlib.sha256(identity.encode("utf-8", errors="surrogatepass")).hexdigest()[:24]
     SUBTITLE_CACHE.mkdir(parents=True, exist_ok=True)
     return SUBTITLE_CACHE / f"{digest}.vtt"
 
 
-def _extract_webvtt(fs_path: str, stream_index: int) -> Path:
-    cached = _subtitle_cache_path(fs_path, stream_index)
+def _extract_webvtt(fs_path: str, stream_index: int, offset: float = 0) -> Path:
+    offset = max(0.0, float(offset or 0))
+    cached = _subtitle_cache_path(fs_path, stream_index, offset)
     if cached.is_file() and cached.stat().st_size > 0:
         return cached
     ffmpeg = shutil.which("ffmpeg")
@@ -80,15 +85,21 @@ def _extract_webvtt(fs_path: str, stream_index: int) -> Path:
     fd, temp_name = tempfile.mkstemp(prefix="nomad-sub-", suffix=".vtt", dir=str(SUBTITLE_CACHE))
     os.close(fd)
     try:
+        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+        # HLS output is started at the session's absolute source position and
+        # its media timeline resets to zero. Apply the same input seek here so
+        # WebVTT cue times line up with that HLS timeline.
+        if offset > 0:
+            cmd += ["-ss", f"{offset:.3f}"]
+        cmd += [
+            "-i", fs_path,
+            "-map", f"0:{int(stream_index)}",
+            "-c:s", "webvtt",
+            "-f", "webvtt",
+            temp_name,
+        ]
         result = subprocess.run(
-            [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                "-i", fs_path,
-                "-map", f"0:{int(stream_index)}",
-                "-c:s", "webvtt",
-                "-f", "webvtt",
-                temp_name,
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=45,
@@ -144,7 +155,8 @@ def embedded_subtitle_webvtt(
             status_code=422,
             detail="This subtitle is image-based and requires burn-in transcoding",
         )
-    vtt_path = _extract_webvtt(fs_path, stream_index)
+    offset = session.position if session.mode != PlaybackMode.DIRECT_PLAY.value else 0.0
+    vtt_path = _extract_webvtt(fs_path, stream_index, offset=offset)
     return FileResponse(
         vtt_path,
         media_type="text/vtt; charset=utf-8",
