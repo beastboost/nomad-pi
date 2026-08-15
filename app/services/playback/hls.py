@@ -76,6 +76,7 @@ def build_hls_command(
     audio_stream_index: Optional[int] = None,
     subtitle_stream_index: Optional[int] = None,
     video_encoder_override: Optional[str] = None,
+    source_video_codec: Optional[str] = None,
     source_width: Optional[int] = None,
     source_height: Optional[int] = None,
     max_width: Optional[int] = None,
@@ -90,6 +91,7 @@ def build_hls_command(
     playlist_path = str(output_dir / "index.m3u8")
 
     playback_mode = PlaybackMode(mode)
+    source_codec = str(source_video_codec or "").strip().lower()
     if subtitle_stream_index is not None and playback_mode != PlaybackMode.TRANSCODE_VIDEO:
         raise HLSJobError("Image subtitle burn-in requires video transcoding")
 
@@ -123,9 +125,15 @@ def build_hls_command(
 
     if playback_mode == PlaybackMode.REMUX:
         cmd += ["-c:v", "copy", "-c:a", "copy"]
+        if source_codec in {"hevc", "h265"}:
+            # Apple requires/strongly prefers hvc1 signalling for HEVC carried
+            # in MP4/fMP4. This changes the sample entry without re-encoding.
+            cmd += ["-tag:v", "hvc1"]
     elif playback_mode == PlaybackMode.TRANSCODE_AUDIO:
         audio_encoder = AUDIO_ENCODERS.get((target_audio_codec or "aac").lower(), "aac")
         cmd += ["-c:v", "copy", "-c:a", audio_encoder]
+        if source_codec in {"hevc", "h265"}:
+            cmd += ["-tag:v", "hvc1"]
         if audio_encoder in {"aac", "libopus", "libmp3lame"}:
             cmd += ["-b:a", "192k"]
     elif playback_mode == PlaybackMode.TRANSCODE_VIDEO:
@@ -133,6 +141,14 @@ def build_hls_command(
         video_encoder = video_encoder_override or SOFTWARE_VIDEO_ENCODERS.get(target_codec, "libx264")
         cmd += ["-c:v", video_encoder]
         cmd += video_encoder_args(video_encoder, max_bitrate=max_bitrate)
+
+        # A 10-bit HEVC/VP9 source can otherwise produce a 10-bit H.264 output
+        # with some FFmpeg/x264 builds. Baseline browser/iPhone compatibility
+        # is much stronger when generated H.264 is explicitly 8-bit 4:2:0.
+        if target_codec in {"h264", "avc"}:
+            cmd += ["-pix_fmt", "yuv420p"]
+        elif target_codec in {"hevc", "h265"}:
+            cmd += ["-pix_fmt", "yuv420p", "-tag:v", "hvc1"]
 
         if dims and subtitle_stream_index is None:
             cmd += ["-vf", f"scale={dims[0]}:{dims[1]}"]
@@ -257,6 +273,7 @@ class HLSManager:
         target_audio_codec: Optional[str],
         audio_stream_index: Optional[int] = None,
         subtitle_stream_index: Optional[int] = None,
+        source_video_codec: Optional[str] = None,
         source_width: Optional[int] = None,
         source_height: Optional[int] = None,
         max_width: Optional[int] = None,
@@ -304,6 +321,7 @@ class HLSManager:
                 target_audio_codec=target_audio_codec,
                 audio_stream_index=audio_stream_index,
                 subtitle_stream_index=subtitle_stream_index,
+                source_video_codec=source_video_codec,
                 source_width=source_width,
                 source_height=source_height,
                 max_width=max_width,
