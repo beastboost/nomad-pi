@@ -15,9 +15,9 @@ permissions:
 
 jobs:
   test:
-    name: Python and frontend test suite
+    name: Python, frontend and playback runtime suite
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -34,7 +34,12 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Install system media dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
@@ -58,7 +63,12 @@ jobs:
         run: |
           bash -n scripts/vendor-assets.sh
 
-      - name: Run tests
+      - name: Run unit and regression tests
         env:
           ALLOW_INSECURE_DEFAULT: 'true'
         run: python -m pytest tests/ -q
+
+      - name: Run real FFmpeg playback smoke test
+        env:
+          ALLOW_INSECURE_DEFAULT: 'true'
+        run: python scripts/playback-selftest.py --smoke-hls
