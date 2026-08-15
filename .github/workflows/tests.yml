@@ -68,6 +68,7 @@ jobs:
           node --check app/static/js/offline-control.js
           node --check app/static/js/download-live.js
           node --check app/static/js/library-health.js
+          node --check app/static/js/media-actions.js
           node --check app/static/js/storage-failover.js
           node --check app/static/js/playback-health-ui.js
           node --check app/static/js/profile-context.js
