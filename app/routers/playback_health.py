@@ -14,6 +14,7 @@ import psutil
 
 from app.routers.auth import get_current_user_id
 from app.routers import playback_core as core
+from app.services.playback.abr import abr_available, abr_policy
 from app.services.playback.encoders import (
     ALL_KNOWN_HARDWARE_ENCODERS,
     HARDWARE_VIDEO_ENCODERS,
@@ -108,7 +109,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     executable_video = {}
     h264_candidates: list[str] = []
     hevc_candidates: list[str] = []
-    policy = hardware_policy()
+    hw_policy = hardware_policy()
     if ffmpeg:
         encoders = _ffmpeg_encoders(ffmpeg)
         hwaccels = _ffmpeg_hwaccels(ffmpeg)
@@ -117,8 +118,8 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             for codec, encoder in SOFTWARE_VIDEO_ENCODERS.items()
             if codec in {"h264", "hevc", "vp9", "av1"}
         }
-        h264_candidates = video_encoder_candidates("h264", available=encoders, policy=policy)
-        hevc_candidates = video_encoder_candidates("hevc", available=encoders, policy=policy)
+        h264_candidates = video_encoder_candidates("h264", available=encoders, policy=hw_policy)
+        hevc_candidates = video_encoder_candidates("hevc", available=encoders, policy=hw_policy)
         h264_hw = [x for x in h264_candidates if x in ALL_KNOWN_HARDWARE_ENCODERS]
         checks.append(_check(
             "H.264 encoder path",
@@ -143,6 +144,19 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "AAC encoder available" if "aac" in encoders else "AAC encoder missing; incompatible audio cannot be converted for browser HLS",
             severity="warn",
         ))
+
+    abr_ok, abr_reason, abr_candidates = abr_available(
+        available_encoders=encoders,
+        policy=abr_policy(),
+    ) if ffmpeg else (False, "ffmpeg is unavailable", [])
+    checks.append(_check(
+        "adaptive bitrate",
+        bool(abr_ok and "aac" in encoders),
+        abr_reason if abr_ok and "aac" in encoders else (
+            "AAC encoder missing; adaptive HLS requires AAC audio" if abr_ok else abr_reason
+        ),
+        severity="warn",
+    ))
 
     writable, write_error = _cache_writable()
     checks.append(_check(
@@ -180,7 +194,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     executable_hardware = sorted({
         encoder
         for codec in ("h264", "hevc")
-        for encoder in video_encoder_candidates(codec, available=encoders, policy=policy)
+        for encoder in video_encoder_candidates(codec, available=encoders, policy=hw_policy)
         if encoder in ALL_KNOWN_HARDWARE_ENCODERS
     }) if ffmpeg else []
 
@@ -201,8 +215,8 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "hardware_encoders_detected": sorted(encoders & ALL_KNOWN_HARDWARE_ENCODERS),
             "hardware_accels_detected": sorted(set(hwaccels)),
             "executor_video_codecs": executable_video,
-            "hardware_policy": policy,
-            "hardware_acceleration_enabled": bool(executable_hardware and policy != "off"),
+            "hardware_policy": hw_policy,
+            "hardware_acceleration_enabled": bool(executable_hardware and hw_policy != "off"),
             "executor_hardware_encoders": executable_hardware,
             "h264_encoder_candidates": h264_candidates,
             "hevc_encoder_candidates": hevc_candidates,
@@ -211,11 +225,20 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
                 if codec in {"h264", "hevc"}
             },
         },
+        "adaptive_bitrate": {
+            "policy": abr_policy(),
+            "available": bool(abr_ok and "aac" in encoders and writable),
+            "reason": abr_reason,
+            "encoder_candidates": abr_candidates,
+            "software_opt_in": str(__import__("os").environ.get("NOMAD_ABR_SOFTWARE", "0")).strip().lower() in {"1", "true", "yes", "on"},
+            "ladder": ["1080p", "720p", "480p"],
+        },
         "playback_modes": {
             "direct_play": True,
             "remux": bool(ffmpeg and writable),
             "audio_transcode": bool(ffmpeg and writable and "aac" in encoders),
             "video_transcode": bool(ffmpeg and writable and any_video_encoder),
+            "adaptive_hls": bool(ffmpeg and writable and abr_ok and "aac" in encoders),
         },
         "checks": checks,
     }
