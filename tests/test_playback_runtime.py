@@ -109,6 +109,10 @@ def _arg_after(cmd, flag):
     return cmd[cmd.index(flag) + 1]
 
 
+def _mapped_streams(cmd):
+    return [cmd[i + 1] for i, value in enumerate(cmd[:-1]) if value == "-map"]
+
+
 def test_hls_remux_copies_streams(tmp_path):
     cmd = build_hls_command(
         source_path="movie.mkv",
@@ -120,6 +124,21 @@ def test_hls_remux_copies_streams(tmp_path):
     assert _arg_after(cmd, "-c:v") == "copy"
     assert _arg_after(cmd, "-c:a") == "copy"
     assert _arg_after(cmd, "-hls_segment_type") == "fmp4"
+    assert _mapped_streams(cmd) == ["0:v:0?", "0:a:0?"]
+
+
+def test_hls_maps_explicit_audio_stream_index(tmp_path):
+    cmd = build_hls_command(
+        source_path="movie.mkv",
+        output_dir=Path(tmp_path),
+        mode="transcode_audio",
+        target_video_codec=None,
+        target_audio_codec="aac",
+        audio_stream_index=4,
+    )
+    assert _mapped_streams(cmd) == ["0:v:0?", "0:4?"]
+    assert _arg_after(cmd, "-c:v") == "copy"
+    assert _arg_after(cmd, "-c:a") == "aac"
 
 
 def test_hls_audio_transcode_keeps_video(tmp_path):
