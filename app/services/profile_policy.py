@@ -32,6 +32,7 @@ DEFAULT_POLICY = {
     "allow_offline_sync": True,
     "allow_delete": True,
     "allow_library_health": True,
+    "allow_server_admin": True,
 }
 
 RATING_AGES = {
@@ -95,7 +96,11 @@ def normalise_policy(raw: Any) -> Dict[str, Any]:
     policy["allow_downloads"] = _bool(data.get("allow_downloads"), True)
     policy["allow_offline_sync"] = _bool(data.get("allow_offline_sync", data.get("allow_offline")), True)
     policy["allow_delete"] = _bool(data.get("allow_delete"), True)
-    policy["allow_library_health"] = _bool(data.get("allow_library_health"), True)
+    # Once parental controls are enabled, diagnostic/admin surfaces default to
+    # hidden unless the owner explicitly opts them back in. This is safer for
+    # older policies that predate these flags and matches the child-profile UI.
+    policy["allow_library_health"] = _bool(data.get("allow_library_health"), not policy["enabled"])
+    policy["allow_server_admin"] = _bool(data.get("allow_server_admin"), not policy["enabled"])
     return policy
 
 
@@ -168,6 +173,12 @@ def _feature_for_request(request: Request) -> Optional[str]:
     path = request.url.path.lower()
     if "/profile" in path:
         return None
+    if (
+        path.startswith("/api/system/") or path == "/api/system" or
+        path.startswith("/api/auth/users") or path.startswith("/api/auth/change-password") or
+        path.startswith("/api/playback/health")
+    ):
+        return "server_admin"
     if "/intelligence" in path:
         return "library_health"
     if "/debrid" in path or "/stream-keep" in path:
@@ -245,6 +256,8 @@ def assert_policy(policy: Dict[str, Any], *, request: Request, payload: Dict[str
     if not policy or not policy.get("enabled"):
         return
     feature = _feature_for_request(request)
+    if feature == "server_admin" and not policy.get("allow_server_admin", False):
+        raise HTTPException(status_code=403, detail="Server administration is hidden for this profile")
     if feature == "debrid" and not policy.get("allow_debrid", True):
         raise HTTPException(status_code=403, detail="This profile cannot use remote/debrid acquisition")
     if feature == "offline_sync" and not policy.get("allow_offline_sync", True):
@@ -253,7 +266,7 @@ def assert_policy(policy: Dict[str, Any], *, request: Request, payload: Dict[str
         raise HTTPException(status_code=403, detail="Downloads are disabled for this profile")
     if feature == "delete" and not policy.get("allow_delete", True):
         raise HTTPException(status_code=403, detail="Deleting media is disabled for this profile")
-    if feature == "library_health" and not policy.get("allow_library_health", True):
+    if feature == "library_health" and not policy.get("allow_library_health", False):
         raise HTTPException(status_code=403, detail="Library health is hidden for this profile")
 
     library = _library_from_request(request, payload)
