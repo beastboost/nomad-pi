@@ -59,7 +59,7 @@ class ClientCapabilities:
 
 @dataclass(frozen=True)
 class MediaProbe:
-    """The subset of ffprobe information needed to make a playback decision."""
+    """The subset of ffprobe information needed by the playback core."""
 
     container: str
     video_codec: Optional[str] = None
@@ -67,6 +67,7 @@ class MediaProbe:
     width: Optional[int] = None
     height: Optional[int] = None
     bitrate: Optional[int] = None
+    duration: Optional[float] = None
 
     def __post_init__(self):
         object.__setattr__(self, "container", (self.container or "").strip().lower())
@@ -131,12 +132,9 @@ class PlaybackPlanner:
         reasons.extend(limit_reasons)
         video_limits_ok = not limit_reasons
 
-        # Cheapest path: deliver the file exactly as-is.
         if container_supported and video_supported and audio_supported and video_limits_ok:
             return PlaybackPlan(mode=PlaybackMode.DIRECT_PLAY)
 
-        # Any video incompatibility requires video transcoding. Audio can be
-        # copied when supported, otherwise transcode it at the same time.
         if source.has_video and (not video_supported or not video_limits_ok):
             target_video = self._choose_video_codec(client.video_codecs)
             if not target_video:
@@ -162,7 +160,6 @@ class PlaybackPlanner:
                 target_audio_codec=target_audio,
             )
 
-        # Video (if present) is stream-copyable, but audio is not.
         if source.has_audio and not audio_supported:
             target_audio = self._choose_audio_codec(client.audio_codecs)
             if not target_audio:
@@ -177,8 +174,6 @@ class PlaybackPlanner:
                 target_audio_codec=target_audio,
             )
 
-        # At this point codecs and limits are compatible; only the container
-        # needs changing, so stream-copy both tracks into a supported wrapper.
         if not container_supported:
             target_container = self._choose_container(client.containers)
             if not target_container:
