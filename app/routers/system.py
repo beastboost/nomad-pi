@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import re
+import unicodedata
 import zipfile
 import tempfile
 import sqlite3
@@ -1378,11 +1379,23 @@ class WifiConnectRequest(BaseModel):
     
     @validator('ssid')
     def validate_ssid(cls, v):
-        # Allow all printable ASCII characters (SSIDs may contain !@#$& etc.)
-        if not v or not all(0x20 <= ord(c) <= 0x7E for c in v):
-            raise ValueError("SSID must contain only printable ASCII characters")
-        if len(v) > 32:
-            raise ValueError("SSID too long (max 32 characters)")
+        # 802.11 SSIDs are up to 32 *bytes* of arbitrary data, in practice
+        # UTF-8. They are emphatically not ASCII: every iPhone hotspot is
+        # named "Name’s iPhone" with U+2019, and an earlier ASCII-only rule
+        # here made those impossible to join.
+        #
+        # Nothing is escaped away for safety because nothing needs to be:
+        # the value is passed to nmcli as a discrete argv entry (never a
+        # shell string), so it cannot be interpreted as anything but an SSID.
+        # Control characters are the one real exclusion — they cannot occur
+        # in a legitimate SSID and would corrupt the invocation.
+        if not v:
+            raise ValueError("SSID cannot be empty")
+        if any(unicodedata.category(ch) == "Cc" for ch in v):
+            raise ValueError("SSID contains control characters")
+        encoded = len(v.encode("utf-8"))
+        if encoded > 32:
+            raise ValueError(f"SSID too long ({encoded} bytes; the limit is 32)")
         return v
 
 @router.post("/wifi/connect")
