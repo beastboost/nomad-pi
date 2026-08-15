@@ -53,6 +53,40 @@ def test_generated_fmp4_converts_unsafe_video_codec_to_h264():
     assert plan.target_container == "mp4"
 
 
+def test_high10_h264_does_not_direct_play_on_iphone():
+    planner = BrowserPlaybackPlanner()
+    plan = planner.plan(
+        MediaProbe(
+            container="mp4",
+            video_codec="h264",
+            audio_codec="aac",
+            video_profile="High 10",
+            pixel_format="yuv420p10le",
+            codec_tag="avc1",
+        ),
+        iphone_like_caps(),
+    )
+    assert plan.mode == PlaybackMode.TRANSCODE_VIDEO
+    assert plan.target_video_codec == "h264"
+
+
+def test_hev1_hevc_is_remuxed_to_hvc1_instead_of_direct_play():
+    planner = BrowserPlaybackPlanner()
+    plan = planner.plan(
+        MediaProbe(
+            container="mp4",
+            video_codec="hevc",
+            audio_codec="aac",
+            pixel_format="yuv420p10le",
+            codec_tag="hev1",
+        ),
+        iphone_like_caps(),
+    )
+    assert plan.mode == PlaybackMode.REMUX
+    assert plan.target_container == "mp4"
+    assert "hvc1" in " ".join(plan.reasons)
+
+
 def test_ffmpeg_openmax_is_preferred_before_software_when_available():
     candidates = video_encoder_candidates(
         "h264",
