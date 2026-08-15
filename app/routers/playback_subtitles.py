@@ -50,8 +50,6 @@ def _source_probe(metadata: dict, audio_codec: Optional[str] = None) -> MediaPro
 
 
 def _hls_video_codec(caps: ClientCapabilities, source_codec: Optional[str]) -> str:
-    # H.264 is the widest browser HLS target. Preserve HEVC only when H.264 is
-    # unavailable and the client explicitly reported HEVC support.
     for codec in ("h264", "avc", "hevc", "h265"):
         if codec in caps.video_codecs:
             return "h264" if codec == "avc" else "hevc" if codec == "h265" else codec
@@ -68,7 +66,7 @@ def _selected_audio(tracks: dict, stream_index: Optional[int]) -> Optional[dict]
 
 
 def _prepare_replacement(replacement, fs_path: str, user_id: int):
-    if replacement.mode == PlaybackMode.DIRECT_PLAY.value:
+    if replacement.mode == PlaybackMode.DIRECT_PLAY.value and not (replacement.metadata or {}).get("abr"):
         return core.session_store.update(
             replacement.id, user_id=user_id, state="ready"
         ) or replacement
@@ -96,13 +94,7 @@ def switch_burned_subtitle(
     request: SubtitleBurnRequest,
     user_id: int = Depends(get_current_user_id),
 ):
-    """Enable/disable bitmap subtitle burn-in without losing playback position.
-
-    PGS/DVD/DVB subtitles are image streams, so a browser cannot consume them
-    as WebVTT. Nomad creates a replacement video-transcode session and overlays
-    the chosen subtitle stream. Disabling burn-in replans the cheapest normal
-    playback path and preserves an explicitly selected audio stream.
-    """
+    """Enable/disable bitmap subtitle burn-in without losing playback position."""
     old = core.session_store.get(session_id, user_id=user_id)
     if not old or old.state == "stopped":
         raise HTTPException(status_code=404, detail="Active playback session not found")
@@ -114,6 +106,7 @@ def switch_burned_subtitle(
     position = max(0.0, float(request.position or 0))
     selected_audio = _selected_audio(tracks, old.audio_track)
     selected_audio_codec = str((selected_audio or {}).get("codec") or "").lower() or None
+    adaptive = bool(metadata.get("abr"))
 
     selected_subtitle = None
     if request.stream_index is not None:
@@ -127,8 +120,14 @@ def switch_burned_subtitle(
             raise HTTPException(status_code=422, detail="Text subtitles should use WebVTT rather than burn-in")
 
         source = _source_probe(metadata, selected_audio_codec)
-        target_video = _hls_video_codec(caps, source.video_codec)
-        if source.has_audio and selected_audio_codec and selected_audio_codec not in caps.audio_codecs:
+        target_video = "h264" if adaptive else _hls_video_codec(caps, source.video_codec)
+        if adaptive:
+            if "h264" not in caps.video_codecs and "avc" not in caps.video_codecs:
+                raise HTTPException(status_code=422, detail="Adaptive subtitle burn-in requires H.264 client support")
+            if source.has_audio and "aac" not in caps.audio_codecs:
+                raise HTTPException(status_code=422, detail="Adaptive subtitle burn-in requires AAC client support")
+            target_audio = "aac"
+        elif source.has_audio and selected_audio_codec and selected_audio_codec not in caps.audio_codecs:
             if "aac" not in caps.audio_codecs:
                 raise HTTPException(status_code=422, detail="Selected audio cannot be represented during subtitle burn-in")
             target_audio = "aac"
@@ -137,7 +136,7 @@ def switch_burned_subtitle(
 
         metadata["burn_subtitle"] = selected_subtitle
         metadata["target"] = {
-            "container": "mp4",
+            "container": "hls" if adaptive else "mp4",
             "video_codec": target_video,
             "audio_codec": target_audio,
         }
@@ -145,36 +144,49 @@ def switch_burned_subtitle(
         mode = PlaybackMode.TRANSCODE_VIDEO
         subtitle_track = int(request.stream_index)
     else:
-        # Re-plan the cheapest non-burned path. If the user explicitly selected
-        # an alternate audio stream, keep the session on HLS even when the file
-        # could otherwise direct-play because a direct file URL cannot select a
-        # non-default embedded audio stream.
         metadata.pop("burn_subtitle", None)
         source = _source_probe(metadata, selected_audio_codec)
-        plan = core.planner.plan(source, caps)
-        if plan.mode == PlaybackMode.UNSUPPORTED:
-            raise HTTPException(status_code=422, detail={
-                "message": "No viable playback path after disabling subtitle burn-in",
-                "reasons": list(plan.reasons),
-            })
-        mode = plan.mode
-        target_audio = plan.target_audio_codec
-        if old.audio_track is not None and mode == PlaybackMode.DIRECT_PLAY:
-            if not selected_audio_codec or selected_audio_codec in caps.audio_codecs:
-                mode = PlaybackMode.REMUX
-                target_audio = None
-            elif "aac" in caps.audio_codecs:
-                mode = PlaybackMode.TRANSCODE_AUDIO
-                target_audio = "aac"
-            else:
-                raise HTTPException(status_code=422, detail="Selected audio cannot be preserved after disabling subtitles")
-        metadata["target"] = {
-            "container": plan.target_container,
-            "video_codec": plan.target_video_codec,
-            "audio_codec": target_audio,
-        }
-        metadata["reasons"] = list(plan.reasons)
-        subtitle_track = None
+
+        if adaptive:
+            # Removing PGS from an adaptive session should regenerate the same
+            # master ladder without the overlay, not accidentally direct-play a
+            # session whose metadata still advertises ABR.
+            if "h264" not in caps.video_codecs and "avc" not in caps.video_codecs:
+                raise HTTPException(status_code=422, detail="Adaptive playback requires H.264 client support")
+            if source.has_audio and "aac" not in caps.audio_codecs:
+                raise HTTPException(status_code=422, detail="Adaptive playback requires AAC client support")
+            mode = PlaybackMode.TRANSCODE_VIDEO
+            metadata["target"] = {
+                "container": "hls",
+                "video_codec": "h264",
+                "audio_codec": "aac",
+            }
+            subtitle_track = None
+        else:
+            plan = core.planner.plan(source, caps)
+            if plan.mode == PlaybackMode.UNSUPPORTED:
+                raise HTTPException(status_code=422, detail={
+                    "message": "No viable playback path after disabling subtitle burn-in",
+                    "reasons": list(plan.reasons),
+                })
+            mode = plan.mode
+            target_audio = plan.target_audio_codec
+            if old.audio_track is not None and mode == PlaybackMode.DIRECT_PLAY:
+                if not selected_audio_codec or selected_audio_codec in caps.audio_codecs:
+                    mode = PlaybackMode.REMUX
+                    target_audio = None
+                elif "aac" in caps.audio_codecs:
+                    mode = PlaybackMode.TRANSCODE_AUDIO
+                    target_audio = "aac"
+                else:
+                    raise HTTPException(status_code=422, detail="Selected audio cannot be preserved after disabling subtitles")
+            metadata["target"] = {
+                "container": plan.target_container,
+                "video_codec": plan.target_video_codec,
+                "audio_codec": target_audio,
+            }
+            metadata["reasons"] = list(plan.reasons)
+            subtitle_track = None
 
     replacement = core.session_store.create(
         user_id=user_id,
