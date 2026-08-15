@@ -5,4 +5,5 @@
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/track-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/subtitle-control.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/quality-control.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
