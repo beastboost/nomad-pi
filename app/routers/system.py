@@ -9,6 +9,7 @@ import logging
 import shutil
 import re
 import unicodedata
+import time
 import zipfile
 import tempfile
 import sqlite3
@@ -839,11 +840,101 @@ def get_wifi_status(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+WIFI_STATE_DIR = "/etc/nomad-pi"
+WIFI_DEADLINE_FILE = os.path.join(WIFI_STATE_DIR, "wifi-off-until")
+WIFI_REVERT_SECONDS = 300
+
+
+def _has_other_route() -> bool:
+    """True when the box is reachable by something other than Wi-Fi — any
+    non-wireless interface that is up with a carrier."""
+    try:
+        for name in os.listdir("/sys/class/net"):
+            if name == "lo" or name.startswith(("wl", "p2p", "docker", "veth", "br-")):
+                continue
+            carrier = f"/sys/class/net/{name}/carrier"
+            try:
+                with open(carrier) as f:
+                    if f.read().strip() == "1":
+                        return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
+def _arm_wifi_revert(seconds: int) -> bool:
+    """Record a deadline the wifi-guard timer will honour. Returns False when
+    the marker cannot be written, in which case the caller must refuse to
+    disable the radio — an unguarded switch-off is how a box gets stranded."""
+    try:
+        os.makedirs(WIFI_STATE_DIR, exist_ok=True)
+        with open(WIFI_DEADLINE_FILE, "w") as f:
+            f.write(str(int(time.time()) + int(seconds)))
+        return True
+    except OSError as e:
+        logger.error(f"Could not arm the Wi-Fi revert: {e}")
+        return False
+
+
+def _clear_wifi_revert(permanent: bool = False) -> None:
+    try:
+        if permanent:
+            os.makedirs(WIFI_STATE_DIR, exist_ok=True)
+            with open(WIFI_DEADLINE_FILE, "w") as f:
+                f.write("permanent")
+        elif os.path.exists(WIFI_DEADLINE_FILE):
+            os.remove(WIFI_DEADLINE_FILE)
+    except OSError:
+        pass
+
+
+@router.post("/wifi/confirm-off")
+def confirm_wifi_off(admin: dict = Depends(get_current_admin)):
+    """Keep the radio off past the revert window.
+
+    Only meaningful if you can still reach the box — i.e. over Ethernet. If
+    Wi-Fi is the only route this refuses, because honouring it would strand
+    the box with no way back in."""
+    if not _has_other_route():
+        raise HTTPException(
+            status_code=409,
+            detail="Wi-Fi is the only way to reach this box. It will switch "
+                   "back on shortly so you do not lose access. Connect Ethernet "
+                   "first if you need the radio off permanently.",
+        )
+    _clear_wifi_revert(permanent=True)
+    return {"status": "success", "permanent": True}
+
+
 @router.post("/wifi/toggle")
-def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
+def toggle_wifi(enable: bool, confirm: bool = False, user_id: int = Depends(get_current_user_id)):
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
-    
+
+    # Turning the radio off usually removes the only route to this box, and
+    # the off state survives a reboot — so it is never a plain toggle. Require
+    # an explicit confirmation and always arm an automatic revert, which the
+    # wifi-guard timer carries out even if this process dies.
+    revert_in = None
+    if not enable:
+        if not confirm:
+            raise HTTPException(
+                status_code=409,
+                detail="Turning Wi-Fi off will disconnect you from this box, and "
+                       "the setting survives a reboot. Re-send with confirm=true; "
+                       "the radio switches itself back on after 5 minutes unless "
+                       "you confirm from another connection.",
+            )
+        if not _arm_wifi_revert(WIFI_REVERT_SECONDS):
+            raise HTTPException(
+                status_code=500,
+                detail="Refusing to disable Wi-Fi: the automatic-revert marker "
+                       "could not be written, so there would be no way back in.",
+            )
+        revert_in = WIFI_REVERT_SECONDS
+
     try:
         action = "on" if enable else "off"
         # Try nmcli first with sudo -n
@@ -851,7 +942,14 @@ def toggle_wifi(enable: bool, user_id: int = Depends(get_current_user_id)):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         
         if result.returncode == 0:
-            return {"status": "success", "enabled": enable}
+            if enable:
+                _clear_wifi_revert()
+            return {
+                "status": "success",
+                "enabled": enable,
+                "revert_in_seconds": revert_in,
+                "other_route": _has_other_route() if not enable else None,
+            }
         
         # Fallback to rfkill
         action = "unblock" if enable else "block"

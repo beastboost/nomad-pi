@@ -216,3 +216,47 @@ class TestProgressStorage:
                 if re.search(r'(?<!["\w.])current_time(?!["\w])', line):
                     offenders.append(line.strip())
         assert not offenders, "unquoted current_time in SQL:\n" + "\n".join(offenders)
+
+
+class TestWifiSafety:
+    """Wi-Fi is normally the only route to a headless Pi, and `nmcli radio
+    wifi off` survives reboots — so switching it off from the UI could strand
+    the box until someone physically attached Ethernet or a keyboard. Turning
+    it off must therefore be confirmed and self-reverting."""
+
+    def test_toggle_off_requires_confirmation(self, client):
+        """Unconfirmed disable must be refused, not silently obeyed."""
+        res = client.post("/api/system/wifi/toggle", params={"enable": "false"})
+        # 401/403 when unauthenticated; 409 is the refusal we care about.
+        assert res.status_code in (401, 403, 409)
+        if res.status_code == 409:
+            assert "confirm" in res.text.lower()
+
+    def test_confirm_off_requires_admin(self, client):
+        res = client.post("/api/system/wifi/confirm-off")
+        assert res.status_code in (401, 403)
+
+    def test_revert_marker_helpers_roundtrip(self, tmp_path, monkeypatch):
+        from app.routers import system as sysmod
+        marker = tmp_path / "wifi-off-until"
+        monkeypatch.setattr(sysmod, "WIFI_STATE_DIR", str(tmp_path))
+        monkeypatch.setattr(sysmod, "WIFI_DEADLINE_FILE", str(marker))
+
+        assert sysmod._arm_wifi_revert(300) is True
+        deadline = int(marker.read_text())
+        import time as _t
+        assert deadline > _t.time(), "deadline must be in the future"
+
+        sysmod._clear_wifi_revert(permanent=True)
+        assert marker.read_text() == "permanent"
+
+        sysmod._clear_wifi_revert()
+        assert not marker.exists(), "re-enabling must clear the marker"
+
+    def test_guard_script_ships_and_is_wired(self):
+        """The self-heal only works if the guard is installed by setup/update."""
+        assert os.path.exists("scripts/wifi-guard.sh")
+        for script in ("setup.sh", "update.sh"):
+            assert "install_wifi_guard" in open(script).read(), f"{script} does not install the guard"
+        unit = "os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.timer"
+        assert os.path.exists(unit)
