@@ -31,7 +31,7 @@ This file tracks the large in-flight Nomad 2 media-platform branch separately fr
 - CDN URLs remain server-side behind signed Nomad URLs
 - remote Range proxy and redirects use the SSRF guard
 - remote HLS supports absolute seek while the local copy downloads/indexes in parallel
-- local copies now use stable `.part` files plus ETag/Last-Modified resume metadata
+- local copies use stable `.part` files plus ETag/Last-Modified resume metadata
 - interrupted downloads continue with HTTP `Range` + `If-Range` after transient failures or a Nomad process restart
 - a valid `206` is required before appending; ignored/invalid ranges safely restart instead of corrupting the file
 - Stream + Keep jobs automatically reattach/recover on process startup with a bounded retry count
@@ -65,7 +65,7 @@ This file tracks the large in-flight Nomad 2 media-platform branch separately fr
 ## Reader state
 - reading progress, bookmarks and annotations persist per user/path
 - paged formats retain page/total-page positions
-- EPUB now stores real epub.js CFI, href, percentage and displayed-location metadata instead of unstable visual page numbers
+- EPUB stores real epub.js CFI, href, percentage and displayed-location metadata instead of unstable visual page numbers
 - EPUB resume, bookmarks and note jumps use the stored CFI so changing screen/font layout does not invalidate the location
 
 ## Docker/server mode
@@ -77,5 +77,6 @@ This file tracks the large in-flight Nomad 2 media-platform branch separately fr
 - fixed JSON-body system-control admin routing
 - preserved the existing large system/Nocturne implementations behind compatibility facades while new work is split into focused modules
 - later feature routers and browser modules are explicitly mounted/loaded rather than merely existing in the repository
-- expanded regression coverage includes authentication, playback planning, HLS/ABR, hardware fallback, tracks/subtitles, device handoff, Music 2, Stream + Keep, byte-range resume, Offline Sync, Library Health, household profiles and Watch Together
-- CI syntax-checks all active Nomad 2 browser modules and runs synthetic single-HLS + adaptive-HLS FFmpeg smoke tests when GitHub allocates a runner
+- regression coverage in the branch includes authentication, playback planning, HLS/ABR, hardware fallback, tracks/subtitles, device handoff, Music 2, Stream + Keep, byte-range resume, Offline Sync, Library Health, household profiles and Watch Together
+- CI is configured to syntax-check all active Nomad 2 browser modules and run synthetic single-HLS + adaptive-HLS FFmpeg smoke tests
+- execution of the full suite is still pending the merge/test phase: this runtime cannot clone GitHub because its container DNS cannot resolve `github.com`, and GitHub Actions has previously failed to allocate a runner for the repository account
