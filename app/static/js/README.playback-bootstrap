@@ -1,0 +1,12 @@
+The current Nocturne application shell is preserved byte-for-byte as app_legacy.js.
+app.js is a compatibility bootstrap that loads app_legacy.js first, then the Nomad 2.x playback modules:
+- playback-core.js: capability planning, playback sessions, Direct/HLS attachment, seeking and heartbeats
+- track-control.js: embedded audio stream discovery/switching
+- subtitle-control.js: embedded text subtitles via ticket-protected WebVTT, with legacy subtitle search preserved
+- quality-control.js: Auto/Original/1080p/720p/480p session switching
+
+Playback runtime readiness is exposed at GET /api/playback/health.
+A real FFmpeg smoke test can be run on the SBC with:
+  python3 scripts/playback-selftest.py --smoke-hls
+
+This keeps the established UI intact while the new playback engine evolves independently.

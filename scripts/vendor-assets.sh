@@ -2,21 +2,21 @@
 # Vendor the front-end's third-party assets into app/static/vendor/.
 #
 # Nomad Pi is used offline — on a hotspot in a van, on a plane, anywhere with
-# no uplink. Loading the icon font and Inter from a CDN at runtime means the
-# first visit on an offline box renders without icons. This script pulls them
-# down once, at setup/update time (when the Pi does have internet), so the
-# running app is fully self-hosted.
+# no uplink. Loading runtime assets from a CDN means the first visit on an
+# offline box can lose icons, fonts, readers or adaptive playback. This script
+# pulls them down once at setup/update time, so the running app is self-hosted.
 #
 # Safe to re-run. Never fails the caller: if the network is unavailable the
-# app falls back to the CDN links at runtime.
+# app falls back to CDN links where a fallback exists.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR="$SCRIPT_DIR/app/static/vendor"
 PH_VER="2.1.1"
 PH_BASE="https://unpkg.com/@phosphor-icons/web@${PH_VER}/src"
+HLS_VER="1.6.16"
 
-mkdir -p "$VENDOR/phosphor" "$VENDOR/inter" || exit 0
+mkdir -p "$VENDOR/phosphor" "$VENDOR/inter" "$VENDOR/hls" || exit 0
 
 fetch() {
     # fetch <url> <dest>  — returns non-zero on failure without killing the run
@@ -29,8 +29,6 @@ echo "Vendoring Phosphor icons…"
 for variant in regular fill; do
     css="$VENDOR/phosphor/$variant.css"
     if fetch "$PH_BASE/$variant/style.css" "$css"; then
-        # Pull every font file the stylesheet references and rewrite the urls
-        # to sit next to it.
         grep -oE "url\(['\"]?[^)'\"]+\.(woff2|woff|ttf)" "$css" 2>/dev/null \
             | sed -E "s/url\(['\"]?//" | sort -u | while read -r rel; do
             file="$(basename "$rel")"
@@ -50,7 +48,6 @@ done
 
 echo "Vendoring Inter…"
 INTER_CSS="$VENDOR/inter/inter.css"
-# Ask for the woff2 form by sending a modern User-Agent
 if curl -fsSL --max-time 45 \
      -H "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36" \
      -o "$INTER_CSS" \
@@ -66,8 +63,6 @@ fi
 
 echo "Vendoring epub.js (EPUB reader)…"
 mkdir -p "$VENDOR/epub" || true
-# epub.js needs JSZip present first; concatenate both into one file so the
-# page only has to load a single script.
 JSZIP="$VENDOR/epub/.jszip.js"
 EPUBJS="$VENDOR/epub/.epub.js"
 if fetch "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" "$JSZIP" \
@@ -80,9 +75,18 @@ else
     ok=0
 fi
 
+echo "Vendoring Hls.js (adaptive browser playback)…"
+if fetch "https://cdn.jsdelivr.net/npm/hls.js@${HLS_VER}/dist/hls.min.js" "$VENDOR/hls/hls.min.js"; then
+    echo "  Hls.js ${HLS_VER} ready"
+else
+    echo "  ! could not fetch Hls.js — Safari/native HLS still works; other browsers need network fallback"
+    rm -f "$VENDOR/hls/hls.min.js"
+    ok=0
+fi
+
 if [ "$ok" = "1" ]; then
     echo "Vendored assets ready in app/static/vendor/ — the UI no longer needs a CDN."
 else
-    echo "Some assets could not be vendored; the UI falls back to CDN links."
+    echo "Some assets could not be vendored; the UI falls back where possible."
 fi
 exit 0
