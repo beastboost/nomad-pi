@@ -1,10 +1,9 @@
 """Backend household/profile content-policy enforcement.
 
-The existing profiles table already stores ``parental_controls``. This module
-normalises that JSON and provides a FastAPI dependency that can be attached to
-media/playback/debrid routers. Main-account requests without a profile context
-retain existing behaviour; requests carrying an active profile context are
-checked before the endpoint executes.
+Profile policy is resolved from the Nomad 2 household-profile store when
+available, with the legacy ``profiles`` row retained as a compatibility
+fallback. A selected household profile is bound to the authenticated login
+session, so dropping or forging a profile header cannot bypass restrictions.
 """
 
 from __future__ import annotations
@@ -17,7 +16,8 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, HTTPException, Request
 
 from app import database
-from app.routers.auth import get_current_user_id
+from app.routers.auth import get_current_user_id, _extract_auth_token
+from app.services.household_profiles import HouseholdProfileStore
 
 
 DEFAULT_POLICY = {
@@ -31,6 +31,7 @@ DEFAULT_POLICY = {
     "allow_downloads": True,
     "allow_offline_sync": True,
     "allow_delete": True,
+    "allow_library_health": True,
 }
 
 RATING_AGES = {
@@ -79,7 +80,6 @@ def normalise_policy(raw: Any) -> Dict[str, Any]:
     if not isinstance(data, dict):
         data = {}
     policy = dict(DEFAULT_POLICY)
-    # Support a few historical/obvious aliases without requiring a migration.
     enabled = data.get("enabled", data.get("parental_controls_enabled", bool(data)))
     policy["enabled"] = _bool(enabled, False)
     policy["allowed_libraries"] = _list(data.get("allowed_libraries", data.get("libraries")))
@@ -95,10 +95,11 @@ def normalise_policy(raw: Any) -> Dict[str, Any]:
     policy["allow_downloads"] = _bool(data.get("allow_downloads"), True)
     policy["allow_offline_sync"] = _bool(data.get("allow_offline_sync", data.get("allow_offline")), True)
     policy["allow_delete"] = _bool(data.get("allow_delete"), True)
+    policy["allow_library_health"] = _bool(data.get("allow_library_health"), True)
     return policy
 
 
-def get_profile_policy(user_id: int, profile_id: int) -> Optional[Dict[str, Any]]:
+def _legacy_profile_policy(user_id: int, profile_id: int) -> Optional[Dict[str, Any]]:
     conn = _connect()
     try:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(profiles)").fetchall()}
@@ -107,8 +108,10 @@ def get_profile_policy(user_id: int, profile_id: int) -> Optional[Dict[str, Any]
         controls_col = "parental_controls" if "parental_controls" in columns else None
         name_col = "name" if "name" in columns else None
         selected = ["id", "user_id"]
-        if name_col: selected.append(name_col)
-        if controls_col: selected.append(controls_col)
+        if name_col:
+            selected.append(name_col)
+        if controls_col:
+            selected.append(controls_col)
         row = conn.execute(
             f"SELECT {','.join(selected)} FROM profiles WHERE id=? AND user_id=?",
             (int(profile_id), int(user_id)),
@@ -118,9 +121,27 @@ def get_profile_policy(user_id: int, profile_id: int) -> Optional[Dict[str, Any]
         policy = normalise_policy(row[controls_col] if controls_col else {})
         policy["profile_id"] = int(row["id"])
         policy["profile_name"] = row[name_col] if name_col else f"Profile {profile_id}"
+        policy["pin_required"] = False
         return policy
+    except sqlite3.Error:
+        return None
     finally:
         conn.close()
+
+
+def get_profile_policy(user_id: int, profile_id: int) -> Optional[Dict[str, Any]]:
+    """Return normalized policy for a profile owned by ``user_id``."""
+    try:
+        profile = HouseholdProfileStore(database.DB_PATH).get(int(user_id), int(profile_id))
+    except Exception:
+        profile = None
+    if profile:
+        policy = normalise_policy(profile.parental_controls)
+        policy["profile_id"] = profile.id
+        policy["profile_name"] = profile.name
+        policy["pin_required"] = profile.pin_required
+        return policy
+    return _legacy_profile_policy(user_id, profile_id)
 
 
 def _library_from_path(path: str) -> Optional[str]:
@@ -128,13 +149,14 @@ def _library_from_path(path: str) -> Optional[str]:
     for library in ("movies", "shows", "music", "books", "gallery", "files"):
         if f"/data/{library}/" in value or value.endswith(f"/data/{library}"):
             return library
-    # External media can still be classified from the route category when the
-    # actual file path is outside /data.
     return None
 
 
 def _library_from_request(request: Request, payload: Dict[str, Any]) -> Optional[str]:
     path = request.url.path.lower()
+    category = str(payload.get("category") or request.query_params.get("category") or "").lower()
+    if category in {"movies", "shows", "music", "books", "gallery", "files"}:
+        return category
     for library in ("movies", "shows", "music", "books", "gallery", "files"):
         if f"/{library}" in path:
             return library
@@ -144,6 +166,10 @@ def _library_from_request(request: Request, payload: Dict[str, Any]) -> Optional
 
 def _feature_for_request(request: Request) -> Optional[str]:
     path = request.url.path.lower()
+    if "/profile" in path:
+        return None
+    if "/intelligence" in path:
+        return "library_health"
     if "/debrid" in path or "/stream-keep" in path:
         return "debrid"
     if "/offline" in path:
@@ -161,7 +187,6 @@ def rating_to_age(value: Any) -> Optional[int]:
     text = str(value).strip().upper()
     if not text or text in {"N/A", "NR", "UNRATED", "NOT RATED"}:
         return None
-    # Handle values like "Rated PG-13", "15 (UK)", "TV-14".
     text = re.sub(r"^RATED\s+", "", text)
     for label, age in sorted(RATING_AGES.items(), key=lambda item: len(item[0]), reverse=True):
         if re.search(rf"(?<![A-Z0-9]){re.escape(label)}(?![A-Z0-9])", text):
@@ -181,7 +206,12 @@ def _metadata_rating(path: str) -> Optional[int]:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(file_metadata)").fetchall()}
         if not columns or "path" not in columns:
             return None
-        useful = [name for name in ("rating", "rated", "certification", "content_rating", "metadata", "metadata_json") if name in columns]
+        useful = [
+            name for name in (
+                "rating", "rated", "certification", "content_rating",
+                "metadata", "metadata_json", "meta_json",
+            ) if name in columns
+        ]
         if not useful:
             return None
         row = conn.execute(
@@ -195,12 +225,12 @@ def _metadata_rating(path: str) -> Optional[int]:
                 age = rating_to_age(row[name])
                 if age is not None:
                     return age
-        for name in ("metadata", "metadata_json"):
+        for name in ("metadata", "metadata_json", "meta_json"):
             if name not in useful:
                 continue
             data = _json(row[name], {})
             if isinstance(data, dict):
-                for key in ("rated", "rating", "certification", "content_rating", "mpaa"):
+                for key in ("rated", "Rated", "rating", "certification", "content_rating", "mpaa"):
                     age = rating_to_age(data.get(key))
                     if age is not None:
                         return age
@@ -223,6 +253,8 @@ def assert_policy(policy: Dict[str, Any], *, request: Request, payload: Dict[str
         raise HTTPException(status_code=403, detail="Downloads are disabled for this profile")
     if feature == "delete" and not policy.get("allow_delete", True):
         raise HTTPException(status_code=403, detail="Deleting media is disabled for this profile")
+    if feature == "library_health" and not policy.get("allow_library_health", True):
+        raise HTTPException(status_code=403, detail="Library health is hidden for this profile")
 
     library = _library_from_request(request, payload)
     allowed = set(policy.get("allowed_libraries") or [])
@@ -232,7 +264,10 @@ def assert_policy(policy: Dict[str, Any], *, request: Request, payload: Dict[str
     if library and library in blocked:
         raise HTTPException(status_code=403, detail=f"The {library} library is blocked for this profile")
 
-    candidate = str(payload.get("path") or request.query_params.get("path") or payload.get("title") or request.query_params.get("q") or "")
+    candidate = str(
+        payload.get("path") or request.query_params.get("path") or
+        payload.get("title") or request.query_params.get("q") or ""
+    )
     lowered = candidate.lower()
     for term in policy.get("blocked_terms") or []:
         if term and term in lowered:
@@ -240,27 +275,79 @@ def assert_policy(policy: Dict[str, Any], *, request: Request, payload: Dict[str
 
     max_age = policy.get("max_age")
     if max_age is not None and candidate:
-        age = _metadata_rating(str(payload.get("path") or request.query_params.get("path") or ""))
+        media_path = str(payload.get("path") or request.query_params.get("path") or "")
+        age = _metadata_rating(media_path)
         if age is None and policy.get("block_unrated"):
             raise HTTPException(status_code=403, detail="Unrated media is blocked for this profile")
         if age is not None and age > int(max_age):
             raise HTTPException(status_code=403, detail=f"This title exceeds the profile age limit ({max_age})")
 
 
+def _header(request: Request, name: str) -> Optional[str]:
+    headers = getattr(request, "headers", {}) or {}
+    try:
+        return headers.get(name)
+    except Exception:
+        return None
+
+
 async def profile_policy_guard(
     request: Request,
     user_id: int = Depends(get_current_user_id),
 ):
-    raw_profile = request.headers.get("X-Nomad-Profile-ID") or request.query_params.get("profile_id")
-    if not raw_profile:
+    """Resolve the session-bound profile and enforce its policy.
+
+    A bound profile wins over request headers. Supplying a different profile id
+    is rejected so clients must use the explicit profile-switch endpoint, which
+    is where optional PIN verification happens.
+    """
+    if "/profile" in request.url.path.lower():
         return None
-    try:
-        profile_id = int(raw_profile)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid profile context")
-    policy = get_profile_policy(user_id, profile_id)
-    if policy is None:
-        raise HTTPException(status_code=403, detail="Profile does not belong to this account")
+
+    token = _extract_auth_token(request)
+    household = HouseholdProfileStore(database.DB_PATH)
+    bound = None
+    if token:
+        try:
+            bound = household.binding(user_id=int(user_id), token=token)
+        except Exception:
+            bound = None
+
+    raw_profile = _header(request, "X-Nomad-Profile-ID") or request.query_params.get("profile_id")
+    requested_id: Optional[int] = None
+    if raw_profile:
+        try:
+            requested_id = int(raw_profile)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid profile context")
+
+    if bound and requested_id is not None and requested_id != bound.id:
+        raise HTTPException(
+            status_code=409,
+            detail="This login session is bound to another profile; use the profile switch action",
+        )
+
+    active_id = bound.id if bound else requested_id
+    if active_id is None:
+        return None
+
+    profile = household.get(int(user_id), int(active_id))
+    if profile is None:
+        # Compatibility with a pre-household legacy row.
+        policy = _legacy_profile_policy(int(user_id), int(active_id))
+        if policy is None:
+            raise HTTPException(status_code=403, detail="Profile does not belong to this account")
+    else:
+        if not bound and token:
+            if profile.pin_required:
+                raise HTTPException(status_code=423, detail="This profile requires its PIN; use the profile switch action")
+            household.bind(user_id=int(user_id), token=token, profile_id=profile.id)
+        policy = normalise_policy(profile.parental_controls)
+        policy.update({
+            "profile_id": profile.id,
+            "profile_name": profile.name,
+            "pin_required": profile.pin_required,
+        })
 
     payload: Dict[str, Any] = {}
     if request.method.upper() in {"POST", "PUT", "PATCH"}:
