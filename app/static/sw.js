@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v2.0.0';
+const CACHE_NAME = 'nomad-pi-v2.0.1-playback';
 
 const APP_SHELL = [
   '/',
@@ -6,6 +6,8 @@ const APP_SHELL = [
   '/manifest.json',
   '/css/nocturne.css',
   '/js/app.js',
+  '/js/app_legacy.js',
+  '/js/playback-core.js',
   '/js/admin.js',
   '/js/features.js',
   '/js/reader.js',
@@ -15,23 +17,22 @@ const APP_SHELL = [
   '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
-  // Vendored icon + type assets (scripts/vendor-assets.sh). Same-origin, so
-  // these are the ones that actually matter for an offline first load.
+  // Vendored assets populated by scripts/vendor-assets.sh. Local additions
+  // use Promise.allSettled during install so a not-yet-vendored optional file
+  // cannot prevent the service worker from activating.
   '/vendor/phosphor/regular.css',
   '/vendor/phosphor/fill.css',
   '/vendor/inter/inter.css',
   '/vendor/epub/epub.min.js',
-  // CDN fallbacks — fetched opportunistically, never block activation
-  // Phosphor icon CSS + webfonts (the design system's icon set)
+  '/vendor/hls/hls.min.js',
+  // CDN fallbacks are best-effort and never block offline activation.
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/Phosphor.woff2',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/Phosphor-Fill.woff2',
-  // Google Fonts CSS (font files are cached on first use via stale-while-revalidate)
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
 ];
 
-// API responses to cache with network-first + fallback
 const API_CACHE_WHITELIST = [
   '/api/system/stats',
   '/api/media/library/movies',
@@ -46,11 +47,6 @@ const API_CACHE_WHITELIST = [
 ];
 
 self.addEventListener('install', (event) => {
-  // Only same-origin assets block activation. Cross-origin CDN requests are
-  // fetched opportunistically outside waitUntil: on a Pi with no internet
-  // (the normal travel case) they hang until the socket gives up, which used
-  // to stall activation ~16s and delay offline support exactly when it is
-  // needed most.
   const local = APP_SHELL.filter((a) => !a.startsWith('http'));
   const remote = APP_SHELL.filter((a) => a.startsWith('http'));
 
@@ -60,7 +56,6 @@ self.addEventListener('install', (event) => {
     )
   );
 
-  // Best-effort, non-blocking; failures are expected and harmless offline.
   caches.open(CACHE_NAME).then((cache) => {
     remote.forEach((asset) => {
       cache.add(new Request(asset, { mode: 'cors' })).catch(() => {});
@@ -87,13 +82,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  // Never intercept media streams — let the browser handle range requests
+  // Playback URLs contain Range requests, short-lived tickets and HLS
+  // manifests/segments. They must always go straight to FastAPI: caching them
+  // could replay expired credentials, break byte ranges, or serve stale HLS
+  // segments from a previous seek/transcode session.
   if (
+    url.pathname.startsWith('/api/playback/') ||
     url.pathname.includes('/media/stream') ||
     url.pathname.includes('/api/media/stream') ||
+    url.pathname.endsWith('.m3u8') ||
+    url.pathname.endsWith('.m4s') ||
     url.pathname.endsWith('.mp4') ||
     url.pathname.endsWith('.mkv') ||
     url.pathname.endsWith('.mp3') ||
@@ -102,17 +102,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // HTML documents: network-first
   if (event.request.destination === 'document' || url.pathname === '/') {
     event.respondWith(networkFirst(event.request));
     return;
   }
 
-  // Static assets + fonts + images + CDN resources: stale-while-revalidate
   const isCdnAsset =
     url.hostname.includes('unpkg.com') ||
     url.hostname.includes('fonts.googleapis.com') ||
-    url.hostname.includes('fonts.gstatic.com');
+    url.hostname.includes('fonts.gstatic.com') ||
+    url.hostname.includes('cdn.jsdelivr.net');
 
   if (
     isCdnAsset ||
@@ -125,8 +124,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Local static assets (e.g. manifest.json — everything else is already
-  // routed by the destination checks above)
   const isLocalAsset = APP_SHELL.some(
     (a) => !a.startsWith('http') && url.pathname === a
   );
@@ -135,7 +132,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Whitelisted API calls: network-first with cached fallback
   const isWhitelistedApi = API_CACHE_WHITELIST.some((path) =>
     url.pathname.startsWith(path) || url.pathname.includes(path)
   );
@@ -147,18 +143,10 @@ self.addEventListener('fetch', (event) => {
 
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_NAME);
-  // Exact-URL match only: matching with ignoreSearch would return an OLD
-  // ?v= entry ahead of the freshly cached one, defeating cache busting.
   const cachedResponse = await cache.match(request);
 
   const networkPromise = fetch(request)
     .then(async (networkResponse) => {
-      // Only cache non-opaque responses where we can confirm success.
-      // Opaque responses (cross-origin no-cors) always show status 0 — we
-      // cannot tell them apart from a CDN error page, so caching them risks
-      // permanently storing a 503/429 under the correct asset key.
-      // CDN fonts/icons are pre-cached during install with mode:'cors' so
-      // they arrive as real responses; don't need to re-cache them here.
       if (networkResponse && networkResponse.status === 200 && networkResponse.type !== 'opaque') {
         await evictStaleVariants(cache, request);
         cache.put(request, networkResponse.clone());
@@ -166,12 +154,9 @@ async function staleWhileRevalidate(request) {
       return networkResponse;
     })
     .catch(async () => {
-      // Offline and no exact match: fall back to any version of this asset —
-      // a stale stylesheet beats a broken page.
       return cachedResponse || (await cache.match(request, { ignoreSearch: true })) || Response.error();
     });
 
-  // Serve cached immediately if available; revalidate in background
   return cachedResponse || networkPromise;
 }
 
@@ -185,15 +170,12 @@ async function networkFirst(request) {
     }
     return networkResponse;
   } catch {
-    // Offline: prefer the exact URL, fall back to any variant of it.
     const cachedResponse = await cache.match(request) ||
       await cache.match(request, { ignoreSearch: true });
     return cachedResponse || Response.error();
   }
 }
 
-// Remove previously cached entries for the same path with a different query
-// string (old ?v= versions) so they can never shadow the current one.
 async function evictStaleVariants(cache, request) {
   try {
     const url = new URL(request.url);
