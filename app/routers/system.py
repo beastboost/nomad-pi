@@ -12,6 +12,7 @@ from fastapi import Depends
 
 from app.routers.auth import get_current_admin
 from app.routers import system_legacy as _legacy
+from app.routers.system_storage_policy import router as _storage_policy_router
 
 
 # The legacy body-form route was registered with ordinary user authentication
@@ -48,6 +49,9 @@ _legacy.router.add_api_route(
     methods=["POST"],
     name="system_control_body",
 )
+
+# New storage policy controls live in a focused module but share /api/system.
+_legacy.router.include_router(_storage_policy_router)
 
 # Consumers importing ``app.routers.system`` should receive the implementation
 # module itself.  This keeps monkeypatching of module globals (used by tests and
