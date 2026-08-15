@@ -1,6 +1,6 @@
 /* Nomad Pi app compatibility bootstrap. */
 (() => {
-    const version = '2.0.3-radxa-hotfix';
+    const version = '2.0.4-radxa-hotfix';
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/player-mobile-fix.js?v=${encodeURIComponent(version)}"><\/script>`);
