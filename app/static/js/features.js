@@ -77,8 +77,12 @@ function openShow(index) {
 
           <div class="list">
             ${eps.map(e => {
-                const cur = Number(e.current_time || 0);
-                const dur = Number(e.duration || 0);
+                // get_shows_library nests playback state under e.progress;
+                // reading it flat meant every episode showed no progress and
+                // always restarted from zero.
+                const pr = e.progress || {};
+                const cur = Number(pr.current_time ?? e.current_time ?? 0);
+                const dur = Number(pr.duration ?? e.duration ?? 0);
                 const pct = dur > 0 ? Math.min(100, Math.round((cur / dur) * 100)) : 0;
                 return `
                   <div class="ep-row row-rule">

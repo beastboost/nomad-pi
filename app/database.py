@@ -1569,7 +1569,14 @@ def delete_playlist(playlist_id: int, user_id: int):
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('DELETE FROM playlist_items WHERE playlist_id = ?', (playlist_id,))
+        # The item wipe must be scoped to the owner too. Scoping only the
+        # playlist row let any user empty someone else's playlist: the row
+        # survived (so it still listed) but every item was gone.
+        c.execute('''DELETE FROM playlist_items
+                      WHERE playlist_id = ?
+                        AND playlist_id IN (SELECT id FROM playlists
+                                             WHERE id = ? AND user_id = ?)''',
+                  (playlist_id, playlist_id, user_id))
         c.execute('DELETE FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, user_id))
         conn.commit()
     finally:

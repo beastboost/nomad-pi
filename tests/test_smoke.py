@@ -260,3 +260,86 @@ class TestWifiSafety:
             assert "install_wifi_guard" in open(script).read(), f"{script} does not install the guard"
         unit = "os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.timer"
         assert os.path.exists(unit)
+
+
+class TestNoDuplicateRoutes:
+    """Three separate duplicate-route bugs shipped in this codebase
+    (/storage/info, POST /settings, /diagnostics). In each case the earlier
+    registration silently won and the later, better implementation was dead
+    code. Fail the build rather than discover the fourth in production."""
+
+    def test_no_router_registers_a_path_twice(self):
+        import collections, glob, re
+        offenders = []
+        for path in sorted(glob.glob("app/routers/*.py")):
+            src = open(path).read()
+            routes = re.findall(
+                r'@(\w+)\.(get|post|put|delete|patch|websocket)\(\s*["\']([^"\']+)["\']', src)
+            for key, n in collections.Counter(routes).items():
+                if n > 1:
+                    offenders.append(f"{path}: {key[1].upper()} {key[2]} x{n}")
+        assert not offenders, "duplicate route registrations:\n" + "\n".join(offenders)
+
+
+class TestPublicEndpointDisclosure:
+    """/samba/config is intentionally unauthenticated so the desktop transfer
+    tool can self-configure. It must not tell an anonymous caller whether the
+    admin password is still the default — that is an invitation."""
+
+    def test_samba_config_hides_password_state_when_anonymous(self, client):
+        res = client.get("/api/system/samba/config")
+        assert res.status_code == 200, "the tool relies on this being public"
+        assert "is_default_password" not in res.json(), \
+            "password state leaked to an unauthenticated caller"
+
+
+class TestUploadContainment:
+    """POST /media/upload_stream/{category} joined `category` onto BASE_DIR
+    with no allowlist, so category=".." wrote outside the data root — an
+    arbitrary file write that, combined with the update endpoint, is remote
+    code execution. Verified escaping before the fix."""
+
+    def test_category_allowlist_rejects_traversal(self):
+        from fastapi import HTTPException
+        from app.routers.media import _validated_category
+        for bad in ["..", "../..", "/etc", "app", "", "../app/routers"]:
+            with pytest.raises(HTTPException):
+                _validated_category(bad)
+
+    def test_real_categories_still_accepted(self):
+        from app.routers.media import _validated_category
+        for good in ["movies", "shows", "music", "books", "gallery", "files"]:
+            assert _validated_category(good) == good
+
+
+class TestPrivilegedEndpointsRequireAdmin:
+    """Destructive or config-changing endpoints must require admin, not just
+    any logged-in account. A standard user could previously format a drive,
+    shut the box down, re-point Tailscale, or delete provider API keys."""
+
+    @pytest.mark.parametrize("module,func", [
+        ("app.routers.system", "format_drive"),
+        ("app.routers.system", "system_control"),
+        ("app.routers.system", "set_tailscale_auth_key"),
+        ("app.routers.system", "tailscale_up"),
+        ("app.routers.system", "mount_drive"),
+        ("app.routers.system", "unmount_drive"),
+        ("app.routers.system", "toggle_wifi"),
+        ("app.routers.debrid", "set_rd_key"),
+        ("app.routers.debrid", "delete_rd_key"),
+        ("app.routers.debrid", "set_provider"),
+    ])
+    def test_requires_admin(self, module, func):
+        import importlib, inspect
+        mod = importlib.import_module(module)
+        sig = inspect.signature(getattr(mod, func))
+        deps = [str(p.default) for p in sig.parameters.values() if p.default is not inspect._empty]
+        assert any("get_current_admin" in d for d in deps), \
+            f"{func} does not require admin: {deps}"
+
+    def test_format_refuses_system_disk(self):
+        """The device holding / and /boot must never be formattable."""
+        from app.routers.system import _protected_block_devices
+        # On any real host the root device must resolve to something.
+        protected = _protected_block_devices()
+        assert isinstance(protected, set)

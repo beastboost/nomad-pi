@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Body, File, UploadFile
+from fastapi import APIRouter, HTTPException, Depends, Body, File, UploadFile, Request
 from pydantic import BaseModel, validator
 import psutil
 import os
@@ -150,8 +150,15 @@ def get_setup_status():
     }
 
 @public_router.get("/samba/config")
-def get_samba_config():
-    """Get Samba configuration for NomadTransferTool auto-setup"""
+def get_samba_config(request: Request):
+    """Samba details for NomadTransferTool auto-setup.
+
+    Deliberately unauthenticated so the desktop tool can self-configure
+    against a fresh box. It therefore must not disclose anything that helps
+    an attacker: the share path and account name are already discoverable
+    over mDNS/SMB, but whether the admin password is still the default is
+    not, and announcing it to anyone on the network is an invitation. That
+    flag is returned only to an authenticated caller."""
     user = "pi"  # Default fallback for Raspberry Pi
     if platform.system() == "Linux":
         try:
@@ -178,12 +185,22 @@ def get_samba_config():
     except (socket.gaierror, OSError):
         pass
         
-    return {
+    payload = {
         "user": user,
         "path": path,
         "hostname": hostname,
-        "is_default_password": database.get_setting("admin_password") in [None, "nomad"]
     }
+
+    # Only an authenticated caller learns the password state.
+    token = request.cookies.get("auth_token") or request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+    if token and database.get_session(token):
+        payload["is_default_password"] = database.get_setting("admin_password") in [None, "nomad"]
+
+    return payload
 
 @public_router.get("/health")
 def get_health():
@@ -706,7 +723,7 @@ def restart_minidlna_best_effort() -> None:
         pass
 
 @router.post("/mount")
-def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_current_user_id)):
+def mount_drive(device: str, mount_point: str, admin: dict = Depends(get_current_admin)):
     if platform.system() == "Linux":
         # Validate device path
         if not device.startswith("/dev/"):
@@ -743,7 +760,7 @@ def mount_drive(device: str, mount_point: str, user_id: int = Depends(get_curren
     return {"status": "not_implemented_on_windows", "message": "Simulated mount success"}
 
 @router.post("/unmount")
-def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
+def unmount_drive(target: str, admin: dict = Depends(get_current_admin)):
     if platform.system() == "Linux":
         # Validate target path - prevent command injection
         if any(char in target for char in [';', '&', '|', '`', '$', '\x00', '\n', '\r']):
@@ -761,8 +778,55 @@ def unmount_drive(target: str, user_id: int = Depends(get_current_user_id)):
             raise HTTPException(status_code=500, detail=str(e))
     return {"status": "not_implemented_on_windows", "message": "Simulated unmount success"}
 
+def _protected_block_devices() -> set:
+    """Devices that must never be formatted: whatever backs /, /boot and
+    /boot/firmware, plus their parent disks.
+
+    On a Pi the OS lives on /dev/mmcblk0, and the format endpoint happily
+    accepted /dev/mmcblk* — so a single call could wipe the operating system
+    and leave the box unbootable. Partitions are mapped back to their parent
+    disk as well, because formatting the whole disk destroys the OS just as
+    effectively as formatting its root partition."""
+    protected = set()
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                source, mount = parts[0], parts[1]
+                if mount not in ("/", "/boot", "/boot/firmware"):
+                    continue
+                if not source.startswith("/dev/"):
+                    continue
+                protected.add(source)
+                # …and the disk that partition belongs to
+                try:
+                    pk = subprocess.run(
+                        ["lsblk", "-no", "PKNAME", source],
+                        capture_output=True, text=True, timeout=5)
+                    parent = (pk.stdout or "").strip().splitlines()
+                    if parent and parent[0]:
+                        protected.add(f"/dev/{parent[0].strip()}")
+                except Exception:
+                    # Fall back to stripping the partition suffix
+                    m = re.match(r"^(/dev/(?:mmcblk\d+|nvme\d+n\d+))p\d+$", source)
+                    if m:
+                        protected.add(m.group(1))
+                    else:
+                        m = re.match(r"^(/dev/sd[a-z]+)\d+$", source)
+                        if m:
+                            protected.add(m.group(1))
+    except OSError:
+        pass
+    return protected
+
+
 @router.post("/storage/format")
-def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current_user_id)):
+def format_drive(request: FormatDriveRequest, confirm: bool = False,
+                 admin: dict = Depends(get_current_admin)):
+    """Format a drive. Irreversible, so: admin only, never a system disk, and
+    never without an explicit confirmation."""
     if platform.system() != "Linux":
         return {"status": "success", "message": "Simulated format success"}
 
@@ -773,6 +837,22 @@ def format_drive(request: FormatDriveRequest, user_id: int = Depends(get_current
     # Validate device path - prevent path traversal and command injection
     if not device.startswith("/dev/sd") and not device.startswith("/dev/nvme") and not device.startswith("/dev/mmcblk"):
         raise HTTPException(status_code=400, detail="Invalid device path")
+
+    protected = _protected_block_devices()
+    if device in protected:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Refusing to format {device}: it holds the operating system. "
+                   "Formatting it would destroy this installation and leave the "
+                   "box unbootable.",
+        )
+
+    if not confirm:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Formatting {device} erases everything on it permanently. "
+                   "Re-send with confirm=true if that is what you intend.",
+        )
 
     # Additional security checks for device path
     if '..' in device or ';' in device or '&' in device or '|' in device or '`' in device or '$' in device:
@@ -909,7 +989,7 @@ def confirm_wifi_off(admin: dict = Depends(get_current_admin)):
 
 
 @router.post("/wifi/toggle")
-def toggle_wifi(enable: bool, confirm: bool = False, user_id: int = Depends(get_current_user_id)):
+def toggle_wifi(enable: bool, confirm: bool = False, admin: dict = Depends(get_current_admin)):
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Wi-Fi control only supported on Linux/Raspberry Pi")
 
@@ -1020,7 +1100,7 @@ def system_control_body(request: ControlRequest, user_id: int = Depends(get_curr
     return system_control(request.action, user_id=user_id)
 
 @router.post("/control/{action}")
-def system_control(action: str, user_id: int = Depends(get_current_user_id)):
+def system_control(action: str, admin: dict = Depends(get_current_admin)):
     if action not in ["shutdown", "reboot", "update", "restart"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     
@@ -1497,7 +1577,7 @@ class WifiConnectRequest(BaseModel):
         return v
 
 @router.post("/wifi/connect")
-def connect_wifi(request: WifiConnectRequest, user_id: int = Depends(get_current_user_id)):
+def connect_wifi(request: WifiConnectRequest, admin: dict = Depends(get_current_admin)):
     """Connect to a new WiFi network"""
     if platform.system() != "Linux":
         return {"status": "success", "message": f"Simulated connection to {request.ssid}"}
@@ -1842,7 +1922,7 @@ def get_tailscale_ip(user_id: int = Depends(get_current_user_id)):
         return {"ip": None, "error": str(e)}
 
 @router.post("/tailscale/up")
-def tailscale_up(user_id: int = Depends(get_current_user_id)):
+def tailscale_up(admin: dict = Depends(get_current_admin)):
     """Connect to Tailscale network"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
@@ -1890,7 +1970,7 @@ def tailscale_up(user_id: int = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/tailscale/down")
-def tailscale_down(user_id: int = Depends(get_current_user_id)):
+def tailscale_down(admin: dict = Depends(get_current_admin)):
     """Disconnect from Tailscale network"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Tailscale only available on Linux")
@@ -1994,7 +2074,7 @@ class TailscaleAuthKeyRequest(BaseModel):
     auth_key: str
 
 @router.post("/tailscale/set-auth-key")
-def set_tailscale_auth_key(request: TailscaleAuthKeyRequest, user_id: int = Depends(get_current_user_id)):
+def set_tailscale_auth_key(request: TailscaleAuthKeyRequest, admin: dict = Depends(get_current_admin)):
     """Store Tailscale auth key in database"""
     try:
         # Validate auth key format (starts with tskey-)
