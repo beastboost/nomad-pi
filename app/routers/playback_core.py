@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.routers.auth import get_current_user_id
 from app.routers.media import safe_fs_path_from_web_path
+from app.services.profile_policy import profile_policy_guard
 from app.services.playback import ClientCapabilities, PlaybackMode, PlaybackPlanner
 from app.services.playback.hls import HLSJobError, HLSManager
 from app.services.playback.probe import ProbeError, probe_media
@@ -197,6 +198,7 @@ def _ensure_hls(session: PlaybackSession, fs_path: Optional[str] = None) -> Path
 def create_playback_plan(
     request: PlaybackPlanRequest,
     user_id: int = Depends(get_current_user_id),
+    _policy=Depends(profile_policy_guard),
 ):
     """Inspect a local source and return the cheapest viable playback mode."""
     _, source = _resolve_and_probe(request.path)
@@ -208,6 +210,7 @@ def create_playback_plan(
 def start_playback(
     request: PlaybackStartRequest,
     user_id: int = Depends(get_current_user_id),
+    _policy=Depends(profile_policy_guard),
 ):
     """Create a persistent playback session and return a playable URL."""
     fs_path, source = _resolve_and_probe(request.path)
@@ -421,19 +424,13 @@ def stream_direct_media(session_id: str, request: Request, ticket: str = Query(.
         "Cache-Control": "private, no-store",
     }
     if byte_range is None:
-        headers["Content-Length"] = str(size)
-        return StreamingResponse(
-            _file_chunks(fs_path, 0, size),
-            status_code=200,
-            media_type=media_type,
-            headers=headers,
-        )
+        return FileResponse(fs_path, media_type=media_type, headers=headers)
 
     start, end = byte_range
     length = end - start + 1
     headers.update({
-        "Content-Length": str(length),
         "Content-Range": f"bytes {start}-{end}/{size}",
+        "Content-Length": str(length),
     })
     return StreamingResponse(
         _file_chunks(fs_path, start, length),
@@ -443,53 +440,44 @@ def stream_direct_media(session_id: str, request: Request, ticket: str = Query(.
     )
 
 
-def _append_ticket(uri: str, ticket: str) -> str:
-    separator = "&" if "?" in uri else "?"
-    return f"{uri}{separator}ticket={quote(ticket, safe='')}"
-
-
-def _ticketed_playlist(text: str, ticket: str) -> str:
-    output = []
-    map_pattern = re.compile(r'URI="([^"]+)"')
-    for line in text.splitlines():
-        if line.startswith("#EXT-X-MAP:"):
-            line = map_pattern.sub(lambda m: f'URI="{_append_ticket(m.group(1), ticket)}"', line)
-        elif line and not line.startswith("#"):
-            line = _append_ticket(line, ticket)
-        output.append(line)
-    return "\n".join(output) + "\n"
-
-
 @router.get("/hls/{session_id}/index.m3u8")
-def get_hls_playlist(session_id: str, ticket: str = Query(...)):
+def hls_playlist(session_id: str, ticket: str = Query(...)):
     session = _require_ticket_session(session_id, ticket)
     if session.mode == PlaybackMode.DIRECT_PLAY.value:
-        raise HTTPException(status_code=409, detail="This session uses direct playback")
+        raise HTTPException(status_code=409, detail="This session does not use HLS")
     try:
         playlist = _ensure_hls(session)
     except HLSJobError as exc:
-        session_store.update(session.id, user_id=session.user_id, state="failed")
-        raise HTTPException(status_code=503, detail=f"HLS playback failed: {exc}")
-    try:
-        text = playlist.read_text(encoding="utf-8")
-    except OSError:
-        raise HTTPException(status_code=503, detail="HLS playlist is not ready")
+        raise HTTPException(status_code=503, detail=f"HLS unavailable: {exc}")
+    content = playlist.read_text(encoding="utf-8")
+    escaped = quote(ticket, safe="")
+    lines = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            lines.append(f"{stripped}?ticket={escaped}")
+        elif stripped.startswith("#EXT-X-MAP:") and 'URI="' in stripped:
+            lines.append(re.sub(r'URI="([^"]+)"', rf'URI="\1?ticket={escaped}"', line))
+        else:
+            lines.append(line)
     return Response(
-        content=_ticketed_playlist(text, ticket),
+        "\n".join(lines) + "\n",
         media_type="application/vnd.apple.mpegurl",
         headers={"Cache-Control": "no-store"},
     )
 
 
-@router.get("/hls/{session_id}/{filename}")
-def get_hls_segment(session_id: str, filename: str, ticket: str = Query(...)):
+@router.get("/hls/{session_id}/{asset_name}")
+def hls_asset(session_id: str, asset_name: str, ticket: str = Query(...)):
     session = _require_ticket_session(session_id, ticket)
-    if session.mode == PlaybackMode.DIRECT_PLAY.value:
-        raise HTTPException(status_code=409, detail="This session uses direct playback")
-    if filename != "init.mp4" and not re.fullmatch(r"segment_\d{5}\.m4s", filename):
-        raise HTTPException(status_code=404, detail="HLS segment not found")
-    path = hls_manager.session_dir(session_id) / filename
+    if not re.fullmatch(r"(?:init\.mp4|segment_\d+\.m4s)", asset_name):
+        raise HTTPException(status_code=404, detail="HLS asset not found")
+    try:
+        _ensure_hls(session)
+    except HLSJobError as exc:
+        raise HTTPException(status_code=503, detail=f"HLS unavailable: {exc}")
+    path = hls_manager.session_dir(session_id) / asset_name
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="HLS segment not ready")
-    media_type = "video/mp4" if filename == "init.mp4" else "video/iso.segment"
-    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
+        raise HTTPException(status_code=404, detail="HLS asset not ready")
+    media_type = "video/mp4" if asset_name == "init.mp4" else "video/iso.segment"
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=60"})
