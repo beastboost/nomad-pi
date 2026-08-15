@@ -1,10 +1,4 @@
-"""Compatibility adjustments for browser/fMP4 playback.
-
-The base planner reasons about codecs and containers independently. Nomad's
-non-direct browser path, however, currently emits fragmented-MP4 HLS. A codec
-that a browser can play somewhere (for example MP3/Opus in another container)
-is not automatically a safe codec to stream-copy into Apple-style fMP4 HLS.
-"""
+"""Compatibility adjustments for browser/fMP4 playback."""
 
 from __future__ import annotations
 
@@ -13,24 +7,61 @@ from .planner import ClientCapabilities, MediaProbe, PlaybackMode, PlaybackPlan,
 
 FMP4_VIDEO_COPY = {"h264", "avc", "hevc", "h265"}
 FMP4_AUDIO_COPY = {"aac", "alac"}
+SAFE_H264_PIXEL_FORMATS = {"yuv420p", "yuvj420p", "nv12"}
 
 
 class BrowserPlaybackPlanner(PlaybackPlanner):
-    """Prefer Apple-safe H.264/HEVC + AAC/ALAC for generated fMP4 HLS."""
+    """Prefer Apple-safe direct play and generated fMP4 HLS."""
 
     def plan(self, source: MediaProbe, client: ClientCapabilities) -> PlaybackPlan:
         base = super().plan(source, client)
-        if base.mode in {PlaybackMode.DIRECT_PLAY, PlaybackMode.UNSUPPORTED}:
+        if base.mode == PlaybackMode.UNSUPPORTED:
+            return base
+
+        # Codec-family support is not enough for Safari. High-10/10-bit H.264
+        # is a frequent example: canPlayType(H.264) is true but this stream is
+        # not a normal iPhone hardware-decode target. Convert it to 8-bit H.264.
+        if source.video_codec in {"h264", "avc"} and self._unsafe_h264(source):
+            target_video = self._choose_hls_video(client.video_codecs)
+            if not target_video:
+                return PlaybackPlan(
+                    mode=PlaybackMode.UNSUPPORTED,
+                    reasons=("H.264 profile/pixel format is not browser-safe and no compatible video target is available",),
+                )
+            target_audio = None
+            if source.has_audio and source.audio_codec not in FMP4_AUDIO_COPY:
+                target_audio = self._choose_hls_audio(client.audio_codecs)
+            return PlaybackPlan(
+                mode=PlaybackMode.TRANSCODE_VIDEO,
+                reasons=(f"H.264 {source.video_profile or ''} {source.pixel_format or ''} requires 8-bit browser-compatible output".strip(),),
+                target_container="mp4",
+                target_video_codec="h264" if "h264" in client.video_codecs or "avc" in client.video_codecs else target_video,
+                target_audio_codec=target_audio,
+            )
+
+        # HEVC in MP4 can be decodable but signalled with the hev1 sample entry,
+        # which is less reliable on Apple clients. A cheap remux lets FFmpeg
+        # retag it as hvc1 without touching the video bitstream.
+        if (
+            base.mode == PlaybackMode.DIRECT_PLAY
+            and source.video_codec in {"hevc", "h265"}
+            and source.container in {"mp4", "mov"}
+            and source.codec_tag
+            and source.codec_tag != "hvc1"
+        ):
+            return PlaybackPlan(
+                mode=PlaybackMode.REMUX,
+                reasons=(f"HEVC sample entry '{source.codec_tag}' will be retagged as hvc1 for Apple playback",),
+                target_container="mp4",
+            )
+
+        if base.mode == PlaybackMode.DIRECT_PLAY:
             return base
 
         reasons = list(base.reasons)
         video_copy_safe = not source.has_video or source.video_codec in FMP4_VIDEO_COPY
         audio_copy_safe = not source.has_audio or source.audio_codec in FMP4_AUDIO_COPY
 
-        # Every generated HLS path currently uses fMP4, regardless of which
-        # generic container the browser reported elsewhere. Do not stream-copy
-        # VP9/AV1/MPEG4 or MP3/Opus/Vorbis into that output merely because the
-        # browser can decode those codecs in WebM/Ogg/MP3.
         if not video_copy_safe:
             target_video = self._choose_hls_video(client.video_codecs)
             if not target_video:
@@ -68,7 +99,6 @@ class BrowserPlaybackPlanner(PlaybackPlanner):
                 target_audio_codec=target_audio,
             )
 
-        # Safe stream-copy/remux path. Report the actual generated container.
         if base.mode == PlaybackMode.REMUX:
             return PlaybackPlan(
                 mode=PlaybackMode.REMUX,
@@ -76,9 +106,6 @@ class BrowserPlaybackPlanner(PlaybackPlanner):
                 target_container="mp4",
             )
 
-        # If a video transcode was already required for resolution/bitrate/etc,
-        # make sure a globally-supported but fMP4-unsafe source audio codec is
-        # not accidentally copied into the output.
         if base.mode == PlaybackMode.TRANSCODE_VIDEO and source.has_audio and not audio_copy_safe:
             audio = self._choose_hls_audio(client.audio_codecs)
             if not audio:
@@ -95,6 +122,16 @@ class BrowserPlaybackPlanner(PlaybackPlanner):
             )
 
         return base
+
+    @staticmethod
+    def _unsafe_h264(source: MediaProbe) -> bool:
+        profile = str(source.video_profile or "").lower()
+        pix = str(source.pixel_format or "").lower()
+        if "high 10" in profile or "high10" in profile or "10 bit" in profile:
+            return True
+        if pix and pix not in SAFE_H264_PIXEL_FORMATS:
+            return True
+        return False
 
     @staticmethod
     def _choose_hls_video(codecs: frozenset[str]):
