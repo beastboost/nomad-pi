@@ -6,7 +6,6 @@ import uuid
 import os
 import secrets
 import logging
-import re
 from datetime import datetime, timedelta
 from collections import defaultdict
 from passlib.context import CryptContext
@@ -26,6 +25,7 @@ MAX_PASSWORD_CHANGE_ATTEMPTS = 3
 MAX_USER_CREATION_ATTEMPTS = 10
 LOCKOUT_MINUTES = 15
 
+
 def check_rate_limit(attempts_dict: dict, client_ip: str, max_attempts: int, lockout_minutes: int = LOCKOUT_MINUTES) -> None:
     """
     Check if an IP has exceeded rate limits.
@@ -43,13 +43,16 @@ def check_rate_limit(attempts_dict: dict, client_ip: str, max_attempts: int, loc
             detail=f"Too many attempts. Try again in {lockout_minutes} minutes."
         )
 
+
 def record_attempt(attempts_dict: dict, client_ip: str) -> None:
     """Record a failed attempt for an IP address."""
     attempts_dict[client_ip].append(datetime.now())
 
+
 def clear_attempts(attempts_dict: dict, client_ip: str) -> None:
     """Clear all attempts for an IP address (on success)."""
     attempts_dict[client_ip] = []
+
 
 # Authentication configuration
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -59,6 +62,7 @@ ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower(
 # Password complexity requirements
 MIN_PASSWORD_LENGTH = 8
 
+
 def validate_password_strength(password: str) -> tuple[bool, str]:
     """
     Validate password strength requirements.
@@ -66,20 +70,20 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     """
     if len(password) < MIN_PASSWORD_LENGTH:
         return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
-    
+
     # Relaxed requirements based on user feedback
     # if not re.search(r'[A-Z]', password):
     #     return False, "Password must contain at least one uppercase letter"
-    
     # if not re.search(r'[a-z]', password):
     #     return False, "Password must contain at least one lowercase letter"
-    
     # if not re.search(r'\d', password):
     #     return False, "Password must contain at least one digit"
-    
+
     return True, ""
 
+
 logger = logging.getLogger(__name__)
+
 
 def ensure_admin_user():
     """Ensures at least one admin user exists."""
@@ -91,37 +95,40 @@ def ensure_admin_user():
             password = ADMIN_PASSWORD
         elif ADMIN_PASSWORD_HASH:
             password = None
-            must_change = False # If pre-hashed, assume it's secure
+            must_change = False  # If pre-hashed, assume it's secure
         else:
             if ALLOW_INSECURE_DEFAULT:
                 password = "nomad"
             else:
                 password = secrets.token_urlsafe(16)
-            
+
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
         database.create_user("admin", h, is_admin=True, must_change_password=must_change)
-        
+
         if password:
-            print(f"\n" + "="*50)
-            print(f"!!! FIRST TIME SETUP: ADMIN USER CREATED !!!")
-            print(f"Username: admin")
+            print("\n" + "=" * 50)
+            print("!!! FIRST TIME SETUP: ADMIN USER CREATED !!!")
+            print("Username: admin")
             print(f"Password: {password}")
-            print(f"PLEASE LOGIN AND CHANGE YOUR PASSWORD IMMEDIATELY.")
-            print("="*50 + "\n")
-            logger.warning(f"Created default admin user. Password displayed in console.")
+            print("PLEASE LOGIN AND CHANGE YOUR PASSWORD IMMEDIATELY.")
+            print("=" * 50 + "\n")
+            logger.warning("Created default admin user. Password displayed in console.")
         else:
-            print(f"Created default admin user with pre-hashed password")
+            print("Created default admin user with pre-hashed password")
+
 
 # ensure_admin_user() called in main.py after init_db
+
 
 class LoginRequest(BaseModel):
     username: str = "admin"
     password: str
 
+
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         is_valid, error_msg = validate_password_strength(v)
@@ -129,11 +136,12 @@ class PasswordChangeRequest(BaseModel):
             raise ValueError(error_msg)
         return v
 
+
 class UserCreateRequest(BaseModel):
     username: str
     password: str
     is_admin: bool = False
-    
+
     @validator('password')
     def validate_password(cls, v):
         is_valid, error_msg = validate_password_strength(v)
@@ -141,12 +149,14 @@ class UserCreateRequest(BaseModel):
             raise ValueError(error_msg)
         return v
 
+
 class UserRoleRequest(BaseModel):
     is_admin: bool
 
+
 class UserPasswordResetRequest(BaseModel):
     new_password: str
-    
+
     @validator('new_password')
     def validate_new_password(cls, v):
         is_valid, error_msg = validate_password_strength(v)
@@ -154,11 +164,32 @@ class UserPasswordResetRequest(BaseModel):
             raise ValueError(error_msg)
         return v
 
+
 class ProfileUpdateRequest(BaseModel):
     name: str
     avatar: Optional[str] = None
     preferences: dict = Field(default_factory=dict)
     parental_controls: int = 0
+
+
+def _extract_auth_token(request: Request, allow_query: bool = True) -> Optional[str]:
+    """Return the session token supplied by cookie, bearer header, or query.
+
+    Query-string tokens are retained for compatibility with native HTML media
+    elements. The playback-core work will replace those with short-lived stream
+    tickets so the primary login token no longer needs to appear in media URLs.
+    """
+    token = request.cookies.get("auth_token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+    if not token and allow_query:
+        token = request.query_params.get("token")
+
+    return token or None
+
 
 @router.post("/login")
 def login(request: LoginRequest, request_obj: Request):
@@ -177,10 +208,10 @@ def login(request: LoginRequest, request_obj: Request):
             raise HTTPException(status_code=500, detail="Password verification backend error. Check logs.")
 
     if user and verified:
-        # Clear attempts on success
+        # A media-server account commonly has several devices logged in at once.
+        # Do not rotate every other token when a new device signs in; each login
+        # gets its own independent session which can be revoked separately.
         clear_attempts(login_attempts, client_ip)
-        # Rotate session: invalidate any existing sessions for this user
-        database.delete_user_sessions(user['id'])
         token = str(uuid.uuid4())
         database.create_session(token, user['id'])
 
@@ -210,25 +241,19 @@ def login(request: LoginRequest, request_obj: Request):
 
     raise HTTPException(status_code=401, detail="Invalid username or password")
 
+
 # Dependency for protecting routes
 def get_current_user_id(request: Request):
-    token = request.cookies.get("auth_token")
-    if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-
-    if not token:
-        token = request.query_params.get("token")
-            
+    token = _extract_auth_token(request)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-        
+
     session = database.get_session(token)
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-        
+
     return session['user_id']
+
 
 def get_current_admin(user_id=Depends(get_current_user_id)):
     user = database.get_user_by_id(user_id)
@@ -236,9 +261,11 @@ def get_current_admin(user_id=Depends(get_current_user_id)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
     return user
 
+
 @router.get("/users")
 def list_users(admin=Depends(get_current_admin)):
     return database.get_all_users()
+
 
 @router.post("/users")
 def create_user(request: UserCreateRequest, request_obj: Request, admin=Depends(get_current_admin)):
@@ -258,12 +285,14 @@ def create_user(request: UserCreateRequest, request_obj: Request, admin=Depends(
 
     return {"status": "ok", "user_id": user_id}
 
+
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, admin=Depends(get_current_admin)):
     if user_id == admin['id']:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
     database.delete_user(user_id)
     return {"status": "ok"}
+
 
 @router.post("/users/{user_id}/role")
 def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_current_admin)):
@@ -272,11 +301,16 @@ def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_c
     database.update_user_role(user_id, request.is_admin)
     return {"status": "ok"}
 
+
 @router.post("/users/{user_id}/password")
 def reset_user_password(user_id: int, request: UserPasswordResetRequest, admin=Depends(get_current_admin)):
     h = pwd_context.hash(request.new_password)
     database.update_user_password(user_id, h)
+    # A password reset is a security boundary: revoke every session belonging
+    # to the target account. A normal login no longer does this.
+    database.delete_user_sessions(user_id)
     return {"status": "ok"}
+
 
 @router.get("/profile")
 def get_profile(user_id=Depends(get_current_user_id)):
@@ -286,16 +320,18 @@ def get_profile(user_id=Depends(get_current_user_id)):
         return {"user_id": user_id, "name": user['username'], "avatar": None, "preferences": {}, "parental_controls": 0}
     return profile
 
+
 @router.post("/profile")
 def update_profile(request: ProfileUpdateRequest, user_id=Depends(get_current_user_id)):
     database.upsert_profile(
-        user_id, 
-        request.name, 
-        avatar=request.avatar, 
-        preferences=request.preferences, 
+        user_id,
+        request.name,
+        avatar=request.avatar,
+        preferences=request.preferences,
         parental_controls=request.parental_controls
     )
     return {"status": "ok"}
+
 
 @router.post("/change-password")
 def change_password(request: PasswordChangeRequest, request_obj: Request, user_id=Depends(get_current_user_id)):
@@ -314,16 +350,28 @@ def change_password(request: PasswordChangeRequest, request_obj: Request, user_i
 
     new_hash = pwd_context.hash(request.new_password)
     database.update_user_password(user_id, new_hash)
+
+    # Changing a password should invalidate other devices while keeping the
+    # device performing the change signed in when it has a valid session token.
+    current_token = _extract_auth_token(request_obj)
+    database.delete_user_sessions(user_id)
+    if current_token:
+        database.create_session(current_token, user_id)
+
     return {"status": "ok", "message": "Password changed successfully"}
+
 
 @router.post("/logout")
 def logout(request: Request):
-    token = request.cookies.get("auth_token")
+    # Revoke only the session used for this request. Other logged-in devices
+    # must remain connected.
+    token = _extract_auth_token(request)
     if token:
         database.delete_session(token)
     response = JSONResponse(content={"status": "logged_out"})
     response.delete_cookie("auth_token")
     return response
+
 
 @router.get("/me")
 def get_me(user_id: int = Depends(get_current_user_id)):
@@ -339,15 +387,10 @@ def get_me(user_id: int = Depends(get_current_user_id)):
         }
     }
 
+
 @router.get("/check")
 def check_auth(request: Request):
-    # Try token sources (cookie or Authorization header)
-    token = request.cookies.get("auth_token")
-    if not token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-
+    token = _extract_auth_token(request, allow_query=False)
     if token:
         session = database.get_session(token)
         if session:
