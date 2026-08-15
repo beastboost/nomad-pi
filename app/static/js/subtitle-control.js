@@ -11,6 +11,7 @@
         sessionId: null,
         offset: null,
         refreshing: false,
+        burned: false,
     };
 
     function subtitleLabel(track) {
@@ -22,6 +23,12 @@
         return bits.filter(Boolean).join(' · ');
     }
 
+    function absolutePosition() {
+        if (typeof Core.absolutePosition === 'function') return Core.absolutePosition();
+        const video = V?.el;
+        return Math.max(0, Number(Core.current?.offset || 0) + Number(video?.currentTime || 0));
+    }
+
     function removeEmbeddedTrack() {
         const video = V?.el;
         if (!video) return;
@@ -29,23 +36,62 @@
         Array.from(video.textTracks || []).forEach(track => { track.mode = 'disabled'; });
     }
 
-    function clearSubtitle() {
-        removeEmbeddedTrack();
+    function resetActive() {
         active.path = null;
         active.streamIndex = null;
         active.language = null;
         active.title = null;
         active.sessionId = null;
         active.offset = null;
-        closeSheet();
-        toast('Subtitles off', 'success', 1800);
+        active.burned = false;
+    }
+
+    function clearTextSubtitle(quiet = false) {
+        removeEmbeddedTrack();
+        resetActive();
+        if (!quiet) {
+            closeSheet();
+            toast('Subtitles off', 'success', 1800);
+        }
+    }
+
+    async function disableBurn(quiet = false) {
+        const current = Core.current;
+        const video = V?.el;
+        if (!current || !video) return;
+        if (!active.burned) {
+            clearTextSubtitle(quiet);
+            return;
+        }
+        const wasPlaying = !video.paused;
+        const absolute = absolutePosition();
+        if (!quiet) toast('Removing burned subtitles…', 'info', 1800);
+        const result = await api(`/playback/sessions/${encodeURIComponent(current.id)}/subtitles/burn`, {
+            method: 'POST',
+            body: JSON.stringify({ stream_index: null, position: absolute }),
+        });
+        if (Core.current !== current) return;
+        removeEmbeddedTrack();
+        await Core.applyReplacement(result, { autoplay: wasPlaying, absolute });
+        resetActive();
+        if (!quiet) {
+            closeSheet();
+            toast('Subtitles off', 'success', 1800);
+        }
     }
 
     async function attachSubtitle(track, quiet = false) {
-        const current = Core.current;
-        const video = V?.el;
+        let current = Core.current;
+        let video = V?.el;
         if (!current || !video || !V?.path) throw new Error('No active playback session');
         if (!track?.text_supported) throw new Error('This subtitle requires burn-in transcoding');
+
+        if (active.burned) {
+            await disableBurn(true);
+            current = Core.current;
+            video = V?.el;
+            if (!current || !video) throw new Error('Playback session changed while disabling burn-in');
+        }
 
         active.refreshing = true;
         try {
@@ -78,6 +124,7 @@
             active.title = track.title || '';
             active.sessionId = current.id;
             active.offset = Number(current.offset || 0);
+            active.burned = false;
             if (!quiet) {
                 closeSheet();
                 toast(`Subtitles: ${subtitleLabel(track)}`, 'success', 2500);
@@ -85,6 +132,39 @@
         } finally {
             active.refreshing = false;
         }
+    }
+
+    async function attachBurnedSubtitle(track) {
+        const current = Core.current;
+        const video = V?.el;
+        if (!current || !video || !V?.path) throw new Error('No active playback session');
+        if (track?.text_supported) return attachSubtitle(track);
+        if (typeof Core.applyReplacement !== 'function') throw new Error('Playback handover helper is unavailable');
+
+        const wasPlaying = !video.paused;
+        const absolute = absolutePosition();
+        removeEmbeddedTrack();
+        closeSheet();
+        toast(`Burning in ${subtitleLabel(track)}…`, 'info', 2500);
+
+        const result = await api(`/playback/sessions/${encodeURIComponent(current.id)}/subtitles/burn`, {
+            method: 'POST',
+            body: JSON.stringify({
+                stream_index: Number(track.stream_index),
+                position: absolute,
+            }),
+        });
+        if (Core.current !== current) return;
+        await Core.applyReplacement(result, { autoplay: wasPlaying, absolute });
+
+        active.path = V.path;
+        active.streamIndex = Number(track.stream_index);
+        active.language = track.language || 'und';
+        active.title = track.title || '';
+        active.sessionId = result.session.id;
+        active.offset = Number(result.source_offset || absolute || 0);
+        active.burned = true;
+        toast(`Burned subtitles: ${subtitleLabel(track)}`, 'success', 3000);
     }
 
     async function openEmbeddedSubtitles() {
@@ -120,16 +200,18 @@
                       <button class="sheet-option row-rule" data-nomad-sub="${Number(track.stream_index)}">
                         <span style="min-width:0;text-align:left">
                           <span style="display:block">${escapeHtml(subtitleLabel(track))}</span>
+                          <span class="list-sub">Text subtitle · switchable instantly</span>
                         </span>
-                        ${selected ? '<i class="ph ph-check" style="color:var(--color-accent)"></i>' : ''}
+                        ${selected && !active.burned ? '<i class="ph ph-check" style="color:var(--color-accent)"></i>' : ''}
                       </button>`);
                 } else {
                     rows.push(`
-                      <button class="sheet-option row-rule" disabled style="opacity:.55">
+                      <button class="sheet-option row-rule" data-nomad-sub-burn="${Number(track.stream_index)}">
                         <span style="min-width:0;text-align:left">
                           <span style="display:block">${escapeHtml(subtitleLabel(track))}</span>
-                          <span class="list-sub">Image subtitle · burn-in required</span>
+                          <span class="list-sub">Image subtitle · burn into video</span>
                         </span>
+                        ${selected && active.burned ? '<i class="ph ph-check" style="color:var(--color-accent)"></i>' : '<i class="ph ph-fire" style="color:var(--text-45)"></i>'}
                       </button>`);
                 }
             });
@@ -166,7 +248,8 @@
         if (event.target.closest('[data-nomad-sub-off]')) {
             event.preventDefault();
             event.stopImmediatePropagation();
-            clearSubtitle();
+            if (active.burned) disableBurn().catch(err => toast(err.message || 'Could not disable subtitles', 'error', 6000));
+            else clearTextSubtitle();
             return;
         }
 
@@ -179,6 +262,15 @@
             return;
         }
 
+        const burn = event.target.closest('[data-nomad-sub-burn]');
+        if (burn) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const track = findRenderedTrack(Number(burn.dataset.nomadSubBurn));
+            if (track) attachBurnedSubtitle(track).catch(err => toast(err.message || 'Could not burn subtitle', 'error', 7000));
+            return;
+        }
+
         if (event.target.closest('[data-nomad-sub-search]')) {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -187,17 +279,16 @@
         }
     }, true);
 
-    // HLS seeks and audio-track replacements change the source-time offset and
-    // sometimes the playback session id. Refresh an active embedded subtitle
-    // against the new session so its extracted cue timeline stays aligned.
+    // Text subtitles are separate WebVTT resources and must be refreshed when
+    // a seek/replacement changes the source offset or session ticket. Burned
+    // subtitles live in the HLS video itself and the backend preserves them.
     setInterval(() => {
-        if (active.streamIndex === null || active.refreshing) return;
+        if (active.streamIndex === null || active.refreshing || active.burned) return;
         const current = Core.current;
         if (!current || !V?.path) return;
         if (V.path !== active.path) {
             removeEmbeddedTrack();
-            active.path = null;
-            active.streamIndex = null;
+            resetActive();
             return;
         }
         const offset = Number(current.offset || 0);
