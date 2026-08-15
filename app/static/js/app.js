@@ -1,6 +1,6 @@
 /* Nomad Pi app compatibility bootstrap. */
 (() => {
-    const version = '2.0.5-radxa-hotfix';
+    const version = '2.0.6-radxa-hotfix';
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/player-mobile-fix.js?v=${encodeURIComponent(version)}"><\/script>`);
@@ -17,6 +17,7 @@
     document.write(`<script src="js/offline-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/download-live.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/library-health.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/media-actions.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/storage-failover.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-health-ui.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/profile-context.js?v=${encodeURIComponent(version)}"><\/script>`);
