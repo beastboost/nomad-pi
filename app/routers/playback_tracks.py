@@ -1,0 +1,175 @@
+"""Audio/subtitle track APIs layered onto the Nomad 2.x playback core."""
+
+from __future__ import annotations
+
+import copy
+import os
+from typing import Optional
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from app.routers.auth import get_current_user_id
+from app.routers.media import safe_fs_path_from_web_path
+from app.routers import playback_core as core
+from app.services.playback.hls import HLSJobError
+from app.services.playback.planner import PlaybackMode
+from app.services.playback.probe import ProbeError
+from app.services.playback.tracks import probe_tracks
+
+
+router = APIRouter()
+
+
+class AudioTrackSwitchRequest(BaseModel):
+    stream_index: int = Field(ge=0)
+    position: float = Field(default=0, ge=0)
+
+
+def _resolve(path: str) -> str:
+    try:
+        fs_path = safe_fs_path_from_web_path(path)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid media path")
+    if not os.path.isfile(fs_path):
+        raise HTTPException(status_code=404, detail="Media file not found")
+    return fs_path
+
+
+def _tracks(fs_path: str) -> dict:
+    try:
+        return probe_tracks(fs_path)
+    except ProbeError as exc:
+        message = str(exc)
+        raise HTTPException(status_code=503 if "not installed" in message else 422, detail=message)
+
+
+def _ticketed_url(session_id: str, user_id: int) -> tuple[str, int]:
+    ticket = core.ticket_signer.issue(session_id=session_id, user_id=user_id)
+    return (
+        f"/api/playback/hls/{session_id}/index.m3u8?ticket={quote(ticket, safe='')}",
+        core.ticket_signer.ttl_seconds,
+    )
+
+
+@router.get("/tracks")
+def get_playback_tracks(
+    path: str = Query(...),
+    user_id: int = Depends(get_current_user_id),
+):
+    """Return ffprobe stream metadata suitable for player track menus."""
+    fs_path = _resolve(path)
+    tracks = _tracks(fs_path)
+    return {
+        "path": path,
+        **tracks,
+    }
+
+
+@router.post("/sessions/{session_id}/audio")
+def switch_audio_track(
+    session_id: str,
+    request: AudioTrackSwitchRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Switch embedded audio while keeping the same absolute playback time.
+
+    Browser native multi-audio handling is inconsistent. Nomad therefore
+    creates a replacement HLS session mapped to the chosen ffprobe stream.
+    H.264/AAC media is remuxed; other selected audio is converted to AAC while
+    video is copied whenever the existing playback plan permits it.
+    """
+    old = core.session_store.get(session_id, user_id=user_id)
+    if not old or old.state == "stopped":
+        raise HTTPException(status_code=404, detail="Active playback session not found")
+
+    fs_path = _resolve(old.path)
+    tracks = _tracks(fs_path)
+    selected = next(
+        (item for item in tracks.get("audio", []) if item.get("stream_index") == request.stream_index),
+        None,
+    )
+    if not selected:
+        raise HTTPException(status_code=404, detail="Audio stream not found")
+
+    metadata = copy.deepcopy(old.metadata or {})
+    caps = metadata.get("capabilities") or {}
+    target = metadata.setdefault("target", {})
+    source = metadata.get("source") or {}
+    audio_codec = str(selected.get("codec") or "").lower()
+    client_audio = {str(x).lower() for x in (caps.get("audio_codecs") or [])}
+
+    if old.mode == PlaybackMode.TRANSCODE_VIDEO.value:
+        mode = PlaybackMode.TRANSCODE_VIDEO.value
+        # HLS/fMP4's most interoperable browser audio is AAC. Copy an AAC
+        # selection, otherwise convert it if the client reported AAC support.
+        if audio_codec == "aac":
+            target["audio_codec"] = None
+        elif "aac" in client_audio:
+            target["audio_codec"] = "aac"
+        else:
+            raise HTTPException(status_code=422, detail="Client cannot accept a safe HLS audio format")
+    else:
+        if audio_codec == "aac":
+            mode = PlaybackMode.REMUX.value
+            target["audio_codec"] = None
+        elif "aac" in client_audio:
+            mode = PlaybackMode.TRANSCODE_AUDIO.value
+            target["audio_codec"] = "aac"
+        else:
+            raise HTTPException(status_code=422, detail="Client cannot accept a safe HLS audio format")
+
+    metadata["selected_audio"] = selected
+    position = max(0.0, float(request.position or 0))
+
+    replacement = core.session_store.create(
+        user_id=user_id,
+        path=old.path,
+        mode=mode,
+        position=position,
+        audio_track=request.stream_index,
+        subtitle_track=old.subtitle_track,
+        quality=old.quality,
+        device_id=old.device_id,
+        metadata=metadata,
+    )
+
+    core.hls_manager.stop(old.id, remove_cache=True)
+    core.session_store.update(old.id, user_id=user_id, state="stopped")
+    core.session_store.update(replacement.id, user_id=user_id, state="preparing")
+
+    try:
+        core.hls_manager.ensure_job(
+            session_id=replacement.id,
+            source_path=fs_path,
+            mode=replacement.mode,
+            target_video_codec=target.get("video_codec"),
+            target_audio_codec=target.get("audio_codec"),
+            audio_stream_index=request.stream_index,
+            source_width=source.get("width"),
+            source_height=source.get("height"),
+            max_width=caps.get("max_width"),
+            max_height=caps.get("max_height"),
+            max_bitrate=caps.get("max_bitrate"),
+            start_position=position,
+        )
+        core.hls_manager.wait_until_ready(replacement.id)
+    except HLSJobError as exc:
+        core.session_store.update(replacement.id, user_id=user_id, state="failed")
+        raise HTTPException(status_code=503, detail=f"Audio switch failed: {exc}")
+
+    replacement = core.session_store.update(
+        replacement.id, user_id=user_id, state="ready"
+    ) or replacement
+    url, expires = _ticketed_url(replacement.id, user_id)
+    return {
+        "replaced_session_id": old.id,
+        "session": replacement.to_dict(),
+        "track": selected,
+        "source_offset": position,
+        "playback": {"type": "hls", "url": url},
+        "ticket_expires_in": expires,
+    }
