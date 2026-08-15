@@ -41,6 +41,19 @@ def _setting_int(key: str, default: int) -> int:
         return int(default)
 
 
+def _web_root_for_mount(resolved: Path) -> str:
+    """Convert a filesystem mount into the path form media.py accepts."""
+    data_root = Path(_data_root()).resolve()
+    try:
+        rel = resolved.relative_to(data_root)
+        # Nomad-mounted volumes live under data/external/<name>.  Store them
+        # as /data/... rather than /home/.../data/... so media.py's guarded
+        # path resolver can consume the setting.
+        return "/data/" + rel.as_posix().lstrip("/")
+    except ValueError:
+        return str(resolved)
+
+
 def _candidate_mounts() -> list[dict]:
     data_root = Path(_data_root()).resolve()
     candidates: list[dict] = []
@@ -71,6 +84,7 @@ def _candidate_mounts() -> list[dict]:
 
         candidates.append({
             "mountpoint": str(resolved),
+            "web_root": _web_root_for_mount(resolved),
             "device": part.device,
             "fstype": part.fstype,
             "total": int(usage.total),
@@ -101,13 +115,19 @@ def _current_policy() -> dict:
         category: (database.get_setting(f"storage.failover.target.{category}") or "")
         for category in CATEGORIES
     }
-    configured_mount = ""
+    configured_target_root = ""
     nonempty = [value for value in targets.values() if value]
     if nonempty:
-        # Targets are stored as <mount>/<category>; report the common parent.
         parents = {str(Path(value).parent) for value in nonempty}
         if len(parents) == 1:
-            configured_mount = parents.pop()
+            configured_target_root = parents.pop()
+
+    candidates = _candidate_mounts()
+    configured_mount = ""
+    for candidate in candidates:
+        if candidate.get("web_root") == configured_target_root or candidate.get("mountpoint") == configured_target_root:
+            configured_mount = candidate["mountpoint"]
+            break
 
     threshold = max(5, min(50, _setting_int("storage.failover.threshold_free_percent", 20)))
     enabled = bool(_setting_int("storage.failover.enabled", 0))
@@ -117,10 +137,11 @@ def _current_policy() -> dict:
         "enabled": enabled,
         "threshold_free_percent": threshold,
         "configured_mount": configured_mount,
+        "configured_target_root": configured_target_root,
         "targets": targets,
         "primary": primary,
         "failover_active": effective_failover,
-        "candidates": _candidate_mounts(),
+        "candidates": candidates,
     }
 
 
@@ -134,8 +155,10 @@ def set_storage_policy(
     request: StoragePolicyRequest,
     admin: dict = Depends(get_current_admin),
 ):
-    candidates = {item["mountpoint"]: item for item in _candidate_mounts()}
+    candidate_items = _candidate_mounts()
+    candidates = {item["mountpoint"]: item for item in candidate_items}
     mount = str(request.failover_mount or "").rstrip("/")
+    target_root = ""
 
     if request.enabled:
         if not mount:
@@ -144,18 +167,28 @@ def set_storage_policy(
             resolved = str(Path(mount).resolve())
         except OSError:
             raise HTTPException(status_code=400, detail="Invalid failover mount")
-        if resolved not in candidates:
+        candidate = candidates.get(resolved)
+        if not candidate:
             raise HTTPException(status_code=400, detail="Failover target is not a currently mounted external volume")
         mount = resolved
+        target_root = str(candidate["web_root"]).rstrip("/")
+    elif mount:
+        try:
+            resolved = str(Path(mount).resolve())
+        except OSError:
+            resolved = ""
+        candidate = candidates.get(resolved)
+        if candidate:
+            target_root = str(candidate["web_root"]).rstrip("/")
 
     database.set_setting("storage.failover.enabled", "1" if request.enabled else "0")
     database.set_setting("storage.failover.threshold_free_percent", str(int(request.threshold_free_percent)))
 
-    if mount:
+    if target_root:
         for category in CATEGORIES:
             database.set_setting(
                 f"storage.failover.target.{category}",
-                str(Path(mount) / category),
+                f"{target_root}/{category}",
             )
 
     return {"status": "ok", "policy": _current_policy()}
