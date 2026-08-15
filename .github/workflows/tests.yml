@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   test:
-    name: Python 3.11 test suite
+    name: Python and frontend test suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -29,6 +29,11 @@ jobs:
           python-version: '3.11'
           cache: pip
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -36,6 +41,17 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall -q app tests
+
+      - name: Check frontend JavaScript syntax
+        run: |
+          node --check app/static/js/app.js
+          node --check app/static/js/app_legacy.js
+          node --check app/static/js/playback-core.js
+          node --check app/static/sw.js
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/vendor-assets.sh
 
       - name: Run tests
         env:
