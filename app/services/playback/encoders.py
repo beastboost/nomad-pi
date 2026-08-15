@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -72,6 +73,42 @@ def available_ffmpeg_encoders(ffmpeg_path: Optional[str] = None) -> frozenset[st
     return frozenset(_parse_encoders((result.stdout or "") + (result.stderr or "")))
 
 
+def _platform_model() -> str:
+    for path in ("/proc/device-tree/model", "/sys/firmware/devicetree/base/model"):
+        try:
+            return Path(path).read_text(encoding="utf-8", errors="ignore").replace("\x00", "").strip()
+        except OSError:
+            pass
+    return ""
+
+
+def _best_hardware_candidate(candidates: list[str], model: Optional[str] = None) -> Optional[str]:
+    """Pick the single hardware encoder most appropriate to this SBC.
+
+    HLSManager intentionally keeps one hardware attempt plus one software
+    fallback. Choosing one hardware candidate here guarantees that a machine
+    advertising several wrappers cannot exhaust the fallback slot before
+    reaching libx264/libx265.
+    """
+    if not candidates:
+        return None
+    model_text = str(model if model is not None else _platform_model()).lower()
+
+    # Radxa Cubie A7Z / Allwinner A733 vendor images use OpenMAX for H.264.
+    if ("a733" in model_text or "cubie a7" in model_text) and "h264_omx" in candidates:
+        return "h264_omx"
+
+    # Prefer the platform-specific wrappers over generic V4L2 where both are
+    # exposed. Rockchip's rkmpp is generally the intended path on RK boards.
+    if "rockchip" in model_text:
+        for name in candidates:
+            if name.endswith("_rkmpp"):
+                return name
+
+    # On other boards preserve the configured candidate order.
+    return candidates[0]
+
+
 def hardware_policy() -> str:
     """Return off/auto/force from NOMAD_HW_ACCEL, defaulting safely to auto."""
     value = str(os.environ.get("NOMAD_HW_ACCEL", "auto")).strip().lower()
@@ -83,11 +120,12 @@ def video_encoder_candidates(
     *,
     available: Optional[Iterable[str]] = None,
     policy: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> list[str]:
-    """Return preferred encoder candidates, hardware first then software.
+    """Return the execution order: one best hardware encoder, then software.
 
-    In ``force`` mode only detected hardware candidates are returned. In
-    ``auto`` mode hardware is attempted first but software remains the fallback.
+    ``auto`` tries the board-appropriate hardware path first and always keeps a
+    software fallback. ``force`` uses only the best detected hardware path.
     ``off`` disables hardware entirely.
     """
     normalized = str(codec or "h264").strip().lower()
@@ -98,13 +136,14 @@ def video_encoder_candidates(
         encoder for encoder in HARDWARE_VIDEO_ENCODERS.get(normalized, ())
         if encoder in encoders
     ]
+    best_hardware = _best_hardware_candidate(hardware, model=model)
 
     if selected_policy == "off":
         return [software]
     if selected_policy == "force":
-        return hardware
+        return [best_hardware] if best_hardware else []
 
-    candidates = list(hardware)
+    candidates = [best_hardware] if best_hardware else []
     if software not in candidates:
         candidates.append(software)
     return candidates
