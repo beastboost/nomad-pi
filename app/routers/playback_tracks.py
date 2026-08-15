@@ -86,9 +86,6 @@ def _extract_webvtt(fs_path: str, stream_index: int, offset: float = 0) -> Path:
     os.close(fd)
     try:
         cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
-        # HLS output is started at the session's absolute source position and
-        # its media timeline resets to zero. Apply the same input seek here so
-        # WebVTT cue times line up with that HLS timeline.
         if offset > 0:
             cmd += ["-ss", f"{offset:.3f}"]
         cmd += [
@@ -170,17 +167,7 @@ def switch_audio_track(
     request: AudioTrackSwitchRequest,
     user_id: int = Depends(get_current_user_id),
 ):
-    """Switch embedded audio while keeping the same absolute playback time.
-
-    Browser native multi-audio handling is inconsistent. Nomad therefore
-    creates a replacement HLS session mapped to the chosen ffprobe stream.
-    H.264/AAC media is remuxed; other selected audio is converted to AAC while
-    video is copied whenever the existing playback plan permits it.
-
-    The current session is kept alive until the replacement HLS playlist is
-    proven ready. A failed remux/transcode therefore cannot interrupt playback
-    that was already working.
-    """
+    """Switch embedded audio while keeping the same absolute playback time."""
     old = core.session_store.get(session_id, user_id=user_id)
     if not old or old.state == "stopped":
         raise HTTPException(status_code=404, detail="Active playback session not found")
@@ -200,17 +187,18 @@ def switch_audio_track(
     source = metadata.get("source") or {}
     audio_codec = str(selected.get("codec") or "").lower()
     client_audio = {str(x).lower() for x in (caps.get("audio_codecs") or [])}
+    burn_subtitle = metadata.get("burn_subtitle")
 
-    if old.mode == PlaybackMode.TRANSCODE_VIDEO.value:
+    if old.mode == PlaybackMode.TRANSCODE_VIDEO.value or burn_subtitle:
         mode = PlaybackMode.TRANSCODE_VIDEO.value
-        if audio_codec == "aac":
+        if audio_codec == "aac" or audio_codec in client_audio:
             target["audio_codec"] = None
         elif "aac" in client_audio:
             target["audio_codec"] = "aac"
         else:
             raise HTTPException(status_code=422, detail="Client cannot accept a safe HLS audio format")
     else:
-        if audio_codec == "aac":
+        if audio_codec == "aac" or audio_codec in client_audio:
             mode = PlaybackMode.REMUX.value
             target["audio_codec"] = None
         elif "aac" in client_audio:
@@ -226,6 +214,7 @@ def switch_audio_track(
         user_id=user_id,
         path=old.path,
         mode=mode,
+        duration=old.duration,
         position=position,
         audio_track=request.stream_index,
         subtitle_track=old.subtitle_track,
@@ -243,6 +232,7 @@ def switch_audio_track(
             target_video_codec=target.get("video_codec"),
             target_audio_codec=target.get("audio_codec"),
             audio_stream_index=request.stream_index,
+            subtitle_stream_index=(old.subtitle_track if burn_subtitle else None),
             source_width=source.get("width"),
             source_height=source.get("height"),
             max_width=caps.get("max_width"),
@@ -260,7 +250,6 @@ def switch_audio_track(
         replacement.id, user_id=user_id, state="ready"
     ) or replacement
 
-    # Only retire the old stream once the replacement is known to be playable.
     core.hls_manager.stop(old.id, remove_cache=True)
     core.session_store.update(old.id, user_id=user_id, state="stopped")
 
