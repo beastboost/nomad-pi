@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
-from typing import Optional
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.routers.auth import get_current_user_id
@@ -20,6 +25,7 @@ from app.services.playback.tracks import probe_tracks
 
 
 router = APIRouter()
+SUBTITLE_CACHE = Path("data/.nomad_cache/subtitles")
 
 
 class AudioTrackSwitchRequest(BaseModel):
@@ -55,6 +61,54 @@ def _ticketed_url(session_id: str, user_id: int) -> tuple[str, int]:
     )
 
 
+def _subtitle_cache_path(fs_path: str, stream_index: int) -> Path:
+    st = os.stat(fs_path)
+    identity = f"{os.path.abspath(fs_path)}|{st.st_size}|{st.st_mtime_ns}|{stream_index}"
+    digest = hashlib.sha256(identity.encode("utf-8", errors="surrogatepass")).hexdigest()[:24]
+    SUBTITLE_CACHE.mkdir(parents=True, exist_ok=True)
+    return SUBTITLE_CACHE / f"{digest}.vtt"
+
+
+def _extract_webvtt(fs_path: str, stream_index: int) -> Path:
+    cached = _subtitle_cache_path(fs_path, stream_index)
+    if cached.is_file() and cached.stat().st_size > 0:
+        return cached
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(status_code=503, detail="ffmpeg is not installed")
+
+    fd, temp_name = tempfile.mkstemp(prefix="nomad-sub-", suffix=".vtt", dir=str(SUBTITLE_CACHE))
+    os.close(fd)
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-i", fs_path,
+                "-map", f"0:{int(stream_index)}",
+                "-c:s", "webvtt",
+                "-f", "webvtt",
+                temp_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+        if result.returncode != 0 or not os.path.isfile(temp_name) or os.path.getsize(temp_name) == 0:
+            detail = (result.stderr or result.stdout or "subtitle conversion failed").strip()
+            raise HTTPException(status_code=422, detail=detail[:800])
+        os.replace(temp_name, cached)
+        return cached
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Subtitle conversion timed out")
+    finally:
+        if os.path.exists(temp_name):
+            try:
+                os.remove(temp_name)
+            except OSError:
+                pass
+
+
 @router.get("/tracks")
 def get_playback_tracks(
     path: str = Query(...),
@@ -67,6 +121,35 @@ def get_playback_tracks(
         "path": path,
         **tracks,
     }
+
+
+@router.get("/sessions/{session_id}/subtitles/{stream_index}.vtt")
+def embedded_subtitle_webvtt(
+    session_id: str,
+    stream_index: int,
+    ticket: str = Query(...),
+):
+    """Expose a text-based embedded subtitle as ticket-protected WebVTT."""
+    session = core._require_ticket_session(session_id, ticket)
+    fs_path = _resolve(session.path)
+    tracks = _tracks(fs_path)
+    selected = next(
+        (item for item in tracks.get("subtitles", []) if item.get("stream_index") == stream_index),
+        None,
+    )
+    if not selected:
+        raise HTTPException(status_code=404, detail="Subtitle stream not found")
+    if not selected.get("text_supported"):
+        raise HTTPException(
+            status_code=422,
+            detail="This subtitle is image-based and requires burn-in transcoding",
+        )
+    vtt_path = _extract_webvtt(fs_path, stream_index)
+    return FileResponse(
+        vtt_path,
+        media_type="text/vtt; charset=utf-8",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/sessions/{session_id}/audio")
@@ -104,8 +187,6 @@ def switch_audio_track(
 
     if old.mode == PlaybackMode.TRANSCODE_VIDEO.value:
         mode = PlaybackMode.TRANSCODE_VIDEO.value
-        # HLS/fMP4's most interoperable browser audio is AAC. Copy an AAC
-        # selection, otherwise convert it if the client reported AAC support.
         if audio_codec == "aac":
             target["audio_codec"] = None
         elif "aac" in client_audio:
