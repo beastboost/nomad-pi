@@ -25,20 +25,19 @@ SOFTWARE_VIDEO_ENCODERS = {
     "av1": "libaom-av1",
 }
 
-# These are intentionally conservative. v4l2m2m is used by a number of Linux
-# SBC FFmpeg builds (including Raspberry Pi variants), while rkmpp is found in
-# Rockchip-oriented builds. Both can sit behind the ordinary decoded-frame
-# path used by Nomad. VAAPI/QSV/NVENC are still reported by /playback/health,
-# but are not auto-selected until their device/upload paths are implemented.
+# Conservative hardware candidates that can accept the ordinary decoded-frame
+# path used by Nomad. OpenMAX H.264 is included because Allwinner/Radxa images
+# may expose the A733 encoder through FFmpeg as h264_omx; if the advertised
+# encoder is unusable at runtime HLSManager automatically falls back.
 HARDWARE_VIDEO_ENCODERS = {
-    "h264": ("h264_v4l2m2m", "h264_rkmpp"),
-    "avc": ("h264_v4l2m2m", "h264_rkmpp"),
+    "h264": ("h264_v4l2m2m", "h264_rkmpp", "h264_omx"),
+    "avc": ("h264_v4l2m2m", "h264_rkmpp", "h264_omx"),
     "hevc": ("hevc_v4l2m2m", "hevc_rkmpp"),
     "h265": ("hevc_v4l2m2m", "hevc_rkmpp"),
 }
 
 ALL_KNOWN_HARDWARE_ENCODERS = {
-    "h264_v4l2m2m", "hevc_v4l2m2m", "h264_rkmpp", "hevc_rkmpp",
+    "h264_v4l2m2m", "hevc_v4l2m2m", "h264_rkmpp", "hevc_rkmpp", "h264_omx",
     "h264_vaapi", "hevc_vaapi", "h264_nvenc", "hevc_nvenc",
     "h264_qsv", "hevc_qsv", "h264_videotoolbox", "hevc_videotoolbox",
 }
@@ -121,7 +120,7 @@ def video_encoder_args(encoder: str, *, max_bitrate: Optional[int] = None) -> li
         args = ["-preset", "veryfast", "-crf", "23"]
     elif encoder == "libx265":
         args = ["-preset", "veryfast", "-crf", "27"]
-    elif encoder in {"h264_v4l2m2m", "hevc_v4l2m2m", "h264_rkmpp", "hevc_rkmpp"}:
+    elif encoder in {"h264_v4l2m2m", "hevc_v4l2m2m", "h264_rkmpp", "hevc_rkmpp", "h264_omx"}:
         # Hardware SBC encoders are bitrate-driven rather than CRF-driven.
         bitrate = max(500_000, int(max_bitrate or 6_000_000))
         args = ["-b:v", str(bitrate)]
