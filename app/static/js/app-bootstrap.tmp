@@ -1,9 +1,0 @@
-/* Nomad Pi app compatibility bootstrap.
- * Keeps the proven Nocturne UI intact while layering the 2.x playback core
- * after it. This file is promoted to app.js in the following tree commit.
- */
-(() => {
-    const version = '2.0.0-playback-core';
-    document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
-    document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
-})();
