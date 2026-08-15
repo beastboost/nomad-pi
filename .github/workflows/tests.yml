@@ -69,7 +69,7 @@ jobs:
           ALLOW_INSECURE_DEFAULT: 'true'
         run: python -m pytest tests/ -q
 
-      - name: Run real FFmpeg playback smoke test
+      - name: Run real FFmpeg HLS smoke tests
         env:
           ALLOW_INSECURE_DEFAULT: 'true'
-        run: python scripts/playback-selftest.py --smoke-hls
+        run: python scripts/playback-selftest.py --smoke-hls --smoke-abr
