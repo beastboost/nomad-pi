@@ -424,10 +424,12 @@ async function renderStorage(body) {
 
 async function mountDrive(name) {
     const device = name.startsWith('/dev/') ? name : `/dev/${name}`;
-    const point = `/media/${name.replace(/^\/dev\//, '')}`;
+    // The server rejects absolute mount points — it mounts under
+    // data/external/<name> itself and wants just the bare name.
+    const point = name.replace(/^\/dev\//, '');
     try {
         await api(`/system/mount?device=${encodeURIComponent(device)}&mount_point=${encodeURIComponent(point)}`, { method: 'POST' });
-        toast(`Mounted at ${point}`, 'success');
+        toast(`Mounted ${point}`, 'success');
         refreshSub();
     } catch (e) { toast(e.message || 'Could not mount that device', 'error'); }
 }

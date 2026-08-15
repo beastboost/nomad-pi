@@ -361,7 +361,10 @@ namespace NomadTransferTool
                             
                             SambaPath = path;
                             
-                            if ((bool)config.is_default_password && string.IsNullOrEmpty(SambaPassword))
+                            // is_default_password is only returned to authenticated callers, so it
+                            // may legitimately be absent — treat that as "unknown".
+                            bool isDefaultPw = config.is_default_password != null && (bool)config.is_default_password;
+                            if (isDefaultPw && string.IsNullOrEmpty(SambaPassword))
                             {
                                 SambaPassword = "nomad";
                                 SambaPassBox.Password = "nomad";

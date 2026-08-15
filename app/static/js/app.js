@@ -541,7 +541,12 @@ async function loadLibrary() {
             renderShowsGrid(body);
             return;
         }
-        const data = await api(`/media/library/${S.lib}`);
+        // The route defaults to limit=50 — without an explicit limit any
+        // library over 50 items was silently truncated with no 'load more'.
+        const data = await api(`/media/library/${S.lib}?limit=5000`);
+        if (data.has_more) {
+            console.warn(`library ${S.lib}: ${data.total} items, showing first 5000`);
+        }
         S.libItems = (data.items || []).filter(i => i && i.path);
         renderLibItems();
     } catch (e) {
@@ -669,13 +674,27 @@ async function openDetail(path) {
 
     S.sel = { path, meta, kind };
 
+    // /media/meta returns the flat file_metadata row (lowercase columns) and,
+    // when cached, the raw OMDb payload under meta.meta with capitalised keys
+    // (Title/Plot/Genre/Runtime). Reading only the lowercase form meant the
+    // synopsis, genres and runtime never rendered for OMDb-backed titles.
     const info = meta.metadata || meta.meta || {};
-    const title = info.title || meta.title || name;
-    const poster = posterUrl(meta.poster || info.poster);
-    const year = info.year || meta.year || '';
-    const runtime = info.runtime || '';
-    const genres = info.genre ? String(info.genre).split(',').map(g => g.trim()).filter(Boolean).slice(0, 4) : [];
-    const overview = info.plot || info.overview || meta.overview || '';
+    const pick = (...keys) => {
+        for (const k of keys) {
+            for (const src of [meta, info]) {
+                const v = src?.[k];
+                if (v && v !== 'N/A') return v;
+            }
+        }
+        return '';
+    };
+    const title = pick('title', 'Title') || name;
+    const poster = posterUrl(pick('poster', 'Poster'));
+    const year = pick('year', 'Year');
+    const runtime = pick('runtime', 'Runtime');
+    const genreRaw = pick('genre', 'Genre');
+    const genres = genreRaw ? String(genreRaw).split(',').map(g => g.trim()).filter(Boolean).slice(0, 4) : [];
+    const overview = pick('plot', 'Plot', 'overview', 'Overview');
     const prog = meta.progress || {};
     const cur = Number(prog.current_time || 0);
     const dur = Number(prog.duration || 0);

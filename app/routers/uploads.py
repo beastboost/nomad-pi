@@ -33,6 +33,20 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
 # Configuration
 UPLOAD_DIR = Path("data/uploads")
+
+
+def _safe_upload_dir(file_id: str) -> "Path":
+    """Contain file_id/filename inside UPLOAD_DIR.
+
+    verify/ and info/ built paths by plain join, so a segment of ".." walked
+    out of the upload sandbox and let a caller hash or list arbitrary files
+    under data/ (a content oracle for the database and backups)."""
+    from pathlib import Path as _P
+    base = _P(UPLOAD_DIR).resolve()
+    target = (base / file_id).resolve()
+    if target != base and base not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid file id")
+    return target
 CHUNK_SIZE = 16 * 1024 * 1024  # 16MB chunks (optimized for WiFi throughput)
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 BUFFER_SIZE = 64 * 1024  # 64KB buffer for file I/O
@@ -560,7 +574,7 @@ async def download_file(
     Returns:
         StreamingResponse with file content
     """
-    file_path = UPLOAD_DIR / file_id / filename
+    file_path = _safe_upload_dir(file_id) / filename
     
     # Validate file exists and is within upload directory
     try:
@@ -604,7 +618,7 @@ async def delete_upload(
     Returns:
         JSON response with deletion status
     """
-    file_dir = UPLOAD_DIR / file_id
+    file_dir = _safe_upload_dir(file_id)
     
     try:
         # Validate directory is within upload directory
@@ -661,7 +675,7 @@ async def verify_file_integrity(
     Returns:
         JSON response with verification result
     """
-    file_path = UPLOAD_DIR / file_id / filename
+    file_path = _safe_upload_dir(file_id) / filename
     
     if not await aiofiles.os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -700,7 +714,7 @@ async def get_file_info(
     Returns:
         Dictionary with file information
     """
-    file_dir = UPLOAD_DIR / file_id
+    file_dir = _safe_upload_dir(file_id)
     
     if not await aiofiles.os.path.exists(file_dir):
         raise HTTPException(status_code=404, detail="File not found")

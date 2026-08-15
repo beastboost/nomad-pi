@@ -631,6 +631,18 @@ async def cache_remote_poster(poster_url: str):
     if not (poster_url.startswith("http://") or poster_url.startswith("https://")):
         return None
 
+    # This URL can come straight from a client (dashboard session updates carry
+    # poster_url), so it gets the same SSRF guard as the debrid downloader —
+    # otherwise it is a fetch primitive against the LAN, loopback and cloud
+    # metadata, with the cached result readable back as an oracle.
+    try:
+        from app.services.debrid import is_safe_external_url
+        if not is_safe_external_url(poster_url):
+            logger.warning("Refusing to fetch poster from a non-public URL")
+            return None
+    except ImportError:
+        pass
+
     os.makedirs(POSTER_CACHE_DIR, exist_ok=True)
     key = hashlib.sha256(poster_url.encode("utf-8", errors="ignore")).hexdigest()
     out_fs = os.path.join(POSTER_CACHE_DIR, f"{key}.jpg")
@@ -3580,6 +3592,22 @@ async def trigger_auto_organize():
     except Exception as e:
         logger.error(f"Automated organization failed: {e}")
 
+# Upload targets are joined onto BASE_DIR, so an unconstrained {category}
+# escapes the data root: category=".." wrote straight into the application
+# directory, which combined with the update endpoint is remote code
+# execution. Both upload routes validate against this allowlist.
+UPLOAD_CATEGORIES = {"movies", "shows", "music", "books", "gallery", "files", "uploads", "ingest"}
+
+
+def _validated_category(category: str) -> str:
+    if category not in UPLOAD_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Allowed: {', '.join(sorted(UPLOAD_CATEGORIES))}",
+        )
+    return category
+
+
 @router.post("/upload/{category}")
 async def upload_file(category: str, background_tasks: BackgroundTasks, files: UploadFile = File(...), user_id: int = Depends(get_current_user_id)):
     # Note: 'files' param name matches frontend FormData.append('files', ...)
@@ -3592,6 +3620,7 @@ async def upload_file(category: str, background_tasks: BackgroundTasks, files: U
     # The frontend does: formData.append('files', file)
     # So the field name is 'files'.
     
+    category = _validated_category(category)
     path = os.path.join(BASE_DIR, category)
     os.makedirs(path, exist_ok=True)
     
@@ -3641,6 +3670,7 @@ import aiofiles
 
 @router.post("/upload_stream/{category}")
 async def upload_stream(category: str, request: Request, background_tasks: BackgroundTasks, path: str = Query(default=""), user_id: int = Depends(get_current_user_id)):
+    category = _validated_category(category)
     incoming_name = path or request.headers.get("x-file-path", "")
     incoming_name = (incoming_name or "").replace("\\", "/")
     normalized = posixpath.normpath(incoming_name).lstrip("/")
