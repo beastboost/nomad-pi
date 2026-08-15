@@ -26,12 +26,18 @@ from app.routers.playback_abr import (
     router as _abr_router,
 )
 from app.services.playback.abr import ABRJobError
+from app.services.playback.compat import BrowserPlaybackPlanner
 from app.services.playback.hls import HLSJobError
 
 
 _original_playback_urls = _core._playback_urls
 _original_hls_stop = _core.hls_manager.stop
 _original_hls_status = _core.hls_manager.status
+
+# The execution layer emits fragmented-MP4 HLS for all non-direct browser
+# playback. Use the compatibility-aware planner so codecs such as MP3/Opus or
+# VP9 are not blindly stream-copied into an Apple-incompatible fMP4 stream.
+_core.planner = BrowserPlaybackPlanner()
 
 
 def _ensure_hls_with_selected_streams(session, fs_path=None):
