@@ -42,6 +42,13 @@ def test_auto_accepts_ffmpeg_openmax_then_software():
     assert is_hardware_encoder("h264_omx") is True
 
 
+def test_a733_prefers_openmax_over_generic_v4l2_then_software():
+    available = {"h264_v4l2m2m", "h264_omx", "libx264"}
+    assert video_encoder_candidates(
+        "h264", available=available, policy="auto", model="Radxa Cubie A7Z A733"
+    ) == ["h264_omx", "libx264"]
+
+
 def test_hardware_policy_off_forces_software_candidate():
     available = {"h264_v4l2m2m", "libx264"}
     assert video_encoder_candidates("h264", available=available, policy="off") == ["libx264"]
