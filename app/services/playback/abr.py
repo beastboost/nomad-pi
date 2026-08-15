@@ -68,7 +68,6 @@ def choose_renditions(
         return []
     selected: list[ABRRendition] = []
     for rendition in ladder:
-        # Never upscale merely to manufacture another ABR rung.
         if rendition.width > source_width or rendition.height > source_height:
             continue
         if max_width and rendition.width > max_width:
@@ -84,7 +83,7 @@ def choose_renditions(
 
 def abr_available(*, available_encoders: Optional[Iterable[str]] = None, policy: Optional[str] = None) -> tuple[bool, str, list[str]]:
     selected_policy = (policy or abr_policy()).lower()
-    candidates = video_encoder_candidates("h264", available=available_encoders, policy="auto")
+    candidates = video_encoder_candidates("h264", available=available_encoders)
     hardware = [name for name in candidates if is_hardware_encoder(name)]
     if selected_policy == "off":
         return False, "Adaptive bitrate is disabled by NOMAD_ABR=off", candidates
@@ -268,8 +267,23 @@ class ABRManager:
                 return existing
 
             directory = self.session_dir(session_id)
+            # A completed cache survives process/server restarts. Re-register it
+            # in memory rather than regenerating an entire ABR ladder.
             if directory.exists():
+                cached = ABRJob(
+                    session_id=session_id,
+                    source_path=source_path,
+                    directory=directory,
+                    process=None,
+                    log_path=directory / "ffmpeg.log",
+                    renditions=variants,
+                    encoder="cached",
+                )
+                if self._ready(cached):
+                    self._jobs[session_id] = cached
+                    return cached
                 shutil.rmtree(directory, ignore_errors=True)
+
             directory.mkdir(parents=True, exist_ok=True)
             log_path = directory / "ffmpeg.log"
 
