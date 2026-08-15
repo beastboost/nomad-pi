@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import platform
 import re
 import shutil
 import subprocess
 import tempfile
-from typing import Iterable
 
 from fastapi import APIRouter, Depends
 import psutil
@@ -20,8 +18,13 @@ from app.routers import playback_core as core
 
 router = APIRouter()
 
-RELEVANT_VIDEO_ENCODERS = {
-    "libx264", "libx265", "libvpx-vp9", "libaom-av1",
+SOFTWARE_VIDEO_ENCODERS = {
+    "h264": "libx264",
+    "hevc": "libx265",
+    "vp9": "libvpx-vp9",
+    "av1": "libaom-av1",
+}
+RELEVANT_VIDEO_ENCODERS = set(SOFTWARE_VIDEO_ENCODERS.values()) | {
     "h264_v4l2m2m", "hevc_v4l2m2m", "h264_vaapi", "hevc_vaapi",
     "h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv",
     "h264_videotoolbox", "hevc_videotoolbox",
@@ -110,15 +113,20 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
 
     encoders: set[str] = set()
     hwaccels: list[str] = []
+    executable_video = {}
     if ffmpeg:
         encoders = _ffmpeg_encoders(ffmpeg)
         hwaccels = _ffmpeg_hwaccels(ffmpeg)
+        executable_video = {
+            codec: encoder in encoders
+            for codec, encoder in SOFTWARE_VIDEO_ENCODERS.items()
+        }
         checks.append(_check(
-            "H.264 encoder",
-            "libx264" in encoders or bool(encoders & HARDWARE_ENCODERS),
-            "libx264 or a detected hardware H.264/HEVC encoder is available"
-            if ("libx264" in encoders or bool(encoders & HARDWARE_ENCODERS))
-            else "No supported H.264/video encoder detected; video transcoding may fail",
+            "H.264 software encoder",
+            executable_video.get("h264", False),
+            "libx264 is available and matches the current HLS executor"
+            if executable_video.get("h264") else
+            "libx264 is missing; the current executor cannot produce H.264 even if separate hardware encoders are detected",
             severity="warn",
         ))
         checks.append(_check(
@@ -160,6 +168,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     statuses = {item["status"] for item in checks}
     overall = "fail" if "fail" in statuses else "warn" if "warn" in statuses else "ok"
     memory = psutil.virtual_memory()
+    any_video_encoder = any(executable_video.values())
 
     return {
         "status": overall,
@@ -175,14 +184,16 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "ffprobe_path": ffprobe,
             "video_encoders": sorted(encoders & RELEVANT_VIDEO_ENCODERS),
             "audio_encoders": sorted(encoders & RELEVANT_AUDIO_ENCODERS),
-            "hardware_encoders": sorted(encoders & HARDWARE_ENCODERS),
-            "hardware_accels": sorted(set(hwaccels)),
+            "hardware_encoders_detected": sorted(encoders & HARDWARE_ENCODERS),
+            "hardware_accels_detected": sorted(set(hwaccels)),
+            "executor_video_codecs": executable_video,
+            "hardware_acceleration_enabled": False,
         },
         "playback_modes": {
             "direct_play": True,
             "remux": bool(ffmpeg and writable),
             "audio_transcode": bool(ffmpeg and writable and "aac" in encoders),
-            "video_transcode": bool(ffmpeg and writable and ("libx264" in encoders or bool(encoders & HARDWARE_ENCODERS))),
+            "video_transcode": bool(ffmpeg and writable and any_video_encoder),
         },
         "checks": checks,
     }
