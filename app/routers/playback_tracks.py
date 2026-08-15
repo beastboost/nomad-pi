@@ -184,14 +184,19 @@ def switch_audio_track(
     metadata = copy.deepcopy(old.metadata or {})
     caps = metadata.get("capabilities") or {}
     target = metadata.setdefault("target", {})
-    source = metadata.get("source") or {}
     audio_codec = str(selected.get("codec") or "").lower()
     client_audio = {str(x).lower() for x in (caps.get("audio_codecs") or [])}
     burn_subtitle = metadata.get("burn_subtitle")
+    adaptive = bool(metadata.get("abr"))
 
-    if old.mode == PlaybackMode.TRANSCODE_VIDEO.value or burn_subtitle:
+    if old.mode == PlaybackMode.TRANSCODE_VIDEO.value or burn_subtitle or adaptive:
         mode = PlaybackMode.TRANSCODE_VIDEO.value
-        if audio_codec == "aac" or audio_codec in client_audio:
+        if adaptive:
+            # The adaptive engine always emits AAC for each rendition.
+            if "aac" not in client_audio:
+                raise HTTPException(status_code=422, detail="Adaptive playback requires AAC support")
+            target["audio_codec"] = "aac"
+        elif audio_codec == "aac" or audio_codec in client_audio:
             target["audio_codec"] = None
         elif "aac" in client_audio:
             target["audio_codec"] = "aac"
@@ -225,22 +230,10 @@ def switch_audio_track(
     core.session_store.update(replacement.id, user_id=user_id, state="preparing")
 
     try:
-        core.hls_manager.ensure_job(
-            session_id=replacement.id,
-            source_path=fs_path,
-            mode=replacement.mode,
-            target_video_codec=target.get("video_codec"),
-            target_audio_codec=target.get("audio_codec"),
-            audio_stream_index=request.stream_index,
-            subtitle_stream_index=(old.subtitle_track if burn_subtitle else None),
-            source_width=source.get("width"),
-            source_height=source.get("height"),
-            max_width=caps.get("max_width"),
-            max_height=caps.get("max_height"),
-            max_bitrate=caps.get("max_bitrate"),
-            start_position=position,
-        )
-        core.hls_manager.wait_until_ready(replacement.id)
+        # The facade routes this through single-rendition HLS or the adaptive
+        # ladder according to persisted session metadata, preserving selected
+        # audio and burned subtitles in either case.
+        core._ensure_hls(replacement, fs_path=fs_path)
     except HLSJobError as exc:
         core.hls_manager.stop(replacement.id, remove_cache=True)
         core.session_store.update(replacement.id, user_id=user_id, state="failed")
@@ -253,12 +246,12 @@ def switch_audio_track(
     core.hls_manager.stop(old.id, remove_cache=True)
     core.session_store.update(old.id, user_id=user_id, state="stopped")
 
-    url, expires = _ticketed_url(replacement.id, user_id)
+    ticket = core.ticket_signer.issue(session_id=replacement.id, user_id=user_id)
     return {
         "replaced_session_id": old.id,
         "session": replacement.to_dict(),
         "track": selected,
         "source_offset": position,
-        "playback": {"type": "hls", "url": url},
-        "ticket_expires_in": expires,
+        "playback": core._playback_urls(replacement, ticket),
+        "ticket_expires_in": core.ticket_signer.ttl_seconds,
     }
