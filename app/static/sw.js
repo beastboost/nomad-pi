@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v2.0.9-radxa-hotfix';
+const CACHE_NAME = 'nomad-pi-v2.0.10-radxa-hotfix';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css',
@@ -6,7 +6,7 @@ const APP_SHELL = [
   '/js/replacement-control.js', '/js/track-control.js', '/js/subtitle-control.js',
   '/js/quality-control.js', '/js/device-control.js', '/js/watch-party.js', '/js/music2-player.js',
   '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js',
-  '/js/offline-control.js', '/js/library-health.js', '/js/storage-failover.js', '/js/profile-context.js', '/js/profile-switch.js', '/js/reader-state.js',
+  '/js/offline-control.js', '/js/download-live.js', '/js/library-health.js', '/js/storage-failover.js', '/js/profile-context.js', '/js/profile-switch.js', '/js/reader-state.js',
   '/js/admin.js', '/js/features.js', '/js/reader.js',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png',
   '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-512.svg',
