@@ -1,9 +1,8 @@
 """Persistent Stream + Keep orchestration for debrid-backed media.
 
 A job exposes the remote debrid object immediately through a short-lived Nomad
-stream ticket while reusing the existing debrid downloader to save/index a
-local copy. Remote URLs are retained server-side and deliberately omitted from
-public job dictionaries.
+stream ticket while a dedicated resumable worker saves/indexes a local copy.
+The remote URL never appears in public job dictionaries.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from app import database
-from app.services import debrid
+from app.services import stream_keep_download
 
 
 def _now() -> str:
@@ -51,6 +50,12 @@ class StreamKeepJob:
         data = asdict(self)
         if not include_remote:
             data.pop("remote_url", None)
+            # Filesystem destinations are internal implementation details.
+            if isinstance(data.get("metadata"), dict):
+                data["metadata"] = {
+                    key: value for key, value in data["metadata"].items()
+                    if key not in {"download_dest_path", "remote_url"}
+                }
         return data
 
 
@@ -203,6 +208,22 @@ class StreamKeepStore:
         finally:
             conn.close()
 
+    def list_recoverable(self, limit: int = 200) -> List[StreamKeepJob]:
+        self.ensure_schema()
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM stream_keep_jobs
+                WHERE status IN ('starting','downloading','interrupted')
+                ORDER BY updated_at ASC LIMIT ?
+                """,
+                (max(1, min(1000, int(limit))),),
+            ).fetchall()
+            return [self._job(row) for row in rows]
+        finally:
+            conn.close()
+
     def update(self, job_id: str, *, user_id: Optional[int] = None, **fields) -> Optional[StreamKeepJob]:
         self.ensure_schema()
         allowed = {
@@ -244,50 +265,47 @@ class StreamKeepStore:
 
 
 class StreamKeepManager:
-    def __init__(self, store: Optional[StreamKeepStore] = None):
+    MAX_RECOVERY_RESTARTS = 4
+
+    def __init__(self, store: Optional[StreamKeepStore] = None, *, auto_recover: bool = False):
         self.store = store or StreamKeepStore()
         self._monitors: Dict[str, threading.Thread] = {}
+        self._recovering: set[str] = set()
         self._lock = threading.Lock()
+        if auto_recover:
+            self.schedule_recovery()
 
     @staticmethod
-    def _web_path_from_dest(dest_path: Optional[str]) -> Optional[str]:
-        if not dest_path:
-            return None
-        try:
-            from app.routers import media
-            abs_base = os.path.abspath(media.BASE_DIR)
-            abs_dest = os.path.abspath(dest_path)
-            if os.path.commonpath([abs_base, abs_dest]) == abs_base:
-                rel = os.path.relpath(abs_dest, abs_base).replace(os.sep, "/")
-                return f"/data/{rel}"
-            ext_root = os.path.join(media.BASE_DIR, "external")
-            if os.path.isdir(ext_root):
-                for item in os.listdir(ext_root):
-                    link_path = os.path.join(ext_root, item)
-                    if not os.path.islink(link_path):
-                        continue
-                    target = os.path.realpath(link_path)
-                    try:
-                        if os.path.commonpath([target, abs_dest]) == target:
-                            rel = os.path.relpath(abs_dest, target).replace(os.sep, "/")
-                            return f"/data/external/{item}/{rel}"
-                    except ValueError:
-                        continue
-            return abs_dest
-        except Exception:
-            return dest_path
+    def _metadata(job: StreamKeepJob) -> Dict[str, Any]:
+        return dict(job.metadata or {})
 
-    def start_download(self, job: StreamKeepJob) -> StreamKeepJob:
+    def start_download(self, job: StreamKeepJob, *, recovery: bool = False) -> StreamKeepJob:
+        metadata = self._metadata(job)
+        dest_path = metadata.get("download_dest_path")
+        restart_count = int(metadata.get("download_restart_count") or 0)
+        if recovery:
+            restart_count += 1
+            metadata["download_restart_count"] = restart_count
         try:
-            download_id = debrid.download_to_pi(
-                "",
-                job.remote_url,
-                job.filename,
-                job.category,
-                job.is_show,
+            download_id = stream_keep_download.start_download(
+                url=job.remote_url,
+                filename=job.filename,
+                category=job.category,
+                is_show=job.is_show,
+                dest_path=str(dest_path) if dest_path else None,
             )
+            info = stream_keep_download.get_status(download_id) or {}
+            if info.get("dest_path"):
+                metadata["download_dest_path"] = info["dest_path"]
+            metadata["resume_supported"] = info.get("range_supported")
         except Exception as exc:
-            updated = self.store.update(job.id, user_id=job.user_id, status="failed", error=str(exc))
+            updated = self.store.update(
+                job.id,
+                user_id=job.user_id,
+                status="failed",
+                error=str(exc),
+                metadata_json=json.dumps(metadata, separators=(",", ":")),
+            )
             return updated or job
 
         updated = self.store.update(
@@ -296,6 +314,7 @@ class StreamKeepManager:
             status="downloading",
             download_id=download_id,
             error=None,
+            metadata_json=json.dumps(metadata, separators=(",", ":")),
         ) or job
         self._start_monitor(updated.id, updated.user_id, download_id)
         return updated
@@ -318,10 +337,10 @@ class StreamKeepManager:
         try:
             missing_count = 0
             while True:
-                info = debrid.get_download_status(download_id)
+                info = stream_keep_download.get_status(download_id)
                 if info is None:
                     missing_count += 1
-                    if missing_count >= 15:
+                    if missing_count >= 8:
                         self.store.update(
                             job_id,
                             user_id=user_id,
@@ -330,54 +349,116 @@ class StreamKeepManager:
                             speed=0,
                         )
                         return
-                    time.sleep(2)
+                    time.sleep(1)
                     continue
                 missing_count = 0
                 status = str(info.get("status") or "downloading")
+                job = self.store.get(job_id, user_id=user_id)
+                metadata = self._metadata(job) if job else {}
+                if info.get("dest_path"):
+                    metadata["download_dest_path"] = info["dest_path"]
+                if info.get("range_supported") is not None:
+                    metadata["resume_supported"] = bool(info.get("range_supported"))
+                if info.get("resumed_from"):
+                    metadata["last_resumed_from"] = int(info.get("resumed_from") or 0)
                 common = {
                     "progress": float(info.get("progress") or 0),
                     "size_total": int(info.get("size_total") or 0),
                     "size_downloaded": int(info.get("size_downloaded") or 0),
                     "speed": int(info.get("speed") or 0),
                     "error": info.get("error"),
+                    "metadata_json": json.dumps(metadata, separators=(",", ":")),
                 }
                 if status == "completed":
                     self.store.update(
                         job_id,
                         user_id=user_id,
                         status="local_ready",
-                        local_path=self._web_path_from_dest(info.get("dest_path")),
+                        local_path=info.get("local_path"),
                         progress=100.0,
                         speed=0,
                         size_total=common["size_total"],
                         size_downloaded=common["size_downloaded"],
                         error=None,
+                        metadata_json=common["metadata_json"],
                     )
                     return
                 if status in {"failed", "cancelled"}:
                     self.store.update(job_id, user_id=user_id, status=status, **common)
                     return
+                if status == "interrupted":
+                    self.store.update(job_id, user_id=user_id, status="interrupted", **common)
+                    time.sleep(1)
+                    continue
                 self.store.update(job_id, user_id=user_id, status="downloading", **common)
                 time.sleep(1)
         finally:
             with self._lock:
                 self._monitors.pop(job_id, None)
 
+    def _recover_job(self, job: StreamKeepJob) -> StreamKeepJob:
+        with self._lock:
+            if job.id in self._recovering:
+                return job
+            monitor = self._monitors.get(job.id)
+            if monitor and monitor.is_alive():
+                return job
+            self._recovering.add(job.id)
+        try:
+            metadata = self._metadata(job)
+            restart_count = int(metadata.get("download_restart_count") or 0)
+            if restart_count >= self.MAX_RECOVERY_RESTARTS:
+                return self.store.update(
+                    job.id,
+                    user_id=job.user_id,
+                    status="failed",
+                    speed=0,
+                    error="Stream + Keep exceeded automatic recovery limit",
+                ) or job
+            return self.start_download(job, recovery=True)
+        finally:
+            with self._lock:
+                self._recovering.discard(job.id)
+
+    def recover_pending(self) -> int:
+        recovered = 0
+        for job in self.store.list_recoverable():
+            current = stream_keep_download.get_status(job.download_id) if job.download_id else None
+            if current is not None:
+                self._start_monitor(job.id, job.user_id, job.download_id)
+                continue
+            updated = self._recover_job(job)
+            if updated.download_id != job.download_id or updated.status == "downloading":
+                recovered += 1
+        return recovered
+
+    def schedule_recovery(self, delay_seconds: float = 3.0) -> None:
+        def run():
+            time.sleep(max(0.0, float(delay_seconds)))
+            try:
+                self.recover_pending()
+            except Exception:
+                # Recovery is best-effort; status reconciliation can retry later.
+                pass
+        threading.Thread(target=run, daemon=True, name="stream-keep-recovery").start()
+
     def reconcile(self, job: StreamKeepJob) -> StreamKeepJob:
-        """Refresh in-memory downloader state without exposing the remote URL."""
+        """Refresh/recover downloader state without exposing the remote URL."""
         if job.status == "local_ready" and job.local_path:
             return job
         if job.download_id:
-            info = debrid.get_download_status(job.download_id)
+            info = stream_keep_download.get_status(job.download_id)
             if info is not None:
                 self._start_monitor(job.id, job.user_id, job.download_id)
                 refreshed = self.store.get(job.id, user_id=job.user_id)
                 return refreshed or job
+        if job.status in {"starting", "downloading", "interrupted"}:
+            return self._recover_job(job)
         return job
 
     def cancel(self, job: StreamKeepJob) -> StreamKeepJob:
         if job.download_id:
-            debrid.cancel_download(job.download_id)
+            stream_keep_download.cancel(job.download_id)
         return self.store.update(
             job.id, user_id=job.user_id, status="cancelled", speed=0
         ) or job
