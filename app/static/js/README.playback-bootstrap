@@ -1,0 +1,3 @@
+The current Nocturne application shell is preserved as app_legacy.js.
+app.js is a compatibility bootstrap that loads app_legacy.js and then playback-core.js.
+This keeps the existing UI unchanged while the Nomad 2.x playback layer is developed independently.
