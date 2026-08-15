@@ -69,6 +69,7 @@ def _ensure_hls_with_selected_streams(session, fs_path=None):
         target_audio_codec=target.get("audio_codec"),
         audio_stream_index=session.audio_track,
         subtitle_stream_index=(session.subtitle_track if burn_subtitle else None),
+        source_video_codec=source.get("video_codec"),
         source_width=source.get("width"),
         source_height=source.get("height"),
         max_width=caps.get("max_width"),
