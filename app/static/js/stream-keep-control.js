@@ -107,12 +107,18 @@
         statusSheet(result.name || title.title, 'Resolving cached release…');
 
         try {
+            // Torrent search results use info_hash. Keep the old `hash` name as
+            // a compatibility fallback for providers/older cached responses,
+            // but never send an undefined field to FastAPI.
+            const infoHash = String(result.info_hash || result.hash || '').trim();
+            if (!infoHash) throw new Error('That release has no usable info hash');
+
             const magnet = await api('/debrid/magnet', {
                 method: 'POST',
                 body: JSON.stringify({
-                    info_hash: result.hash,
+                    info_hash: infoHash,
                     title: title.title,
-                    year: title.year,
+                    year: String(title.year || ''),
                     media_type: title.type || 'movie',
                     season: result.season || 1,
                     episode: result.episode || 1,
@@ -147,7 +153,7 @@
                         year: title.year,
                         media_type: title.type || 'movie',
                         imdb_id: title.imdb_id || null,
-                        info_hash: result.hash,
+                        info_hash: infoHash,
                         release: result.name || filename,
                         quality: result.quality || null,
                         codec: result.codec || null,
