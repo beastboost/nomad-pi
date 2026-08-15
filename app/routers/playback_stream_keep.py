@@ -216,6 +216,7 @@ def _ensure_remote_hls(job):
         mode=mode,
         target_video_codec=target.get("video_codec"),
         target_audio_codec=target.get("audio_codec"),
+        source_video_codec=source.get("video_codec"),
         source_width=source.get("width"),
         source_height=source.get("height"),
         max_width=caps.get("max_width"),
