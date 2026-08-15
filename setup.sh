@@ -345,6 +345,25 @@ if [ -x "$CURRENT_DIR/scripts/vendor-assets.sh" ]; then
     bash "$CURRENT_DIR/scripts/vendor-assets.sh" || true
 fi
 
+# Wi-Fi guard: restores the radio if turning it off would strand the box.
+# Without this, `nmcli radio wifi off` (which survives reboots) leaves a
+# headless Pi unreachable until someone attaches Ethernet or a keyboard.
+install_wifi_guard() {
+    local root="$1"
+    [ -f "$root/scripts/wifi-guard.sh" ] || return 0
+    sudo install -m 755 "$root/scripts/wifi-guard.sh" /usr/local/sbin/nomad-pi-wifi-guard.sh 2>/dev/null || return 0
+    sudo install -m 644 "$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.service" \
+        /etc/systemd/system/ 2>/dev/null || true
+    sudo install -m 644 "$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.timer" \
+        /etc/systemd/system/ 2>/dev/null || true
+    sudo mkdir -p /etc/nomad-pi 2>/dev/null || true
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl enable --now nomad-pi-wifi-guard.timer 2>/dev/null || true
+    echo "Wi-Fi guard installed."
+}
+
+install_wifi_guard "$CURRENT_DIR"
+
 # Create service file
 sudo bash -c "cat > $SERVICE_FILE" <<EOL
 [Unit]

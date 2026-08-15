@@ -109,11 +109,33 @@ async function renderWifi(body) {
       </div>`;
 
     $('#wifi-toggle').addEventListener('click', async () => {
+        if (!enabled) {
+            try {
+                await api('/system/wifi/toggle?enable=true', { method: 'POST' });
+                toast('Wi-Fi turned on', 'success');
+                refreshSub();
+            } catch (e) { toast(e.message || 'Could not turn Wi-Fi on', 'error'); }
+            return;
+        }
+
+        // Switching the radio off is how you lose the box: on a headless Pi
+        // Wi-Fi is usually the only route in, and the off state survives a
+        // reboot. Say so plainly, then rely on the server's auto-revert.
+        const ok = await confirmDialog(
+            'Turn Wi-Fi off?',
+            'Wi-Fi is normally the only way to reach this box, so you will be '
+            + 'disconnected immediately and cannot turn it back on from here.\n\n'
+            + 'As a safety net the radio switches itself back on after 5 minutes. '
+            + 'Only continue if you have Ethernet plugged in, or you want it off briefly.',
+            'Turn off anyway');
+        if (!ok) return;
+
         try {
-            await api(`/system/wifi/toggle?enable=${enabled ? 'false' : 'true'}`, { method: 'POST' });
-            toast(enabled ? 'Wi-Fi turned off' : 'Wi-Fi turned on', 'success');
+            const r = await api('/system/wifi/toggle?enable=false&confirm=true', { method: 'POST' });
+            const mins = Math.round((r.revert_in_seconds || 300) / 60);
+            toast(`Wi-Fi off — switching back on automatically in ${mins} min`, 'warn', 9000);
             refreshSub();
-        } catch (e) { toast(e.message || 'Could not toggle Wi-Fi', 'error'); }
+        } catch (e) { toast(e.message || 'Could not turn Wi-Fi off', 'error', 8000); }
     });
     $('#wifi-restart').addEventListener('click', async () => {
         if (!await confirmDialog('Restart Wi-Fi?', 'All wireless connections drop briefly while the adapter restarts.', 'Restart')) return;

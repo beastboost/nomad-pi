@@ -1,0 +1,8 @@
+[Unit]
+Description=Nomad Pi Wi-Fi guard (restores the radio if it would strand the box)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nomad-pi-wifi-guard.sh
