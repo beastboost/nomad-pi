@@ -10,12 +10,16 @@ from app.routers.playback_health import router as _health_router
 from app.routers.playback_subtitles import router as _subtitle_router
 from app.routers.playback_devices import router as _devices_router
 from app.routers.playback_music import router as _music_router
-from app.routers.playback_stream_keep import router as _stream_keep_router
+from app.routers.playback_stream_keep import (
+    manager as _stream_keep_manager,
+    router as _stream_keep_router,
+)
 from app.routers.playback_stream_keep_control import router as _stream_keep_control_router
 from app.routers.playback_offline import router as _offline_router
 from app.routers.playback_intelligence import router as _intelligence_router
 from app.routers.playback_profile_policy import router as _profile_policy_router
 from app.routers.playback_reader import router as _reader_router
+from app.routers.playback_watch_party import router as _watch_party_router
 from app.routers.playback_abr import (
     abr_manager as _abr_manager,
     ensure_adaptive_session as _ensure_adaptive_session,
@@ -112,8 +116,14 @@ for _router in (
     _intelligence_router,
     _profile_policy_router,
     _reader_router,
+    _watch_party_router,
 ):
     _core.router.include_router(_router)
+
+# Reattach any interrupted Stream + Keep local copies after process startup.
+# The worker keeps its stable .part file and resumes with HTTP Range where the
+# debrid host supports it; this call is intentionally non-blocking.
+_stream_keep_manager.schedule_recovery()
 
 # Preserve imports such as ``from app.routers import playback`` while keeping
 # the main playback implementation and optional controls modular.
