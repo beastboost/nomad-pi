@@ -11,7 +11,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -22,40 +22,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # One-time repair for the legacy body-form system-control route. The
-      # exact replacement commits the narrow fix to this feature branch. The
-      # bot's follow-up push skips this step to prevent recursion.
-      - name: Repair system control body route
-        if: github.ref == 'refs/heads/agent/nomad-2-playback-core-foundation' && github.actor != 'github-actions[bot]'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('app/routers/system.py')
-          text = path.read_text(encoding='utf-8')
-          old = '''@router.post("/control")
-          def system_control_body(request: ControlRequest, user_id: int = Depends(get_current_user_id)):
-              return system_control(request.action, user_id=user_id)
-          '''
-          new = '''@router.post("/control")
-          def system_control_body(request: ControlRequest, admin: dict = Depends(get_current_admin)):
-              return system_control(request.action, admin=admin)
-          '''
-          if old not in text:
-              raise SystemExit('Expected legacy system-control route was not found; refusing an unsafe fuzzy edit')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/routers/system.py
-          git diff --cached --check
-          git commit -m "Fix system control body route"
-          git push
 
       - name: Set up Python
         uses: actions/setup-python@v5
