@@ -9,4 +9,6 @@
     document.write(`<script src="js/quality-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/device-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/music2-player.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/music2-fallback.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/media-exclusivity.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
