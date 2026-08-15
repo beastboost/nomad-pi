@@ -1,8 +1,8 @@
 """Capability-driven playback planning for Nomad Pi.
 
-This module decides *what kind* of playback is required. It deliberately does
-not launch ffmpeg yet; execution belongs in a later playback/transcoding layer.
-Keeping planning pure makes it cheap to test and safe on low-power SBCs.
+This module decides *what kind* of playback is required. Execution belongs in
+the playback/transcoding layer. Keeping planning pure makes it cheap to test
+and safe on low-power SBCs.
 """
 
 from dataclasses import dataclass, field
@@ -68,11 +68,17 @@ class MediaProbe:
     height: Optional[int] = None
     bitrate: Optional[int] = None
     duration: Optional[float] = None
+    video_profile: Optional[str] = None
+    pixel_format: Optional[str] = None
+    codec_tag: Optional[str] = None
 
     def __post_init__(self):
         object.__setattr__(self, "container", (self.container or "").strip().lower())
         object.__setattr__(self, "video_codec", _clean_optional(self.video_codec))
         object.__setattr__(self, "audio_codec", _clean_optional(self.audio_codec))
+        object.__setattr__(self, "video_profile", _clean_optional(self.video_profile))
+        object.__setattr__(self, "pixel_format", _clean_optional(self.pixel_format))
+        object.__setattr__(self, "codec_tag", _clean_optional(self.codec_tag))
 
     @property
     def has_video(self) -> bool:
@@ -101,18 +107,7 @@ class PlaybackPlan:
 
 
 class PlaybackPlanner:
-    """Choose the cheapest viable playback path for a client.
-
-    Decision priority is intentionally conservative:
-
-    1. Direct play when every relevant source characteristic is supported.
-    2. Remux when codecs are supported but the container is not.
-    3. Audio-only transcode when video can be copied unchanged.
-    4. Video transcode when video codec/resolution/bitrate is incompatible.
-
-    The planner prefers stream-copy over transcoding because Nomad Pi targets
-    devices as small as a Raspberry Pi Zero 2W.
-    """
+    """Choose the cheapest viable playback path for a client."""
 
     def plan(self, source: MediaProbe, client: ClientCapabilities) -> PlaybackPlan:
         reasons = []
