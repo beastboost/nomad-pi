@@ -11,6 +11,12 @@ import threading
 import time
 from typing import Dict, Optional, Tuple
 
+from .encoders import (
+    SOFTWARE_VIDEO_ENCODERS,
+    is_hardware_encoder,
+    video_encoder_args,
+    video_encoder_candidates,
+)
 from .planner import PlaybackMode
 
 
@@ -25,16 +31,11 @@ class HLSJob:
     directory: Path
     process: Optional[subprocess.Popen]
     log_path: Path
+    encoder: Optional[str] = None
+    fallback_encoder: Optional[str] = None
+    fallback_cmd: Optional[list[str]] = None
+    fallback_attempted: bool = False
 
-
-VIDEO_ENCODERS = {
-    "h264": "libx264",
-    "avc": "libx264",
-    "hevc": "libx265",
-    "h265": "libx265",
-    "vp9": "libvpx-vp9",
-    "av1": "libaom-av1",
-}
 
 AUDIO_ENCODERS = {
     "aac": "aac",
@@ -73,6 +74,8 @@ def build_hls_command(
     target_video_codec: Optional[str],
     target_audio_codec: Optional[str],
     audio_stream_index: Optional[int] = None,
+    subtitle_stream_index: Optional[int] = None,
+    video_encoder_override: Optional[str] = None,
     source_width: Optional[int] = None,
     source_height: Optional[int] = None,
     max_width: Optional[int] = None,
@@ -86,16 +89,38 @@ def build_hls_command(
     segment_pattern = str(output_dir / "segment_%05d.m4s")
     playlist_path = str(output_dir / "index.m3u8")
 
+    playback_mode = PlaybackMode(mode)
+    if subtitle_stream_index is not None and playback_mode != PlaybackMode.TRANSCODE_VIDEO:
+        raise HLSJobError("Image subtitle burn-in requires video transcoding")
+
+    dims = fit_dimensions(source_width, source_height, max_width, max_height)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-y"]
     if start_position and start_position > 0:
         cmd += ["-ss", f"{float(start_position):.3f}"]
-    cmd += ["-i", source_path, "-map", "0:v:0?"]
+    cmd += ["-i", source_path]
+
+    # Graphic subtitle streams (PGS/DVD/DVB) are decoded as bitmap frames.
+    # FFmpeg's overlay compatibility path can blend them directly with the
+    # video stream. Overlay before scaling so subtitle coordinates still match
+    # the source frame, then scale the composited frame if the client requested
+    # a lower quality profile.
+    if subtitle_stream_index is not None:
+        if dims:
+            graph = (
+                f"[0:v:0][0:{int(subtitle_stream_index)}]overlay[vsub];"
+                f"[vsub]scale={dims[0]}:{dims[1]}[vout]"
+            )
+        else:
+            graph = f"[0:v:0][0:{int(subtitle_stream_index)}]overlay[vout]"
+        cmd += ["-filter_complex", graph, "-map", "[vout]"]
+    else:
+        cmd += ["-map", "0:v:0?"]
+
     if audio_stream_index is None:
         cmd += ["-map", "0:a:0?"]
     else:
         cmd += ["-map", f"0:{int(audio_stream_index)}?"]
 
-    playback_mode = PlaybackMode(mode)
     if playback_mode == PlaybackMode.REMUX:
         cmd += ["-c:v", "copy", "-c:a", "copy"]
     elif playback_mode == PlaybackMode.TRANSCODE_AUDIO:
@@ -104,19 +129,13 @@ def build_hls_command(
         if audio_encoder in {"aac", "libopus", "libmp3lame"}:
             cmd += ["-b:a", "192k"]
     elif playback_mode == PlaybackMode.TRANSCODE_VIDEO:
-        video_encoder = VIDEO_ENCODERS.get((target_video_codec or "h264").lower(), "libx264")
+        target_codec = (target_video_codec or "h264").lower()
+        video_encoder = video_encoder_override or SOFTWARE_VIDEO_ENCODERS.get(target_codec, "libx264")
         cmd += ["-c:v", video_encoder]
-        if video_encoder == "libx264":
-            cmd += ["-preset", "veryfast", "-crf", "23"]
-        elif video_encoder == "libx265":
-            cmd += ["-preset", "veryfast", "-crf", "27"]
+        cmd += video_encoder_args(video_encoder, max_bitrate=max_bitrate)
 
-        dims = fit_dimensions(source_width, source_height, max_width, max_height)
-        if dims:
+        if dims and subtitle_stream_index is None:
             cmd += ["-vf", f"scale={dims[0]}:{dims[1]}"]
-        if max_bitrate:
-            bitrate = max(250_000, int(max_bitrate))
-            cmd += ["-maxrate", str(bitrate), "-bufsize", str(bitrate * 2)]
 
         if target_audio_codec:
             audio_encoder = AUDIO_ENCODERS.get(target_audio_codec.lower(), "aac")
@@ -162,11 +181,7 @@ class HLSManager:
             return False
 
     def cleanup_cache(self, ttl_seconds: Optional[float] = None) -> int:
-        """Remove inactive HLS cache directories older than the configured TTL.
-
-        Active FFmpeg jobs are never touched. Cleanup is opportunistic when a
-        new HLS job starts, avoiding another background thread on small SBCs.
-        """
+        """Remove inactive HLS cache directories older than the configured TTL."""
         if ttl_seconds is None:
             try:
                 ttl_seconds = float(os.environ.get("NOMAD_HLS_CACHE_TTL", "86400"))
@@ -207,6 +222,31 @@ class HLSManager:
                 continue
         return removed
 
+    @staticmethod
+    def _spawn(cmd: list[str], log_path: Path, note: Optional[str] = None) -> subprocess.Popen:
+        if note:
+            with open(log_path, "ab") as handle:
+                handle.write((f"\n--- {note} ---\n").encode("utf-8", errors="replace"))
+        log_handle = open(log_path, "ab", buffering=0)
+        try:
+            return subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=log_handle,
+                close_fds=True,
+            )
+        finally:
+            log_handle.close()
+
+    @staticmethod
+    def _clear_outputs(directory: Path) -> None:
+        for pattern in ("index.m3u8", "init.mp4", "segment_*.m4s", "*.tmp"):
+            for path in directory.glob(pattern):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
     def ensure_job(
         self,
         *,
@@ -216,6 +256,7 @@ class HLSManager:
         target_video_codec: Optional[str],
         target_audio_codec: Optional[str],
         audio_stream_index: Optional[int] = None,
+        subtitle_stream_index: Optional[int] = None,
         source_width: Optional[int] = None,
         source_height: Optional[int] = None,
         max_width: Optional[int] = None,
@@ -243,13 +284,26 @@ class HLSManager:
                 shutil.rmtree(directory, ignore_errors=True)
             directory.mkdir(parents=True, exist_ok=True)
             log_path = directory / "ffmpeg.log"
-            cmd = build_hls_command(
+
+            playback_mode = PlaybackMode(mode)
+            encoder_candidates: list[Optional[str]] = [None]
+            if playback_mode == PlaybackMode.TRANSCODE_VIDEO:
+                encoder_candidates = list(video_encoder_candidates(target_video_codec))
+                if not encoder_candidates:
+                    raise HLSJobError(
+                        "Hardware acceleration was forced but no supported hardware encoder was detected"
+                    )
+
+            primary_encoder = encoder_candidates[0]
+            fallback_encoder = encoder_candidates[1] if len(encoder_candidates) > 1 else None
+            common = dict(
                 source_path=source_path,
                 output_dir=directory,
                 mode=mode,
                 target_video_codec=target_video_codec,
                 target_audio_codec=target_audio_codec,
                 audio_stream_index=audio_stream_index,
+                subtitle_stream_index=subtitle_stream_index,
                 source_width=source_width,
                 source_height=source_height,
                 max_width=max_width,
@@ -257,19 +311,56 @@ class HLSManager:
                 max_bitrate=max_bitrate,
                 start_position=start_position,
             )
-            log_handle = open(log_path, "ab", buffering=0)
-            try:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=log_handle,
-                    close_fds=True,
+            cmd = build_hls_command(
+                **common,
+                video_encoder_override=primary_encoder,
+            )
+            fallback_cmd = None
+            if fallback_encoder:
+                fallback_cmd = build_hls_command(
+                    **common,
+                    video_encoder_override=fallback_encoder,
                 )
-            finally:
-                log_handle.close()
-            job = HLSJob(session_id, source_path, directory, process, log_path)
+
+            process = self._spawn(
+                cmd,
+                log_path,
+                note=(
+                    f"starting {'hardware' if is_hardware_encoder(primary_encoder) else 'software'} "
+                    f"encoder {primary_encoder}"
+                    if primary_encoder else "starting HLS stream-copy job"
+                ),
+            )
+            job = HLSJob(
+                session_id=session_id,
+                source_path=source_path,
+                directory=directory,
+                process=process,
+                log_path=log_path,
+                encoder=primary_encoder,
+                fallback_encoder=fallback_encoder,
+                fallback_cmd=fallback_cmd,
+            )
             self._jobs[session_id] = job
             return job
+
+    def _try_fallback(self, job: HLSJob) -> bool:
+        if not job.fallback_cmd or job.fallback_attempted:
+            return False
+        with self._lock:
+            current = self._jobs.get(job.session_id)
+            if current is not job or job.fallback_attempted:
+                return False
+            job.fallback_attempted = True
+            self._clear_outputs(job.directory)
+            job.process = self._spawn(
+                job.fallback_cmd,
+                job.log_path,
+                note=f"hardware encoder failed; falling back to {job.fallback_encoder}",
+            )
+            job.encoder = job.fallback_encoder
+            job.fallback_cmd = None
+            return True
 
     def wait_until_ready(self, session_id: str, timeout: Optional[float] = None) -> Path:
         if timeout is None:
@@ -277,18 +368,32 @@ class HLSManager:
                 timeout = float(os.environ.get("NOMAD_HLS_START_TIMEOUT", "20"))
             except (TypeError, ValueError):
                 timeout = 20.0
-        deadline = time.monotonic() + max(0.1, float(timeout))
+        timeout = max(0.1, float(timeout))
+        deadline = time.monotonic() + timeout
         playlist = self.playlist_path(session_id)
-        while time.monotonic() < deadline:
-            if playlist.exists() and playlist.stat().st_size > 0:
-                return playlist
-            with self._lock:
-                job = self._jobs.get(session_id)
-            if job and job.process and job.process.poll() is not None:
-                message = self.log_tail(session_id)
-                raise HLSJobError(message or f"ffmpeg exited with code {job.process.returncode}")
-            time.sleep(0.1)
-        raise HLSJobError(f"Timed out after {float(timeout):.1f}s waiting for the HLS playlist")
+
+        while True:
+            while time.monotonic() < deadline:
+                if playlist.exists() and playlist.stat().st_size > 0:
+                    return playlist
+                with self._lock:
+                    job = self._jobs.get(session_id)
+                if job and job.process and job.process.poll() is not None:
+                    if self._try_fallback(job):
+                        # Give the software fallback its own full startup window.
+                        deadline = time.monotonic() + timeout
+                        break
+                    message = self.log_tail(session_id)
+                    raise HLSJobError(message or f"ffmpeg exited with code {job.process.returncode}")
+                time.sleep(0.1)
+            else:
+                with self._lock:
+                    job = self._jobs.get(session_id)
+                if job and self._try_fallback(job):
+                    deadline = time.monotonic() + timeout
+                    continue
+                raise HLSJobError(f"Timed out after {timeout:.1f}s waiting for the HLS playlist")
+            continue
 
     def status(self, session_id: str) -> dict:
         playlist = self.playlist_path(session_id)
@@ -300,6 +405,9 @@ class HLSManager:
             "playlist_ready": playlist.exists() and playlist.stat().st_size > 0,
             "complete": self._playlist_complete(session_id),
             "returncode": None if not job or not job.process or running else job.process.returncode,
+            "encoder": job.encoder if job else None,
+            "hardware_accelerated": bool(job and is_hardware_encoder(job.encoder)),
+            "fallback_attempted": bool(job and job.fallback_attempted),
         }
 
     def stop(self, session_id: str, *, remove_cache: bool = False) -> None:
