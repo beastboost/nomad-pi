@@ -1,8 +1,7 @@
 """Small ffprobe adapter used by the playback planner.
 
-Only extracts information needed to decide direct-play/remux/transcode. Richer
-track metadata will be layered on later without coupling the planner to ffprobe
-JSON or FastAPI.
+Only extracts information needed by playback planning/session timing. Richer
+track metadata lives separately in tracks.py.
 """
 
 import json
@@ -25,7 +24,7 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
         "ffprobe",
         "-v", "error",
         "-print_format", "json",
-        "-show_entries", "format=format_name,bit_rate",
+        "-show_entries", "format=format_name,bit_rate,duration",
         "-show_entries", "stream=codec_type,codec_name,width,height,bit_rate",
         path,
     ]
@@ -77,6 +76,7 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
             or _positive_int((video or {}).get("bit_rate"))
             or _positive_int((audio or {}).get("bit_rate"))
         ),
+        duration=_positive_float(fmt.get("duration")),
     )
 
 
@@ -114,6 +114,14 @@ def _container_name(path: str, ffprobe_name: str) -> str:
 def _positive_int(value):
     try:
         parsed = int(value)
+        return parsed if parsed > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _positive_float(value):
+    try:
+        parsed = float(value)
         return parsed if parsed > 0 else None
     except (TypeError, ValueError):
         return None
