@@ -8,7 +8,7 @@
 
     let timer = null;
     let busy = false;
-    let lastIds = '';
+    let lastShape = null;
 
     function visibleActiveDownloads() {
         return S?.tab === 'downloads' && S?.dl === 'active' && !document.hidden;
@@ -33,6 +33,10 @@
         return job.status || '';
     }
 
+    function shapeOf(list) {
+        return list.map(job => `${String(job.id || '')}:${String(job.status || '')}`).sort().join('|');
+    }
+
     async function tick() {
         if (!visibleActiveDownloads() || busy) return;
         const body = $('#dl-body');
@@ -41,24 +45,20 @@
         try {
             const data = await api('/debrid/downloads');
             const list = data.downloads || [];
-            const ids = list.map(item => String(item.id || '')).filter(Boolean).sort().join('|');
-            const cards = cardsById(body);
+            const shape = shapeOf(list);
 
-            // If the set of jobs changed (new/completed/removed), do one full
-            // redraw so buttons and completed states are correct. Otherwise
-            // update only progress/status nodes and avoid visible spinner flicker.
-            const canPatch = ids && ids === lastIds && list.every(job => !job.id || cards.has(String(job.id)));
-            if (!canPatch) {
-                lastIds = ids;
+            // Redraw once when jobs are added/removed or a status changes.
+            // Progress/speed changes do not alter the shape and are patched
+            // in place below, which avoids the spinner/flicker of a full render.
+            if (shape !== lastShape) {
+                lastShape = shape;
                 await renderActiveDownloads(body);
-                if (typeof window.NomadOffline !== 'undefined' && typeof loadDownloads === 'function') {
-                    // Offline Sync's wrapper/periodic renderer will re-add its
-                    // section; do not block the live download path on it.
-                }
-                return;
             }
 
+            const cards = cardsById(body);
             for (const job of list) {
+                const status = String(job.status || '');
+                if (['completed', 'error', 'failed', 'cancelled'].includes(status)) continue;
                 const id = String(job.id || '');
                 const card = cards.get(id);
                 if (!card) continue;
@@ -68,13 +68,6 @@
                 if (bar) bar.style.width = `${pct}%`;
                 if (stats[0]) stats[0].textContent = `${pct}%`;
                 if (stats[1]) stats[1].textContent = statusText(job);
-
-                // Completion/failure changes controls, so redraw immediately.
-                if (['completed', 'error', 'failed', 'cancelled'].includes(String(job.status || ''))) {
-                    lastIds = '';
-                    await renderActiveDownloads(body);
-                    break;
-                }
             }
         } catch {
             // Keep the current display on transient network errors.
