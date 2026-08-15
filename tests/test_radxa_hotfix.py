@@ -1,9 +1,11 @@
 """Regression coverage for the first Nomad 2 Radxa/iPhone field fixes."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.services.playback.compat import BrowserPlaybackPlanner
 from app.services.playback.encoders import video_encoder_candidates
+from app.services.playback.hls import build_hls_command, streaming_input_readrate
 from app.services.playback.planner import ClientCapabilities, MediaProbe, PlaybackMode
 
 
@@ -105,3 +107,40 @@ def test_nomad_external_mount_is_stored_as_data_web_root(tmp_path, monkeypatch):
     monkeypatch.setattr(policy, "_data_root", lambda: str(data))
 
     assert policy._web_root_for_mount(Path(mount).resolve()) == "/data/external/usb-media"
+
+
+def test_low_memory_remux_defaults_to_two_x_readrate(monkeypatch):
+    monkeypatch.delenv("NOMAD_HLS_READRATE", raising=False)
+    monkeypatch.setattr(
+        "app.services.playback.hls.psutil.virtual_memory",
+        lambda: SimpleNamespace(total=1024 * 1024 * 1024),
+    )
+    assert streaming_input_readrate(PlaybackMode.REMUX) == 2.0
+    assert streaming_input_readrate(PlaybackMode.TRANSCODE_AUDIO) == 2.0
+    assert streaming_input_readrate(PlaybackMode.TRANSCODE_VIDEO) is None
+
+
+def test_remux_hls_command_uses_event_playlist_and_readrate(tmp_path):
+    cmd = build_hls_command(
+        source_path="movie.mkv",
+        output_dir=Path(tmp_path),
+        mode="remux",
+        target_video_codec=None,
+        target_audio_codec=None,
+        source_video_codec="h264",
+        input_readrate=2.0,
+    )
+    assert cmd[cmd.index("-readrate") + 1] == "2.000"
+    assert cmd[cmd.index("-hls_playlist_type") + 1] == "event"
+    assert cmd[cmd.index("-avoid_negative_ts") + 1] == "make_zero"
+
+
+def test_one_gib_device_uses_sequential_quality_handover(monkeypatch):
+    from app.routers import playback_quality
+
+    monkeypatch.delenv("NOMAD_PLAYBACK_HANDOVER", raising=False)
+    monkeypatch.setattr(
+        "app.routers.playback_quality.psutil.virtual_memory",
+        lambda: SimpleNamespace(total=1024 * 1024 * 1024),
+    )
+    assert playback_quality._sequential_handover_required() is True
