@@ -72,6 +72,7 @@ def build_hls_command(
     mode: str,
     target_video_codec: Optional[str],
     target_audio_codec: Optional[str],
+    audio_stream_index: Optional[int] = None,
     source_width: Optional[int] = None,
     source_height: Optional[int] = None,
     max_width: Optional[int] = None,
@@ -88,7 +89,11 @@ def build_hls_command(
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "warning", "-y"]
     if start_position and start_position > 0:
         cmd += ["-ss", f"{float(start_position):.3f}"]
-    cmd += ["-i", source_path, "-map", "0:v:0?", "-map", "0:a:0?"]
+    cmd += ["-i", source_path, "-map", "0:v:0?"]
+    if audio_stream_index is None:
+        cmd += ["-map", "0:a:0?"]
+    else:
+        cmd += ["-map", f"0:{int(audio_stream_index)}?"]
 
     playback_mode = PlaybackMode(mode)
     if playback_mode == PlaybackMode.REMUX:
@@ -164,6 +169,7 @@ class HLSManager:
         mode: str,
         target_video_codec: Optional[str],
         target_audio_codec: Optional[str],
+        audio_stream_index: Optional[int] = None,
         source_width: Optional[int] = None,
         source_height: Optional[int] = None,
         max_width: Optional[int] = None,
@@ -195,6 +201,7 @@ class HLSManager:
                 mode=mode,
                 target_video_codec=target_video_codec,
                 target_audio_codec=target_audio_codec,
+                audio_stream_index=audio_stream_index,
                 source_width=source_width,
                 source_height=source_height,
                 max_width=max_width,
