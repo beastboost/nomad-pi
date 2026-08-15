@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v2.0.2-playback';
+const CACHE_NAME = 'nomad-pi-v2.0.3-playback';
 
 const APP_SHELL = [
   '/',
@@ -12,6 +12,7 @@ const APP_SHELL = [
   '/js/track-control.js',
   '/js/subtitle-control.js',
   '/js/quality-control.js',
+  '/js/device-control.js',
   '/js/admin.js',
   '/js/features.js',
   '/js/reader.js',
