@@ -5,4 +5,8 @@ app.js is a compatibility bootstrap that loads app_legacy.js first, then the Nom
 - subtitle-control.js: embedded text subtitles via ticket-protected WebVTT, with legacy subtitle search preserved
 - quality-control.js: Auto/Original/1080p/720p/480p session switching
 
+Playback runtime readiness is exposed at GET /api/playback/health.
+A real FFmpeg smoke test can be run on the SBC with:
+  python3 scripts/playback-selftest.py --smoke-hls
+
 This keeps the established UI intact while the new playback engine evolves independently.
