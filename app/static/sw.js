@@ -1,11 +1,11 @@
-const CACHE_NAME = 'nomad-pi-v2.0.5-playback';
+const CACHE_NAME = 'nomad-pi-v2.0.6-playback';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css',
   '/js/app.js', '/js/app_legacy.js', '/js/playback-core.js',
   '/js/replacement-control.js', '/js/track-control.js', '/js/subtitle-control.js',
   '/js/quality-control.js', '/js/device-control.js', '/js/music2-player.js',
-  '/js/music2-fallback.js', '/js/media-exclusivity.js',
+  '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js',
   '/js/admin.js', '/js/features.js', '/js/reader.js',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png',
   '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-512.svg',
