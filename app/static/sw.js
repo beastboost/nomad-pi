@@ -8,6 +8,7 @@ const APP_SHELL = [
   '/js/app.js',
   '/js/app_legacy.js',
   '/js/playback-core.js',
+  '/js/track-control.js',
   '/js/admin.js',
   '/js/features.js',
   '/js/reader.js',
@@ -17,15 +18,11 @@ const APP_SHELL = [
   '/icons/maskable-512.png',
   '/icons/apple-touch-icon.png',
   '/icons/icon-512.svg',
-  // Vendored assets populated by scripts/vendor-assets.sh. Local additions
-  // use Promise.allSettled during install so a not-yet-vendored optional file
-  // cannot prevent the service worker from activating.
   '/vendor/phosphor/regular.css',
   '/vendor/phosphor/fill.css',
   '/vendor/inter/inter.css',
   '/vendor/epub/epub.min.js',
   '/vendor/hls/hls.min.js',
-  // CDN fallbacks are best-effort and never block offline activation.
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/Phosphor.woff2',
@@ -84,10 +81,10 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
-  // Playback URLs contain Range requests, short-lived tickets and HLS
-  // manifests/segments. They must always go straight to FastAPI: caching them
-  // could replay expired credentials, break byte ranges, or serve stale HLS
-  // segments from a previous seek/transcode session.
+  // Playback traffic is intentionally network-only. It contains Range
+  // requests, expiring stream tickets, and HLS state tied to a particular
+  // playback/seek session; caching any of it can replay stale credentials or
+  // obsolete segments.
   if (
     url.pathname.startsWith('/api/playback/') ||
     url.pathname.includes('/media/stream') ||
