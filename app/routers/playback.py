@@ -58,6 +58,10 @@ class PlaybackHeartbeatRequest(BaseModel):
     state: Optional[str] = Field(default=None, max_length=32)
 
 
+class PlaybackSeekRequest(BaseModel):
+    position: float = Field(ge=0)
+
+
 def _client_capabilities(caps: ClientCapabilitiesRequest) -> ClientCapabilities:
     return ClientCapabilities.from_values(
         containers=caps.containers,
@@ -284,6 +288,50 @@ def playback_heartbeat(
     return {
         "session": updated.to_dict() if updated else session.to_dict(),
         "ticket": ticket,
+        "ticket_expires_in": ticket_signer.ttl_seconds,
+    }
+
+
+@router.post("/sessions/{session_id}/seek")
+def seek_playback_session(
+    session_id: str,
+    request: PlaybackSeekRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Seek to an absolute source timestamp.
+
+    Direct-play clients can seek the original file themselves. HLS sessions
+    restart ffmpeg at the requested timestamp, avoiding a long transcode from
+    the beginning on low-power SBCs.
+    """
+    session = session_store.get(session_id, user_id=user_id)
+    if not session or session.state == "stopped":
+        raise HTTPException(status_code=404, detail="Active playback session not found")
+
+    target = float(request.position)
+    if session.mode == PlaybackMode.DIRECT_PLAY.value:
+        updated = session_store.update(
+            session_id, user_id=user_id, position=target, state="ready"
+        ) or session
+    else:
+        hls_manager.stop(session_id, remove_cache=True)
+        updated = session_store.update(
+            session_id, user_id=user_id, position=target, state="preparing"
+        ) or session
+        try:
+            _ensure_hls(updated)
+        except HLSJobError as exc:
+            session_store.update(session_id, user_id=user_id, state="failed")
+            raise HTTPException(status_code=503, detail=f"Seek failed: {exc}")
+        updated = session_store.update(
+            session_id, user_id=user_id, state="ready"
+        ) or updated
+
+    ticket = ticket_signer.issue(session_id=session_id, user_id=user_id)
+    return {
+        "session": updated.to_dict(),
+        "playback": _playback_urls(updated, ticket),
+        "source_offset": target if updated.mode != PlaybackMode.DIRECT_PLAY.value else 0,
         "ticket_expires_in": ticket_signer.ttl_seconds,
     }
 
