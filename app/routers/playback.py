@@ -12,6 +12,10 @@ from app.routers.playback_devices import router as _devices_router
 from app.routers.playback_music import router as _music_router
 from app.routers.playback_stream_keep import router as _stream_keep_router
 from app.routers.playback_stream_keep_control import router as _stream_keep_control_router
+from app.routers.playback_offline import router as _offline_router
+from app.routers.playback_intelligence import router as _intelligence_router
+from app.routers.playback_profile_policy import router as _profile_policy_router
+from app.routers.playback_reader import router as _reader_router
 from app.routers.playback_abr import (
     abr_manager as _abr_manager,
     ensure_adaptive_session as _ensure_adaptive_session,
@@ -92,15 +96,24 @@ _core._playback_urls = _playback_urls_with_adaptive
 _core.hls_manager.stop = _stop_all_hls
 _core.hls_manager.status = _status_all_hls
 
-_core.router.include_router(_tracks_router)
-_core.router.include_router(_quality_router)
-_core.router.include_router(_health_router)
-_core.router.include_router(_subtitle_router)
-_core.router.include_router(_abr_router)
-_core.router.include_router(_devices_router)
-_core.router.include_router(_music_router)
-_core.router.include_router(_stream_keep_router)
-_core.router.include_router(_stream_keep_control_router)
+# Keep the core router stable while feature routers remain independently
+# testable and small. All of these endpoints live below /api/playback.
+for _router in (
+    _tracks_router,
+    _quality_router,
+    _health_router,
+    _subtitle_router,
+    _abr_router,
+    _devices_router,
+    _music_router,
+    _stream_keep_router,
+    _stream_keep_control_router,
+    _offline_router,
+    _intelligence_router,
+    _profile_policy_router,
+    _reader_router,
+):
+    _core.router.include_router(_router)
 
 # Preserve imports such as ``from app.routers import playback`` while keeping
 # the main playback implementation and optional controls modular.
