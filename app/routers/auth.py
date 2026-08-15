@@ -252,7 +252,13 @@ def get_current_user_id(request: Request):
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
-    return session['user_id']
+    user_id = session['user_id']
+    # Every legacy authenticated endpoint now participates in the session-bound
+    # profile context. The import is intentionally lazy to avoid an auth <-
+    # profile-policy import cycle during FastAPI module initialization.
+    from app.services.profile_policy_shell import enforce_request_policy_shell
+    enforce_request_policy_shell(request, user_id, token)
+    return user_id
 
 
 def get_current_admin(user_id=Depends(get_current_user_id)):
@@ -367,6 +373,13 @@ def logout(request: Request):
     # must remain connected.
     token = _extract_auth_token(request)
     if token:
+        session = database.get_session(token)
+        if session:
+            try:
+                from app.services.household_profiles import HouseholdProfileStore
+                HouseholdProfileStore(database.DB_PATH).unbind(user_id=session['user_id'], token=token)
+            except Exception:
+                pass
         database.delete_session(token)
     response = JSONResponse(content={"status": "logged_out"})
     response.delete_cookie("auth_token")
