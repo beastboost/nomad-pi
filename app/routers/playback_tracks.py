@@ -176,6 +176,10 @@ def switch_audio_track(
     creates a replacement HLS session mapped to the chosen ffprobe stream.
     H.264/AAC media is remuxed; other selected audio is converted to AAC while
     video is copied whenever the existing playback plan permits it.
+
+    The current session is kept alive until the replacement HLS playlist is
+    proven ready. A failed remux/transcode therefore cannot interrupt playback
+    that was already working.
     """
     old = core.session_store.get(session_id, user_id=user_id)
     if not old or old.state == "stopped":
@@ -229,9 +233,6 @@ def switch_audio_track(
         device_id=old.device_id,
         metadata=metadata,
     )
-
-    core.hls_manager.stop(old.id, remove_cache=True)
-    core.session_store.update(old.id, user_id=user_id, state="stopped")
     core.session_store.update(replacement.id, user_id=user_id, state="preparing")
 
     try:
@@ -251,12 +252,18 @@ def switch_audio_track(
         )
         core.hls_manager.wait_until_ready(replacement.id)
     except HLSJobError as exc:
+        core.hls_manager.stop(replacement.id, remove_cache=True)
         core.session_store.update(replacement.id, user_id=user_id, state="failed")
         raise HTTPException(status_code=503, detail=f"Audio switch failed: {exc}")
 
     replacement = core.session_store.update(
         replacement.id, user_id=user_id, state="ready"
     ) or replacement
+
+    # Only retire the old stream once the replacement is known to be playable.
+    core.hls_manager.stop(old.id, remove_cache=True)
+    core.session_store.update(old.id, user_id=user_id, state="stopped")
+
     url, expires = _ticketed_url(replacement.id, user_id)
     return {
         "replaced_session_id": old.id,
