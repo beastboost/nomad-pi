@@ -117,6 +117,14 @@ def switch_quality(
         raise HTTPException(status_code=404, detail="Playback source not found")
 
     metadata = copy.deepcopy(old.metadata or {})
+    # A manual profile intentionally exits multi-rendition ABR. Clear the
+    # adaptive markers before planning/starting the replacement, otherwise the
+    # compatibility facade would correctly route the new session back into ABR.
+    metadata.pop("abr", None)
+    metadata.pop("abr_policy_reason", None)
+    metadata.pop("abr_encoder_candidates", None)
+    metadata.pop("abr_renditions", None)
+
     caps = _capabilities(metadata, profile)
     source = _media_probe(metadata)
     plan = core.planner.plan(source, caps)
@@ -141,9 +149,6 @@ def switch_quality(
         else:
             raise HTTPException(status_code=422, detail="Selected audio cannot be represented at this quality")
 
-    # Burned bitmap subtitles necessarily require decoded video frames. Keep
-    # the burn-in active when quality changes and force a browser-safe HLS video
-    # codec even if the un-subtitled source could otherwise remux/direct-play.
     burn_subtitle = metadata.get("burn_subtitle")
     if burn_subtitle:
         mode = PlaybackMode.TRANSCODE_VIDEO
@@ -184,22 +189,7 @@ def switch_quality(
             ) or replacement
         else:
             core.session_store.update(replacement.id, user_id=user_id, state="preparing")
-            core.hls_manager.ensure_job(
-                session_id=replacement.id,
-                source_path=fs_path,
-                mode=replacement.mode,
-                target_video_codec=target_video,
-                target_audio_codec=target_audio,
-                audio_stream_index=old.audio_track,
-                subtitle_stream_index=(old.subtitle_track if burn_subtitle else None),
-                source_width=source.width,
-                source_height=source.height,
-                max_width=caps.max_width,
-                max_height=caps.max_height,
-                max_bitrate=caps.max_bitrate,
-                start_position=position,
-            )
-            core.hls_manager.wait_until_ready(replacement.id)
+            core._ensure_hls(replacement, fs_path=fs_path)
             replacement = core.session_store.update(
                 replacement.id, user_id=user_id, state="ready"
             ) or replacement
