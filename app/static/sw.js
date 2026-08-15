@@ -10,6 +10,7 @@ const APP_SHELL = [
   '/js/playback-core.js',
   '/js/track-control.js',
   '/js/subtitle-control.js',
+  '/js/quality-control.js',
   '/js/admin.js',
   '/js/features.js',
   '/js/reader.js',
