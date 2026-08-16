@@ -59,8 +59,6 @@ def _cleanup_roots(manager, *, ttl_seconds: Optional[float] = None, force: bool 
     removed = 0
 
     roots = cache_root_candidates(getattr(manager, "root"))
-    # Include roots already selected for active/recent sessions even if the
-    # failover setting was changed after those sessions started.
     for directory in _session_map(manager).values():
         root = directory.parent
         if root not in roots:
@@ -86,29 +84,51 @@ def _cleanup_roots(manager, *, ttl_seconds: Optional[float] = None, force: bool 
                 shutil.rmtree(directory, ignore_errors=True)
                 if not directory.exists():
                     removed += 1
-                    # A stale mapping must not keep pointing at a deleted dir.
                     _session_map(manager).pop(directory.name, None)
             except OSError:
                 continue
     return removed
 
 
-def _select_session_dir(manager, session_id: str, error_type):
+def _expected_session_bytes(manager, kwargs: dict) -> int:
+    """Estimate the worst useful preflight size for a local HLS job."""
+    source = kwargs.get("source_path")
+    if not source or not isinstance(source, (str, os.PathLike)):
+        return 0
+    try:
+        path = Path(source)
+        if not path.is_file():
+            return 0
+        size = int(path.stat().st_size)
+    except OSError:
+        return 0
+
+    # A stream-copy HLS cache approaches source size.  Multi-rendition ABR can
+    # exceed it because several encoded copies are written concurrently, so use
+    # a conservative factor without pretending to predict exact codec output.
+    if isinstance(manager, ABRManager):
+        renditions = kwargs.get("renditions")
+        try:
+            count = len(tuple(renditions)) if renditions is not None else 2
+        except TypeError:
+            count = 2
+        return int(size * max(2.0, min(3.0, float(count))))
+    return size
+
+
+def _select_session_dir(manager, session_id: str, error_type, *, expected_bytes: int = 0):
     mapping = _session_map(manager)
     existing = mapping.get(session_id)
     if existing is not None:
         return existing
 
-    # Normal cleanup first. Under pressure, retry after evicting every inactive
-    # session immediately; a crashed playback session should never strand GBs
-    # of cache for an hour while the boot filesystem is full.
     _cleanup_roots(manager)
     try:
-        volume = choose_cache_root(getattr(manager, "root"))
+        volume = choose_cache_root(getattr(manager, "root"), expected_bytes=expected_bytes)
     except CacheStorageError:
         _cleanup_roots(manager, ttl_seconds=0, force=True)
         try:
-            volume = choose_cache_root(getattr(manager, "root"))
+            volume = choose_cache_root(getattr(manager, "root"), expected_bytes=expected_bytes)
         except CacheStorageError as exc:
             raise error_type(str(exc)) from exc
 
@@ -145,22 +165,23 @@ def _install_manager_guard(cls, error_type):
     def ensure_job(self, *args, **kwargs):
         session_id = kwargs.get("session_id")
         if session_id is None and args:
-            # Both current managers expose session_id as keyword-only, but keep
-            # this defensive path for older installs/tests.
             session_id = args[0]
         session_id = str(session_id or "")
         if not session_id:
             raise error_type("Playback cache session id is missing")
 
-        _select_session_dir(self, session_id, error_type)
+        expected_bytes = _expected_session_bytes(self, kwargs)
+        _select_session_dir(
+            self,
+            session_id,
+            error_type,
+            expected_bytes=expected_bytes,
+        )
         try:
             return original_ensure(self, *args, **kwargs)
         except OSError as exc:
             if exc.errno != errno.ENOSPC:
                 raise
-            # A concurrent download can consume the last free blocks between
-            # selection and mkdir/FFmpeg startup. Evict stale caches once, then
-            # convert the raw OS exception into a useful playback error.
             _cleanup_roots(self, ttl_seconds=0, force=True)
             raise error_type(
                 "Playback cache ran out of space. Free storage or enable an external failover volume."
