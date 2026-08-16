@@ -205,11 +205,47 @@ nomad_install_media_stack() {
     fi
 }
 
+nomad_ensure_ssh() {
+    # A headless Nomad appliance must remain manageable even if the web UI is
+    # unavailable. Debian-family images call the OpenSSH unit "ssh"; tolerate
+    # distro aliases while keeping failure non-fatal to the media service.
+    if ! command -v sshd >/dev/null 2>&1; then
+        echo "WARNING: OpenSSH server binary is unavailable after package installation."
+        return 0
+    fi
+
+    local unit=""
+    if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
+        unit="ssh.service"
+    elif systemctl list-unit-files sshd.service >/dev/null 2>&1; then
+        unit="sshd.service"
+    fi
+    if [ -z "$unit" ]; then
+        echo "WARNING: OpenSSH is installed but no ssh/sshd systemd unit was found."
+        return 0
+    fi
+
+    if nomad_sudo systemctl enable --now "$unit" >/dev/null 2>&1; then
+        local listen=""
+        if command -v ss >/dev/null 2>&1; then
+            listen="$(ss -ltn 2>/dev/null | awk '$4 ~ /(^|:)22$/ {print $4; exit}' || true)"
+        fi
+        if [ -n "$listen" ]; then
+            echo "SSH remote access: enabled and listening on port 22 ($listen)."
+        else
+            echo "SSH remote access: $unit is active; port 22 listener not yet visible."
+        fi
+    else
+        echo "WARNING: OpenSSH is installed but $unit could not be enabled/started."
+        nomad_sudo systemctl status "$unit" --no-pager -l 2>/dev/null | tail -n 12 || true
+    fi
+}
+
 nomad_install_packages() {
     local required=(
         git ca-certificates curl python3 python3-pip python3-venv python3-dev
         network-manager dos2unix ntfs-3g avahi-daemon samba samba-common-bin
-        minidlna unar libarchive-tools ffmpeg
+        minidlna unar libarchive-tools ffmpeg openssh-server
     )
     local missing=()
     local pkg
@@ -238,6 +274,7 @@ nomad_install_packages() {
     fi
 
     nomad_install_media_stack
+    nomad_ensure_ssh
 }
 
 nomad_set_env_key() {
