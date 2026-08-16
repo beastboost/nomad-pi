@@ -8,7 +8,10 @@
     let dragging = false;
 
     function music() { return window.NomadMusic || null; }
-    function audio() { return window.S?.audio?.el || null; }
+    function audio() {
+        try { return typeof S !== 'undefined' ? S.audio?.el || null : null; }
+        catch { return null; }
+    }
     function currentTrack() {
         const m = music();
         return m && m.index >= 0 ? m.queue[m.index] : null;
