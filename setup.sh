@@ -46,6 +46,10 @@ if [ ! -f "$CURRENT_DIR/scripts/install-common.sh" ]; then
 fi
 # shellcheck disable=SC1091
 . "$CURRENT_DIR/scripts/install-common.sh"
+if [ -f "$CURRENT_DIR/scripts/network-appliance.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$CURRENT_DIR/scripts/network-appliance.sh"
+fi
 
 nomad_require_host
 
@@ -94,9 +98,13 @@ if [ -d .git ]; then
     fi
 fi
 
-# Refresh shared helper after pull in case platform/install code changed.
+# Refresh shared helpers after pull in case platform/install code changed.
 # shellcheck disable=SC1091
 . "$CURRENT_DIR/scripts/install-common.sh"
+if [ -f "$CURRENT_DIR/scripts/network-appliance.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$CURRENT_DIR/scripts/network-appliance.sh"
+fi
 nomad_detect_platform 2>/dev/null || true
 
 # Debian/Radxa OS/Ubuntu package path. Optional archive/filesystem package names
@@ -104,29 +112,17 @@ nomad_detect_platform 2>/dev/null || true
 echo "[1/10] System dependencies"
 nomad_install_packages
 
-# Hostname is a Nomad product hostname, not a claim that the machine is a Pi.
+# Nomad's product hostname is `nomad`, so the stable user-facing address is
+# http://nomad.local on both Raspberry Pi and Radxa. Avahi also advertises the
+# HTTP/SMB services explicitly; the port-80 helper redirects to the app on 8000.
 echo "[2/10] Hostname and mDNS"
-NEW_HOSTNAME="${NOMAD_HOSTNAME_OVERRIDE:-nomadpi}"
-CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo '')"
-if [ -n "$NEW_HOSTNAME" ] && [ "$CURRENT_HOSTNAME" != "$NEW_HOSTNAME" ] && command -v hostnamectl >/dev/null 2>&1; then
-    nomad_sudo hostnamectl set-hostname "$NEW_HOSTNAME"
-    if grep -qE '^127\.0\.1\.1[[:space:]]+' /etc/hosts 2>/dev/null; then
-        nomad_sudo python3 - "$CURRENT_HOSTNAME" "$NEW_HOSTNAME" <<'PY'
-from pathlib import Path
-import sys
-p = Path('/etc/hosts')
-old, new = sys.argv[1:3]
-text = p.read_text(encoding='utf-8', errors='ignore')
-lines = []
-for line in text.splitlines():
-    if line.startswith('127.0.1.1'):
-        line = f'127.0.1.1\t{new}'
-    lines.append(line)
-p.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-PY
-    fi
+ENV_FILE="/etc/nomadpi.env"
+STORED_HOSTNAME="$(nomad_get_env_key "$ENV_FILE" NOMAD_HOSTNAME)"
+NEW_HOSTNAME="${NOMAD_HOSTNAME_OVERRIDE:-${STORED_HOSTNAME:-nomad}}"
+if declare -F nomad_configure_hostname_mdns >/dev/null 2>&1; then
+    nomad_configure_hostname_mdns "$NEW_HOSTNAME"
 fi
-nomad_sudo systemctl enable --now avahi-daemon 2>/dev/null || true
+NEW_HOSTNAME="$(hostname 2>/dev/null || printf '%s' "$NEW_HOSTNAME")"
 
 # Python environment. Install as the actual service account even when setup was
 # launched with sudo/root so future web updates do not inherit root-owned venvs.
@@ -178,7 +174,6 @@ fi
 # Preserve the environment file. Older setup truncated it and accidentally
 # discarded unrelated HOME_SSID/TAILSCALE/etc values on reruns.
 echo "[5/10] Service configuration"
-ENV_FILE="/etc/nomadpi.env"
 OMDB_KEY_VALUE="${OMDB_API_KEY:-$(nomad_get_env_key "$ENV_FILE" OMDB_API_KEY)}"
 ADMIN_PASS_VALUE="${ADMIN_PASSWORD:-$(nomad_get_env_key "$ENV_FILE" ADMIN_PASSWORD)}"
 if [ -z "$OMDB_KEY_VALUE" ] && [ -t 0 ]; then
@@ -192,6 +187,7 @@ nomad_sudo touch "$ENV_FILE"
 nomad_sudo chmod 600 "$ENV_FILE"
 [ -n "$OMDB_KEY_VALUE" ] && nomad_set_env_key "$ENV_FILE" OMDB_API_KEY "$OMDB_KEY_VALUE"
 nomad_set_env_key "$ENV_FILE" ADMIN_PASSWORD "$ADMIN_PASS_VALUE"
+nomad_set_env_key "$ENV_FILE" NOMAD_HOSTNAME "$NEW_HOSTNAME"
 
 # Write detected platform into the service environment for diagnostics/logging.
 nomad_set_env_key "$ENV_FILE" NOMAD_BOARD_FAMILY "${NOMAD_BOARD_FAMILY:-generic-linux}"
@@ -268,14 +264,11 @@ if command -v nmcli >/dev/null 2>&1; then
             ACTIVE_WIFI="$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2=="802-11-wireless" {print $1; exit}')"
         fi
 
-        if ! nmcli connection show NomadPi >/dev/null 2>&1; then
-            echo "Creating fallback hotspot 'NomadPi'..."
-            nomad_sudo nmcli con add type wifi ifname "$WIFI_DEV" con-name NomadPi autoconnect yes ssid NomadPi >/dev/null 2>&1 || true
-            nomad_sudo nmcli con modify NomadPi 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared >/dev/null 2>&1 || true
-            nomad_sudo nmcli con modify NomadPi wifi-sec.key-mgmt wpa-psk wifi-sec.psk nomadpassword connection.autoconnect-priority 0 connection.autoconnect-retries 1 >/dev/null 2>&1 || true
+        if declare -F nomad_configure_hotspot_profile >/dev/null 2>&1; then
+            nomad_configure_hotspot_profile "$CURRENT_DIR" "$WIFI_DEV"
         fi
         if [ -z "$ACTIVE_WIFI" ]; then
-            nomad_sudo timeout 20s nmcli con up NomadPi >/dev/null 2>&1 || echo "WARNING: fallback hotspot could not be started."
+            nomad_sudo timeout 20s nmcli con up "${NOMAD_HOTSPOT_NAME:-NomadPi}" >/dev/null 2>&1 || echo "WARNING: fallback hotspot could not be started."
         else
             echo "Leaving active Wi-Fi '$ACTIVE_WIFI' connected."
         fi
@@ -374,9 +367,10 @@ echo "============================================================"
 echo "Nomad Pi setup complete"
 echo "Board:   $NOMAD_BOARD_DISPLAY"
 echo "Profile: ${NOMAD_MEMORY_CLASS:-unknown} memory (${NOMAD_RAM_MB:-?} MB RAM)"
-echo "Web:     http://${IP_ADDR:-$NEW_HOSTNAME}:8000"
-echo "mDNS:    http://$NEW_HOSTNAME.local:8000"
+echo "Web:     http://$NEW_HOSTNAME.local"
+echo "Direct:  http://${IP_ADDR:-$NEW_HOSTNAME}:8000"
+echo "mDNS:    $NEW_HOSTNAME.local"
 echo "SMB:     \\\\$NEW_HOSTNAME.local\\data"
-echo "Hotspot: NomadPi / nomadpassword (only used when no Wi-Fi is connected)"
+echo "Hotspot: ${NOMAD_HOTSPOT_NAME:-NomadPi} / ${NOMAD_HOTSPOT_PASSWORD:-nomadpassword} · portal http://${NOMAD_HOTSPOT_IP:-10.42.0.1}/"
 echo "Admin:   initial password is the value in /etc/nomadpi.env"
 echo "============================================================"
