@@ -1,0 +1,13 @@
+[Unit]
+Description=Nomad local HTTP and captive portal redirect
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/nomad-port80-redirect.sh start
+ExecStop=/usr/local/sbin/nomad-port80-redirect.sh stop
+
+[Install]
+WantedBy=multi-user.target
