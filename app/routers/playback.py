@@ -5,13 +5,15 @@ from urllib.parse import quote
 
 from app.routers import playback_core as _core
 from app.services.playback.cache_guard import install_playback_cache_guard
+from app.services.playback.remux_stability import install_remux_stability
 from app.services.playback.runtime_abr_policy import install_runtime_abr_policy
 
 # Install runtime policy before feature routers instantiate their own managers
-# or capture abr_available by name.  playback_core has already created its HLS
-# manager, but the cache guard patches manager classes so that instance is
-# covered too.
+# or capture helper functions by name. playback_core has already created its
+# HLS manager, but these overlays patch manager classes/module globals so that
+# existing instance is covered too.
 install_playback_cache_guard()
+install_remux_stability()
 install_runtime_abr_policy()
 
 from app.routers.playback_tracks import router as _tracks_router
