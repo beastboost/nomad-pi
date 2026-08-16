@@ -1,6 +1,15 @@
 /* Nomad Pi app compatibility bootstrap. */
 (() => {
-    const version = '2.0.6-radxa-hotfix';
+    // setup.sh/update.sh stamp the app.js URL with ?v=<git commit>. Propagate
+    // that exact deploy id to every child module instead of maintaining a
+    // second hand-bumped version string that can leave Safari/PWA clients one
+    // release behind on the first reload.
+    const currentSrc = document.currentScript?.src || '';
+    let version = 'dev';
+    try {
+        version = new URL(currentSrc, location.href).searchParams.get('v') || 'dev';
+    } catch {}
+
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/player-mobile-fix.js?v=${encodeURIComponent(version)}"><\/script>`);
