@@ -6,7 +6,7 @@ NOMAD_HOTSPOT_NAME="${NOMAD_HOTSPOT_NAME:-NomadPi}"
 NOMAD_HOTSPOT_IP="${NOMAD_HOTSPOT_IP:-10.42.0.1}"
 NOMAD_HOTSPOT_CIDR="${NOMAD_HOTSPOT_CIDR:-10.42.0.1/24}"
 NOMAD_HOTSPOT_PASSWORD="${NOMAD_HOTSPOT_PASSWORD:-nomadpassword}"
-NOMAD_PRODUCT_HOSTNAME="${NOMAD_PRODUCT_HOSTNAME:-nomad}"
+NOMAD_PRODUCT_HOSTNAME="${NOMAD_PRODUCT_HOSTNAME:-nomadpi}"
 
 _nomad_net_sudo() {
     if declare -F nomad_sudo >/dev/null 2>&1; then
@@ -21,7 +21,7 @@ _nomad_net_sudo() {
 nomad_configure_hostname_mdns() {
     local hostname="${1:-$NOMAD_PRODUCT_HOSTNAME}"
     hostname="$(printf '%s' "$hostname" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
-    [ -n "$hostname" ] || hostname="nomad"
+    [ -n "$hostname" ] || hostname="nomadpi"
 
     local current
     current="$(hostname 2>/dev/null || true)"
@@ -179,7 +179,7 @@ address=/clients3.google.com/$NOMAD_HOTSPOT_IP
 address=/www.msftconnecttest.com/$NOMAD_HOTSPOT_IP
 address=/www.msftncsi.com/$NOMAD_HOTSPOT_IP
 address=/detectportal.firefox.com/$NOMAD_HOTSPOT_IP
-address=/nomad.local/$NOMAD_HOTSPOT_IP
+address=/nomadpi.local/$NOMAD_HOTSPOT_IP
 # RFC 8910 captive-portal URL. Older clients still use the DNS probe overrides.
 dhcp-option=114,http://$NOMAD_HOTSPOT_IP/portal
 EOF
