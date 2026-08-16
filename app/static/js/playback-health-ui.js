@@ -25,6 +25,7 @@
         const gst = data.gstreamer_openmax || {};
         const gstBackend = gst.backend || {};
         const modes = data.playback_modes || {};
+        const runtime = data.runtime_policy || {};
         const system = data.system || {};
         const candidates = ff.h264_encoder_candidates || [];
         const executionPath = ff.h264_execution_path || candidates;
@@ -35,6 +36,8 @@
         const vendorOmx = !!gst.h264_encoder;
         const gstExecutor = !!gst.executor_enabled;
         const primaryHardware = candidates.find(x => advertised.includes(x));
+        const automaticVideo = runtime.automatic_live_video_transcode === true;
+        const lite = runtime.lite_playback === true;
 
         let hwText = 'none';
         if (gstExecutor) {
@@ -53,11 +56,13 @@
         let platformNote = '';
         if (system.is_allwinner_a733) {
             if (gstExecutor) {
-                platformVideoText = 'A733 OMX ✓ active';
-                platformNote = 'The Radxa/Allwinner OpenMAX encoder passed a real encode test. Nomad uses GStreamer OMX for compatible H.264 transcodes and falls back to libx264 if the vendor pipeline fails.';
+                platformVideoText = automaticVideo ? 'A733 OMX ✓ available + enabled' : 'A733 OMX ✓ available';
+                platformNote = automaticVideo
+                    ? 'The Radxa/Allwinner OpenMAX encoder passed a real encode test and live video conversion is explicitly enabled.'
+                    : 'The Radxa/Allwinner OpenMAX encoder passed a real encode test, but Lite mode keeps it idle during normal playback. Direct play and cheap fallbacks are preferred.';
             } else if (validated.includes('h264_v4l2m2m')) {
-                platformVideoText = 'A733 V4L2 M2M ✓';
-                platformNote = 'The Allwinner A733 V4L2 M2M hardware encoder accepted a real test frame. OpenMAX is not required on this image.';
+                platformVideoText = 'A733 V4L2 M2M ✓ available';
+                platformNote = 'The Allwinner A733 V4L2 M2M encoder accepted a real test frame. It remains an optional execution path, not a normal playback requirement.';
             } else if (vendorOmx) {
                 platformVideoText = 'A733 OMX detected';
                 platformNote = gstBackend.detail || 'GStreamer exposes the A733 OpenMAX encoder, but its Nomad runtime validation has not passed.';
@@ -68,14 +73,14 @@
                     ? `No A733 backend has passed validation: ${detail}`
                     : `${primaryHardware} is advertised, but Nomad has not validated a working A733 hardware encode path.`;
             } else {
-                platformVideoText = 'A733 software fallback';
-                platformNote = gstBackend.detail
-                    ? `No validated A733 hardware backend: ${gstBackend.detail}`
-                    : 'No validated A733 hardware encoder is currently available; Nomad will use libx264.';
+                platformVideoText = 'A733 direct-first';
+                platformNote = 'No validated A733 hardware encoder is required for normal Nomad playback. Compatible media still direct-plays normally.';
             }
         } else if (primaryHardware && validated.includes(primaryHardware)) {
-            platformVideoText = `${primaryHardware} ✓`;
-            platformNote = 'The selected hardware encoder passed a runtime test frame.';
+            platformVideoText = `${primaryHardware} ✓ available`;
+            platformNote = automaticVideo
+                ? 'The selected hardware encoder passed a runtime test frame and live video conversion is enabled.'
+                : 'The selected hardware encoder passed a runtime test frame. Lite mode keeps it as an optional fallback rather than using it automatically.';
         }
 
         const nodeText = videoNodes.length
@@ -88,10 +93,13 @@
             system.memory_class ? `${system.memory_class} memory` : '',
         ].filter(Boolean).join(' · ');
         const omxText = gstExecutor
-            ? 'omxh264videoenc ✓ active'
+            ? (automaticVideo ? 'omxh264videoenc ✓ enabled' : 'omxh264videoenc ✓ standby')
             : vendorOmx
                 ? 'omxh264videoenc · detected'
                 : 'not detected';
+        const policyText = lite
+            ? 'Direct-first Lite mode'
+            : 'Standard direct-first mode';
 
         card.innerHTML = `
           <div class="health-head">
@@ -108,6 +116,8 @@
             <div class="fact"><span class="fact-key">Video transcode</span><span class="fact-val">${yesNo(modes.video_transcode)}</span></div>
             <div class="fact"><span class="fact-key">Adaptive HLS</span><span class="fact-val">${yesNo(modes.adaptive_hls)}</span></div>
             <div class="facts-divider"></div>
+            <div class="fact"><span class="fact-key">Runtime policy</span><span class="fact-val">${escapeHtml(policyText)}</span></div>
+            <div class="fact"><span class="fact-key">Preferred media</span><span class="fact-val">${escapeHtml(runtime.preferred_acquisition || '1080p H.264 MP4/AAC')}</span></div>
             <div class="fact"><span class="fact-key">Platform family</span><span class="fact-val">${escapeHtml(system.family || 'generic-linux')}</span></div>
             <div class="fact"><span class="fact-key">H.264 execution</span><span class="fact-val">${escapeHtml(executionPath.join(' → ') || 'none')}</span></div>
             <div class="fact"><span class="fact-key">Hardware test</span><span class="fact-val">${escapeHtml(hwText)}</span></div>
@@ -115,7 +125,7 @@
             ${system.is_allwinner_a733 ? `<div class="fact"><span class="fact-key">A733 OMX</span><span class="fact-val">${escapeHtml(omxText)}</span></div>` : ''}
           </div>
           <div class="facts-note" style="text-align:left;margin-top:12px">
-            ${escapeHtml(platformNote || 'Hardware acceleration is treated as an optimisation; software fallback remains available.')}
+            ${escapeHtml(platformNote || 'Hardware acceleration is an optional optimisation; direct playback does not depend on it.')}
             <br><br><strong>Video devices:</strong> ${escapeHtml(nodeText)}
           </div>`;
     }
