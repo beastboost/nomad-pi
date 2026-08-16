@@ -44,6 +44,12 @@
             const directA = a.lite_direct_candidate ? 1 : 0;
             const directB = b.lite_direct_candidate ? 1 : 0;
             if (directA !== directB) return directB - directA;
+            const safeA = a.lite_compatible ? 1 : 0;
+            const safeB = b.lite_compatible ? 1 : 0;
+            if (safeA !== safeB) return safeB - safeA;
+            const audioFallbackA = a.lite_audio_fallback ? 1 : 0;
+            const audioFallbackB = b.lite_audio_fallback ? 1 : 0;
+            if (audioFallbackA !== audioFallbackB) return audioFallbackB - audioFallbackA;
             const score = Number(b.lite_score || 0) - Number(a.lite_score || 0);
             if (score) return score;
             return Number(b.seeders || 0) - Number(a.seeders || 0);
@@ -67,13 +73,13 @@
 
         const max = Lite.maxGb ? ` · ≤${Lite.maxGb} GB` : '';
         if (Lite.showAll) {
-            note.innerHTML = `Showing all ${Lite.total} releases. <button class="btn" id="debrid-lite-toggle" type="button">Pi-friendly only</button>`;
+            note.innerHTML = `Showing all ${Lite.total} releases. Audio-conversion and heavyweight fallbacks are included. <button class="btn" id="debrid-lite-toggle" type="button">Pi-friendly only</button>`;
         } else if (Lite.safe > 0) {
-            note.innerHTML = `Pi-friendly: ${Lite.safe} of ${Lite.total} · 1080p · H.264${max} · MP4/AAC preferred. <button class="btn" id="debrid-lite-toggle" type="button">Show all</button>`;
+            note.innerHTML = `Pi-friendly: ${Lite.safe} of ${Lite.total} · 1080p · H.264${max} · no known Dolby/DTS conversion · MP4/AAC preferred. <button class="btn" id="debrid-lite-toggle" type="button">Show all</button>`;
         } else if (Lite.total > 0) {
-            note.innerHTML = `No Pi-friendly 1080p H.264 release matched${max}. Heavy/incompatible releases are hidden. <button class="btn" id="debrid-lite-toggle" type="button">Show all</button>`;
+            note.innerHTML = `No conversion-free Pi-friendly 1080p H.264 release matched${max}. Fallback releases are hidden. <button class="btn" id="debrid-lite-toggle" type="button">Show all</button>`;
             const empty = out.querySelector('.empty');
-            if (empty) empty.textContent = 'No Pi-friendly release found.';
+            if (empty) empty.textContent = 'No conversion-free Pi-friendly release found.';
         } else {
             return;
         }
@@ -94,8 +100,17 @@
             const row = button.closest('.torrent-row');
             if (!row || row.querySelector('.debrid-lite-badge')) return;
             const badge = document.createElement('span');
-            badge.className = `tag debrid-lite-badge${result.lite_direct_candidate ? ' tag-accent' : ''}`;
-            badge.textContent = result.lite_direct_candidate ? 'DIRECT PICK' : 'PI SAFE';
+            const direct = result.lite_direct_candidate === true;
+            const safe = result.lite_compatible === true;
+            const audioFallback = result.lite_audio_fallback === true;
+            badge.className = `tag debrid-lite-badge${direct ? ' tag-accent' : ''}`;
+            badge.textContent = direct
+                ? 'DIRECT PICK'
+                : safe
+                    ? 'PI SAFE'
+                    : audioFallback
+                        ? 'AUDIO CONVERT'
+                        : 'FALLBACK';
             row.insertBefore(badge, row.firstChild);
         });
     }
@@ -116,9 +131,9 @@
         Lite.safe = safe.length;
         Lite.maxGb = safe[0]?.lite_max_size_gb || all[0]?.lite_max_size_gb || null;
 
-        // The appliance defaults to releases that avoid live video conversion.
-        // Keep result counts bounded so the mobile DOM and JSON payload remain
-        // small even when Torrentio returns a very large catalog.
+        // The appliance defaults to releases that avoid live audio/video
+        // conversion. Audio-only Dolby/DTS conversion remains available behind
+        // Show all, along with the heavier manual fallbacks.
         data.results = (Lite.showAll ? all : safe).slice(0, Lite.showAll ? 30 : 15);
         data.lite_total = Lite.total;
         data.lite_safe = Lite.safe;
