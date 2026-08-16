@@ -37,6 +37,10 @@ if [ ! -f scripts/install-common.sh ]; then
 fi
 # shellcheck disable=SC1091
 . scripts/install-common.sh
+if [ -f scripts/network-appliance.sh ]; then
+    # shellcheck disable=SC1091
+    . scripts/network-appliance.sh
+fi
 nomad_require_host
 
 update_status 5 "Checking platform and system health..."
@@ -68,9 +72,13 @@ nomad_as_user "$REAL_USER" git reset --hard origin/main
 chmod +x ./*.sh scripts/*.sh 2>/dev/null || true
 
 # Re-source after reset so this run immediately benefits from newer platform
-# policy shipped in the commit it just installed.
+# and network policy shipped in the commit it just installed.
 # shellcheck disable=SC1091
 . scripts/install-common.sh
+if [ -f scripts/network-appliance.sh ]; then
+    # shellcheck disable=SC1091
+    . scripts/network-appliance.sh
+fi
 nomad_detect_platform 2>/dev/null || true
 
 echo "Updated to: $(git log -1 --oneline --no-decorate)" | tee -a update.log
@@ -85,6 +93,23 @@ nomad_install_wifi_guard "$SCRIPT_DIR"
 
 update_status 50 "Checking system dependencies..."
 nomad_install_packages
+
+update_status 54 "Refreshing local name and hotspot portal..."
+ENV_FILE="/etc/nomadpi.env"
+STORED_HOSTNAME="$(nomad_get_env_key "$ENV_FILE" NOMAD_HOSTNAME)"
+NOMAD_HOSTNAME_VALUE="${NOMAD_HOSTNAME_OVERRIDE:-${STORED_HOSTNAME:-nomad}}"
+if declare -F nomad_configure_hostname_mdns >/dev/null 2>&1; then
+    nomad_configure_hostname_mdns "$NOMAD_HOSTNAME_VALUE"
+fi
+CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo nomad)"
+nomad_set_env_key "$ENV_FILE" NOMAD_HOSTNAME "$CURRENT_HOSTNAME"
+
+if command -v nmcli >/dev/null 2>&1 && declare -F nomad_configure_hotspot_profile >/dev/null 2>&1; then
+    WIFI_DEV="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2=="wifi" {print $1; exit}' || true)"
+    if [ -n "$WIFI_DEV" ]; then
+        nomad_configure_hotspot_profile "$SCRIPT_DIR" "$WIFI_DEV"
+    fi
+fi
 
 update_status 58 "Checking remote-access service..."
 nomad_ensure_tailscale
@@ -130,7 +155,7 @@ if id minidlna >/dev/null 2>&1; then
 fi
 
 update_status 85 "Refreshing media services..."
-CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo nomadpi)"
+CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo nomad)"
 nomad_configure_minidlna "$SCRIPT_DIR" "$CURRENT_HOSTNAME"
 
 # Preserve the existing web-admin privilege model, but repair the file if an OS
@@ -178,6 +203,8 @@ echo "============================================================" >> update.lo
 echo "Update complete: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)" >> update.log
 echo "Platform: ${NOMAD_BOARD_DISPLAY:-unknown}" >> update.log
 echo "Memory profile: ${NOMAD_MEMORY_CLASS:-unknown} (${NOMAD_RAM_MB:-?} MB)" >> update.log
+echo "Local URL: http://${CURRENT_HOSTNAME}.local" >> update.log
+echo "Hotspot portal: http://${NOMAD_HOTSPOT_IP:-10.42.0.1}/" >> update.log
 echo "============================================================" >> update.log
 
 # Defer the restart so the HTTP request that launched update.sh can return its
