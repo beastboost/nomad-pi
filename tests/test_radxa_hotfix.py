@@ -51,9 +51,17 @@ def test_high10_h264_does_not_direct_play_on_iphone():
     assert plan.target_video_codec == "h264"
 
 
-def test_hev1_hevc_mp4_stays_direct_when_client_supports_hevc():
+def test_hev1_hevc_mp4_is_retagged_for_iphone_instead_of_direct_play():
     planner = BrowserPlaybackPlanner()
     plan = planner.plan(MediaProbe(container="mp4", video_codec="hevc", audio_codec="aac", pixel_format="yuv420p10le", codec_tag="hev1"), iphone_like_caps())
+    assert plan.mode == PlaybackMode.REMUX
+    assert plan.target_container == "mp4"
+    assert "hvc1" in " ".join(plan.reasons)
+
+
+def test_hvc1_hevc_mp4_can_stay_direct_when_client_supports_hevc():
+    planner = BrowserPlaybackPlanner()
+    plan = planner.plan(MediaProbe(container="mp4", video_codec="hevc", audio_codec="aac", pixel_format="yuv420p10le", codec_tag="hvc1"), iphone_like_caps())
     assert plan.mode == PlaybackMode.DIRECT_PLAY
 
 
