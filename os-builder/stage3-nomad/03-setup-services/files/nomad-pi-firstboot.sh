@@ -80,14 +80,14 @@ address=/www.msftconnecttest.com/$HOTSPOT_IP
 address=/www.msftncsi.com/$HOTSPOT_IP
 address=/detectportal.firefox.com/$HOTSPOT_IP
 address=/nomadpi.local/$HOTSPOT_IP
-dhcp-option=114,http://$HOTSPOT_IP/portal
+dhcp-option=114,http://$HOTSPOT_IP/setup.html
 EOF
 
 if ! nmcli -t -f NAME connection show --active 2>/dev/null | grep -Fxq "$HOTSPOT_NAME"; then
     nmcli con up "$HOTSPOT_NAME" >/dev/null 2>&1 || echo "nomad-pi-firstboot: WARNING - hotspot activation failed."
 fi
 
-systemctl enable --now nomad-pi-captive-portal.service 2>/dev/null || true
+systemctl enable --now nomad-pi-port80-redirect.service 2>/dev/null || true
 
 touch "$DONE_STAMP"
 exit 0
