@@ -1,11 +1,11 @@
-const CACHE_NAME = 'nomad-pi-v2.0.13-radxa-hotfix';
+const CACHE_NAME = 'nomad-pi-v2.0.14-series-picker';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css', '/css/appliance-polish.css',
   '/js/app.js', '/js/app_legacy.js', '/js/playback-core.js', '/js/runtime-ui-guard.js', '/js/debrid-lite.js', '/js/player-mobile-fix.js', '/js/direct-play-guard.js',
   '/js/replacement-control.js', '/js/track-control.js', '/js/subtitle-control.js',
   '/js/quality-control.js', '/js/device-control.js', '/js/watch-party.js', '/js/music2-player.js',
-  '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js', '/js/universal-search.js', '/js/universal-home.js',
+  '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js', '/js/universal-search.js', '/js/series-download-picker.js', '/js/universal-home.js',
   '/js/offline-control.js', '/js/download-live.js', '/js/library-health.js', '/js/media-actions.js', '/js/storage-failover.js', '/js/playback-health-ui.js', '/js/profile-context.js', '/js/profile-switch.js', '/js/reader-state.js',
   '/js/admin.js', '/js/features.js', '/js/reader.js',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png',
