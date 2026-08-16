@@ -1,7 +1,7 @@
 """Storage-aware placement for transient Nomad caches.
 
 Playback caches must never be allowed to consume the appliance filesystem just
-because persistent media failover exists elsewhere.  This module deliberately
+because persistent media failover exists elsewhere. This module deliberately
 shares the storage.failover policy without importing the very large media
 router, keeping playback services free of router-level circular imports.
 """
@@ -80,8 +80,6 @@ def configured_failover_root() -> Optional[Path]:
     first = roots[0]
     if all(path == first for path in roots[1:]):
         return first
-    # A manually-edited policy may have per-category volumes.  The files target
-    # is the least surprising transient-cache location; otherwise use the first.
     files = _web_to_fs(database.get_setting("storage.failover.target.files") or "")
     return files.parent if files is not None else first
 
@@ -128,39 +126,49 @@ def cache_root_candidates(primary_root: str | Path) -> list[Path]:
     return roots
 
 
-def choose_cache_root(primary_root: str | Path) -> CacheVolume:
+def choose_cache_root(
+    primary_root: str | Path,
+    *,
+    expected_bytes: int = 0,
+) -> CacheVolume:
     """Choose a safe volume for a new transient cache session.
 
-    Internal storage is used while it remains above the same free-space reserve
-    configured for media failover.  Once it reaches that reserve, a configured
-    external failover volume is preferred.  We also retain a small absolute
-    headroom floor because a percentage alone is unsafe on tiny boot media.
+    ``expected_bytes`` is a conservative estimate of how much this session may
+    write.  A local remux can approach the source file size, so checking only
+    the current free percentage is not sufficient to protect a small boot disk.
     """
     primary = Path(primary_root).resolve()
     reserve = _reserve_percent()
     minimum = _minimum_free_bytes()
+    expected = max(0, int(expected_bytes or 0))
 
     override = str(os.environ.get("NOMAD_CACHE_ROOT", "")).strip()
     if override:
         base = Path(override).expanduser().resolve()
         candidate = base / primary.name
         vol = _volume(candidate, external=not str(candidate).startswith(str(_data_root())))
-        if vol.free_bytes < minimum:
+        required = minimum + expected
+        if vol.free_bytes < required:
             raise CacheStorageError(
                 f"Configured cache volume has only {vol.free_bytes // (1024 * 1024)} MB free; "
-                f"Nomad requires at least {minimum // (1024 * 1024)} MB headroom"
+                f"this session needs about {required // (1024 * 1024)} MB including safety headroom"
             )
         candidate.mkdir(parents=True, exist_ok=True)
         return vol
 
     primary_vol = _volume(primary, external=False)
-    primary_safe = primary_vol.free_percent > reserve and primary_vol.free_bytes >= minimum
+    reserve_bytes = max(minimum, int(primary_vol.total_bytes * (reserve / 100.0)))
+    safe_headroom = max(0, primary_vol.free_bytes - reserve_bytes)
+    primary_safe = (
+        primary_vol.free_percent > reserve
+        and primary_vol.free_bytes >= minimum
+        and (expected <= safe_headroom if expected else True)
+    )
     if primary_safe:
         try:
             primary.mkdir(parents=True, exist_ok=True)
             return primary_vol
         except OSError:
-            # A filesystem can become full/read-only between disk_usage and mkdir.
             pass
 
     if _failover_enabled():
@@ -168,11 +176,10 @@ def choose_cache_root(primary_root: str | Path) -> CacheVolume:
         if external_base is not None:
             external_root = (external_base / ".nomad_cache" / primary.name).resolve()
             ext = _volume(external_root, external=True)
-            # Preserve the absolute safety floor on external storage.  The
-            # percentage reserve applies to the internal appliance disk; using
-            # the same percentage on a multi-TB media disk would waste hundreds
-            # of GB for a transient cache.
-            if ext.free_bytes >= minimum:
+            # Keep an absolute reserve on the external drive, but do not waste
+            # a fixed percentage of a multi-terabyte media disk.
+            required = minimum + expected
+            if ext.free_bytes >= required:
                 try:
                     external_root.mkdir(parents=True, exist_ok=True)
                     return ext
@@ -180,8 +187,14 @@ def choose_cache_root(primary_root: str | Path) -> CacheVolume:
                     pass
 
     free_mb = primary_vol.free_bytes // (1024 * 1024)
-    suffix = " and no usable external failover cache is configured" if not _failover_enabled() else " and the configured external failover cache is unavailable or full"
+    expected_mb = expected // (1024 * 1024)
+    footprint = f"; estimated session cache {expected_mb} MB" if expected else ""
+    suffix = (
+        " and no usable external failover cache is configured"
+        if not _failover_enabled()
+        else " and the configured external failover cache is unavailable or lacks enough headroom"
+    )
     raise CacheStorageError(
-        f"Internal storage is below the {reserve}% safety reserve ({free_mb} MB free){suffix}. "
+        f"Internal storage cannot preserve the {reserve}% safety reserve ({free_mb} MB free{footprint}){suffix}. "
         "Free space or configure Storage & Drives → Automatic storage failover."
     )
