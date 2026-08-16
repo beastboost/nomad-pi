@@ -23,6 +23,13 @@ nomad_configure_hostname_mdns() {
     hostname="$(printf '%s' "$hostname" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')"
     [ -n "$hostname" ] || hostname="nomadpi"
 
+    # A short-lived development regression changed the default to `nomad`.
+    # Repair that automatically, but still honour a deliberate custom hostname
+    # supplied through NOMAD_HOSTNAME_OVERRIDE.
+    if [ -z "${NOMAD_HOSTNAME_OVERRIDE:-}" ] && [ "$hostname" = "nomad" ]; then
+        hostname="nomadpi"
+    fi
+
     local current
     current="$(hostname 2>/dev/null || true)"
     if command -v hostnamectl >/dev/null 2>&1 && [ "$current" != "$hostname" ]; then
