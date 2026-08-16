@@ -1,446 +1,195 @@
 #!/bin/bash
-set -e
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Nomad Pi in-place updater for Debian-family Linux hosts.
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+NOMAD_ROOT="$SCRIPT_DIR"
+REAL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 STATUS_FILE="/tmp/nomad-pi-update.json"
 STATUS_DIR="/tmp"
 
 update_status() {
-    local tmp_file
-    tmp_file=$(mktemp "$STATUS_DIR/nomad-pi-update.tmp.XXXXXX" 2>/dev/null) || tmp_file="$STATUS_DIR/nomad-pi-update.tmp.$$"
-    # Use jq to build valid JSON if available, otherwise fallback to simple printf escaping
+    local progress="$1" message="$2" tmp_file
+    tmp_file="$(mktemp "$STATUS_DIR/nomad-pi-update.tmp.XXXXXX" 2>/dev/null || echo "$STATUS_DIR/nomad-pi-update.tmp.$$")"
     if command -v jq >/dev/null 2>&1; then
-        jq -n \
-           --arg progress "$1" \
-           --arg message "$2" \
-           --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-           '{progress: ($progress|tonumber), message: $message, timestamp: $ts}' > "$tmp_file"
+        jq -n --arg progress "$progress" --arg message "$message" --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '{progress: ($progress|tonumber), message: $message, timestamp: $ts}' > "$tmp_file"
     else
-        # Fallback to printf with basic escaping
-        local escaped_msg=$(echo "$2" | sed 's/"/\\"/g')
-        printf '{"progress": %d, "message": "%s", "timestamp": "%s"}' \
-               "$1" "$escaped_msg" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > "$tmp_file"
+        PROGRESS="$progress" MESSAGE="$message" python3 - <<'PY' > "$tmp_file"
+import json, os
+from datetime import datetime, timezone
+print(json.dumps({
+    "progress": int(os.environ.get("PROGRESS", "0")),
+    "message": os.environ.get("MESSAGE", ""),
+    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}))
+PY
     fi
     chmod 644 "$tmp_file" 2>/dev/null || true
-    # Try to move, if fails (e.g. permission denied), try sudo, otherwise fail silently so script doesn't crash
     mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || sudo mv -f "$tmp_file" "$STATUS_FILE" 2>/dev/null || true
 }
 
-update_status 5 "Checking System Health..."
-echo "Checking system memory and power resources..."
-
-# Check for under-voltage/throttling (Pi specific)
-if command -v vcgencmd >/dev/null 2>&1; then
-    THROTTLED=$(vcgencmd get_throttled | cut -d= -f2)
-    if [ "$THROTTLED" != "0x0" ]; then
-        echo "WARNING: Your Pi is reporting throttling/under-voltage ($THROTTLED)!"
-    fi
-fi
-
-# Ensure enough swap for pip installs
-TOTAL_SWAP=$(free -m | awk '/Swap/ {print $2}')
-if [ "$TOTAL_SWAP" -lt 1000 ]; then
-    echo "Increasing swap to 1GB for stability..."
-    if [ -f /etc/dphys-swapfile ]; then
-        sudo -n sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
-        sudo -n dphys-swapfile setup
-        sudo -n dphys-swapfile swapon
-    fi
-fi
-
-# Stop the service ONLY when we are about to finish, to keep the UI responsive for as long as possible
-# echo "Stopping nomad-pi service to free up memory..."
-# sudo systemctl stop nomad-pi 2>/dev/null || true
-
-update_status 10 "Configuring Git..."
-echo "Optimizing Git configuration..."
-
-# System update to pick up GnuTLS/security fixes (optional but recommended for handshake issues)
-# sudo apt update && sudo apt full-upgrade -y
-
-update_status 15 "Ensuring repository permissions..."
-# Fix repository ownership if it was accidentally changed to root
-# This is a common issue when running parts of the setup with sudo
-echo "Ensuring correct repository permissions..."
-REAL_USER=${SUDO_USER:-$USER}
-
-sudo -n chown -R "$REAL_USER:$REAL_USER" . 2>/dev/null || true
-# Mark directory as safe for git (common issue on newer git versions)
-git config --global --add safe.directory "$SCRIPT_DIR" 2>/dev/null || true
-
-# Check if we can actually run git commands here
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "ERROR: Not a git repository or insufficient permissions to read .git"
-    update_status 15 "ERROR: Git permission issue. Try: sudo chown -R $USER:$USER ."
+if [ ! -f scripts/install-common.sh ]; then
+    update_status 1 "Update helper missing"
+    echo "ERROR: scripts/install-common.sh is missing. Run setup.sh from a complete current checkout." >&2
     exit 1
 fi
+# shellcheck disable=SC1091
+. scripts/install-common.sh
+nomad_require_host
 
-update_status 20 "Optimizing Git configuration..."
-git config --global --unset http.sslBackend 2>/dev/null || true
-git config --global http.sslVerify true
-# Force HTTP/1.1 as GnuTLS on some Pi versions fails to negotiate HTTP/2 correctly with GitHub
-git config --global http.version HTTP/1.1
-# Increase postBuffer to 50MB (from default 1MB) for stable large transfers without excessive memory usage
-git config --global http.postBuffer 52428800
-# Memory optimizations for Git on Pi Zero
-git config --global pack.windowMemory "10m"
-git config --global pack.packSizeLimit "20m"
-git config --global core.packedGitLimit "20m"
-git config --global core.packedGitWindowSize "10m"
+update_status 5 "Checking platform and system health..."
+echo "============================================================" | tee -a update.log
+echo "Nomad Pi update" | tee -a update.log
+nomad_print_install_profile | tee -a update.log
+echo "============================================================" | tee -a update.log
+nomad_check_board_health
+nomad_ensure_swap
 
-# Hardcode the public URL to avoid password prompts
-git remote set-url origin https://github.com/beastboost/nomad-pi.git
-git config credential.helper 'cache --timeout=2592000'
+update_status 12 "Preparing repository..."
+# Repair ownership only for the application checkout. Do not recursively chown
+# attached media under data/external during an update.
+nomad_sudo chown "$REAL_USER:$REAL_USER" "$SCRIPT_DIR" 2>/dev/null || true
+nomad_sudo chown -R "$REAL_USER:$REAL_USER" .git 2>/dev/null || true
+nomad_configure_git "$REAL_USER" "$SCRIPT_DIR"
 
-update_status 10 "Pulling latest changes from Git..."
-echo "Pulling latest changes from Git..."
-echo "Git remote:"
-git remote -v || true
-# Force reset to origin/main to solve any local change conflicts automatically
-update_status 30 "Fetching latest changes..."
-git fetch origin
-update_status 40 "Resetting to latest version..."
-git reset --hard origin/main
-echo "Updated to commit:"
-git log -1 --oneline --no-decorate || true
+if ! nomad_as_user "$REAL_USER" git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    update_status 12 "ERROR: Nomad checkout is not a Git repository"
+    exit 1
+fi
+nomad_as_user "$REAL_USER" git remote set-url origin https://github.com/beastboost/nomad-pi.git
+nomad_as_user "$REAL_USER" git config credential.helper 'cache --timeout=2592000' 2>/dev/null || true
 
-# Fix permissions immediately after pull
-chmod +x *.sh
-find . -name "*.sh" -exec chmod +x {} +
+update_status 22 "Fetching latest Nomad version..."
+nomad_as_user "$REAL_USER" git fetch origin
+update_status 32 "Switching to latest main..."
+nomad_as_user "$REAL_USER" git reset --hard origin/main
+chmod +x ./*.sh scripts/*.sh 2>/dev/null || true
 
-# Stamp cache-busting versions with the current commit so browsers and the
-# PWA service worker always pick up this deploy (no more hand-bumped ?v=).
-STAMP=$(git rev-parse --short HEAD 2>/dev/null || date +%s)
-echo "Stamping static asset versions with $STAMP..."
-sed -i -E "s/\?v=[0-9a-zA-Z._-]+/?v=$STAMP/g" app/static/index.html
-sed -i -E "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = 'nomad-pi-$STAMP'/" app/static/sw.js
+# Re-source after reset so this run immediately benefits from newer platform
+# policy shipped in the commit it just installed.
+# shellcheck disable=SC1091
+. scripts/install-common.sh
+nomad_detect_platform 2>/dev/null || true
 
-# Vendor the front-end's icon font and typeface so the box works offline.
+echo "Updated to: $(git log -1 --oneline --no-decorate)" | tee -a update.log
+
+update_status 40 "Refreshing browser assets..."
+STAMP="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
+nomad_stamp_assets "$SCRIPT_DIR" "$STAMP"
 if [ -x scripts/vendor-assets.sh ]; then
     bash scripts/vendor-assets.sh || true
 fi
+nomad_install_wifi_guard "$SCRIPT_DIR"
 
-# Wi-Fi guard: restores the radio if turning it off would strand the box.
-# Without this, `nmcli radio wifi off` (which survives reboots) leaves a
-# headless Pi unreachable until someone attaches Ethernet or a keyboard.
-install_wifi_guard() {
-    local root="$1"
-    [ -f "$root/scripts/wifi-guard.sh" ] || return 0
-    sudo install -m 755 "$root/scripts/wifi-guard.sh" /usr/local/sbin/nomad-pi-wifi-guard.sh 2>/dev/null || return 0
-    sudo install -m 644 "$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.service" \
-        /etc/systemd/system/ 2>/dev/null || true
-    sudo install -m 644 "$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-wifi-guard.timer" \
-        /etc/systemd/system/ 2>/dev/null || true
-    sudo mkdir -p /etc/nomad-pi 2>/dev/null || true
-    sudo systemctl daemon-reload 2>/dev/null || true
-    sudo systemctl enable --now nomad-pi-wifi-guard.timer 2>/dev/null || true
-    echo "Wi-Fi guard installed."
-}
+update_status 50 "Checking system dependencies..."
+nomad_install_packages
 
-install_wifi_guard "$SCRIPT_DIR"
+update_status 58 "Checking remote-access service..."
+nomad_ensure_tailscale
 
-update_status 50 "Installing system dependencies..."
-echo "Installing/Updating system dependencies..."
-# Ensure all required system packages are present
-# We only run update if install fails to save time on Pi
-# Note: unrar is in non-free repo for better CBR/RAR support (unar is fallback)
-# Note: 7zip replaces p7zip-full on Ubuntu 24.04+
-if [ "$(id -u)" = "0" ]; then
-    echo "Updating dependencies as root..."
-    apt-get update
-    apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
-else
-    echo "Updating dependencies with sudo..."
-    if ! sudo -n apt-get update; then
-        echo "Failed to update package list with sudo -n. Trying interactive sudo..."
-        sudo apt-get update
-    fi
-    
-    if ! sudo -n apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg; then
-        echo "Failed to install packages with sudo -n. Trying interactive sudo..."
-        sudo apt-get install -y python3 python3-pip python3-venv network-manager dos2unix python3-dev ntfs-3g exfat-fuse avahi-daemon samba samba-common-bin minidlna 7zip unar unrar libarchive-tools curl ffmpeg
-    fi
+update_status 64 "Updating Python environment..."
+if [ -d venv ]; then
+    nomad_sudo chown -R "$REAL_USER:$REAL_USER" venv 2>/dev/null || true
+fi
+if [ ! -d venv ]; then
+    nomad_as_user "$REAL_USER" python3 -m venv venv
+fi
+nomad_as_user "$REAL_USER" ./venv/bin/python3 -m pip install --upgrade pip
+
+REQUIREMENTS_HASH="$(md5sum requirements.txt | awk '{print $1}')"
+PREV_HASH="$(cat .requirements_hash 2>/dev/null || true)"
+if [ "$REQUIREMENTS_HASH" != "$PREV_HASH" ] || [ ! -x ./venv/bin/uvicorn ]; then
+    echo "Requirements changed; installing with ${NOMAD_MEMORY_CLASS:-unknown}-memory profile." | tee -a update.log
+    nomad_as_user "$REAL_USER" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
+    nomad_as_user "$REAL_USER" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary 'passlib[bcrypt]' bcrypt==4.0.1 python-multipart aiofiles jinja2 'python-jose[cryptography]' httpx
+    nomad_as_user "$REAL_USER" ./venv/bin/python3 -m pip install --no-cache-dir --prefer-binary -r requirements.txt
+    printf '%s\n' "$REQUIREMENTS_HASH" > .requirements_hash
+fi
+if ! nomad_as_user "$REAL_USER" ./venv/bin/python3 -c 'import uvicorn, fastapi, passlib' >/dev/null 2>&1; then
+    update_status 68 "ERROR: Python environment validation failed"
+    exit 1
 fi
 
-# Ensure Tailscale is installed (for updates via UI)
-update_status 55 "Checking Tailscale..."
-if command -v tailscale >/dev/null 2>&1; then
-    echo "Tailscale is already installed."
-else
-    echo "Installing Tailscale..."
-    if curl -fsSL https://tailscale.com/install.sh | sh; then
-        echo "Tailscale installed successfully!"
-    else
-        echo "WARNING: Failed to install Tailscale. Check logs."
-    fi
+update_status 74 "Running database migrations..."
+if [ -f migrate_db.py ]; then
+    nomad_as_user "$REAL_USER" ./venv/bin/python migrate_db.py || echo "WARNING: database migration reported an error; inspect update.log." | tee -a update.log
 fi
 
-# Ensure Tailscale service is running
-if command -v tailscale >/dev/null 2>&1; then
-    if ! systemctl is-active --quiet tailscaled 2>/dev/null; then
-        echo "Starting Tailscale service..."
-        sudo systemctl enable tailscaled 2>/dev/null || true
-        sudo systemctl start tailscaled 2>/dev/null || true
-    fi
+update_status 80 "Checking media directories..."
+mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache data/.nomad_cache
+# Only repair the roots. Walking a mounted external library during every update
+# can take minutes and generate huge unnecessary I/O.
+for dir in data data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache data/.nomad_cache; do
+    nomad_sudo chown "$REAL_USER:$REAL_USER" "$dir" 2>/dev/null || true
+    nomad_sudo chmod 755 "$dir" 2>/dev/null || true
+done
+if id minidlna >/dev/null 2>&1; then
+    nomad_sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
 fi
 
-update_status 60 "Installing Python dependencies..."
-echo "Installing Python dependencies..."
+update_status 85 "Refreshing media services..."
+CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo nomadpi)"
+nomad_configure_minidlna "$SCRIPT_DIR" "$CURRENT_HOSTNAME"
 
-# Fix permissions on venv if it exists to avoid Errno 13
-if [ -d "venv" ]; then
-    echo "Fixing venv permissions..."
-    sudo chown -R $USER:$USER venv || true
+# Preserve the existing web-admin privilege model, but repair the file if an OS
+# update removed it. Validate before install so a malformed sudoers file cannot
+# lock out the device.
+SUDOERS_TMP="$(mktemp)"
+printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$REAL_USER" > "$SUDOERS_TMP"
+if nomad_sudo visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
+    nomad_sudo install -m 0440 "$SUDOERS_TMP" /etc/sudoers.d/nomad-pi
 fi
+rm -f "$SUDOERS_TMP"
 
-if [ ! -d "venv" ]; then
-    echo "Virtual environment not found. Creating one..."
-    python3 -m venv venv
-fi
+# Ensure the service definition follows the current checkout path/user. This is
+# important when an install was migrated from /root or boot media.
+update_status 90 "Refreshing Nomad service..."
+SERVICE_TMP="$(mktemp)"
+cat > "$SERVICE_TMP" <<EOF
+[Unit]
+Description=Nomad Pi Media Server
+After=network-online.target
+Wants=network-online.target
 
-update_status 70 "Upgrading pip..."
-./venv/bin/pip install --upgrade pip
+[Service]
+Type=simple
+User=$REAL_USER
+WorkingDirectory=$SCRIPT_DIR
+EnvironmentFile=-/etc/nomadpi.env
+ExecStart=$SCRIPT_DIR/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --timeout-keep-alive 300
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
 
-# Check for requirements changes to skip redundant installs
-update_status 75 "Checking dependencies..."
-REQUIREMENTS_HASH=$(md5sum requirements.txt | awk '{ print $1 }')
-PREV_HASH=$(cat .requirements_hash 2>/dev/null || echo "")
+[Install]
+WantedBy=multi-user.target
+EOF
+nomad_sudo install -m 644 "$SERVICE_TMP" /etc/systemd/system/nomad-pi.service
+rm -f "$SERVICE_TMP"
+nomad_sudo systemctl daemon-reload
+nomad_sudo systemctl enable nomad-pi.service
 
-if [ "$REQUIREMENTS_HASH" != "$PREV_HASH" ] || [ ! -f "./venv/bin/uvicorn" ]; then
-    echo "Requirements changed or environment incomplete. Installing dependencies..."
-    
-    # Split installation into chunks to avoid massive memory spikes (Pi Zero stability)
-    echo "Installing base dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary fastapi uvicorn psutil
-    
-    echo "Installing security and utility dependencies..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary "passlib[bcrypt]" bcrypt==4.0.1 python-multipart aiofiles jinja2 python-jose[cryptography] httpx
-    
-    echo "Installing remaining requirements..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary -r requirements.txt
-    
-    echo "$REQUIREMENTS_HASH" > .requirements_hash
-else
-    echo "Dependencies already up to date. Skipping pip install."
-fi
-
-# Final check for uvicorn
-if [ ! -f "./venv/bin/uvicorn" ]; then
-    echo "CRITICAL: uvicorn still missing. Trying emergency install..."
-    ./venv/bin/pip install --no-cache-dir --prefer-binary uvicorn
-fi
-
-# Ensure Tailscale is installed (moved up)
-# update_status 80 "Checking Tailscale..." (Logic moved up)
-
-update_status 85 "Running database migrations..."
-echo "Running database migrations..."
-if [ -f "migrate_db.py" ]; then
-    ./venv/bin/python migrate_db.py || {
-        echo "WARNING: Database migration failed. Check logs." >> update.log
-    }
-else
-    echo "No migration script found, skipping..." >> update.log
-fi
-
-
-# Ensure data directories exist
-echo "Ensuring media directories exist..." >> update.log
-mkdir -p data/movies data/shows data/music data/books data/files data/external data/gallery data/uploads data/cache
-
-# Install MiniDLNA if not present
-if ! command -v minidlnad >/dev/null 2>&1; then
-    echo "Installing MiniDLNA..." >> update.log
-    sudo apt-get update >> update.log 2>&1
-    sudo apt-get install -y minidlna >> update.log 2>&1
-fi
-
-# Add minidlna user to group and fix permissions
-if id "minidlna" &>/dev/null; then
-    echo "Configuring minidlna permissions..." >> update.log
-
-    # Add minidlna to user's group so it can access files
-    sudo usermod -a -G "$REAL_USER" minidlna 2>/dev/null || true
-
-    # Get the actual home directory path
-    USER_HOME=$(eval echo ~$REAL_USER)
-
-    # CRITICAL: Home directory must have group read+execute for minidlna user to traverse
-    # Use 755 (rwxr-xr-x) to allow group and others to read and traverse
-    sudo chmod 755 "$USER_HOME" 2>/dev/null || true
-
-    # Make nomad-pi directory traversable and readable
-    sudo chmod 755 "$SCRIPT_DIR" 2>/dev/null || true
-
-    # Set ownership and permissions on data directory
-    sudo chown -R $REAL_USER:$REAL_USER "$SCRIPT_DIR/data" 2>/dev/null || true
-    sudo chmod -R 755 "$SCRIPT_DIR/data" 2>/dev/null || true
-fi
-
-# Fix MiniDLNA permissions and configuration
-echo "Checking MiniDLNA configuration..." >> update.log
-
-MINIDLNA_CONF="/etc/minidlna.conf"
-MINIDLNA_TEMP="/tmp/minidlna.conf.tmp"
-DLNA_CONFIG_CHANGED=0
-CURRENT_HOSTNAME=$(hostname 2>/dev/null || echo "nomadpi")
-
-sudo mkdir -p /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
-sudo -n chown -R minidlna:minidlna /var/cache/minidlna /var/log/minidlna 2>/dev/null || true
-
-# Fix inotify max_user_watches limit for MiniDLNA file monitoring
-# MiniDLNA needs to watch for file changes, increase the limit from default 8192 to 524288
-if [ -f /proc/sys/fs/inotify/max_user_watches ]; then
-    echo 524288 | sudo -n tee /proc/sys/fs/inotify/max_user_watches > /dev/null 2>&1 || true
-    # Make it persistent across reboots
-    if ! grep -q "fs.inotify.max_user_watches" /etc/sysctl.conf 2>/dev/null; then
-        echo "fs.inotify.max_user_watches=524288" | sudo -n tee -a /etc/sysctl.conf > /dev/null 2>&1 || true
-    fi
-fi
-
-# Build the complete config in a temp file
-cat > "$MINIDLNA_TEMP" <<EOL
-# Scan the entire data directory (includes external drives under data/external)
-media_dir=$SCRIPT_DIR/data
-
-# Database and logging
-db_dir=/var/cache/minidlna
-log_dir=/var/log/minidlna
-log_level=general,artwork,database,inotify,scanner,metadata,http,ssdp,tivo=warn
-
-# Network settings
-friendly_name=$CURRENT_HOSTNAME
-port=8200
-
-# File monitoring - scan every 60 seconds for changes
-inotify=yes
-notify_interval=60
-
-# Container settings - use "." for hierarchical folders
-root_container=.
-
-# Presentation
-presentation_url=http://$CURRENT_HOSTNAME.local:8000/
-album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
-
-# Optimization
-max_connections=50
-strict_dlna=no
-enable_tivo=no
-wide_links=yes
-
-# Exclusions - skip junk folders from Windows/Mac/Linux systems
-# This prevents log spam from scanning recycle bins, system folders, etc.
-exclude=\$RECYCLE.BIN,\$Recycle.Bin,Recycled,System Volume Information,.Trashes,.Trash-*,.TemporaryItems,.Spotlight-V100,.fseventsd,lost+found,.AppleDouble,.DS_Store,Thumbs.db
-EOL
-
-# Only update if config changed (use diff like setup.sh does)
-if [ ! -f "$MINIDLNA_CONF" ] || ! diff -q "$MINIDLNA_TEMP" "$MINIDLNA_CONF" >/dev/null 2>&1; then
-    echo "Updating MiniDLNA configuration..." >> update.log
-    sudo -n cp "$MINIDLNA_TEMP" "$MINIDLNA_CONF"
-    DLNA_CONFIG_CHANGED=1
-else
-    echo "MiniDLNA configuration unchanged." >> update.log
-fi
-rm -f "$MINIDLNA_TEMP"
-
-# Re-verify sudoers configuration (in case it was removed by system update)
-REAL_USER=${SUDO_USER:-$USER}
-SYSTEMCTL_PATH=$(command -v systemctl || echo "/usr/bin/systemctl")
-MINIDLNAD_PATH=$(command -v minidlnad || echo "/usr/sbin/minidlnad")
-SUDOERS_FILE="/etc/sudoers.d/nomad-pi"
-CHOWN_PATH=$(command -v chown || echo "/usr/bin/chown")
-CHMOD_PATH=$(command -v chmod || echo "/usr/bin/chmod")
-
-if [ ! -f "$SUDOERS_FILE" ] || ! grep -q "$MINIDLNAD_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHOWN_PATH" "$SUDOERS_FILE" 2>/dev/null || ! grep -q "$CHMOD_PATH" "$SUDOERS_FILE" 2>/dev/null; then
-    echo "Re-applying sudoers permissions..." >> update.log
-    MOUNT_PATH=$(command -v mount || echo "/usr/bin/mount")
-    UMOUNT_PATH=$(command -v umount || echo "/usr/bin/umount")
-    SHUTDOWN_PATH=$(command -v shutdown || echo "/usr/sbin/shutdown")
-    REBOOT_PATH=$(command -v reboot || echo "/usr/sbin/reboot")
-    NMCLI_PATH=$(command -v nmcli || echo "/usr/bin/nmcli")
-    TAILSCALE_PATH=$(command -v tailscale || echo "/usr/bin/tailscale")
-
-    # Write to temp file first and validate before installing
-    # GRANT FULL PASSWORDLESS SUDO ACCESS to ensure updates and system control work from Web UI
-    SUDOERS_TMP=$(mktemp)
-    cat > "$SUDOERS_TMP" <<EOL
-$REAL_USER ALL=(ALL) NOPASSWD: ALL
-EOL
-    # Validate sudoers syntax before installing - a malformed file can lock out sudo access
-    if sudo -n visudo -cf "$SUDOERS_TMP"; then
-        sudo -n cp "$SUDOERS_TMP" "$SUDOERS_FILE"
-        sudo -n chmod 0440 "$SUDOERS_FILE"
-        echo "Sudoers permissions restored (Full Access)." >> update.log
-    else
-        echo "ERROR: Generated sudoers file failed syntax validation. Not installing." >> update.log
-    fi
-    rm -f "$SUDOERS_TMP"
-fi
-
-if command -v minidlnad >/dev/null 2>&1; then
-    echo "Configuring MiniDLNA service..." >> update.log
-
-    # Setup cache directories
-    sudo mkdir -p /var/cache/minidlna /var/log 2>/dev/null || true
-    sudo chown -R minidlna:minidlna /var/cache/minidlna 2>/dev/null || true
-    sudo chown -R minidlna:minidlna /var/log/minidlna 2>/dev/null || true
-
-    if [ "$DLNA_CONFIG_CHANGED" = "1" ]; then
-        echo "Restarting MiniDLNA to apply changes..." >> update.log
-        # Stop first to ensure clean DB if needed
-        sudo -n systemctl stop minidlna 2>/dev/null || true
-        sudo -n rm -f /var/cache/minidlna/files.db 2>/dev/null || true
-        sudo -n systemctl enable minidlna
-        sudo -n systemctl start minidlna
-    else
-        # Restart to ensure permissions apply (group changes)
-        echo "Restarting MiniDLNA to apply permissions..." >> update.log
-        sudo -n systemctl enable minidlna
-        sudo -n systemctl restart minidlna
-    fi
-else
-    echo "MiniDLNA not installed. Skipping configuration." >> update.log
-fi
-
-update_status 90 "Update complete. Finalizing..."
-echo "Update complete. Preparing to restart..."
-
-# Write completion marker to log BEFORE restarting
+update_status 96 "Update complete; scheduling restart..."
 echo "" >> update.log
-echo "==========================================" >> update.log
-echo "          Update Complete!                " >> update.log
-echo "==========================================" >> update.log
-echo "Nomad Pi has been updated successfully." >> update.log
-echo "Server will restart in 5 seconds..." >> update.log
-echo "==========================================" >> update.log
+echo "============================================================" >> update.log
+echo "Update complete: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)" >> update.log
+echo "Platform: ${NOMAD_BOARD_DISPLAY:-unknown}" >> update.log
+echo "Memory profile: ${NOMAD_MEMORY_CLASS:-unknown} (${NOMAD_RAM_MB:-?} MB)" >> update.log
+echo "============================================================" >> update.log
 
-update_status 100 "Update complete! Restarting in 5 seconds..."
-
-# Give the UI time to read the completion status
-echo "Waiting 2 seconds for UI to update..."
-sleep 2
-
-# Try to restart the service, with fallback if service doesn't exist
-if command -v systemctl >/dev/null 2>&1; then
-    echo "Restarting nomad-pi service..." >> update.log
-    sudo -n systemctl daemon-reload
-    sudo -n systemctl enable nomad-pi.service
-    # Use systemd-run to defer restart (avoids self-restart issues)
-    echo "Scheduling deferred service restart..." >> update.log
-
-    # Create a one-shot script to restart the service after a delay
-    RESTART_SCRIPT="/tmp/restart_nomad_pi.sh"
-    cat > "$RESTART_SCRIPT" <<EOL
+# Defer the restart so the HTTP request that launched update.sh can return its
+# final status instead of killing itself mid-response.
+RESTART_SCRIPT="/tmp/restart_nomad_pi.sh"
+cat > "$RESTART_SCRIPT" <<'EOF'
 #!/bin/bash
 sleep 2
 sudo -n systemctl restart nomad-pi.service
-EOL
-    chmod +x "$RESTART_SCRIPT"
-    nohup "$RESTART_SCRIPT" >/dev/null 2>&1 &
-    
-    echo "Update completed successfully!" >> update.log
-    update_status 100 "Update complete!"
-else
-    echo "systemctl not found. If running manually, please restart the application." >> update.log
-fi
+EOF
+chmod +x "$RESTART_SCRIPT"
+nohup "$RESTART_SCRIPT" >/dev/null 2>&1 &
+
+update_status 100 "Update complete! Restarting Nomad..."
+echo "Nomad Pi update complete."
