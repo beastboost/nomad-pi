@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import os
 from pathlib import Path
-import platform
 import re
 import shutil
 import subprocess
 import tempfile
 
 from fastapi import APIRouter, Depends
-import psutil
 
 from app.routers.auth import get_current_user_id
 from app.routers import playback_core as core
+from app.services.platform_info import platform_info
 from app.services.playback.abr import abr_available, abr_policy
 from app.services.playback.encoders import (
     ALL_KNOWN_HARDWARE_ENCODERS,
@@ -59,14 +59,54 @@ def _ffmpeg_hwaccels(ffmpeg: str) -> list[str]:
     return [line for line in lines if not line.lower().startswith("hardware acceleration")]
 
 
-def _gstreamer_omx() -> dict:
-    """Report vendor OMX elements exposed by Radxa/Allwinner images.
+@lru_cache(maxsize=16)
+def _validate_video_encoder(ffmpeg: str, encoder: str) -> dict:
+    """Actually open an encoder and process one tiny software frame.
 
-    Nomad's primary executor is FFmpeg.  A733 Radxa images often expose the
-    vendor VPU through GStreamer/OpenMAX even when distro FFmpeg has no OMX
-    wrapper, so report that distinction rather than saying the board has no
-    hardware codec support at all.
+    `ffmpeg -encoders` only proves the wrapper was compiled in. SBC vendor
+    kernels can advertise V4L2 M2M/OMX wrappers without exposing a usable codec
+    device, so diagnostics must distinguish advertised from executable.
     """
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-f", "lavfi",
+        "-i", "color=c=black:s=320x240:r=1",
+        "-frames:v", "1",
+        "-pix_fmt", "yuv420p",
+        "-c:v", encoder,
+        "-f", "null",
+        "-",
+    ]
+    rc, text = _run(cmd, timeout=10)
+    detail = text.strip()
+    if len(detail) > 800:
+        detail = detail[-800:]
+    return {
+        "advertised": True,
+        "usable": rc == 0,
+        "returncode": rc,
+        "detail": detail,
+    }
+
+
+def _video_nodes() -> list[dict]:
+    nodes: list[dict] = []
+    root = Path("/sys/class/video4linux")
+    if not root.is_dir():
+        return nodes
+    for entry in sorted(root.glob("video*"), key=lambda p: p.name):
+        try:
+            name = (entry / "name").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            name = ""
+        nodes.append({"device": f"/dev/{entry.name}", "name": name})
+    return nodes
+
+
+def _gstreamer_omx() -> dict:
+    """Report vendor OMX elements exposed by Radxa/Allwinner images."""
     gst_inspect = shutil.which("gst-inspect-1.0")
     if not gst_inspect:
         return {"available": False, "path": None, "omx_elements": [], "h264_encoder": False}
@@ -75,10 +115,8 @@ def _gstreamer_omx() -> dict:
         return {"available": False, "path": gst_inspect, "omx_elements": [], "h264_encoder": False}
     elements = []
     for line in text.splitlines():
-        lower = line.lower()
-        if "omx" not in lower:
+        if "omx" not in line.lower():
             continue
-        # Typical gst-inspect listing: omx:  omxh264videoenc: OpenMAX H.264 Video Encoder
         match = re.search(r"\b(omx[a-z0-9_]+)\s*:", line, re.I)
         if match:
             elements.append(match.group(1))
@@ -92,15 +130,6 @@ def _gstreamer_omx() -> dict:
         "hevc_decoder": "omxhevcvideodec" in unique,
         "vp9_decoder": "omxvp9videodec" in unique,
     }
-
-
-def _model_name() -> str:
-    for path in ("/proc/device-tree/model", "/sys/firmware/devicetree/base/model"):
-        try:
-            return Path(path).read_text(encoding="utf-8", errors="ignore").replace("\x00", "").strip()
-        except OSError:
-            pass
-    return platform.node() or platform.machine()
 
 
 def _cache_writable() -> tuple[bool, str | None]:
@@ -128,6 +157,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     checks = []
+    system = dict(platform_info())
 
     checks.append(_check(
         "ffmpeg",
@@ -145,6 +175,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     executable_video = {}
     h264_candidates: list[str] = []
     hevc_candidates: list[str] = []
+    hardware_validation: dict[str, dict] = {}
     hw_policy = hardware_policy()
     if ffmpeg:
         encoders = _ffmpeg_encoders(ffmpeg)
@@ -156,6 +187,14 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
         }
         h264_candidates = video_encoder_candidates("h264", available=encoders, policy=hw_policy)
         hevc_candidates = video_encoder_candidates("hevc", available=encoders, policy=hw_policy)
+
+        advertised_hardware = sorted(encoders & ALL_KNOWN_HARDWARE_ENCODERS)
+        for encoder in advertised_hardware:
+            # Validate only hardware wrappers Nomad can currently select for
+            # H.264/HEVC execution, not unrelated NVENC/QSV wrappers on a host.
+            if encoder in set(HARDWARE_VIDEO_ENCODERS.get("h264", ())) | set(HARDWARE_VIDEO_ENCODERS.get("hevc", ())):
+                hardware_validation[encoder] = _validate_video_encoder(ffmpeg, encoder)
+
         h264_hw = [x for x in h264_candidates if x in ALL_KNOWN_HARDWARE_ENCODERS]
         checks.append(_check(
             "H.264 encoder path",
@@ -168,10 +207,17 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             severity="warn",
         ))
         if h264_hw:
+            candidate = h264_hw[0]
+            validation = hardware_validation.get(candidate, {})
+            usable = bool(validation.get("usable"))
             checks.append(_check(
                 "SBC hardware acceleration",
-                True,
-                f"FFmpeg hardware encoder eligible for execution: {h264_hw[0]}",
+                usable,
+                (
+                    f"{candidate} successfully encoded a test frame"
+                    if usable else
+                    f"{candidate} is advertised by FFmpeg but failed the runtime encoder test"
+                ),
                 severity="warn",
             ))
         checks.append(_check(
@@ -182,20 +228,26 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
         ))
 
     gst_omx = _gstreamer_omx()
-    if gst_omx.get("h264_encoder"):
-        checks.append(_check(
-            "A733/OpenMAX video engine",
-            True,
-            "GStreamer exposes omxh264videoenc; vendor H.264 hardware encoding is installed",
-            severity="warn",
-        ))
-    elif "A733" in _model_name() or "Cubie A7" in _model_name():
-        checks.append(_check(
-            "A733/OpenMAX video engine",
-            False,
-            "A733 detected but omxh264videoenc was not found via gst-inspect-1.0",
-            severity="warn",
-        ))
+    if system.get("is_allwinner_a733"):
+        if gst_omx.get("h264_encoder"):
+            checks.append(_check(
+                "A733/OpenMAX video engine",
+                True,
+                "GStreamer exposes omxh264videoenc; vendor H.264 hardware encoding is installed",
+                severity="warn",
+            ))
+        else:
+            v4l2_usable = bool(hardware_validation.get("h264_v4l2m2m", {}).get("usable"))
+            checks.append(_check(
+                "A733 hardware video path",
+                v4l2_usable,
+                (
+                    "A733 V4L2 M2M H.264 encoding passed; OpenMAX is not required"
+                    if v4l2_usable else
+                    "A733 detected; GStreamer OMX is absent and the FFmpeg V4L2 M2M path has not passed runtime validation"
+                ),
+                severity="warn",
+            ))
 
     abr_ok, abr_reason, abr_candidates = abr_available(
         available_encoders=encoders,
@@ -241,7 +293,6 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
 
     statuses = {item["status"] for item in checks}
     overall = "fail" if "fail" in statuses else "warn" if "warn" in statuses else "ok"
-    memory = psutil.virtual_memory()
     any_video_encoder = bool(h264_candidates or hevc_candidates or executable_video.get("vp9") or executable_video.get("av1"))
     executable_hardware = sorted({
         encoder
@@ -249,16 +300,13 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
         for encoder in video_encoder_candidates(codec, available=encoders, policy=hw_policy)
         if encoder in ALL_KNOWN_HARDWARE_ENCODERS
     }) if ffmpeg else []
+    validated_hardware = sorted(
+        encoder for encoder, result in hardware_validation.items() if result.get("usable")
+    )
 
     return {
         "status": overall,
-        "system": {
-            "model": _model_name(),
-            "platform": platform.platform(),
-            "machine": platform.machine(),
-            "cpu_count": psutil.cpu_count(logical=True),
-            "memory_mb": round(memory.total / (1024 * 1024)),
-        },
+        "system": system,
         "ffmpeg": {
             "path": ffmpeg,
             "ffprobe_path": ffprobe,
@@ -266,6 +314,9 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "audio_encoders": sorted(encoders & RELEVANT_AUDIO_ENCODERS),
             "hardware_encoders_detected": sorted(encoders & ALL_KNOWN_HARDWARE_ENCODERS),
             "hardware_accels_detected": sorted(set(hwaccels)),
+            "hardware_validation": hardware_validation,
+            "validated_hardware_encoders": validated_hardware,
+            "video_devices": _video_nodes(),
             "executor_video_codecs": executable_video,
             "hardware_policy": hw_policy,
             "hardware_acceleration_enabled": bool(executable_hardware and hw_policy != "off"),
@@ -282,7 +333,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "executor_enabled": False,
             "note": (
                 "Vendor OMX hardware is detected. Nomad uses it directly when FFmpeg exposes h264_omx; "
-                "otherwise it is reported here for the dedicated A733 executor path."
+                "otherwise V4L2 M2M or software fallback may be used."
             ),
         },
         "adaptive_bitrate": {
