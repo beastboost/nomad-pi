@@ -20,7 +20,7 @@ def test_modern_ffmpeg_keeps_two_x_readrate(monkeypatch):
     assert remux_stability._effective_streaming_readrate(PlaybackMode.REMUX) == 2.0
 
 
-def test_cheap_hls_command_removes_re_and_generates_pts(monkeypatch):
+def test_cheap_hls_command_removes_re_generates_pts_and_preserves_timebase(monkeypatch):
     monkeypatch.setattr(
         remux_stability,
         "_ORIGINAL_BUILD",
@@ -34,6 +34,21 @@ def test_cheap_hls_command_removes_re_and_generates_pts(monkeypatch):
     assert "-re" not in cmd
     assert cmd[cmd.index("-fflags") + 1] == "+genpts"
     assert cmd.index("-fflags") < cmd.index("-i")
+    assert cmd[cmd.index("-copytb") + 1] == "1"
+    assert cmd.index("-copytb") > cmd.index("-i")
+
+
+def test_audio_transcode_also_preserves_copied_video_timebase(monkeypatch):
+    monkeypatch.setattr(
+        remux_stability,
+        "_ORIGINAL_BUILD",
+        lambda **_kwargs: [
+            "ffmpeg", "-i", "movie.mkv", "-c:v", "copy", "-c:a", "aac", "index.m3u8",
+        ],
+    )
+
+    cmd = remux_stability._stable_build_hls_command(mode="transcode_audio")
+    assert cmd[cmd.index("-copytb") + 1] == "1"
 
 
 def test_video_transcode_command_is_not_rewritten(monkeypatch):
