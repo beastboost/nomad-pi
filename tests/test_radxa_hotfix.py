@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.platform_info import _classify
 from app.services.playback.compat import BrowserPlaybackPlanner
 from app.services.playback.encoders import video_encoder_candidates
+from app.services.playback.gstreamer_a733 import a733_backend_allowed, build_a733_hls_command
 from app.services.playback.hls import build_hls_command, streaming_input_readrate
 from app.services.playback.planner import ClientCapabilities, MediaProbe, PlaybackMode
 
@@ -114,6 +115,65 @@ def test_sun60iw2_prefers_omx_over_generic_v4l2_when_both_exist():
         model="sun60iw2",
     )
     assert candidates == ["h264_omx", "libx264"]
+
+
+def test_a733_gstreamer_worker_command_sets_vendor_decoder_rank(tmp_path):
+    cmd = build_a733_hls_command(
+        source_path="/media/movie.mkv",
+        output_dir=tmp_path,
+        start_position=12.5,
+        width=1280,
+        height=720,
+        max_bitrate=4_000_000,
+    )
+    joined = " ".join(cmd)
+    assert "GST_PLUGIN_FEATURE_RANK=omxh264dec:MAX,omxhevcvideodec:MAX,omxvp9videodec:MAX" in cmd
+    assert "gst-a733-hls.py" in joined
+    assert "--source /media/movie.mkv" in joined
+    assert "--start 12.500" in joined
+    assert "--width 1280 --height 720" in joined
+    assert "--bitrate 4000000" in joined
+
+
+def test_a733_backend_requires_validated_omx_and_default_tracks(monkeypatch):
+    monkeypatch.delenv("NOMAD_A733_GSTREAMER", raising=False)
+    monkeypatch.setattr(
+        "app.services.playback.gstreamer_a733.a733_gstreamer_status",
+        lambda: {"usable": True},
+    )
+    assert a733_backend_allowed(
+        target_video_codec="h264",
+        audio_stream_index=None,
+        subtitle_stream_index=None,
+    ) is True
+    assert a733_backend_allowed(
+        target_video_codec="hevc",
+        audio_stream_index=None,
+        subtitle_stream_index=None,
+    ) is False
+    assert a733_backend_allowed(
+        target_video_codec="h264",
+        audio_stream_index=2,
+        subtitle_stream_index=None,
+    ) is False
+    assert a733_backend_allowed(
+        target_video_codec="h264",
+        audio_stream_index=None,
+        subtitle_stream_index=4,
+    ) is False
+
+
+def test_a733_backend_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("NOMAD_A733_GSTREAMER", "off")
+    monkeypatch.setattr(
+        "app.services.playback.gstreamer_a733.a733_gstreamer_status",
+        lambda: {"usable": True},
+    )
+    assert a733_backend_allowed(
+        target_video_codec="h264",
+        audio_stream_index=None,
+        subtitle_stream_index=None,
+    ) is False
 
 
 def test_nomad_external_mount_is_stored_as_data_web_root(tmp_path, monkeypatch):
