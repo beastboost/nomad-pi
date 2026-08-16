@@ -4,14 +4,16 @@ import sys
 from urllib.parse import quote
 
 from app.routers import playback_core as _core
+from app.services.debrid_lite import install_debrid_lite_search_policy
 from app.services.playback.cache_guard import install_playback_cache_guard
 from app.services.playback.remux_stability import install_remux_stability
 from app.services.playback.runtime_abr_policy import install_runtime_abr_policy
 
-# Install runtime policy before feature routers instantiate their own managers
-# or capture helper functions by name. playback_core has already created its
-# HLS manager, but these overlays patch manager classes/module globals so that
-# existing instance is covered too.
+# Install low-resource runtime policy before feature routers instantiate their
+# own managers or requests begin. The debrid router resolves search_torrentio
+# dynamically from app.services.debrid, so installing its ranking overlay here
+# also covers the already-imported router without duplicating any API routes.
+install_debrid_lite_search_policy()
 install_playback_cache_guard()
 install_remux_stability()
 install_runtime_abr_policy()
