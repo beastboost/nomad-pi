@@ -28,6 +28,7 @@
     document.write(`<script src="js/media-exclusivity.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/stream-keep-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/universal-search.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/universal-home.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/offline-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/download-live.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/library-health.js?v=${encodeURIComponent(version)}"><\/script>`);
