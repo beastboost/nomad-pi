@@ -39,23 +39,28 @@ class BrowserPlaybackPlanner(PlaybackPlanner):
                 target_audio_codec=target_audio,
             )
 
-        # Apple recognises both hvc1 and hev1 HEVC sample entries, although hvc1
-        # is preferred for authored HLS. If an HEVC MP4 is already directly
-        # playable by the client, preserve the original file instead of running
-        # it through a stream-copy HLS remux solely to change hev1 -> hvc1.
-        # Arbitrary source GOPs/timestamps cannot be normalised by stream copy;
-        # on older vendor FFmpeg builds that can create irregular fMP4 fragment
-        # durations or invalid packet-duration warnings and make Safari judder.
+        # Safari/iOS codec-family capability reporting is not sufficient to
+        # guarantee that an arbitrary HEVC MP4 with an hev1 sample entry will
+        # load through an HTMLMediaElement. Field testing on the iPhone client
+        # can return MEDIA_ERR_SRC_NOT_SUPPORTED even though HEVC itself is
+        # advertised as supported. Retag hev1 -> hvc1 through the cheap remux
+        # path instead of handing the original file directly to the browser.
+        # The runtime remux-stability policy supplies lead buffering and avoids
+        # the old 1x -re underrun behaviour on vendor FFmpeg builds.
         if (
             base.mode == PlaybackMode.DIRECT_PLAY
             and source.video_codec in {"hevc", "h265"}
             and source.container in {"mp4", "mov"}
             and source.codec_tag == "hev1"
         ):
-            return base
+            return PlaybackPlan(
+                mode=PlaybackMode.REMUX,
+                reasons=("HEVC sample entry 'hev1' will be retagged as hvc1 for reliable Apple playback",),
+                target_container="mp4",
+            )
 
-        # Keep the retag remux only for unusual HEVC sample entries that are
-        # neither Apple's preferred hvc1 nor the recognised hev1 entry.
+        # Keep the same retag remux for unusual HEVC sample entries that are
+        # neither Apple's preferred hvc1 nor the commonly encountered hev1.
         if (
             base.mode == PlaybackMode.DIRECT_PLAY
             and source.video_codec in {"hevc", "h265"}
