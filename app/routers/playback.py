@@ -4,6 +4,14 @@ import sys
 from urllib.parse import quote
 
 from app.routers import playback_core as _core
+from app.services.playback.cache_guard import install_playback_cache_guard
+
+# Install the storage-pressure guard before feature routers instantiate their
+# own HLS/ABR managers (Stream + Keep, adaptive playback, etc.).  playback_core
+# has already created its manager, but the guard patches manager classes so the
+# existing core instance is covered as well.
+install_playback_cache_guard()
+
 from app.routers.playback_tracks import router as _tracks_router
 from app.routers.playback_quality import router as _quality_router
 from app.routers.playback_health import router as _health_router
@@ -34,9 +42,9 @@ _original_playback_urls = _core._playback_urls
 _original_hls_stop = _core.hls_manager.stop
 _original_hls_status = _core.hls_manager.status
 
-# The execution layer emits fragmented-MP4 HLS for all non-direct browser
-# playback. Use the compatibility-aware planner so codecs such as MP3/Opus or
-# VP9 are not blindly stream-copied into an Apple-incompatible fMP4 stream.
+# The execution layer emits browser HLS for all non-direct playback. Use the
+# compatibility-aware planner so codecs such as MP3/Opus or VP9 are not blindly
+# stream-copied into an Apple-incompatible fMP4 stream.
 _core.planner = BrowserPlaybackPlanner()
 
 
