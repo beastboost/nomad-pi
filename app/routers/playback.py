@@ -37,20 +37,21 @@ from app.routers.playback_abr import (
     ensure_adaptive_session as _ensure_adaptive_session,
     router as _abr_router,
 )
-from app.services.playback.a733_browser_policy import A733BrowserPlaybackPlanner
 from app.services.playback.abr import ABRJobError
 from app.services.playback.hls import HLSJobError
+from app.services.playback.lite_browser_policy import LiteBrowserPlaybackPlanner
 
 
 _original_playback_urls = _core._playback_urls
 _original_hls_stop = _core.hls_manager.stop
 _original_hls_status = _core.hls_manager.status
 
-# The execution layer emits browser HLS for all non-direct playback. Use the
-# compatibility-aware planner plus the A733 field policy: clean direct-play
-# files stay untouched, while HEVC that would otherwise need fragile fMP4
-# stream-copy HLS can use the validated vendor OMX -> H.264 path.
-_core.planner = A733BrowserPlaybackPlanner()
+# Nomad remains a small-appliance media server first. On sub-2 GiB systems the
+# browser planner therefore prefers direct play and cheap stream-copy/audio-only
+# conversion, and refuses automatic live video transcoding unless explicitly
+# enabled. This prevents codec choice from turning a Pi Zero-class box into a
+# permanent transcode appliance.
+_core.planner = LiteBrowserPlaybackPlanner()
 
 
 def _ensure_hls_with_selected_streams(session, fs_path=None):
