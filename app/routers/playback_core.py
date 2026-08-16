@@ -307,8 +307,8 @@ def seek_playback_session(
     """Seek to an absolute source timestamp.
 
     Direct-play clients can seek the original file themselves. HLS sessions
-    restart ffmpeg at the requested timestamp, avoiding a long transcode from
-    the beginning on low-power SBCs.
+    restart their active media backend at the requested timestamp, avoiding a
+    long transcode from the beginning on low-power SBCs.
     """
     session = session_store.get(session_id, user_id=user_id)
     if not session or session.state == "stopped":
@@ -470,7 +470,7 @@ def hls_playlist(session_id: str, ticket: str = Query(...)):
 @router.get("/hls/{session_id}/{asset_name}")
 def hls_asset(session_id: str, asset_name: str, ticket: str = Query(...)):
     session = _require_ticket_session(session_id, ticket)
-    if not re.fullmatch(r"(?:init\.mp4|segment_\d+\.m4s)", asset_name):
+    if not re.fullmatch(r"(?:init\.mp4|segment_\d+\.(?:m4s|ts))", asset_name):
         raise HTTPException(status_code=404, detail="HLS asset not found")
     try:
         _ensure_hls(session)
@@ -479,5 +479,10 @@ def hls_asset(session_id: str, asset_name: str, ticket: str = Query(...)):
     path = hls_manager.session_dir(session_id) / asset_name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="HLS asset not ready")
-    media_type = "video/mp4" if asset_name == "init.mp4" else "video/iso.segment"
+    if asset_name == "init.mp4":
+        media_type = "video/mp4"
+    elif asset_name.endswith(".ts"):
+        media_type = "video/mp2t"
+    else:
+        media_type = "video/iso.segment"
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=60"})
