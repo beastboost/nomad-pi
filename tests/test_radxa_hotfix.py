@@ -129,10 +129,28 @@ def test_remux_hls_command_uses_event_playlist_and_readrate(tmp_path):
         target_audio_codec=None,
         source_video_codec="h264",
         input_readrate=2.0,
+        readrate_supported=True,
     )
     assert cmd[cmd.index("-readrate") + 1] == "2.000"
+    assert "-re" not in cmd
     assert cmd[cmd.index("-hls_playlist_type") + 1] == "event"
     assert cmd[cmd.index("-avoid_negative_ts") + 1] == "make_zero"
+
+
+def test_legacy_ffmpeg_falls_back_to_re_instead_of_readrate(tmp_path):
+    cmd = build_hls_command(
+        source_path="movie.mkv",
+        output_dir=Path(tmp_path),
+        mode="remux",
+        target_video_codec=None,
+        target_audio_codec=None,
+        source_video_codec="h264",
+        input_readrate=2.0,
+        readrate_supported=False,
+    )
+    assert "-readrate" not in cmd
+    assert "-re" in cmd
+    assert cmd.index("-re") < cmd.index("-i")
 
 
 def test_one_gib_device_uses_sequential_quality_handover(monkeypatch):
