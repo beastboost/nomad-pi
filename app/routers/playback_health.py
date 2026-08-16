@@ -23,6 +23,7 @@ from app.services.playback.encoders import (
     hardware_policy,
     video_encoder_candidates,
 )
+from app.services.playback.gstreamer_a733 import a733_gstreamer_status
 
 
 router = APIRouter()
@@ -197,10 +198,10 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
 
         h264_hw = [x for x in h264_candidates if x in ALL_KNOWN_HARDWARE_ENCODERS]
         checks.append(_check(
-            "H.264 encoder path",
+            "H.264 FFmpeg encoder path",
             bool(h264_candidates),
             (
-                f"Nomad will try {h264_candidates[0]}"
+                f"FFmpeg can try {h264_candidates[0]}"
                 + (f" and fall back to {h264_candidates[1]}" if len(h264_candidates) > 1 else "")
             ) if h264_candidates else
             "No H.264 encoder is available under the current hardware policy",
@@ -211,7 +212,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             validation = hardware_validation.get(candidate, {})
             usable = bool(validation.get("usable"))
             checks.append(_check(
-                "SBC hardware acceleration",
+                "FFmpeg SBC hardware acceleration",
                 usable,
                 (
                     f"{candidate} successfully encoded a test frame"
@@ -228,12 +229,20 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
         ))
 
     gst_omx = _gstreamer_omx()
+    gst_backend = a733_gstreamer_status() if system.get("is_allwinner_a733") else {
+        "platform": False,
+        "usable": False,
+        "encoder_usable": False,
+        "elements": {},
+        "detail": "not an Allwinner A733 host",
+    }
+
     if system.get("is_allwinner_a733"):
-        if gst_omx.get("h264_encoder"):
+        if gst_backend.get("usable"):
             checks.append(_check(
-                "A733/OpenMAX video engine",
+                "A733 hardware video path",
                 True,
-                "GStreamer exposes omxh264videoenc; vendor H.264 hardware encoding is installed",
+                "Radxa GStreamer/OpenMAX omxh264videoenc passed a runtime test and is enabled for compatible H.264 HLS transcodes",
                 severity="warn",
             ))
         else:
@@ -242,9 +251,9 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
                 "A733 hardware video path",
                 v4l2_usable,
                 (
-                    "A733 V4L2 M2M H.264 encoding passed; OpenMAX is not required"
+                    "A733 V4L2 M2M H.264 encoding passed; GStreamer/OpenMAX is unavailable"
                     if v4l2_usable else
-                    "A733 detected; GStreamer OMX is absent and the FFmpeg V4L2 M2M path has not passed runtime validation"
+                    f"A733 hardware backend is not validated: {gst_backend.get('detail') or 'no working OMX/V4L2 encoder'}"
                 ),
                 severity="warn",
             ))
@@ -293,7 +302,13 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
 
     statuses = {item["status"] for item in checks}
     overall = "fail" if "fail" in statuses else "warn" if "warn" in statuses else "ok"
-    any_video_encoder = bool(h264_candidates or hevc_candidates or executable_video.get("vp9") or executable_video.get("av1"))
+    any_video_encoder = bool(
+        gst_backend.get("usable")
+        or h264_candidates
+        or hevc_candidates
+        or executable_video.get("vp9")
+        or executable_video.get("av1")
+    )
     executable_hardware = sorted({
         encoder
         for codec in ("h264", "hevc")
@@ -303,6 +318,11 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     validated_hardware = sorted(
         encoder for encoder, result in hardware_validation.items() if result.get("usable")
     )
+
+    if gst_backend.get("usable"):
+        h264_execution_path = ["gst:omxh264videoenc", "libx264"]
+    else:
+        h264_execution_path = list(h264_candidates)
 
     return {
         "status": overall,
@@ -319,9 +339,12 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "video_devices": _video_nodes(),
             "executor_video_codecs": executable_video,
             "hardware_policy": hw_policy,
-            "hardware_acceleration_enabled": bool(executable_hardware and hw_policy != "off"),
+            "hardware_acceleration_enabled": bool(
+                gst_backend.get("usable") or (executable_hardware and hw_policy != "off")
+            ),
             "executor_hardware_encoders": executable_hardware,
             "h264_encoder_candidates": h264_candidates,
+            "h264_execution_path": h264_execution_path,
             "hevc_encoder_candidates": hevc_candidates,
             "supported_sbc_hardware_families": {
                 codec: list(values) for codec, values in HARDWARE_VIDEO_ENCODERS.items()
@@ -330,10 +353,12 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
         },
         "gstreamer_openmax": {
             **gst_omx,
-            "executor_enabled": False,
+            "executor_enabled": bool(gst_backend.get("usable")),
+            "backend": gst_backend,
             "note": (
-                "Vendor OMX hardware is detected. Nomad uses it directly when FFmpeg exposes h264_omx; "
-                "otherwise V4L2 M2M or software fallback may be used."
+                "Validated A733 OMX is used for compatible H.264 HLS transcodes; FFmpeg/libx264 remains the fallback."
+                if gst_backend.get("usable") else
+                "The A733 vendor backend is not currently validated; FFmpeg paths remain available as fallback."
             ),
         },
         "adaptive_bitrate": {
