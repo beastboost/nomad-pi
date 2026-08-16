@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 from typing import Iterable, Optional
+
+from app.services.platform_info import platform_info
 
 
 SOFTWARE_VIDEO_ENCODERS = {
@@ -73,17 +74,8 @@ def available_ffmpeg_encoders(ffmpeg_path: Optional[str] = None) -> frozenset[st
     return frozenset(_parse_encoders((result.stdout or "") + (result.stderr or "")))
 
 
-def _platform_model() -> str:
-    for path in ("/proc/device-tree/model", "/sys/firmware/devicetree/base/model"):
-        try:
-            return Path(path).read_text(encoding="utf-8", errors="ignore").replace("\x00", "").strip()
-        except OSError:
-            pass
-    return ""
-
-
 def _best_hardware_candidate(candidates: list[str], model: Optional[str] = None) -> Optional[str]:
-    """Pick the single hardware encoder most appropriate to this SBC.
+    """Pick the single hardware encoder most appropriate to this machine.
 
     HLSManager intentionally keeps one hardware attempt plus one software
     fallback. Choosing one hardware candidate here guarantees that a machine
@@ -92,20 +84,37 @@ def _best_hardware_candidate(candidates: list[str], model: Optional[str] = None)
     """
     if not candidates:
         return None
-    model_text = str(model if model is not None else _platform_model()).lower()
 
-    # Radxa Cubie A7Z / Allwinner A733 vendor images use OpenMAX for H.264.
-    if ("a733" in model_text or "cubie a7" in model_text) and "h264_omx" in candidates:
+    if model is None:
+        info = platform_info()
+        family = str(info.get("family") or "").lower()
+        model_text = " ".join((
+            str(info.get("model") or ""),
+            str(info.get("raw_model") or ""),
+            str(info.get("compatible") or ""),
+        )).lower()
+    else:
+        family = ""
+        model_text = str(model).lower()
+
+    is_a733 = family == "allwinner-a733" or any(
+        token in model_text for token in ("a733", "sun60iw2", "cubie a7", "cubie-a7")
+    )
+
+    # Radxa/Allwinner vendor images may expose OpenMAX as the native A733 path.
+    # If it is absent, the generic V4L2 M2M wrapper remains eligible below.
+    if is_a733 and "h264_omx" in candidates:
         return "h264_omx"
 
-    # Prefer the platform-specific wrappers over generic V4L2 where both are
-    # exposed. Rockchip's rkmpp is generally the intended path on RK boards.
-    if "rockchip" in model_text:
+    # Prefer the platform-specific wrapper over generic V4L2 when both are
+    # exposed on Rockchip machines.
+    if family == "rockchip" or "rockchip" in model_text:
         for name in candidates:
             if name.endswith("_rkmpp"):
                 return name
 
-    # On other boards preserve the configured candidate order.
+    # On other boards preserve the configured candidate order. For an A733
+    # without FFmpeg OMX this means h264_v4l2m2m/hevc_v4l2m2m is tried first.
     return candidates[0]
 
 
