@@ -56,6 +56,7 @@ jobs:
           node --check app/static/js/app_legacy.js
           node --check app/static/js/playback-core.js
           node --check app/static/js/runtime-ui-guard.js
+          node --check app/static/js/debrid-lite.js
           node --check app/static/js/player-mobile-fix.js
           node --check app/static/js/replacement-control.js
           node --check app/static/js/track-control.js
