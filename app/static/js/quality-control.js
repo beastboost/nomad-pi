@@ -10,6 +10,8 @@
     const speedButton = $('#player-speed');
     if (speedButton?.parentNode) speedButton.parentNode.insertBefore(qualityButton, speedButton);
 
+    let manualVideoQualityAvailable = true;
+
     function currentPosition() {
         if (typeof Core.absolutePosition === 'function') return Core.absolutePosition();
         const current = Core.current;
@@ -29,6 +31,10 @@
         qualityButton.innerHTML = `<i class="ph ph-monitor-play" style="font-size:17px"></i>${escapeHtml(displayLabel(quality))}`;
     }
 
+    function transcodeOnlyProfile(profile) {
+        return !['auto', 'original'].includes(String(profile?.id || '').toLowerCase());
+    }
+
     async function openQualityMenu() {
         const current = Core.current;
         if (!current) {
@@ -39,14 +45,19 @@
           <div class="kicker" style="margin-bottom:12px">Playback quality</div>
           <div id="nomad-quality-list"><div class="empty"><div class="spinner"></div></div></div>`);
         try {
-            const [qualityData, adaptive] = await Promise.all([
+            const [qualityData, adaptive, health] = await Promise.all([
                 api('/playback/quality-profiles'),
                 api('/playback/adaptive/status').catch(err => ({ available: false, reason: err.message || 'Adaptive status unavailable' })),
+                api('/playback/health').catch(() => ({ runtime_policy: {} })),
             ]);
             const profiles = qualityData.profiles || [];
             const selected = current.quality || 'auto';
             const out = $('#nomad-quality-list');
             if (!out) return;
+
+            const runtime = health.runtime_policy || {};
+            const lite = runtime.lite_playback === true;
+            manualVideoQualityAvailable = runtime.automatic_live_video_transcode === true || !lite;
 
             const adaptiveRow = `
               <button class="sheet-option row-rule" data-nomad-quality="adaptive" ${adaptive.available ? '' : 'disabled'}
@@ -62,14 +73,24 @@
                     : '<i class="ph ph-waveform" style="color:var(--text-45)"></i>'}
               </button>`;
 
-            out.innerHTML = `<div class="list">${adaptiveRow}${profiles.map(profile => `
-              <button class="sheet-option row-rule" data-nomad-quality="${escapeHtml(profile.id)}">
-                <span style="text-align:left">
-                  <span style="display:block">${escapeHtml(profile.label)}</span>
-                  ${profile.max_bitrate ? `<span class="list-sub">up to ${Math.round(profile.max_bitrate / 1e6)} Mbps</span>` : ''}
-                </span>
-                ${profile.id === selected ? '<i class="ph ph-check" style="color:var(--color-accent)"></i>' : ''}
-              </button>`).join('')}</div>`;
+            out.innerHTML = `<div class="list">${adaptiveRow}${profiles.map(profile => {
+                const requiresVideo = transcodeOnlyProfile(profile);
+                const disabled = requiresVideo && !manualVideoQualityAvailable;
+                const subtitle = disabled
+                    ? 'Requires video conversion · disabled in Lite mode'
+                    : profile.max_bitrate
+                        ? `up to ${Math.round(profile.max_bitrate / 1e6)} Mbps`
+                        : (profile.id === 'original' ? 'Use the source quality without resizing' : 'Best compatible source path');
+                return `
+                  <button class="sheet-option row-rule" data-nomad-quality="${escapeHtml(profile.id)}" ${disabled ? 'disabled' : ''}
+                          style="${disabled ? 'opacity:.55' : ''}">
+                    <span style="text-align:left;min-width:0">
+                      <span style="display:block">${escapeHtml(profile.label)}</span>
+                      <span class="list-sub">${escapeHtml(subtitle)}</span>
+                    </span>
+                    ${profile.id === selected ? '<i class="ph ph-check" style="color:var(--color-accent)"></i>' : ''}
+                  </button>`;
+            }).join('')}</div>`;
         } catch (err) {
             const out = $('#nomad-quality-list');
             if (out) out.innerHTML = `<div class="facts-note">${escapeHtml(err.message || 'Could not load quality profiles')}</div>`;
@@ -80,6 +101,13 @@
         const current = Core.current;
         const video = V?.el;
         if (!current || !video) return;
+
+        if (transcodeOnlyProfile({ id: quality }) && !manualVideoQualityAvailable) {
+            toast('That quality needs video conversion, which Lite mode keeps disabled.', 'info', 4500);
+            closeSheet();
+            return;
+        }
+
         if (typeof Core.applyReplacement !== 'function') {
             toast('Playback handover helper is unavailable', 'error', 5000);
             return;
