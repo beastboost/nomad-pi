@@ -26,19 +26,63 @@
         const modes = data.playback_modes || {};
         const system = data.system || {};
         const candidates = ff.h264_encoder_candidates || [];
-        const hw = ff.executor_hardware_encoders || [];
+        const advertised = ff.hardware_encoders_detected || [];
+        const validated = ff.validated_hardware_encoders || [];
+        const validation = ff.hardware_validation || {};
+        const videoNodes = ff.video_devices || [];
         const vendorOmx = !!gst.h264_encoder;
-        const omxNote = vendorOmx && !hw.length
-            ? 'A733 OpenMAX is installed through GStreamer, but this FFmpeg build does not expose a usable OMX encoder to Nomad yet.'
-            : vendorOmx
-                ? 'A733 OpenMAX hardware is present.'
-                : 'No GStreamer OpenMAX H.264 encoder detected.';
+        const primaryHardware = candidates.find(x => advertised.includes(x));
+
+        let hwText = 'none';
+        if (primaryHardware) {
+            if (validated.includes(primaryHardware)) hwText = `${primaryHardware} ✓ validated`;
+            else if (validation[primaryHardware]) hwText = `${primaryHardware} · validation failed`;
+            else hwText = `${primaryHardware} · advertised`;
+        } else if (validated.length) {
+            hwText = `${validated.join(', ')} ✓ validated`;
+        } else if (advertised.length) {
+            hwText = `${advertised.join(', ')} · advertised only`;
+        }
+
+        let platformVideoText = 'Generic FFmpeg path';
+        let platformNote = '';
+        if (system.is_allwinner_a733) {
+            if (validated.includes('h264_v4l2m2m')) {
+                platformVideoText = 'A733 V4L2 M2M ✓';
+                platformNote = 'The Allwinner A733 hardware encoder accepted a real test frame. OpenMAX is not required on this image.';
+            } else if (vendorOmx) {
+                platformVideoText = 'A733 OpenMAX detected';
+                platformNote = 'GStreamer exposes the A733 OpenMAX encoder; FFmpeg will use OMX only if h264_omx is also available.';
+            } else if (primaryHardware) {
+                platformVideoText = 'A733 hardware unvalidated';
+                const detail = validation[primaryHardware]?.detail || '';
+                platformNote = detail
+                    ? `${primaryHardware} was advertised but its runtime test failed: ${detail}`
+                    : `${primaryHardware} is advertised, but Nomad has not validated a working A733 hardware encode path.`;
+            } else {
+                platformVideoText = 'A733 software fallback';
+                platformNote = 'No validated A733 hardware encoder is currently exposed to FFmpeg; Nomad will use its software fallback.';
+            }
+        } else if (primaryHardware && validated.includes(primaryHardware)) {
+            platformVideoText = `${primaryHardware} ✓`;
+            platformNote = 'The selected hardware encoder passed a runtime test frame.';
+        }
+
+        const nodeText = videoNodes.length
+            ? videoNodes.map(n => `${n.device}${n.name ? ` (${n.name})` : ''}`).join(', ')
+            : 'no /dev/video* codec nodes reported';
+        const systemLine = [
+            system.model || 'This device',
+            system.architecture || system.machine,
+            `${system.memory_mb || '?'} MB RAM`,
+            system.memory_class ? `${system.memory_class} memory` : '',
+        ].filter(Boolean).join(' · ');
 
         card.innerHTML = `
           <div class="health-head">
             <div>
               <div class="health-title">Playback diagnostics</div>
-              <div class="health-note">${escapeHtml(system.model || 'This device')} · ${escapeHtml(String(system.memory_mb || '?'))} MB RAM</div>
+              <div class="health-note">${escapeHtml(systemLine)}</div>
             </div>
             <span class="tag ${data.status === 'ok' ? 'tag-accent' : ''}">${escapeHtml(String(data.status || 'unknown').toUpperCase())}</span>
           </div>
@@ -49,11 +93,16 @@
             <div class="fact"><span class="fact-key">Video transcode</span><span class="fact-val">${yesNo(modes.video_transcode)}</span></div>
             <div class="fact"><span class="fact-key">Adaptive HLS</span><span class="fact-val">${yesNo(modes.adaptive_hls)}</span></div>
             <div class="facts-divider"></div>
+            <div class="fact"><span class="fact-key">Platform family</span><span class="fact-val">${escapeHtml(system.family || 'generic-linux')}</span></div>
             <div class="fact"><span class="fact-key">H.264 path</span><span class="fact-val">${escapeHtml(candidates.join(' → ') || 'none')}</span></div>
-            <div class="fact"><span class="fact-key">FFmpeg hardware</span><span class="fact-val">${escapeHtml(hw.join(', ') || 'none')}</span></div>
-            <div class="fact"><span class="fact-key">A733 OMX</span><span class="fact-val">${vendorOmx ? 'omxh264videoenc' : 'not detected'}</span></div>
+            <div class="fact"><span class="fact-key">Hardware test</span><span class="fact-val">${escapeHtml(hwText)}</span></div>
+            <div class="fact"><span class="fact-key">Platform video</span><span class="fact-val">${escapeHtml(platformVideoText)}</span></div>
+            ${system.is_allwinner_a733 ? `<div class="fact"><span class="fact-key">A733 OMX</span><span class="fact-val">${vendorOmx ? 'omxh264videoenc' : 'not detected'}</span></div>` : ''}
           </div>
-          <div class="facts-note" style="text-align:left;margin-top:12px">${escapeHtml(omxNote)}</div>`;
+          <div class="facts-note" style="text-align:left;margin-top:12px">
+            ${escapeHtml(platformNote || 'Hardware acceleration is treated as an optimisation; software fallback remains available.')}
+            <br><br><strong>Video devices:</strong> ${escapeHtml(nodeText)}
+          </div>`;
     }
 
     const previousLoadServer = loadServer;
