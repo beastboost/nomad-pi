@@ -10,11 +10,13 @@
         version = new URL(currentSrc, location.href).searchParams.get('v') || 'dev';
     } catch {}
 
+    document.write(`<link rel="stylesheet" href="css/appliance-polish.css?v=${encodeURIComponent(version)}">`);
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/runtime-ui-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/debrid-lite.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/player-mobile-fix.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/direct-play-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/replacement-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/track-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/subtitle-control.js?v=${encodeURIComponent(version)}"><\/script>`);
@@ -25,6 +27,7 @@
     document.write(`<script src="js/music2-fallback.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/media-exclusivity.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/stream-keep-control.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/universal-search.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/offline-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/download-live.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/library-health.js?v=${encodeURIComponent(version)}"><\/script>`);
