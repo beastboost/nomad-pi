@@ -36,10 +36,15 @@ def build_pipeline(source: str, output_dir: Path, width: int | None, height: int
     playlist = output_dir / "index.m3u8"
     segments = output_dir / "segment_%05d.ts"
 
-    # uridecodebin selects the appropriate demuxer/decoder. On Radxa A733 the
-    # process environment ranks OMX decoders above software where present.
+    # Define both named elements before linking dynamic decodebin branches to
+    # them. uridecodebin selects the appropriate demuxer/decoder; the process
+    # environment ranks A733 OMX decoders above software where available.
     return " ".join([
         "uridecodebin", f"uri={_quote(uri)}", "name=dec",
+        "hlssink2", "name=hls",
+        f"location={_quote(str(segments))}",
+        f"playlist-location={_quote(str(playlist))}",
+        "target-duration=4", "max-files=0", "playlist-length=0",
         "dec.", "!", "queue", "max-size-time=3000000000", "!",
         "videoconvert", "!", "videoscale", "!", caps, "!",
         "omxh264videoenc", "name=videoenc", "!",
@@ -47,10 +52,6 @@ def build_pipeline(source: str, output_dir: Path, width: int | None, height: int
         "dec.", "!", "queue", "max-size-time=3000000000", "!",
         "audioconvert", "!", "audioresample", "!",
         "avenc_aac", "bitrate=192000", "!", "aacparse", "!", "queue", "!", "hls.audio",
-        "hlssink2", "name=hls",
-        f"location={_quote(str(segments))}",
-        f"playlist-location={_quote(str(playlist))}",
-        "target-duration=4", "max-files=0", "playlist-length=0",
     ])
 
 
@@ -103,7 +104,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop_handler)
 
     pipeline.set_state(Gst.State.PAUSED)
-    state_result, state, _pending = pipeline.get_state(15 * Gst.SECOND)
+    state_result, _state, _pending = pipeline.get_state(15 * Gst.SECOND)
     if state_result == Gst.StateChangeReturn.FAILURE:
         pipeline.set_state(Gst.State.NULL)
         print("A733 GStreamer pipeline failed while prerolling", file=sys.stderr)
@@ -130,8 +131,6 @@ def main() -> int:
                 Gst.MessageType.ERROR | Gst.MessageType.EOS,
             )
             if message is None:
-                if stopping:
-                    continue
                 continue
             if message.type == Gst.MessageType.ERROR:
                 err, debug = message.parse_error()
