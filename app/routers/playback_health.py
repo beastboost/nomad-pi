@@ -24,6 +24,10 @@ from app.services.playback.encoders import (
     video_encoder_candidates,
 )
 from app.services.playback.gstreamer_a733 import a733_gstreamer_status
+from app.services.playback.lite_browser_policy import (
+    lite_playback_enabled,
+    live_video_transcode_enabled,
+)
 
 
 router = APIRouter()
@@ -159,6 +163,8 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     ffprobe = shutil.which("ffprobe")
     checks = []
     system = dict(platform_info())
+    lite_mode = lite_playback_enabled()
+    live_video_opt_in = live_video_transcode_enabled()
 
     checks.append(_check(
         "ffmpeg",
@@ -191,8 +197,6 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
 
         advertised_hardware = sorted(encoders & ALL_KNOWN_HARDWARE_ENCODERS)
         for encoder in advertised_hardware:
-            # Validate only hardware wrappers Nomad can currently select for
-            # H.264/HEVC execution, not unrelated NVENC/QSV wrappers on a host.
             if encoder in set(HARDWARE_VIDEO_ENCODERS.get("h264", ())) | set(HARDWARE_VIDEO_ENCODERS.get("hevc", ())):
                 hardware_validation[encoder] = _validate_video_encoder(ffmpeg, encoder)
 
@@ -242,7 +246,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             checks.append(_check(
                 "A733 hardware video path",
                 True,
-                "Radxa GStreamer/OpenMAX omxh264videoenc passed a runtime test and is enabled for compatible H.264 HLS transcodes",
+                "Radxa GStreamer/OpenMAX omxh264videoenc passed a runtime test; it remains available for explicit live-transcode opt-in",
                 severity="warn",
             ))
         else:
@@ -257,6 +261,19 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
                 ),
                 severity="warn",
             ))
+
+    checks.append(_check(
+        "lightweight playback policy",
+        True,
+        (
+            "Lite mode is active: direct play and cheap remux/audio conversion are preferred; automatic live video transcode is disabled"
+            if lite_mode and not live_video_opt_in else
+            "Live video transcode is explicitly enabled"
+            if live_video_opt_in else
+            "Lite mode is not active on this host"
+        ),
+        severity="warn",
+    ))
 
     abr_ok, abr_reason, abr_candidates = abr_available(
         available_encoders=encoders,
@@ -324,9 +341,20 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
     else:
         h264_execution_path = list(h264_candidates)
 
+    video_transcode_runtime = bool(
+        ffmpeg and writable and any_video_encoder
+        and (not lite_mode or live_video_opt_in)
+    )
+
     return {
         "status": overall,
         "system": system,
+        "runtime_policy": {
+            "lite_playback": lite_mode,
+            "automatic_live_video_transcode": video_transcode_runtime,
+            "live_video_transcode_opt_in": live_video_opt_in,
+            "preferred_acquisition": "1080p H.264 MP4/AAC",
+        },
         "ffmpeg": {
             "path": ffmpeg,
             "ffprobe_path": ffprobe,
@@ -356,7 +384,9 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "executor_enabled": bool(gst_backend.get("usable")),
             "backend": gst_backend,
             "note": (
-                "Validated A733 OMX is used for compatible H.264 HLS transcodes; FFmpeg/libx264 remains the fallback."
+                "Validated A733 OMX is available for explicit H.264 live transcode, but Lite mode does not invoke it automatically."
+                if gst_backend.get("usable") and lite_mode and not live_video_opt_in else
+                "Validated A733 OMX can be used for compatible H.264 HLS transcodes; FFmpeg/libx264 remains the fallback."
                 if gst_backend.get("usable") else
                 "The A733 vendor backend is not currently validated; FFmpeg paths remain available as fallback."
             ),
@@ -373,7 +403,7 @@ def playback_health(user_id: int = Depends(get_current_user_id)):
             "direct_play": True,
             "remux": bool(ffmpeg and writable),
             "audio_transcode": bool(ffmpeg and writable and "aac" in encoders),
-            "video_transcode": bool(ffmpeg and writable and any_video_encoder),
+            "video_transcode": video_transcode_runtime,
             "adaptive_hls": bool(ffmpeg and writable and abr_ok and "aac" in encoders),
         },
         "checks": checks,
