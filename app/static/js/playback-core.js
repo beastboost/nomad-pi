@@ -104,6 +104,11 @@
         return ['mp4', 'm4v', 'mov'].includes(ext(path));
     }
 
+    function storageIoFailure(err) {
+        const message = String(err?.message || err || '');
+        return /(input\/output error|\berrno\s*5\b|\beio\b|no such device|transport endpoint is not connected|stale file handle)/i.test(message);
+    }
+
     function retireSession(sessionId) {
         if (!sessionId) return;
         fetch(`${API}/playback/sessions/${encodeURIComponent(sessionId)}`, {
@@ -302,6 +307,10 @@
             startHeartbeat(current);
         } catch (err) {
             console.warn('[Nomad playback core] optimized playback failed:', err);
+            if (storageIoFailure(err)) {
+                toast('Storage read failed — the media drive disconnected or returned an I/O error. Playback stopped instead of retrying the drive.', 'error', 10000);
+                return;
+            }
             toast(`Optimized playback unavailable: ${err?.message || err}`, 'error', 8000);
             if (legacyRawFallbackAllowed(path)) {
                 legacyPlayVideo(path, at);
