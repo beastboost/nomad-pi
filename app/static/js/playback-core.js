@@ -95,6 +95,24 @@
                canPlay(video, 'application/x-mpegURL');
     }
 
+    function legacyRawFallbackAllowed(path) {
+        // Never throw containers such as MKV/TS/AVI at the old raw player after
+        // the optimized backend failed. Safari rejecting that raw file hides
+        // the useful server-side error and produces the misleading "Convert to
+        // MP4" toast. Keep the emergency fallback only for plausible native
+        // ISO-BMFF files.
+        return ['mp4', 'm4v', 'mov'].includes(ext(path));
+    }
+
+    function retireSession(sessionId) {
+        if (!sessionId) return;
+        fetch(`${API}/playback/sessions/${encodeURIComponent(sessionId)}`, {
+            method: 'DELETE',
+            headers: authHeaders(),
+            keepalive: true,
+        }).catch(() => {});
+    }
+
     function loadHlsLibrary() {
         if (window.Hls) return Promise.resolve(window.Hls);
         if (Core.hlsPromise) return Core.hlsPromise;
@@ -265,6 +283,7 @@
                 path,
                 type: result.playback.type,
                 mode: result.plan?.mode,
+                quality: result.session?.quality || 'auto',
                 url: result.playback.url,
                 offset: isHls ? Math.max(0, Number(at) || 0) : 0,
                 sourceDuration: sourceDuration > 0 && isFinite(sourceDuration) ? sourceDuration : 0,
@@ -282,9 +301,11 @@
             }
             startHeartbeat(current);
         } catch (err) {
-            console.warn('[Nomad playback core] falling back to legacy stream:', err);
-            toast(`Adaptive playback unavailable: ${err?.message || err}`, 'warn', 5000);
-            legacyPlayVideo(path, at);
+            console.warn('[Nomad playback core] optimized playback failed:', err);
+            toast(`Optimized playback unavailable: ${err?.message || err}`, 'error', 8000);
+            if (legacyRawFallbackAllowed(path)) {
+                legacyPlayVideo(path, at);
+            }
         }
     };
 
@@ -296,13 +317,7 @@
             destroyHls(retiring);
         }
         legacyStopVideo();
-        if (retiring?.id) {
-            fetch(`${API}/playback/sessions/${encodeURIComponent(retiring.id)}`, {
-                method: 'DELETE',
-                headers: authHeaders(),
-                keepalive: true,
-            }).catch(() => {});
-        }
+        retireSession(retiring?.id);
     };
 
     if (legacyReconnectVideo) {
@@ -353,6 +368,46 @@
         };
     }
 
+    async function replacementSeek(current, target, wasPlaying) {
+        const oldId = current.id;
+        const result = await api('/playback/start', {
+            method: 'POST',
+            body: JSON.stringify({
+                path: current.path,
+                capabilities: browserCapabilities(),
+                device_id: deviceId(),
+                quality: current.quality || 'auto',
+                position: Math.max(0, Number(target) || 0),
+            }),
+        });
+        const newId = result.session?.id;
+        if (!newId || result.playback?.type !== 'hls') {
+            if (newId) retireSession(newId);
+            throw new Error('Replacement HLS session was not created');
+        }
+        if (Core.current !== current) {
+            retireSession(newId);
+            return;
+        }
+
+        current.id = newId;
+        current.type = result.playback.type;
+        current.mode = result.plan?.mode || current.mode;
+        current.quality = result.session?.quality || current.quality || 'auto';
+        current.url = result.playback.url;
+        current.offset = Math.max(0, Number(target) || 0);
+        const duration = Number(result.session?.duration || result.plan?.source?.duration || 0);
+        if (duration > 0 && isFinite(duration)) current.sourceDuration = duration;
+        V.url = current.url;
+        V.nomadPlaybackSession = current.id;
+        V.nomadOffset = current.offset;
+
+        await attachHls(current, wasPlaying);
+        retireSession(oldId);
+        updateScrub();
+        heartbeat(wasPlaying ? 'playing' : 'paused');
+    }
+
     async function seekHls(target) {
         const current = Core.current;
         const video = V?.el;
@@ -360,6 +415,16 @@
         Core.seeking = true;
         const wasPlaying = !video.paused;
         try {
+            // Cheap stream-copy jobs are safe to overlap briefly. Prepare the
+            // target in a fresh session while the current stream is still
+            // available, then retire the old FFmpeg job after handover. This
+            // avoids same-session terminate/restart races and preserves playback
+            // if preparing the seek target fails.
+            if (current.mode === 'remux' || current.mode === 'transcode_audio') {
+                await replacementSeek(current, target, wasPlaying);
+                return;
+            }
+
             const result = await api(`/playback/sessions/${encodeURIComponent(current.id)}/seek`, {
                 method: 'POST',
                 body: JSON.stringify({ position: Math.max(0, Number(target) || 0) }),
@@ -375,7 +440,7 @@
             updateScrub();
             heartbeat(wasPlaying ? 'playing' : 'paused');
         } catch (err) {
-            toast(`Could not seek: ${err?.message || err}`, 'error', 5000);
+            toast(`Could not seek: ${err?.message || err}`, 'error', 7000);
         } finally {
             Core.seeking = false;
         }
