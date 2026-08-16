@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from app.services.platform_info import _classify
 from app.services.playback.compat import BrowserPlaybackPlanner
 from app.services.playback.encoders import video_encoder_candidates
 from app.services.playback.hls import build_hls_command, streaming_input_readrate
@@ -94,6 +95,23 @@ def test_ffmpeg_openmax_is_preferred_before_software_when_available():
         "h264",
         available={"h264_omx", "libx264"},
         policy="auto",
+    )
+    assert candidates == ["h264_omx", "libx264"]
+
+
+def test_sun60iw2_is_classified_as_allwinner_a733():
+    family, vendor, soc = _classify("sun60iw2", "allwinner,sun60iw2", "")
+    assert family == "allwinner-a733"
+    assert soc == "allwinner-a733"
+    assert vendor in {"Allwinner", "Radxa"}
+
+
+def test_sun60iw2_prefers_omx_over_generic_v4l2_when_both_exist():
+    candidates = video_encoder_candidates(
+        "h264",
+        available={"h264_v4l2m2m", "h264_omx", "libx264"},
+        policy="auto",
+        model="sun60iw2",
     )
     assert candidates == ["h264_omx", "libx264"]
 
