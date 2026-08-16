@@ -22,7 +22,7 @@
           <div class="health-head">
             <div>
               <div class="health-title">Automatic storage failover</div>
-              <div class="health-note">Keep a free-space safety buffer on the system/data drive, then write new media to an external volume.</div>
+              <div class="health-note">Protect the system/data drive and move new media plus playback caches to a selected external volume when needed.</div>
             </div>
             <label style="display:flex;align-items:center;gap:7px;font-size:13px">
               <input type="checkbox" id="storage-failover-enabled" ${policy.enabled ? 'checked' : ''}
@@ -40,7 +40,7 @@
             </select>
           </label>
           <label class="field" style="margin-top:12px">
-            <span>Switch when internal free space reaches</span>
+            <span>Protect this much internal free space</span>
             <div style="display:flex;align-items:center;gap:10px">
               <input type="range" id="storage-failover-threshold" min="5" max="50" step="1" value="${threshold}" style="flex:1;accent-color:var(--color-accent)">
               <strong id="storage-failover-threshold-label" style="min-width:42px;text-align:right">${threshold}%</strong>
@@ -48,7 +48,7 @@
           </label>
           <button class="btn btn-primary btn-block" id="storage-failover-save" style="margin-top:14px;min-height:46px">Save failover policy</button>
           <div class="facts-note" style="text-align:left;margin-top:10px">
-            Example: 20% means Nomad keeps roughly the last 20% of the internal/data filesystem free. New Movies, Shows, Music, Books, Gallery and Files then go to matching folders on the selected external volume.
+            At 20%, Nomad preserves roughly the last 20% of the internal/data filesystem. New Movies, Shows, Music, Books, Gallery and Files then use matching folders on the selected external volume. HLS, Stream + Keep HLS and adaptive playback caches use the same safety policy. For a large local movie, Nomad preflights the likely cache footprint and can choose the external cache early if writing it internally would breach the reserve.
           </div>`;
 
         body.prepend(card);
@@ -68,7 +68,7 @@
                 });
                 const p = result.policy || {};
                 toast(p.enabled
-                    ? `Storage failover enabled at ${p.threshold_free_percent}% free`
+                    ? `Storage and playback-cache failover enabled at ${p.threshold_free_percent}% free`
                     : 'Storage failover disabled', 'success', 3500);
                 refreshSub();
             } catch (err) {
