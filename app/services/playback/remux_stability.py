@@ -75,6 +75,14 @@ def _stable_build_hls_command(**kwargs):
     if "-fflags" not in cmd[:input_pos]:
         cmd[input_pos:input_pos] = ["-fflags", "+genpts"]
 
+    # Preserve the input demuxer's video timebase for stream-copy jobs. FFmpeg
+    # documents copytb=1 specifically as useful for avoiding non-monotonic
+    # timestamps while stream copying variable/awkward frame-rate sources. The
+    # video is copied in both remux and audio-only transcode modes.
+    input_pos = cmd.index("-i")
+    if "-copytb" not in cmd:
+        cmd[input_pos + 2:input_pos + 2] = ["-copytb", "1"]
+
     # Defensive cleanup for callers that explicitly constructed a legacy
     # read-rate command before this runtime overlay was installed.  A 1x -re
     # producer is the exact underrun condition this module exists to avoid.
