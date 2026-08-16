@@ -88,8 +88,12 @@ jobs:
           bash -n update.sh
           bash -n scripts/platform-detect.sh
           bash -n scripts/install-common.sh
+          bash -n scripts/network-appliance.sh
+          bash -n scripts/port80-redirect.sh
           bash -n scripts/vendor-assets.sh
           bash -n scripts/wifi-guard.sh
+          bash -n os-builder/stage3-nomad/03-setup-services/files/nomad-pi-firstboot.sh
+          bash -n os-builder/stage3-nomad/03-setup-services/files/nomad-port80-redirect.sh
 
       - name: Run unit and regression tests
         env:
