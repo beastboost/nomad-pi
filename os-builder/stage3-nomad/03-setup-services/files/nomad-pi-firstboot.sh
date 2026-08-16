@@ -11,10 +11,10 @@ HOTSPOT_NAME="NomadPi"
 HOTSPOT_IP="10.42.0.1"
 mkdir -p /etc/nomad-pi
 
-# Product identity is `nomad`, which makes the stable Bonjour address
-# http://nomad.local on both Pi and Radxa appliances.
+# Product identity remains `nomadpi`, so the stable Bonjour address is
+# http://nomadpi.local on both Pi and Radxa appliances.
 if command -v hostnamectl >/dev/null 2>&1; then
-    hostnamectl set-hostname nomad 2>/dev/null || true
+    hostnamectl set-hostname nomadpi 2>/dev/null || true
 fi
 if [ -f /etc/hosts ]; then
     python3 - <<'PY'
@@ -25,11 +25,11 @@ lines = []
 found = False
 for line in text.splitlines():
     if line.startswith('127.0.1.1'):
-        line = '127.0.1.1\tnomad'
+        line = '127.0.1.1\tnomadpi'
         found = True
     lines.append(line)
 if not found:
-    lines.append('127.0.1.1\tnomad')
+    lines.append('127.0.1.1\tnomadpi')
 p.write_text('\n'.join(lines).rstrip() + '\n', encoding='utf-8')
 PY
 fi
@@ -79,7 +79,7 @@ address=/clients3.google.com/$HOTSPOT_IP
 address=/www.msftconnecttest.com/$HOTSPOT_IP
 address=/www.msftncsi.com/$HOTSPOT_IP
 address=/detectportal.firefox.com/$HOTSPOT_IP
-address=/nomad.local/$HOTSPOT_IP
+address=/nomadpi.local/$HOTSPOT_IP
 dhcp-option=114,http://$HOTSPOT_IP/portal
 EOF
 
