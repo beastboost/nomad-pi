@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import os
 import shutil
@@ -68,6 +69,32 @@ def fit_dimensions(
     return out_w, out_h
 
 
+@lru_cache(maxsize=4)
+def ffmpeg_supports_readrate(ffmpeg_path: Optional[str] = None) -> bool:
+    """Return whether this FFmpeg build exposes the newer ``-readrate`` input option.
+
+    Radxa vendor images can ship an older FFmpeg that still supports ``-re``
+    but predates ``-readrate``. Merely constructing a command with -readrate on
+    those builds makes FFmpeg exit before opening the media, so detect the
+    option once per executable and use the legacy pacing flag when necessary.
+    """
+    ffmpeg = ffmpeg_path or shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-h", "full"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "-readrate " in (result.stdout or "") or "-readrate\t" in (result.stdout or "")
+
+
 def streaming_input_readrate(mode: str | PlaybackMode) -> Optional[float]:
     """Cap cheap stream-copy jobs on small appliances so they do not saturate I/O.
 
@@ -76,6 +103,10 @@ def streaming_input_readrate(mode: str | PlaybackMode) -> Optional[float]:
     cache. On <2 GiB appliances we default to 2x media rate: enough headroom for
     playback without racing through the whole source. Set NOMAD_HLS_READRATE to
     ``off``/``0`` to disable or a positive number to override.
+
+    Older FFmpeg builds that cannot express an arbitrary read rate are handled
+    by build_hls_command(), which safely falls back to the long-supported ``-re``
+    real-time pacing option instead of failing playback.
     """
     playback_mode = mode if isinstance(mode, PlaybackMode) else PlaybackMode(mode)
     if playback_mode not in {PlaybackMode.REMUX, PlaybackMode.TRANSCODE_AUDIO}:
@@ -116,6 +147,7 @@ def build_hls_command(
     max_bitrate: Optional[int] = None,
     start_position: float = 0,
     input_readrate: Optional[float] = None,
+    readrate_supported: Optional[bool] = None,
 ) -> list[str]:
     ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
     output_dir = Path(output_dir)
@@ -133,7 +165,19 @@ def build_hls_command(
     if start_position and start_position > 0:
         cmd += ["-ss", f"{float(start_position):.3f}"]
     if input_readrate:
-        cmd += ["-readrate", f"{float(input_readrate):.3f}"]
+        supports_readrate = (
+            ffmpeg_supports_readrate(ffmpeg)
+            if readrate_supported is None
+            else bool(readrate_supported)
+        )
+        if supports_readrate:
+            cmd += ["-readrate", f"{float(input_readrate):.3f}"]
+        else:
+            # FFmpeg has supported -re for many years. It is equivalent to a
+            # 1x input read rate, so it is conservative compared with our 2x
+            # low-memory default but prevents both I/O runaway and a startup
+            # failure on older Radxa/vendor FFmpeg packages.
+            cmd += ["-re"]
     cmd += ["-i", source_path]
 
     # Graphic subtitle streams (PGS/DVD/DVB) are decoded as bitmap frames.
