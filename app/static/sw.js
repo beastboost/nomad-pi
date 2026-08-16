@@ -2,7 +2,7 @@ const CACHE_NAME = 'nomad-pi-v2.0.13-radxa-hotfix';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css',
-  '/js/app.js', '/js/app_legacy.js', '/js/playback-core.js', '/js/player-mobile-fix.js',
+  '/js/app.js', '/js/app_legacy.js', '/js/playback-core.js', '/js/runtime-ui-guard.js', '/js/player-mobile-fix.js',
   '/js/replacement-control.js', '/js/track-control.js', '/js/subtitle-control.js',
   '/js/quality-control.js', '/js/device-control.js', '/js/watch-party.js', '/js/music2-player.js',
   '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js',
@@ -52,7 +52,7 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/api/playback/') ||
     url.pathname.includes('/media/stream') ||
     url.pathname.includes('/api/media/stream') ||
-    url.pathname.endsWith('.m3u8') || url.pathname.endsWith('.m4s') ||
+    url.pathname.endsWith('.m3u8') || url.pathname.endsWith('.m4s') || url.pathname.endsWith('.ts') ||
     url.pathname.endsWith('.mp4') || url.pathname.endsWith('.mkv') ||
     url.pathname.endsWith('.mp3') || url.pathname.endsWith('.flac')
   ) return;
