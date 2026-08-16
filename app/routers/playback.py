@@ -3,8 +3,14 @@
 import sys
 from urllib.parse import quote
 
+from app.routers import debrid as _debrid_router_module
 from app.routers import playback_core as _core
+from app.routers.debrid_universal import router as _debrid_universal_router
 from app.services.debrid_lite import install_debrid_lite_search_policy
+from app.services.playback.appliance_runtime import (
+    assert_source_readable,
+    install_appliance_runtime,
+)
 from app.services.playback.cache_guard import install_playback_cache_guard
 from app.services.playback.remux_stability import install_remux_stability
 from app.services.playback.runtime_abr_policy import install_runtime_abr_policy
@@ -12,11 +18,20 @@ from app.services.playback.runtime_abr_policy import install_runtime_abr_policy
 # Install low-resource runtime policy before feature routers instantiate their
 # own managers or requests begin. The debrid router resolves search_torrentio
 # dynamically from app.services.debrid, so installing its ranking overlay here
-# also covers the already-imported router without duplicating any API routes.
+# also covers the already-imported router without duplicating legacy routes.
 install_debrid_lite_search_policy()
+install_appliance_runtime(_core)
 install_playback_cache_guard()
 install_remux_stability()
 install_runtime_abr_policy()
+
+# Universal search lives under the existing /api/debrid prefix. main.py imports
+# the debrid module before this playback facade and only mounts it afterwards,
+# so adding the child router here is deterministic without another top-level
+# app include or a second public prefix.
+if not getattr(_debrid_router_module.router, "_nomad_universal_installed", False):
+    _debrid_router_module.router.include_router(_debrid_universal_router)
+    _debrid_router_module.router._nomad_universal_installed = True
 
 from app.routers.playback_tracks import router as _tracks_router
 from app.routers.playback_quality import router as _quality_router
@@ -24,6 +39,7 @@ from app.routers.playback_health import router as _health_router
 from app.routers.playback_subtitles import router as _subtitle_router
 from app.routers.playback_devices import router as _devices_router
 from app.routers.playback_music import router as _music_router
+from app.routers.playback_storage import router as _storage_router
 from app.routers.playback_stream_keep import (
     manager as _stream_keep_manager,
     router as _stream_keep_router,
@@ -51,8 +67,8 @@ _original_hls_status = _core.hls_manager.status
 # Nomad remains a small-appliance media server first. On sub-2 GiB systems the
 # browser planner therefore prefers direct play and cheap stream-copy/audio-only
 # conversion, and refuses automatic live video transcoding unless explicitly
-# enabled. This prevents codec choice from turning a Pi Zero-class box into a
-# permanent transcode appliance.
+# enabled. Pi and Radxa use this same planner; only the optional execution backend
+# differs underneath it.
 _core.planner = LiteBrowserPlaybackPlanner()
 
 
@@ -73,8 +89,15 @@ def _ensure_hls_with_selected_streams(session, fs_path=None):
             fs_path = _core.safe_fs_path_from_web_path(session.path)
         except Exception as exc:
             raise HLSJobError("Playback source is no longer available") from exc
-    if not _core.os.path.isfile(fs_path):
-        raise HLSJobError("Playback source is no longer available")
+
+    # Turn USB/filesystem EIO into one controlled playback failure before a new
+    # FFmpeg/GStreamer process is spawned. This is particularly important for
+    # seek/restart paths, which otherwise can repeatedly touch a dead drive.
+    try:
+        assert_source_readable(fs_path)
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        raise HLSJobError(str(detail)) from exc
 
     burn_subtitle = metadata.get("burn_subtitle")
     _core.hls_manager.ensure_job(
@@ -133,6 +156,7 @@ for _router in (
     _abr_router,
     _devices_router,
     _music_router,
+    _storage_router,
     _stream_keep_router,
     _stream_keep_control_router,
     _offline_router,
