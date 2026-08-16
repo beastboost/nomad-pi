@@ -61,6 +61,5 @@ def test_low_priority_wrapper_prefers_io_and_cpu_niceness(monkeypatch):
     cmd = remux_stability._low_priority_command(["ffmpeg", "-i", "movie.mkv"])
 
     assert cmd[:5] == ["/usr/bin/ionice", "-c", "2", "-n", "7"]
-    assert "/usr/bin/nice" in cmd
-    assert cmd[-3:] == ["-i", "movie.mkv"] if False else cmd[-3:]
-    assert "ffmpeg" in cmd
+    assert cmd[5:8] == ["/usr/bin/nice", "-n", "5"]
+    assert cmd[8:] == ["ffmpeg", "-i", "movie.mkv"]
