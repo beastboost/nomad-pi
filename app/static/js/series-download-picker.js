@@ -29,6 +29,13 @@
         return file?.video === true || videoExt.test(filePath(file));
     }
 
+    function coversEpisode(file, season, episode) {
+        const fileSeason = Number(file?.season || 0);
+        const start = Number(file?.episode || 0);
+        const end = Number(file?.episode_end || start || 0);
+        return fileSeason === Number(season) && start > 0 && Number(episode) >= start && Number(episode) <= end;
+    }
+
     function episodeText(file) {
         const season = Number(file?.season || 0);
         const episode = Number(file?.episode || 0);
@@ -79,16 +86,9 @@
     function defaultSelection(entry, manifest) {
         state.selected.clear();
         const files = (manifest.files || []).filter(isVideo);
-        const isSeries = entry?.title?.type === 'series';
-        if (!isSeries) {
-            const largest = [...files].sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0))[0];
-            if (largest) state.selected.add(Number(largest.id));
-            return;
-        }
-
         const wantedSeason = Number(entry.title?._season || manifest.requested_season || 1);
         const wantedEpisode = Number(entry.title?._episode || manifest.requested_episode || 1);
-        const exact = files.filter(file => Number(file.season || 0) === wantedSeason && Number(file.episode || 0) === wantedEpisode);
+        const exact = files.filter(file => coversEpisode(file, wantedSeason, wantedEpisode));
         if (exact.length) {
             exact.forEach(file => state.selected.add(Number(file.id)));
             return;
@@ -111,12 +111,14 @@
         const episode = Number(title._episode || manifest.requested_episode || 1);
         const files = (manifest.files || []).filter(isVideo);
         const releaseTotal = files.reduce((sum, file) => sum + Number(file.bytes || 0), 0);
+        const libraryTitle = `${title.title || 'Series'}${title.year ? ` (${String(title.year).match(/\d{4}/)?.[0] || title.year})` : ''}`;
 
         openSheet(`
           <div class="kicker" style="margin-bottom:5px">Choose episodes</div>
           <div style="font-size:17px;font-weight:600;line-height:1.3">${escapeHtml(title.title || entry.release?.name || 'Series')}</div>
           <div class="facts-note" style="text-align:left;margin-top:6px">
             ${files.length} video file${files.length === 1 ? '' : 's'} · ${escapeHtml(bytesLabel(releaseTotal))} in release
+            <br>Saves to <strong>Shows › ${escapeHtml(libraryTitle)} › Season ${String(season).padStart(2, '0')}</strong>
           </div>
 
           <div style="display:flex;gap:7px;flex-wrap:wrap;margin:14px 0 12px">
@@ -163,7 +165,7 @@
                 info_hash: infoHash,
                 title: title.title || '',
                 year: String(title.year || ''),
-                media_type: title.type || 'movie',
+                media_type: title.type || 'series',
                 season: Number(title._season || 1),
                 episode: Number(title._episode || 1),
             }),
@@ -176,7 +178,7 @@
         if (!entry) return;
         openSheet(`
           <div class="kicker" style="margin-bottom:7px">Inspecting release</div>
-          <div style="font-size:16px;margin-bottom:10px">${escapeHtml(entry.title?.title || entry.release?.name || 'Media')}</div>
+          <div style="font-size:16px;margin-bottom:10px">${escapeHtml(entry.title?.title || entry.release?.name || 'Series')}</div>
           <div class="facts-note" style="text-align:left">Reading the provider file manifest before anything is downloaded…</div>
           <div class="bar" style="margin-top:14px"><span style="width:35%"></span></div>`);
         try {
@@ -231,7 +233,7 @@
                         source_path: rawPath || rawName,
                         title: title.title || '',
                         year: String(title.year || ''),
-                        media_type: title.type || 'movie',
+                        media_type: 'series',
                         season,
                         episode,
                     }),
@@ -269,7 +271,7 @@
             const title = state.entry?.title || {};
             const wantedSeason = Number(title._season || state.manifest?.requested_season || 1);
             const wantedEpisode = Number(title._episode || state.manifest?.requested_episode || 1);
-            if (mode === 'episode') applySelection(file => Number(file.season || 0) === wantedSeason && Number(file.episode || 0) === wantedEpisode);
+            if (mode === 'episode') applySelection(file => coversEpisode(file, wantedSeason, wantedEpisode));
             else if (mode === 'season') applySelection(file => Number(file.season || 0) === wantedSeason);
             else if (mode === 'all') applySelection(() => true);
             else applySelection(() => false);
@@ -282,12 +284,14 @@
     });
 
     // Universal search's older compatibility shim turns Download into the
-    // legacy data-grab path during capture. Intercept after that shim but still
-    // before bubbling, so no provider file is selected/downloaded until the
-    // manifest picker has been shown.
+    // legacy data-grab path during capture. Intercept series only; movie
+    // downloads continue through the established movie path.
     document.addEventListener('click', event => {
         const button = event.target.closest('[data-universal-download]');
         if (!button) return;
+        const U = window.NomadUniversalSearch;
+        const entry = U?.entries?.[Number(button.dataset.universalDownload)];
+        if (!entry || !['series', 'show'].includes(String(entry.title?.type || '').toLowerCase())) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         openPicker(button.dataset.universalDownload);
