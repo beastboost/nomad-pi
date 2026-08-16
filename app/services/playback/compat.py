@@ -39,15 +39,29 @@ class BrowserPlaybackPlanner(PlaybackPlanner):
                 target_audio_codec=target_audio,
             )
 
-        # HEVC in MP4 can be decodable but signalled with the hev1 sample entry,
-        # which is less reliable on Apple clients. A cheap remux lets FFmpeg
-        # retag it as hvc1 without touching the video bitstream.
+        # Apple recognises both hvc1 and hev1 HEVC sample entries, although hvc1
+        # is preferred for authored HLS. If an HEVC MP4 is already directly
+        # playable by the client, preserve the original file instead of running
+        # it through a stream-copy HLS remux solely to change hev1 -> hvc1.
+        # Arbitrary source GOPs/timestamps cannot be normalised by stream copy;
+        # on older vendor FFmpeg builds that can create irregular fMP4 fragment
+        # durations or invalid packet-duration warnings and make Safari judder.
+        if (
+            base.mode == PlaybackMode.DIRECT_PLAY
+            and source.video_codec in {"hevc", "h265"}
+            and source.container in {"mp4", "mov"}
+            and source.codec_tag == "hev1"
+        ):
+            return base
+
+        # Keep the retag remux only for unusual HEVC sample entries that are
+        # neither Apple's preferred hvc1 nor the recognised hev1 entry.
         if (
             base.mode == PlaybackMode.DIRECT_PLAY
             and source.video_codec in {"hevc", "h265"}
             and source.container in {"mp4", "mov"}
             and source.codec_tag
-            and source.codec_tag != "hvc1"
+            and source.codec_tag not in {"hvc1", "hev1"}
         ):
             return PlaybackPlan(
                 mode=PlaybackMode.REMUX,
