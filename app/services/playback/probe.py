@@ -26,7 +26,8 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
         "-v", "error",
         "-print_format", "json",
         "-show_entries", "format=format_name,bit_rate,duration",
-        "-show_entries", "stream=codec_type,codec_name,profile,pix_fmt,codec_tag_string,width,height,bit_rate",
+        "-show_entries",
+        "stream=codec_type,codec_name,profile,pix_fmt,codec_tag_string,width,height,bit_rate:stream_disposition=attached_pic",
         path,
     ]
 
@@ -58,7 +59,15 @@ def probe_media(path: str, timeout: int = 30) -> MediaProbe:
     audio = None
     for stream in data.get("streams") or []:
         stream_type = str(stream.get("codec_type") or "").lower()
-        if stream_type == "video" and video is None:
+        disposition = stream.get("disposition") or {}
+        attached_pic = bool(disposition.get("attached_pic"))
+
+        # MP3/FLAC/M4A files frequently carry cover artwork as a MJPEG/PNG
+        # stream with disposition.attached_pic=1. That artwork is metadata, not
+        # playable video. Treating it as video made the audio-only browser
+        # capability set look incapable of playing the file and could push a
+        # perfectly native track into the video-transcode planner.
+        if stream_type == "video" and video is None and not attached_pic:
             video = stream
         elif stream_type == "audio" and audio is None:
             audio = stream
