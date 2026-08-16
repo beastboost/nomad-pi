@@ -39,7 +39,10 @@ for variant in regular fill; do
             esac
             fetch "$url" "$VENDOR/phosphor/$file" || true
         done
-        sed -i -E "s|url\((['\"]?)[^)'\"]*/([^)/'\"]+\.(woff2|woff|ttf))|url(\1\2|g" "$css"
+        # Do not use '|' as the sed delimiter here: the ERE itself contains
+        # alternation (woff2|woff|ttf), which GNU sed otherwise parses as the
+        # end of the substitution and reports "unknown option to s".
+        sed -i -E "s~url\((['\"]?)[^)'\"]*/([^)/'\"]+\.(woff2|woff|ttf))~url(\1\2~g" "$css"
     else
         echo "  ! could not fetch Phosphor $variant — the app will use the CDN"
         ok=0
