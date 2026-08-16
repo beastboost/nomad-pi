@@ -1,13 +1,14 @@
 """Selectable debrid manifests and correctly-structured series downloads.
 
 Universal search should never blindly select an entire season pack before the
-user has seen what is inside it.  This router exposes a small provider-neutral
+user has seen what is inside it. This router exposes a small provider-neutral
 manifest/selection layer and a structured library download endpoint.
 """
 
 from __future__ import annotations
 
 import os
+import queue
 import re
 import threading
 import time
@@ -29,7 +30,9 @@ _VIDEO_EXT = {
     ".mp4", ".mkv", ".m4v", ".webm", ".avi", ".mov", ".ts", ".m2ts",
     ".mts", ".wmv", ".flv", ".mpg", ".mpeg", ".mpe", ".3gp", ".vob",
 }
-_SERIES_DOWNLOAD_SLOT = threading.Semaphore(1)
+_SERIES_QUEUE: queue.Queue[tuple[str, str, str]] = queue.Queue()
+_SERIES_WORKER_LOCK = threading.Lock()
+_SERIES_WORKER: Optional[threading.Thread] = None
 
 
 class ManifestRequest(BaseModel):
@@ -305,15 +308,33 @@ def _show_destination(body: LibraryDownloadRequest) -> tuple[str, str, int, int]
     return media.pick_unique_dest(os.path.join(dest_dir, filename)), filename, season, episode
 
 
-def _queued_series_worker(download_id: str, url: str, dest_path: str) -> None:
-    with _SERIES_DOWNLOAD_SLOT:
-        with debrid._downloads_lock:
-            if download_id not in debrid._downloads:
-                return
-            if debrid._downloads[download_id].get("status") == "cancelled":
-                return
-            debrid._downloads[download_id]["status"] = "downloading"
-        debrid._download_worker(download_id, url, dest_path, "shows")
+def _series_queue_loop() -> None:
+    while True:
+        download_id, url, dest_path = _SERIES_QUEUE.get()
+        try:
+            with debrid._downloads_lock:
+                current = debrid._downloads.get(download_id)
+                if not current or current.get("status") == "cancelled":
+                    continue
+                current["status"] = "downloading"
+            debrid._download_worker(download_id, url, dest_path, "shows")
+        finally:
+            _SERIES_QUEUE.task_done()
+
+
+def _ensure_series_worker() -> None:
+    global _SERIES_WORKER
+    if _SERIES_WORKER and _SERIES_WORKER.is_alive():
+        return
+    with _SERIES_WORKER_LOCK:
+        if _SERIES_WORKER and _SERIES_WORKER.is_alive():
+            return
+        _SERIES_WORKER = threading.Thread(
+            target=_series_queue_loop,
+            name="nomad-series-downloads",
+            daemon=True,
+        )
+        _SERIES_WORKER.start()
 
 
 @router.post("/library-download")
@@ -351,11 +372,8 @@ def queue_library_download(body: LibraryDownloadRequest,
     }
     with debrid._downloads_lock:
         debrid._downloads[download_id] = info
-    threading.Thread(
-        target=_queued_series_worker,
-        args=(download_id, body.url, dest_path),
-        daemon=True,
-    ).start()
+    _ensure_series_worker()
+    _SERIES_QUEUE.put((download_id, body.url, dest_path))
     return {
         "ok": True,
         "download_id": download_id,
@@ -364,4 +382,5 @@ def queue_library_download(body: LibraryDownloadRequest,
         "season": season,
         "episode": episode,
         "destination": dest_path,
+        "queue_depth": _SERIES_QUEUE.qsize(),
     }
