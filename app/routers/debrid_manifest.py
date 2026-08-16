@@ -68,13 +68,33 @@ def _provider_key() -> tuple[str, str]:
 
 
 def _episode_numbers(path: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """Extract season/episode identity from common release naming schemes.
+
+    Provider manifests are not consistent. Besides S06E01 and 6x01, common
+    scene/P2P names use forms such as ``Season.06.Episode.01`` or
+    ``Season 06/Episode 01``. The explicit identity embedded in the release
+    path is authoritative for library placement; search context is only a
+    fallback when a provider exposes an unparseable filename.
+    """
     text = str(path or "")
-    match = re.search(r"(?i)(?:^|[\s._/\\-])S(\d{1,3})E(\d{1,4})(?:E(\d{1,4}))?", text)
-    if match:
-        return int(match.group(1)), int(match.group(2)), int(match.group(3)) if match.group(3) else None
-    match = re.search(r"(?i)(?:^|[\s._/\\-])(\d{1,3})x(\d{1,4})(?:[-._ ]?(\d{1,4}))?", text)
-    if match:
-        return int(match.group(1)), int(match.group(2)), int(match.group(3)) if match.group(3) else None
+    sep = r"[\s._/\\-]*"
+
+    patterns = (
+        # S06E01, S06.E01, S06-E01, S06E01E02
+        rf"(?i)(?:^|[\s._/\\-])S(\d{{1,3}}){sep}E(\d{{1,4}})(?:{sep}E?(\d{{1,4}}))?",
+        # Season.06.Episode.01, Season 6 Ep 1, Season-06/E01
+        rf"(?i)(?:^|[\s._/\\-])Season{sep}(\d{{1,3}}){sep}(?:Episode|Ep|E){sep}(\d{{1,4}})(?:{sep}(?:Episode|Ep|E)?{sep}(\d{{1,4}}))?",
+        # 6x01, 6x01-02
+        r"(?i)(?:^|[\s._/\\-])(\d{1,3})x(\d{1,4})(?:[-._ ]?(\d{1,4}))?",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return (
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)) if match.group(3) else None,
+            )
     return None, None, None
 
 
@@ -182,6 +202,7 @@ def prepare_manifest(body: ManifestRequest, user_id: int = Depends(get_current_u
         raise HTTPException(502, f"Could not inspect release: {exc}") from exc
 
     video_files = [item for item in files if item["video"]]
+    detected_seasons = sorted({int(item["season"]) for item in video_files if item.get("season") is not None})
     return {
         "provider": provider,
         "torrent_id": torrent_id,
@@ -194,6 +215,7 @@ def prepare_manifest(body: ManifestRequest, user_id: int = Depends(get_current_u
         "files": files,
         "video_count": len(video_files),
         "video_bytes": sum(item["bytes"] for item in video_files),
+        "detected_seasons": detected_seasons,
     }
 
 
@@ -275,13 +297,22 @@ def resolve_selection(torrent_id: str, body: SelectionRequest,
 def _show_destination(body: LibraryDownloadRequest) -> tuple[str, str, int, int]:
     source = body.source_path or body.filename
     parsed_season, parsed_episode, _ = _episode_numbers(source)
-    season = int(body.season or parsed_season or 0)
-    episode = int(body.episode or parsed_episode or 0)
+
+    # An explicit episode identity in the provider filename/path is the source
+    # of truth. Search context (body.season/body.episode) is only a fallback.
+    # This prevents a request made from "Season 1" search state from filing a
+    # clearly named Season.06.Episode.01 release inside Season 01.
+    season = int(parsed_season if parsed_season is not None else (body.season or 0))
+    episode = int(parsed_episode if parsed_episode is not None else (body.episode or 0))
 
     title = body.title.strip()
     if not title:
         base = os.path.splitext(os.path.basename(source))[0]
-        title = re.split(r"(?i)[\s._-]+S\d{1,3}E\d{1,4}|[\s._-]+\d{1,3}x\d{1,4}", base, maxsplit=1)[0]
+        title = re.split(
+            r"(?i)[\s._-]+(?:S\d{1,3}[\s._-]*E\d{1,4}|Season[\s._-]*\d{1,3}[\s._-]*(?:Episode|Ep|E)[\s._-]*\d{1,4}|\d{1,3}x\d{1,4})",
+            base,
+            maxsplit=1,
+        )[0]
         title = re.sub(r"[._]+", " ", title).strip() or "Series"
 
     safe_title = debrid._sanitize_filename(title)
