@@ -37,8 +37,8 @@ from app.routers.playback_abr import (
     ensure_adaptive_session as _ensure_adaptive_session,
     router as _abr_router,
 )
+from app.services.playback.a733_browser_policy import A733BrowserPlaybackPlanner
 from app.services.playback.abr import ABRJobError
-from app.services.playback.compat import BrowserPlaybackPlanner
 from app.services.playback.hls import HLSJobError
 
 
@@ -47,9 +47,10 @@ _original_hls_stop = _core.hls_manager.stop
 _original_hls_status = _core.hls_manager.status
 
 # The execution layer emits browser HLS for all non-direct playback. Use the
-# compatibility-aware planner so codecs such as MP3/Opus or VP9 are not blindly
-# stream-copied into an Apple-incompatible fMP4 stream.
-_core.planner = BrowserPlaybackPlanner()
+# compatibility-aware planner plus the A733 field policy: clean direct-play
+# files stay untouched, while HEVC that would otherwise need fragile fMP4
+# stream-copy HLS can use the validated vendor OMX -> H.264 path.
+_core.planner = A733BrowserPlaybackPlanner()
 
 
 def _ensure_hls_with_selected_streams(session, fs_path=None):
