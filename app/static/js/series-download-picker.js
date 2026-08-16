@@ -57,6 +57,20 @@
         return selectedFiles().reduce((sum, file) => sum + Number(file.bytes || 0), 0);
     }
 
+    function sortedVideoFiles(manifest = state.manifest) {
+        return (manifest?.files || []).filter(isVideo).slice().sort((a, b) => {
+            const sa = Number(a.season || 9999), sb = Number(b.season || 9999);
+            if (sa !== sb) return sa - sb;
+            const ea = Number(a.episode || 9999), eb = Number(b.episode || 9999);
+            if (ea !== eb) return ea - eb;
+            return filePath(a).localeCompare(filePath(b));
+        });
+    }
+
+    function detectedSeasons(files = sortedVideoFiles()) {
+        return Array.from(new Set(files.map(file => Number(file.season || 0)).filter(Boolean))).sort((a, b) => a - b);
+    }
+
     function updateSummary() {
         const files = selectedFiles();
         const el = $('#series-picker-summary');
@@ -100,6 +114,56 @@
         if (largest) state.selected.add(Number(largest.id));
     }
 
+    function fileRow(file) {
+        const id = Number(file.id);
+        const path = filePath(file);
+        const name = path.split(/[\\/]/).pop() || path || `File ${id}`;
+        return `
+          <label class="list-row row-rule" style="cursor:pointer;align-items:center;gap:11px;padding:11px 4px">
+            <input type="checkbox" data-file-id="${id}" ${state.selected.has(id) ? 'checked' : ''}
+                   style="width:19px;height:19px;flex:none;accent-color:var(--color-accent)">
+            <div class="list-body" style="min-width:0">
+              <div class="list-title" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+                <span class="tag tag-accent">${escapeHtml(episodeText(file))}</span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${escapeHtml(name)}</span>
+              </div>
+              <div class="list-sub">${escapeHtml(bytesLabel(file.bytes))}</div>
+            </div>
+          </label>`;
+    }
+
+    function groupedFileRows(files) {
+        if (!files.length) return '<div class="empty">No video files were exposed by this release.</div>';
+        const groups = new Map();
+        for (const file of files) {
+            const season = Number(file.season || 0);
+            const key = season || 0;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(file);
+        }
+        return Array.from(groups.entries()).map(([season, group]) => {
+            const total = group.reduce((sum, file) => sum + Number(file.bytes || 0), 0);
+            const label = season ? `Season ${String(season).padStart(2, '0')}` : 'Other video files';
+            return `
+              <div style="padding:11px 4px 5px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+                <div class="kicker">${escapeHtml(label)}</div>
+                <div class="list-sub" style="white-space:nowrap">${group.length} file${group.length === 1 ? '' : 's'} · ${escapeHtml(bytesLabel(total))}</div>
+              </div>
+              ${group.map(fileRow).join('')}`;
+        }).join('');
+    }
+
+    function destinationText(title, year, seasons, requestedSeason) {
+        const libraryTitle = `${title || 'Series'}${year ? ` (${String(year).match(/\d{4}/)?.[0] || year})` : ''}`;
+        if (seasons.length === 1) {
+            return `Shows › ${libraryTitle} › Season ${String(seasons[0]).padStart(2, '0')}`;
+        }
+        if (seasons.length > 1) {
+            return `Shows › ${libraryTitle} › matching Season XX folder for each episode`;
+        }
+        return `Shows › ${libraryTitle} › Season ${String(requestedSeason || 1).padStart(2, '0')} when the release name cannot be parsed`;
+    }
+
     function pickerSheet(entry, manifest) {
         state.entry = entry;
         state.manifest = manifest;
@@ -107,45 +171,33 @@
         defaultSelection(entry, manifest);
 
         const title = entry.title || {};
-        const season = Number(title._season || manifest.requested_season || 1);
-        const episode = Number(title._episode || manifest.requested_episode || 1);
-        const files = (manifest.files || []).filter(isVideo);
+        const requestedSeason = Number(title._season || manifest.requested_season || 1);
+        const requestedEpisode = Number(title._episode || manifest.requested_episode || 1);
+        const files = sortedVideoFiles(manifest);
+        const seasons = detectedSeasons(files);
         const releaseTotal = files.reduce((sum, file) => sum + Number(file.bytes || 0), 0);
-        const libraryTitle = `${title.title || 'Series'}${title.year ? ` (${String(title.year).match(/\d{4}/)?.[0] || title.year})` : ''}`;
+        const destination = destinationText(title.title, title.year, seasons, requestedSeason);
+        const seasonButtons = seasons.map(season =>
+            `<button class="btn" type="button" data-series-season="${season}">Season ${String(season).padStart(2, '0')}</button>`
+        ).join('');
 
         openSheet(`
           <div class="kicker" style="margin-bottom:5px">Choose episodes</div>
           <div style="font-size:17px;font-weight:600;line-height:1.3">${escapeHtml(title.title || entry.release?.name || 'Series')}</div>
           <div class="facts-note" style="text-align:left;margin-top:6px">
-            ${files.length} video file${files.length === 1 ? '' : 's'} · ${escapeHtml(bytesLabel(releaseTotal))} in release
-            <br>Saves to <strong>Shows › ${escapeHtml(libraryTitle)} › Season ${String(season).padStart(2, '0')}</strong>
+            ${files.length} video file${files.length === 1 ? '' : 's'} · <strong>${escapeHtml(bytesLabel(releaseTotal))}</strong> total release size
+            <br>Saves to <strong>${escapeHtml(destination)}</strong>
           </div>
 
           <div style="display:flex;gap:7px;flex-wrap:wrap;margin:14px 0 12px">
-            <button class="btn" type="button" data-series-select="episode">S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}</button>
-            <button class="btn" type="button" data-series-select="season">Season ${String(season).padStart(2, '0')}</button>
+            <button class="btn" type="button" data-series-select="episode">S${String(requestedSeason).padStart(2, '0')}E${String(requestedEpisode).padStart(2, '0')}</button>
+            ${seasonButtons}
             <button class="btn" type="button" data-series-select="all">All video</button>
             <button class="btn" type="button" data-series-select="none">None</button>
           </div>
 
           <div id="series-picker-files" class="list" style="max-height:min(48vh,520px);overflow:auto;border-radius:12px">
-            ${files.map(file => {
-                const id = Number(file.id);
-                const path = filePath(file);
-                const name = path.split(/[\\/]/).pop() || path || `File ${id}`;
-                return `
-                  <label class="list-row row-rule" style="cursor:pointer;align-items:center;gap:11px;padding:11px 4px">
-                    <input type="checkbox" data-file-id="${id}" ${state.selected.has(id) ? 'checked' : ''}
-                           style="width:19px;height:19px;flex:none;accent-color:var(--color-accent)">
-                    <div class="list-body" style="min-width:0">
-                      <div class="list-title" style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
-                        <span class="tag tag-accent">${escapeHtml(episodeText(file))}</span>
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${escapeHtml(name)}</span>
-                      </div>
-                      <div class="list-sub">${escapeHtml(bytesLabel(file.bytes))}</div>
-                    </div>
-                  </label>`;
-            }).join('') || '<div class="empty">No video files were exposed by this release.</div>'}
+            ${groupedFileRows(files)}
           </div>
 
           <div style="position:sticky;bottom:0;background:var(--bg, #0d0d0f);padding-top:13px;margin-top:8px">
@@ -264,6 +316,14 @@
     });
 
     document.addEventListener('click', event => {
+        const seasonSelector = event.target.closest('[data-series-season]');
+        if (seasonSelector) {
+            event.preventDefault();
+            const wantedSeason = Number(seasonSelector.dataset.seriesSeason || 0);
+            applySelection(file => Number(file.season || 0) === wantedSeason);
+            return;
+        }
+
         const selector = event.target.closest('[data-series-select]');
         if (selector) {
             event.preventDefault();
@@ -272,7 +332,6 @@
             const wantedSeason = Number(title._season || state.manifest?.requested_season || 1);
             const wantedEpisode = Number(title._episode || state.manifest?.requested_episode || 1);
             if (mode === 'episode') applySelection(file => coversEpisode(file, wantedSeason, wantedEpisode));
-            else if (mode === 'season') applySelection(file => Number(file.season || 0) === wantedSeason);
             else if (mode === 'all') applySelection(() => true);
             else applySelection(() => false);
             return;
