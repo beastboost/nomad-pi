@@ -6,6 +6,7 @@ from urllib.parse import quote
 from app.routers import debrid as _debrid_router_module
 from app.routers import playback_core as _core
 from app.routers.debrid_universal import router as _debrid_universal_router
+from app.routers.debrid_manifest import router as _debrid_manifest_router
 from app.services.debrid_lite import install_debrid_lite_search_policy
 from app.services.playback.appliance_runtime import (
     assert_source_readable,
@@ -27,10 +28,11 @@ install_runtime_abr_policy()
 
 # Universal search lives under the existing /api/debrid prefix. main.py imports
 # the debrid module before this playback facade and only mounts it afterwards,
-# so adding the child router here is deterministic without another top-level
+# so adding the child routers here is deterministic without another top-level
 # app include or a second public prefix.
 if not getattr(_debrid_router_module.router, "_nomad_universal_installed", False):
     _debrid_router_module.router.include_router(_debrid_universal_router)
+    _debrid_router_module.router.include_router(_debrid_manifest_router)
     _debrid_router_module.router._nomad_universal_installed = True
 
 from app.routers.playback_tracks import router as _tracks_router
