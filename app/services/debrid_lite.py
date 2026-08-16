@@ -9,6 +9,7 @@ Pi-friendly default profile:
 * sensible file size
 * MP4 + AAC preferred when Torrentio exposes enough naming information
 * HEVC/x265/AV1/4K/remux/10-bit/HDR pushed to the bottom
+* Dolby Digital/DTS/TrueHD releases treated as audio-conversion fallbacks
 
 The browser UI can then hide non-lite results by default while still offering an
 explicit "show all" escape hatch.
@@ -65,6 +66,30 @@ def _contains(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
 
 
+def _audio_hint(text: str) -> str:
+    """Infer the release audio family from common scene/P2P naming shorthand.
+
+    In particular, ``DD5.1`` and ``DD 5.1`` are extremely common names for
+    Dolby Digital (AC-3).  Missing those made an H.264 MP4 appear Pi-safe even
+    though Safari needed Nomad to create an AAC HLS fallback.
+    """
+    if _contains(text, ("truehd", "true-hd")):
+        return "truehd"
+    if _contains(text, ("eac3", "e-ac-3", "e-ac3", "ddp", "dd+", "dolby digital plus")):
+        return "eac3"
+    if _contains(text, ("dts-hd", "dtshd", "dts")):
+        return "dts"
+    if _contains(text, ("ac3", "ac-3", "dolby digital")) or re.search(
+        r"(?:^|[\s._-])dd(?:[\s._-]*\d(?:\.\d)?)?(?:$|[\s._-])",
+        text,
+        re.IGNORECASE,
+    ):
+        return "ac3"
+    if _contains(text, ("aac", "mp4a")):
+        return "aac"
+    return ""
+
+
 def _analyse_release(item: dict, media_type: str) -> dict:
     text = _release_text(item)
     quality = str(item.get("quality") or "").strip().lower()
@@ -86,8 +111,9 @@ def _analyse_release(item: dict, media_type: str) -> dict:
     is_h264 = codec == "h264" or _contains(text, ("h264", "h.264", "x264", "avc"))
     is_mp4 = bool(re.search(r"(?:^|[\s._-])mp4(?:$|[\s._-])|\.mp4(?:$|[\s._-])", text))
     is_mkv = bool(re.search(r"(?:^|[\s._-])mkv(?:$|[\s._-])|\.mkv(?:$|[\s._-])", text))
-    is_aac = _contains(text, ("aac", "mp4a"))
-    incompatible_audio = _contains(text, ("dts", "truehd", "eac3", "e-ac-3", "ac3", "ac-3"))
+    audio_hint = _audio_hint(text)
+    is_aac = audio_hint == "aac"
+    incompatible_audio = audio_hint in {"ac3", "eac3", "dts", "truehd"}
 
     heavy_terms = []
     checks = (
@@ -107,16 +133,22 @@ def _analyse_release(item: dict, media_type: str) -> dict:
     if oversize:
         heavy_terms.append(f">{max_gb:g}GB")
 
-    # Strict default shown in the lightweight browser search.  Unknown size is
-    # not rejected because Torrentio does not always expose it.
-    compatible = bool(is_1080 and is_h264 and not heavy_terms)
-    direct_candidate = bool(compatible and is_mp4 and is_aac and not incompatible_audio)
+    # "Pi-safe" means the release does not advertise a codec that forces live
+    # audio/video conversion on our tiny-memory default.  H.264 with AC-3/DTS is
+    # still a useful cheap fallback, but it is intentionally not presented as
+    # equally safe as AAC/direct media.
+    base_h264 = bool(is_1080 and is_h264 and not heavy_terms)
+    audio_fallback = bool(base_h264 and incompatible_audio)
+    compatible = bool(base_h264 and not incompatible_audio)
+    direct_candidate = bool(compatible and is_mp4 and is_aac)
 
     score = 0.0
     if compatible:
         score += 100
     if direct_candidate:
         score += 80
+    elif audio_fallback:
+        score += 20
     elif is_mp4:
         score += 35
     elif is_mkv:
@@ -124,7 +156,7 @@ def _analyse_release(item: dict, media_type: str) -> dict:
     if is_aac:
         score += 20
     if incompatible_audio:
-        score -= 25
+        score -= 40
     if size:
         # Prefer sensible encodes instead of enormous remuxes or implausibly tiny
         # files. This is intentionally gentle: compatibility matters more.
@@ -140,6 +172,8 @@ def _analyse_release(item: dict, media_type: str) -> dict:
     if not is_h264:
         reasons.append("not H.264")
     reasons.extend(heavy_terms)
+    if audio_fallback:
+        reasons.append(f"{audio_hint.upper()} audio needs AAC conversion")
     if compatible and not is_mp4:
         reasons.append("MP4 not identified")
     if compatible and not is_aac:
@@ -148,13 +182,14 @@ def _analyse_release(item: dict, media_type: str) -> dict:
     return {
         "lite_compatible": compatible,
         "lite_direct_candidate": direct_candidate,
+        "lite_audio_fallback": audio_fallback,
         "lite_score": round(score, 2),
         "lite_reasons": reasons,
         "lite_size_bytes": size,
         "lite_max_size_bytes": max_bytes,
         "lite_max_size_gb": max_gb,
         "container_hint": "mp4" if is_mp4 else "mkv" if is_mkv else "",
-        "audio_hint": "aac" if is_aac else "incompatible" if incompatible_audio else "",
+        "audio_hint": audio_hint,
     }
 
 
@@ -180,8 +215,9 @@ def _lite_search(
 
     enriched.sort(
         key=lambda item: (
-            not bool(item.get("lite_compatible")),
-            not bool(item.get("lite_direct_candidate")),
+            0 if item.get("lite_direct_candidate") else
+            1 if item.get("lite_compatible") else
+            2 if item.get("lite_audio_fallback") else 3,
             -float(item.get("lite_score") or 0),
             -int(item.get("seeders") or 0),
             int(item.get("lite_size_bytes") or (1 << 62)),
