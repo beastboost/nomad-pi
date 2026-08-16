@@ -12,6 +12,7 @@
 
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/runtime-ui-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/player-mobile-fix.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/replacement-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/track-control.js?v=${encodeURIComponent(version)}"><\/script>`);
