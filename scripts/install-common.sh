@@ -17,6 +17,7 @@ else
     NOMAD_SWAP_TARGET_MB=0
     NOMAD_MEMORY_CLASS="unknown"
     NOMAD_IS_RPI=0
+    NOMAD_IS_A733=0
 fi
 
 nomad_sudo() {
@@ -136,6 +137,74 @@ nomad_ensure_swap() {
     fi
 }
 
+nomad_install_media_stack() {
+    # A733 vendor images expose the supported VPU path through GStreamer OMX.
+    # Do not replace Radxa's kernel/media libraries with an unrelated FFmpeg
+    # build: install the userspace inspection/HLS pieces around the vendor
+    # stack and validate the actual encoder instead.
+    if [ "${NOMAD_IS_A733:-0}" != "1" ]; then
+        return 0
+    fi
+
+    echo "Configuring Allwinner A733 hardware media stack..."
+    local media_packages=(
+        python3-gi gir1.2-gstreamer-1.0
+        gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-base-apps
+        gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+    )
+    local missing=()
+    local pkg
+    for pkg in "${media_packages[@]}"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "Installing A733 media userspace packages: ${missing[*]}"
+        if ! nomad_sudo apt-get install -y "${missing[@]}"; then
+            echo "Refreshing apt metadata and retrying A733 media packages..."
+            nomad_sudo apt-get update
+            if ! nomad_sudo apt-get install -y "${missing[@]}"; then
+                echo "WARNING: Some A733 GStreamer packages could not be installed."
+            fi
+        fi
+    fi
+
+    local ffmpeg_version=""
+    if command -v ffmpeg >/dev/null 2>&1; then
+        ffmpeg_version="$(ffmpeg -version 2>/dev/null | head -n 1 || true)"
+        [ -n "$ffmpeg_version" ] && echo "FFmpeg: $ffmpeg_version"
+    fi
+
+    if ! command -v gst-inspect-1.0 >/dev/null 2>&1; then
+        echo "WARNING: gst-inspect-1.0 is unavailable; A733 OMX hardware cannot be validated."
+        return 0
+    fi
+
+    local required_element
+    for required_element in uridecodebin hlssink2 avenc_aac h264parse; do
+        if ! gst-inspect-1.0 "$required_element" >/dev/null 2>&1; then
+            echo "WARNING: GStreamer element '$required_element' is missing; Nomad will retain FFmpeg fallback."
+        fi
+    done
+
+    if gst-inspect-1.0 omxh264videoenc >/dev/null 2>&1; then
+        echo "A733 OMX H.264 encoder found: omxh264videoenc"
+        if timeout 12s gst-launch-1.0 -q -e \
+            videotestsrc num-buffers=4 ! \
+            video/x-raw,width=320,height=240,framerate=1/1 ! \
+            omxh264videoenc ! h264parse ! fakesink >/dev/null 2>&1; then
+            echo "A733 OMX H.264 encoder runtime test: PASS"
+        else
+            echo "WARNING: omxh264videoenc is installed but failed a runtime encode test."
+            echo "         Nomad will not rely on it until playback diagnostics validates it."
+        fi
+    else
+        echo "WARNING: Allwinner A733 detected but omxh264videoenc is not present."
+        echo "         Radxa ships the A733 codec engine as part of its vendor OS media stack."
+        echo "         Use 'sudo rsetup' -> System -> System Update, or a current official A733 image,"
+        echo "         rather than replacing the vendor kernel/media libraries with a generic apt upgrade."
+    fi
+}
+
 nomad_install_packages() {
     local required=(
         git ca-certificates curl python3 python3-pip python3-venv python3-dev
@@ -167,6 +236,8 @@ nomad_install_packages() {
     if ! command -v mount.exfat >/dev/null 2>&1 && ! command -v mkfs.exfat >/dev/null 2>&1; then
         nomad_sudo apt-get install -y exfatprogs 2>/dev/null || nomad_sudo apt-get install -y exfat-fuse 2>/dev/null || true
     fi
+
+    nomad_install_media_stack
 }
 
 nomad_set_env_key() {
@@ -265,7 +336,7 @@ inotify=yes
 notify_interval=60
 root_container=.
 presentation_url=http://$hostname.local:8000/
-album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
 max_connections=50
 strict_dlna=no
 enable_tivo=no
