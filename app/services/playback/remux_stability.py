@@ -9,6 +9,12 @@ For cheap remux/audio-only jobs we instead let legacy FFmpeg build ahead while
 running it at reduced CPU/I/O priority.  The storage-pressure guard prevents
 that producer from consuming the appliance filesystem.  We also wait for a
 small complete-segment lead before exposing the playlist to the browser.
+
+On sub-2 GiB appliances, browser audio conversion defaults to stereo AAC.  A
+release tagged DD5.1/EAC3/DTS therefore does not make a tiny Pi preserve a
+multichannel AAC layout that costs more CPU and is a less conservative Safari
+target.  Set NOMAD_HLS_AUDIO_CHANNELS=off to preserve the source channel count
+or to an explicit 1-8 value to override the automatic policy.
 """
 
 from __future__ import annotations
@@ -19,6 +25,8 @@ import shutil
 import threading
 import time
 from typing import Optional
+
+import psutil
 
 from app.services.playback import hls as hls_module
 from app.services.playback.hls import HLSJobError, HLSManager
@@ -33,12 +41,31 @@ _ORIGINAL_SPAWN = HLSManager._spawn
 _ORIGINAL_WAIT = HLSManager.wait_until_ready
 
 
-def _cheap_mode(mode) -> bool:
+def _playback_mode(mode) -> Optional[PlaybackMode]:
     try:
-        value = mode if isinstance(mode, PlaybackMode) else PlaybackMode(str(mode))
+        return mode if isinstance(mode, PlaybackMode) else PlaybackMode(str(mode))
     except (TypeError, ValueError):
-        return False
+        return None
+
+
+def _cheap_mode(mode) -> bool:
+    value = _playback_mode(mode)
     return value in {PlaybackMode.REMUX, PlaybackMode.TRANSCODE_AUDIO}
+
+
+def _lite_audio_channels() -> Optional[int]:
+    raw = str(os.environ.get("NOMAD_HLS_AUDIO_CHANNELS", "auto")).strip().lower()
+    if raw in {"off", "false", "no", "source", "preserve", "0"}:
+        return None
+    if raw not in {"", "auto"}:
+        try:
+            return max(1, min(8, int(raw)))
+        except (TypeError, ValueError):
+            return None
+    try:
+        return 2 if int(psutil.virtual_memory().total) < 2 * 1024 ** 3 else None
+    except Exception:
+        return 2
 
 
 def _legacy_ffmpeg_needs_ahead_mode(desired: Optional[float]) -> bool:
@@ -61,7 +88,8 @@ def _effective_streaming_readrate(mode) -> Optional[float]:
 
 def _stable_build_hls_command(**kwargs):
     cmd = list(_ORIGINAL_BUILD(**kwargs))
-    if not _cheap_mode(kwargs.get("mode")):
+    mode = _playback_mode(kwargs.get("mode"))
+    if mode not in {PlaybackMode.REMUX, PlaybackMode.TRANSCODE_AUDIO}:
         return cmd
 
     # Older demuxers occasionally expose awkward/missing presentation stamps
@@ -82,6 +110,19 @@ def _stable_build_hls_command(**kwargs):
     input_pos = cmd.index("-i")
     if "-copytb" not in cmd:
         cmd[input_pos + 2:input_pos + 2] = ["-copytb", "1"]
+
+    # An audio fallback exists precisely because the source audio was not a safe
+    # browser copy target. On tiny-memory Nomad hosts, make the generated AAC a
+    # deliberately boring stereo stream: less encoder work and a safer iOS HLS
+    # target than preserving AC-3/E-AC-3/DTS 5.1 channel layouts.
+    if mode == PlaybackMode.TRANSCODE_AUDIO and str(kwargs.get("target_audio_codec") or "aac").lower() == "aac":
+        channels = _lite_audio_channels()
+        if channels and "-ac" not in cmd:
+            try:
+                output_option_pos = cmd.index("-avoid_negative_ts")
+            except ValueError:
+                output_option_pos = len(cmd)
+            cmd[output_option_pos:output_option_pos] = ["-ac", str(channels)]
 
     # Defensive cleanup for callers that explicitly constructed a legacy
     # read-rate command before this runtime overlay was installed.  A 1x -re
