@@ -80,12 +80,14 @@ def _episode_numbers(path: str) -> tuple[Optional[int], Optional[int], Optional[
     sep = r"[\s._/\\-]*"
 
     patterns = (
-        # S06E01, S06.E01, S06-E01, S06E01E02
-        rf"(?i)(?:^|[\s._/\\-])S(\d{{1,3}}){sep}E(\d{{1,4}})(?:{sep}E?(\d{{1,4}}))?",
-        # Season.06.Episode.01, Season 6 Ep 1, Season-06/E01
-        rf"(?i)(?:^|[\s._/\\-])Season{sep}(\d{{1,3}}){sep}(?:Episode|Ep|E){sep}(\d{{1,4}})(?:{sep}(?:Episode|Ep|E)?{sep}(\d{{1,4}}))?",
-        # 6x01, 6x01-02
-        r"(?i)(?:^|[\s._/\\-])(\d{1,3})x(\d{1,4})(?:[-._ ]?(\d{1,4}))?",
+        # S06E01, S06.E01, S06-E01, S06E01E02. A second episode must have E.
+        rf"(?i)(?:^|[\s._/\\-])S(\d{{1,3}}){sep}E(\d{{1,4}})(?:{sep}E(\d{{1,4}}))?",
+        # Season.06.Episode.01, Season 6 Ep 1, Season-06/E01.
+        # A multi-episode suffix must also carry an explicit episode marker.
+        rf"(?i)(?:^|[\s._/\\-])Season{sep}(\d{{1,3}}){sep}(?:Episode|Ep|E){sep}(\d{{1,4}})(?:{sep}(?:Episode|Ep|E){sep}(\d{{1,4}}))?",
+        # 6x01, 6x01-02. Only '-' denotes the optional episode range so .1080
+        # can never be mistaken for an episode number.
+        r"(?i)(?:^|[\s._/\\-])(\d{1,3})x(\d{1,4})(?:-(\d{1,4}))?",
     )
     for pattern in patterns:
         match = re.search(pattern, text)
