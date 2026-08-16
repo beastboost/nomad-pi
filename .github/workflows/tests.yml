@@ -58,6 +58,7 @@ jobs:
           node --check app/static/js/runtime-ui-guard.js
           node --check app/static/js/debrid-lite.js
           node --check app/static/js/player-mobile-fix.js
+          node --check app/static/js/direct-play-guard.js
           node --check app/static/js/replacement-control.js
           node --check app/static/js/track-control.js
           node --check app/static/js/subtitle-control.js
@@ -68,6 +69,7 @@ jobs:
           node --check app/static/js/music2-fallback.js
           node --check app/static/js/media-exclusivity.js
           node --check app/static/js/stream-keep-control.js
+          node --check app/static/js/universal-search.js
           node --check app/static/js/offline-control.js
           node --check app/static/js/download-live.js
           node --check app/static/js/library-health.js
