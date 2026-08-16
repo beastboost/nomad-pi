@@ -187,8 +187,15 @@ nomad_set_env_key() {
 nomad_get_env_key() {
     local file="$1"
     local key="$2"
-    [ -f "$file" ] || return 0
-    nomad_sudo grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | sed "s/^${key}=//"
+    local value=""
+    if [ -f "$file" ]; then
+        value="$(nomad_sudo awk -v k="$key" '
+            index($0, k "=") == 1 { value = substr($0, length(k) + 2) }
+            END { if (value != "") print value }
+        ' "$file" 2>/dev/null || true)"
+    fi
+    printf '%s' "$value"
+    return 0
 }
 
 nomad_stamp_assets() {
