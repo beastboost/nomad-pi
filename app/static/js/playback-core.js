@@ -68,6 +68,21 @@
         if (canPlay(audio, 'audio/ogg; codecs="opus"')) audioCodecs.add('opus');
         if (canPlay(audio, 'audio/ogg; codecs="vorbis"')) audioCodecs.add('vorbis');
 
+        // Modern Apple devices support Dolby Digital / Dolby Digital Plus, but
+        // Nomad previously never asked the browser about them. Runtime feature
+        // detection keeps this cross-browser: only advertise Dolby when the
+        // current browser explicitly reports that it can play the codec.
+        const ac3Supported =
+            canPlay(video, 'video/mp4; codecs="avc1.42E01E, ac-3"') ||
+            canPlay(audio, 'audio/mp4; codecs="ac-3"') ||
+            canPlay(audio, 'audio/ac3');
+        const eac3Supported =
+            canPlay(video, 'video/mp4; codecs="avc1.42E01E, ec-3"') ||
+            canPlay(audio, 'audio/mp4; codecs="ec-3"') ||
+            canPlay(audio, 'audio/eac3');
+        if (ac3Supported) audioCodecs.add('ac3');
+        if (eac3Supported) audioCodecs.add('eac3');
+
         // H.264/AAC MP4 is the safe fallback target for MSE/Hls.js. If a
         // browser's canPlayType implementation is overly conservative but it
         // exposes MediaSource, advertise those baseline codecs.
@@ -278,6 +293,14 @@
                 }),
             });
 
+            console.info('[Nomad playback plan]', {
+                path,
+                mode: result.plan?.mode,
+                source: result.plan?.source,
+                target: result.plan?.target,
+                reasons: result.plan?.reasons || [],
+            });
+
             const isHls = result.playback?.type === 'hls';
             const legacyStart = isHls ? 0 : Math.max(0, Number(at) || 0);
             runLegacyPlayer(path, result.playback.url, legacyStart);
@@ -300,8 +323,15 @@
             V.nomadOffset = current.offset;
 
             if (isHls) {
-                const modeLabel = String(current.mode || '').replaceAll('_', ' ');
-                toast(`${modeLabel || 'Adaptive'} playback`, 'info', 1800);
+                let modeLabel = String(current.mode || '').replaceAll('_', ' ');
+                if (current.mode === 'transcode_audio') {
+                    modeLabel = 'Audio fallback — video copied, audio converted to AAC';
+                } else if (current.mode === 'remux') {
+                    modeLabel = 'Container fallback — video/audio copied';
+                } else if (current.mode === 'transcode_video') {
+                    modeLabel = 'Video conversion fallback';
+                }
+                toast(`${modeLabel || 'Optimized'} playback`, 'info', 2400);
                 await attachHls(current, true);
             }
             startHeartbeat(current);
