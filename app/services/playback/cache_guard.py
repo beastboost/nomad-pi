@@ -91,7 +91,7 @@ def _cleanup_roots(manager, *, ttl_seconds: Optional[float] = None, force: bool 
 
 
 def _expected_session_bytes(manager, kwargs: dict) -> int:
-    """Estimate the worst useful preflight size for a local HLS job."""
+    """Estimate conservative local cache growth before starting a job."""
     source = kwargs.get("source_path")
     if not source or not isinstance(source, (str, os.PathLike)):
         return 0
@@ -103,16 +103,25 @@ def _expected_session_bytes(manager, kwargs: dict) -> int:
     except OSError:
         return 0
 
-    # A stream-copy HLS cache approaches source size.  Multi-rendition ABR can
-    # exceed it because several encoded copies are written concurrently, so use
-    # a conservative factor without pretending to predict exact codec output.
+    # Multi-rendition output can exceed the source because several copies are
+    # encoded concurrently. Avoid consuming a one-shot iterable merely to count
+    # renditions; current callers pass a sized list/tuple.
     if isinstance(manager, ABRManager):
         renditions = kwargs.get("renditions")
         try:
-            count = len(tuple(renditions)) if renditions is not None else 2
-        except TypeError:
+            count = len(renditions) if renditions is not None else 2
+        except (TypeError, AttributeError):
             count = 2
         return int(size * max(2.0, min(3.0, float(count))))
+
+    mode = str(kwargs.get("mode") or "").strip().lower()
+    if mode == "transcode_video":
+        # HEVC/VP9 -> H.264 can be materially larger than the source even at a
+        # lower resolution. 2x is deliberately conservative because protecting
+        # the boot filesystem matters more than squeezing every last GB from it.
+        return int(size * 2.0)
+    if mode in {"remux", "transcode_audio"}:
+        return int(size * 1.1)
     return size
 
 
