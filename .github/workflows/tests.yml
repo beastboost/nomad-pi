@@ -48,6 +48,7 @@ jobs:
         run: |
           python -m compileall -q app tests
           python -m py_compile scripts/playback-selftest.py
+          python -m py_compile scripts/gst-a733-hls.py
 
       - name: Check frontend JavaScript syntax
         run: |
