@@ -87,11 +87,12 @@ def assert_source_readable(path: str) -> int:
     if not stat.S_ISREG(info.st_mode):
         raise HTTPException(status_code=404, detail="Media file not found")
 
-    # Opening the source catches a dead/disconnected mount before ffprobe or
-    # FFmpeg gets a chance to spawn and repeatedly hammer it.
+    # A stale USB mount can still answer stat()/open() from cached metadata. Read
+    # one byte so the kernel actually touches the backing device before ffprobe,
+    # FFmpeg or a browser seek starts generating repeated I/O against it.
     try:
-        fd = os.open(path, os.O_RDONLY)
-        os.close(fd)
+        with open(path, "rb", buffering=0) as handle:
+            handle.read(1)
     except OSError as exc:
         if is_storage_error(exc):
             raise HTTPException(status_code=503, detail=storage_error_detail(path, exc))
