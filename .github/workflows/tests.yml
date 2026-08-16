@@ -78,7 +78,12 @@ jobs:
 
       - name: Check shell scripts
         run: |
+          bash -n setup.sh
+          bash -n update.sh
+          bash -n scripts/platform-detect.sh
+          bash -n scripts/install-common.sh
           bash -n scripts/vendor-assets.sh
+          bash -n scripts/wifi-guard.sh
 
       - name: Run unit and regression tests
         env:
