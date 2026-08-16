@@ -37,8 +37,6 @@ nomad_configure_hostname_mdns() {
         _nomad_net_sudo hostnamectl set-hostname "$hostname" || true
     fi
 
-    # Keep /etc/hosts coherent with the hostname. Some Debian images omit the
-    # 127.0.1.1 line entirely, so replace it when present and append otherwise.
     _nomad_net_sudo python3 - "$hostname" <<'PY'
 from pathlib import Path
 import sys
@@ -93,49 +91,23 @@ EOF
 
 nomad_install_captive_portal() {
     local root="$1"
-    [ -f "$root/scripts/captive-portal.py" ] || return 0
+    [ -f "$root/scripts/port80-redirect.sh" ] || return 0
 
-    _nomad_net_sudo install -m 755 "$root/scripts/captive-portal.py" /usr/local/sbin/nomad-captive-portal.py
+    _nomad_net_sudo install -m 755 "$root/scripts/port80-redirect.sh" /usr/local/sbin/nomad-port80-redirect.sh
 
-    local service_src="$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-captive-portal.service"
+    local service_src="$root/os-builder/stage3-nomad/03-setup-services/files/nomad-pi-port80-redirect.service"
     if [ -f "$service_src" ]; then
-        _nomad_net_sudo install -m 644 "$service_src" /etc/systemd/system/nomad-pi-captive-portal.service
-    else
-        local tmp
-        tmp="$(mktemp)"
-        cat > "$tmp" <<'EOF'
-[Unit]
-Description=Nomad captive portal and port-80 redirect
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=nobody
-Group=nogroup
-ExecStart=/usr/bin/python3 /usr/local/sbin/nomad-captive-portal.py
-Restart=always
-RestartSec=8
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-RestrictAddressFamilies=AF_INET AF_INET6
-MemoryMax=64M
-CPUQuota=15%
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        _nomad_net_sudo install -m 644 "$tmp" /etc/systemd/system/nomad-pi-captive-portal.service
-        rm -f "$tmp"
+        _nomad_net_sudo install -m 644 "$service_src" /etc/systemd/system/nomad-pi-port80-redirect.service
     fi
 
+    # Remove the abandoned two-process prototype if an update happened to land
+    # during development. Captive portal requests now stay inside app.main.
+    _nomad_net_sudo systemctl disable --now nomad-pi-captive-portal.service >/dev/null 2>&1 || true
+    _nomad_net_sudo rm -f /etc/systemd/system/nomad-pi-captive-portal.service /usr/local/sbin/nomad-captive-portal.py 2>/dev/null || true
+
     _nomad_net_sudo systemctl daemon-reload >/dev/null 2>&1 || true
-    _nomad_net_sudo systemctl enable --now nomad-pi-captive-portal.service >/dev/null 2>&1 || \
-        echo "WARNING: captive portal port-80 responder could not be started (port 80 may already be in use)."
+    _nomad_net_sudo systemctl enable --now nomad-pi-port80-redirect.service >/dev/null 2>&1 || \
+        echo "WARNING: port-80 redirect could not be enabled; use http://nomadpi.local:8000 until networking is repaired."
 }
 
 nomad_configure_hotspot_profile() {
@@ -153,8 +125,6 @@ nomad_configure_hotspot_profile() {
         _nomad_net_sudo nmcli con add type wifi ifname "$wifi_dev" con-name "$NOMAD_HOTSPOT_NAME" autoconnect yes ssid "$NOMAD_HOTSPOT_NAME" >/dev/null 2>&1 || return 0
     fi
 
-    # Fix the gateway instead of accepting NetworkManager's variable 10.42.x.1
-    # choice. Captive-portal discovery can then safely advertise one URL.
     _nomad_net_sudo nmcli con modify "$NOMAD_HOTSPOT_NAME" \
         connection.interface-name "$wifi_dev" \
         connection.autoconnect yes \
@@ -170,9 +140,8 @@ nomad_configure_hotspot_profile() {
         wifi-sec.key-mgmt wpa-psk \
         wifi-sec.psk "$NOMAD_HOTSPOT_PASSWORD" >/dev/null 2>&1 || true
 
-    # NetworkManager's `shared` mode owns this dnsmasq instance. Override only
-    # well-known captive-check names, never all DNS, so an Ethernet/uplink can
-    # still provide normal internet through the hotspot.
+    # NetworkManager's shared dnsmasq sees only the hotspot. Rewrite known
+    # captive-check names to Nomad, but leave normal internet DNS untouched.
     _nomad_net_sudo mkdir -p /etc/NetworkManager/dnsmasq-shared.d
     local dns_tmp
     dns_tmp="$(mktemp)"
@@ -187,8 +156,8 @@ address=/www.msftconnecttest.com/$NOMAD_HOTSPOT_IP
 address=/www.msftncsi.com/$NOMAD_HOTSPOT_IP
 address=/detectportal.firefox.com/$NOMAD_HOTSPOT_IP
 address=/nomadpi.local/$NOMAD_HOTSPOT_IP
-# RFC 8910 captive-portal URL. Older clients still use the DNS probe overrides.
-dhcp-option=114,http://$NOMAD_HOTSPOT_IP/portal
+# RFC 8910 clients can open the setup page without probe interception.
+dhcp-option=114,http://$NOMAD_HOTSPOT_IP/setup.html
 EOF
     _nomad_net_sudo install -m 644 "$dns_tmp" /etc/NetworkManager/dnsmasq-shared.d/nomad-captive.conf
     rm -f "$dns_tmp"
