@@ -11,6 +11,7 @@
     } catch {}
 
     document.write(`<link rel="stylesheet" href="css/appliance-polish.css?v=${encodeURIComponent(version)}">`);
+    document.write(`<link rel="stylesheet" href="css/media-experience.css?v=${encodeURIComponent(version)}">`);
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/runtime-ui-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
@@ -23,7 +24,9 @@
     document.write(`<script src="js/quality-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/device-control.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/watch-party.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/audio-direct-bridge.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/music2-player.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/music-player-polish.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/music2-fallback.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/media-exclusivity.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/stream-keep-control.js?v=${encodeURIComponent(version)}"><\/script>`);
@@ -39,4 +42,5 @@
     document.write(`<script src="js/profile-context.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/profile-switch.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/reader-state.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/reader-ui-polish.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
