@@ -1,4 +1,4 @@
-"""FFmpeg-backed HLS execution for Nomad Pi playback sessions."""
+"""FFmpeg/GStreamer-backed HLS execution for Nomad playback sessions."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .encoders import (
     video_encoder_args,
     video_encoder_candidates,
 )
+from .gstreamer_a733 import a733_backend_allowed, build_a733_hls_command
 from .planner import PlaybackMode
 
 
@@ -47,6 +48,10 @@ AUDIO_ENCODERS = {
     "vorbis": "libvorbis",
     "alac": "alac",
 }
+
+
+def _hardware_backend(name: Optional[str]) -> bool:
+    return bool(name and (is_hardware_encoder(name) or name == "gst:omxh264videoenc"))
 
 
 def fit_dimensions(
@@ -337,7 +342,7 @@ class HLSManager:
 
     @staticmethod
     def _clear_outputs(directory: Path) -> None:
-        for pattern in ("index.m3u8", "init.mp4", "segment_*.m4s", "*.tmp"):
+        for pattern in ("index.m3u8", "init.mp4", "segment_*.m4s", "segment_*.ts", "*.tmp"):
             for path in directory.glob(pattern):
                 try:
                     path.unlink()
@@ -392,8 +397,6 @@ class HLSManager:
                         "Hardware acceleration was forced but no supported hardware encoder was detected"
                     )
 
-            primary_encoder = encoder_candidates[0]
-            fallback_encoder = encoder_candidates[1] if len(encoder_candidates) > 1 else None
             common = dict(
                 source_path=source_path,
                 output_dir=directory,
@@ -411,24 +414,62 @@ class HLSManager:
                 start_position=start_position,
                 input_readrate=streaming_input_readrate(playback_mode),
             )
-            cmd = build_hls_command(
-                **common,
-                video_encoder_override=primary_encoder,
+
+            use_a733_gst = (
+                playback_mode == PlaybackMode.TRANSCODE_VIDEO
+                and a733_backend_allowed(
+                    target_video_codec=target_video_codec,
+                    audio_stream_index=audio_stream_index,
+                    subtitle_stream_index=subtitle_stream_index,
+                )
             )
+
             fallback_cmd = None
-            if fallback_encoder:
+            if use_a733_gst:
+                dims = fit_dimensions(source_width, source_height, max_width, max_height)
+                primary_encoder = "gst:omxh264videoenc"
+                # Do not fall back to an unvalidated generic V4L2 wrapper after
+                # the vendor path fails. The deterministic safety net is x264.
+                fallback_encoder = SOFTWARE_VIDEO_ENCODERS.get(
+                    str(target_video_codec or "h264").lower(),
+                    "libx264",
+                )
+                cmd = build_a733_hls_command(
+                    source_path=source_path,
+                    output_dir=directory,
+                    start_position=start_position,
+                    width=dims[0] if dims else None,
+                    height=dims[1] if dims else None,
+                    max_bitrate=max_bitrate,
+                )
                 fallback_cmd = build_hls_command(
                     **common,
                     video_encoder_override=fallback_encoder,
                 )
+            else:
+                primary_encoder = encoder_candidates[0]
+                fallback_encoder = encoder_candidates[1] if len(encoder_candidates) > 1 else None
+                cmd = build_hls_command(
+                    **common,
+                    video_encoder_override=primary_encoder,
+                )
+                if fallback_encoder:
+                    fallback_cmd = build_hls_command(
+                        **common,
+                        video_encoder_override=fallback_encoder,
+                    )
 
             process = self._spawn(
                 cmd,
                 log_path,
                 note=(
-                    f"starting {'hardware' if is_hardware_encoder(primary_encoder) else 'software'} "
-                    f"encoder {primary_encoder}"
-                    if primary_encoder else "starting HLS stream-copy job"
+                    "starting validated A733 GStreamer/OpenMAX encoder omxh264videoenc"
+                    if primary_encoder == "gst:omxh264videoenc" else
+                    (
+                        f"starting {'hardware' if _hardware_backend(primary_encoder) else 'software'} "
+                        f"encoder {primary_encoder}"
+                        if primary_encoder else "starting HLS stream-copy job"
+                    )
                 ),
             )
             job = HLSJob(
@@ -456,7 +497,7 @@ class HLSManager:
             job.process = self._spawn(
                 job.fallback_cmd,
                 job.log_path,
-                note=f"hardware encoder failed; falling back to {job.fallback_encoder}",
+                note=f"hardware backend failed; falling back to {job.fallback_encoder}",
             )
             job.encoder = job.fallback_encoder
             job.fallback_cmd = None
@@ -484,7 +525,7 @@ class HLSManager:
                         deadline = time.monotonic() + timeout
                         break
                     message = self.log_tail(session_id)
-                    raise HLSJobError(message or f"ffmpeg exited with code {job.process.returncode}")
+                    raise HLSJobError(message or f"HLS backend exited with code {job.process.returncode}")
                 time.sleep(0.1)
             else:
                 with self._lock:
@@ -506,7 +547,7 @@ class HLSManager:
             "complete": self._playlist_complete(session_id),
             "returncode": None if not job or not job.process or running else job.process.returncode,
             "encoder": job.encoder if job else None,
-            "hardware_accelerated": bool(job and is_hardware_encoder(job.encoder)),
+            "hardware_accelerated": bool(job and _hardware_backend(job.encoder)),
             "fallback_attempted": bool(job and job.fallback_attempted),
         }
 
