@@ -144,6 +144,9 @@ data class AndroidCapabilities(
             if (has("audio/vnd.dts")) audio += "dts"
             if (has("audio/true-hd")) audio += "truehd"
 
+            // Media3 ships extractors for these common progressive containers.
+            // Codec support remains device-driven above, so this does not claim
+            // that every stream inside a container is playable.
             val containers = listOf("mp4", "mov", "mkv", "webm", "ts", "m2ts")
             return AndroidCapabilities(
                 containers = containers,
@@ -164,37 +167,6 @@ class NomadApi(server: String = "http://nomadpi.local") {
         baseUrl = normalizeServer(server)
         token = authToken
         profileId = activeProfile
-    }
-
-    /** Lightweight unauthenticated reachability check used before presenting login. */
-    fun probeServer(server: String): Boolean {
-        val root = normalizeServer(server)
-        val connection = try {
-            (URL("$root/api/auth/check").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 2_500
-                readTimeout = 3_500
-                useCaches = false
-                instanceFollowRedirects = true
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "NomadAndroid/${BuildConfig.VERSION_NAME}")
-            }
-        } catch (_: Throwable) {
-            return false
-        }
-        return try {
-            val status = connection.responseCode
-            if (status !in 200..299) return false
-            val body = connection.inputStream.use { stream ->
-                BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).readText()
-            }
-            val json = runCatching { JSONObject(body) }.getOrNull() ?: return false
-            json.has("authenticated")
-        } catch (_: Throwable) {
-            false
-        } finally {
-            connection.disconnect()
-        }
     }
 
     fun login(server: String, username: String, password: String): NomadSession {
@@ -352,13 +324,35 @@ class NomadApi(server: String = "http://nomadpi.local") {
         requestJson("DELETE", "/api/playback/sessions/${encPathSegment(sessionId)}")
     }
 
-    fun musicStreamUrl(path: String): String = absoluteUrl("/api/playback/music/stream?path=${enc(path)}")
-    fun galleryItemUrl(id: String): String = absoluteUrl("/api/playback/gallery/item/${encPathSegment(id)}")
-    fun mediaStreamUrl(path: String): String = absoluteUrl("/api/media/stream?path=${enc(path)}")
+    fun musicStreamUrl(path: String): String {
+        val t = token.orEmpty()
+        return "$baseUrl/api/playback/music/stream?path=${enc(path)}&token=${enc(t)}${profileQuery()}"
+    }
+
+    fun mediaStreamUrl(path: String): String {
+        val t = token.orEmpty()
+        return "$baseUrl/api/media/stream?path=${enc(path)}&token=${enc(t)}${profileQuery()}"
+    }
+
+    fun imageUrl(path: String?): String? {
+        if (path.isNullOrBlank()) return null
+        if (path.startsWith("http://") || path.startsWith("https://")) return path
+        return mediaStreamUrl(path)
+    }
+
+    fun galleryItemUrl(id: String): String {
+        val t = token.orEmpty()
+        return "$baseUrl/api/playback/gallery/item/${encPathSegment(id)}?token=${enc(t)}${profileQuery(prefix = "&") }"
+    }
 
     fun absoluteUrl(path: String): String {
         if (path.startsWith("http://") || path.startsWith("https://")) return path
-        return if (path.startsWith('/')) "$baseUrl$path" else "$baseUrl/$path"
+        return baseUrl.trimEnd('/') + "/" + path.trimStart('/')
+    }
+
+    private fun profileQuery(prefix: String = "&"): String {
+        val id = profileId ?: return ""
+        return "$prefix${"profile_id"}=$id"
     }
 
     private fun parseProfile(json: JSONObject): NomadProfile = NomadProfile(
