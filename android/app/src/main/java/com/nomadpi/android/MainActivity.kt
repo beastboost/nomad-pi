@@ -13,7 +13,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             NomadDesign {
                 val vm: NomadViewModel = viewModel()
-                NomadRoot(vm)
+                if (vm.entry == EntryScreen.APP) {
+                    NomadNativeApp(vm)
+                } else {
+                    NomadRoot(vm)
+                }
             }
         }
     }
