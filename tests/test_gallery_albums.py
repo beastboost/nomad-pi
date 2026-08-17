@@ -43,6 +43,6 @@ def test_unfiled_destination_is_year_month(tmp_path):
     source = tmp_path / "photo.jpg"
     source.write_bytes(b"x")
     destination = albums._library_destination(tmp_path / "private", source)
-    assert destination.parent.name == "Library"
+    assert destination.parts[-3] == "Library"
     assert len(destination.parts[-2]) == 4
     assert len(destination.parts[-1]) == 2
