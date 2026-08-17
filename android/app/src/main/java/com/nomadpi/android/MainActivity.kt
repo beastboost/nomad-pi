@@ -11,7 +11,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            NomadTheme {
+            NomadDesign {
                 val vm: NomadViewModel = viewModel()
                 NomadApp(vm)
             }
