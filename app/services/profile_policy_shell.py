@@ -63,11 +63,13 @@ def enforce_request_policy_shell(request: Request, user_id: int, token: str):
         return None
 
     profile = household.get(int(user_id), int(active_id))
+    is_default_profile = True
     if profile is None:
         policy = _legacy_profile_policy(int(user_id), int(active_id))
         if policy is None:
             raise HTTPException(status_code=403, detail="Profile does not belong to this account")
     else:
+        is_default_profile = bool(profile.is_default)
         if not bound:
             if profile.pin_required:
                 raise HTTPException(
@@ -81,6 +83,24 @@ def enforce_request_policy_shell(request: Request, user_id: int, token: str):
             "profile_name": profile.name,
             "pin_required": profile.pin_required,
         })
+
+    # Photos are now a profile-private subsystem. The old generic gallery index
+    # had no ownership model, so leaving it reachable would let one household
+    # profile bypass the Photos API and enumerate another profile's filenames.
+    # All Gallery UI traffic goes through /api/playback/gallery instead.
+    if path.startswith("/api/media/library/gallery"):
+        raise HTTPException(status_code=410, detail="Gallery is profile-private; use the Photos library")
+
+    requested_path = str(request.query_params.get("path") or "").replace("\\", "/").lower()
+    # Private profile roots are never served by generic Files/media endpoints;
+    # their opaque item IDs are resolved by playback_gallery after validating
+    # the session-bound profile.
+    if requested_path.startswith("/data/.nomad_gallery"):
+        raise HTTPException(status_code=403, detail="Profile photos must be opened from the Photos library")
+    # Pre-profile installs stored photos directly under data/gallery. Preserve
+    # those for the default profile only so existing libraries do not disappear.
+    if requested_path.startswith("/data/gallery") and not is_default_profile:
+        raise HTTPException(status_code=403, detail="This photo library belongs to another profile")
 
     # This shell intentionally supplies no body payload. Query/path based
     # library and feature restrictions still cover legacy browse/stream/delete
