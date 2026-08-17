@@ -43,6 +43,7 @@ from app.routers.playback_subtitles import router as _subtitle_router
 from app.routers.playback_devices import router as _devices_router
 from app.routers.playback_music import router as _music_router
 from app.routers.playback_gallery import router as _gallery_router
+from app.routers.playback_gallery_albums import router as _gallery_albums_router
 from app.routers.playback_storage import router as _storage_router
 from app.routers.playback_stream_keep import (
     manager as _stream_keep_manager,
@@ -161,6 +162,7 @@ for _router in (
     _devices_router,
     _music_router,
     _gallery_router,
+    _gallery_albums_router,
     _storage_router,
     _stream_keep_router,
     _stream_keep_control_router,
