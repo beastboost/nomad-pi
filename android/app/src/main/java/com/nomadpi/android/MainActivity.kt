@@ -13,7 +13,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             NomadDesign {
                 val vm: NomadViewModel = viewModel()
-                NomadApp(vm)
+                NomadRoot(vm)
             }
         }
     }
