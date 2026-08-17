@@ -92,15 +92,20 @@ def enforce_request_policy_shell(request: Request, user_id: int, token: str):
         raise HTTPException(status_code=410, detail="Gallery is profile-private; use the Photos library")
 
     requested_path = str(request.query_params.get("path") or "").replace("\\", "/").lower()
-    # Private profile roots are never served by generic Files/media endpoints;
-    # their opaque item IDs are resolved by playback_gallery after validating
-    # the session-bound profile.
     if requested_path.startswith("/data/.nomad_gallery"):
         raise HTTPException(status_code=403, detail="Profile photos must be opened from the Photos library")
-    # Pre-profile installs stored photos directly under data/gallery. Preserve
-    # those for the default profile only so existing libraries do not disappear.
     if requested_path.startswith("/data/gallery") and not is_default_profile:
         raise HTTPException(status_code=403, detail="This photo library belongs to another profile")
+
+    # A personal photo library is not age-rated entertainment. Existing child
+    # profile presets predate Gallery and therefore omit it from
+    # allowed_libraries. Treat Gallery as allowed unless an admin explicitly
+    # puts it in blocked_libraries. This lets every profile have its own photos
+    # without weakening movie/show/music restrictions.
+    if "gallery" not in set(policy.get("blocked_libraries") or []):
+        allowed = list(policy.get("allowed_libraries") or [])
+        if allowed and "gallery" not in allowed:
+            policy["allowed_libraries"] = [*allowed, "gallery"]
 
     # This shell intentionally supplies no body payload. Query/path based
     # library and feature restrictions still cover legacy browse/stream/delete
