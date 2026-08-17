@@ -4,12 +4,21 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Build
+import java.net.Inet4Address
+import java.net.Inet6Address
+import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Lightweight foreground DNS-SD discovery for the _http._tcp service Avahi
  * advertises from Nomad. Manual hostname/IP entry remains available if a
  * vendor Android build suppresses multicast discovery.
+ *
+ * Android 14+ can return every A/AAAA address for a resolved service. Prefer
+ * IPv4 for small LAN appliances because a single legacy `host` result may be
+ * an IPv6 address that is valid in mDNS but not actually routable from the
+ * phone's current network/VPN configuration.
  */
 class NomadDiscovery(private val context: Context) {
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -44,18 +53,27 @@ class NomadDiscovery(private val context: Context) {
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 val name = serviceInfo.serviceName.orEmpty()
                 if (!name.contains("nomad", ignoreCase = true)) return
-                if (!seen.add("$name:${serviceInfo.serviceType}")) return
+                val serviceKey = "$name:${serviceInfo.serviceType}"
+                if (!seen.add(serviceKey)) return
+
                 @Suppress("DEPRECATION")
                 nsd.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                     override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                        seen.remove("$name:${serviceInfo.serviceType}")
+                        seen.remove(serviceKey)
                     }
 
                     @Suppress("DEPRECATION")
                     override fun onServiceResolved(resolved: NsdServiceInfo) {
-                        val host = resolved.host?.hostAddress ?: return
                         val port = resolved.port.takeIf { it > 0 } ?: 80
-                        val hostForUrl = if (host.contains(':')) "[$host]" else host
+                        val address = preferredAddress(resolved) ?: run {
+                            seen.remove(serviceKey)
+                            return
+                        }
+                        val host = address.hostAddress?.substringBefore('%') ?: run {
+                            seen.remove(serviceKey)
+                            return
+                        }
+                        val hostForUrl = if (address is Inet6Address) "[$host]" else host
                         val url = if (port == 80) "http://$hostForUrl" else "http://$hostForUrl:$port"
                         onServer(resolved.serviceName ?: "Nomad", url)
                     }
@@ -69,6 +87,24 @@ class NomadDiscovery(private val context: Context) {
             onError(t.message ?: "Discovery failed")
             stop()
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun preferredAddress(info: NsdServiceInfo): InetAddress? {
+        val addresses = if (Build.VERSION.SDK_INT >= 34) {
+            info.hostAddresses.orEmpty()
+        } else {
+            listOfNotNull(info.host)
+        }
+
+        val usable = addresses
+            .filterNot { it.isAnyLocalAddress || it.isLoopbackAddress }
+            .distinctBy { it.hostAddress }
+
+        return usable.firstOrNull { it is Inet4Address && !it.isLinkLocalAddress }
+            ?: usable.firstOrNull { it is Inet4Address }
+            ?: usable.firstOrNull { it is Inet6Address && !it.isLinkLocalAddress }
+            ?: usable.firstOrNull()
     }
 
     fun stop() {
