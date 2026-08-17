@@ -4,6 +4,11 @@ The generic media index is intentionally not used here. Household profiles get
 separate gallery roots so changing profile changes the photo library as well as
 watch history/content policy. Existing files directly below data/gallery remain
 visible to the account's default profile for backwards compatibility.
+
+New private photos live outside ``data/`` entirely. Nomad mounts ``data/`` at
+``/data`` for legacy media streaming, so storing private profile photos there
+would make a guessed raw URL an account-level bypass. The private gallery is
+only exposed through the profile-aware endpoints in this router.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ router = APIRouter()
 store = HouseholdProfileStore(database.DB_PATH)
 
 _GALLERY_ROOT = Path("data/gallery").resolve()
-_PRIVATE_ROOT = Path("data/.nomad_gallery").resolve()
+_PRIVATE_ROOT = Path("private/gallery").resolve()
 _IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif"}
 _VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm"}
 _ALLOWED_EXT = _IMAGE_EXT | _VIDEO_EXT
@@ -118,8 +123,6 @@ def _iter_root(root: Path, *, legacy: bool = False) -> Iterable[Path]:
         return
     for current, dirs, files in os.walk(root):
         current_path = Path(current)
-        # Private profile storage must never leak through the legacy root if a
-        # future install happens to place it underneath data/gallery.
         dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"profiles", ".nomad_gallery"}]
         for name in files:
             if name.startswith("."):
@@ -137,9 +140,6 @@ def _item_id(user_id: int, profile_id: int, path: Path) -> str:
 def _remember(user_id: int, profile_id: int, item_id: str, path: Path) -> None:
     with _CACHE_LOCK:
         if len(_CACHE) >= _CACHE_LIMIT:
-            # The gallery list repopulates hot entries immediately. A complete
-            # clear is cheaper and more deterministic than maintaining an LRU
-            # on a tiny SBC.
             _CACHE.clear()
         _CACHE[(int(user_id), int(profile_id), item_id)] = str(path.resolve())
 
@@ -187,8 +187,6 @@ def _resolve_item(user_id: int, profile: HouseholdProfile, item_id: str) -> Path
         if path.is_file() and path.suffix.lower() in _ALLOWED_EXT and any(_within(path, root) for root in _roots(user_id, profile)):
             return path
 
-    # Cache misses are uncommon (process restart / stale browser). Rebuild only
-    # this profile's map, never another profile's library.
     _scan(user_id, profile, limit=3000)
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
@@ -338,7 +336,6 @@ async def gallery_upload(
             raise
         uploaded.append({"name": destination.name, "size": total})
 
-    # Force fresh item mappings after upload.
     with _CACHE_LOCK:
         stale = [key for key in _CACHE if key[0] == int(user_id) and key[1] == int(profile.id)]
         for key in stale:
@@ -354,8 +351,6 @@ def delete_gallery_item(
 ):
     profile = _active_profile(request, int(user_id))
     path = _resolve_item(int(user_id), profile, item_id)
-    # Legacy gallery files are deliberately not deletable through the profile
-    # gallery API; they may be shared with older Nomad installs/workflows.
     private = _private_root(int(user_id), profile.id)
     if not _within(path, private):
         raise HTTPException(status_code=409, detail="Legacy gallery items must be managed from Files")
