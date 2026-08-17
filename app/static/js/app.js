@@ -13,6 +13,7 @@
     document.write(`<link rel="stylesheet" href="css/appliance-polish.css?v=${encodeURIComponent(version)}">`);
     document.write(`<link rel="stylesheet" href="css/media-experience.css?v=${encodeURIComponent(version)}">`);
     document.write(`<link rel="stylesheet" href="css/gallery-photos.css?v=${encodeURIComponent(version)}">`);
+    document.write(`<link rel="stylesheet" href="css/qol-polish.css?v=${encodeURIComponent(version)}">`);
     document.write(`<script src="js/app_legacy.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/playback-core.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/runtime-ui-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
@@ -44,6 +45,7 @@
     document.write(`<script src="js/profile-switch.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/gallery-photos.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/gallery-library-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/qol-polish.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/reader-state.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/reader-ui-polish.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
