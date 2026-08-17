@@ -8,6 +8,7 @@ from app.routers import playback_core as _core
 from app.routers.debrid_universal import router as _debrid_universal_router
 from app.routers.debrid_manifest import router as _debrid_manifest_router
 from app.services.debrid_lite import install_debrid_lite_search_policy
+from app.services import gallery_privacy as _gallery_privacy  # noqa: F401 - import applies idempotent privacy migration
 from app.services.playback.appliance_runtime import (
     assert_source_readable,
     install_appliance_runtime,
