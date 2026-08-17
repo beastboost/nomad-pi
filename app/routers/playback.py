@@ -8,6 +8,7 @@ from app.routers import playback_core as _core
 from app.routers.debrid_universal import router as _debrid_universal_router
 from app.routers.debrid_manifest import router as _debrid_manifest_router
 from app.services.debrid_lite import install_debrid_lite_search_policy
+from app.services.download_queue_runtime import install_download_queue_runtime
 from app.services import gallery_privacy as _gallery_privacy  # noqa: F401 - import applies idempotent privacy migration
 from app.services.playback.appliance_runtime import (
     assert_source_readable,
@@ -22,6 +23,7 @@ from app.services.playback.runtime_abr_policy import install_runtime_abr_policy
 # dynamically from app.services.debrid, so installing its ranking overlay here
 # also covers the already-imported router without duplicating legacy routes.
 install_debrid_lite_search_policy()
+install_download_queue_runtime()
 install_appliance_runtime(_core)
 install_playback_cache_guard()
 install_remux_stability()
