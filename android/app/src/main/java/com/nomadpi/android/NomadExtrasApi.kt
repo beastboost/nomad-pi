@@ -224,7 +224,7 @@ class NomadExtrasApi(private val api: NomadApi) {
 
         if (provider == "rd" && preferredIndex != null && preferredIndex in 0 until files.length()) {
             val file = files.optJSONObject(preferredIndex)
-            val name = file?.optString("path", file.optString("name")).orEmpty()
+            val name = file?.let { it.optString("path", it.optString("name")) }.orEmpty()
             val link = links.optString(preferredIndex)
             if (name.isNotBlank() && video.containsMatchIn(name) && link.isNotBlank()) return link to name
         }
