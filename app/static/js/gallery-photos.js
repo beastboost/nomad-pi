@@ -36,7 +36,12 @@
     function fmtDate(value, options = {}) {
         const d = new Date(value || 0);
         if (!Number.isFinite(d.getTime())) return '';
-        return d.toLocaleDateString(undefined, options);
+        try {
+            if (options?.timeStyle || options?.dateStyle) return d.toLocaleString(undefined, options);
+            return d.toLocaleDateString(undefined, options);
+        } catch {
+            return d.toLocaleString();
+        }
     }
 
     function dayKey(item) {
@@ -101,7 +106,10 @@
             media.classList.add(direction > 0 ? 'slide-next' : 'slide-prev');
         }
         viewer.querySelector('#photo-viewer-title').textContent = item.name || 'Photo';
-        viewer.querySelector('#photo-viewer-sub').textContent = fmtDate(item.taken_at || Number(item.mtime || 0) * 1000, { dateStyle: 'medium', timeStyle: 'short' });
+        viewer.querySelector('#photo-viewer-sub').textContent = fmtDate(
+            item.taken_at || Number(item.mtime || 0) * 1000,
+            { dateStyle: 'medium', timeStyle: 'short' },
+        );
         viewer.querySelector('#photo-viewer-count').textContent = `${G.index + 1} / ${G.items.length}`;
         viewer.querySelector('#photo-viewer-prev').disabled = G.index <= 0;
         viewer.querySelector('#photo-viewer-next').disabled = G.index >= G.items.length - 1;
@@ -148,6 +156,14 @@
 
     function lazyImages() {
         G.observer?.disconnect();
+        const images = [...document.querySelectorAll('#lib-body img[data-gallery-lazy]')];
+        if (!('IntersectionObserver' in window)) {
+            for (const img of images) {
+                if (img.dataset.src) img.src = img.dataset.src;
+                delete img.dataset.src;
+            }
+            return;
+        }
         G.observer = new IntersectionObserver(entries => {
             for (const entry of entries) {
                 if (!entry.isIntersecting) continue;
@@ -157,13 +173,14 @@
                 G.observer.unobserve(img);
             }
         }, { rootMargin: '500px 0px' });
-        document.querySelectorAll('#lib-body img[data-gallery-lazy]').forEach(img => G.observer.observe(img));
+        images.forEach(img => G.observer.observe(img));
     }
 
     function renderGrid() {
         const body = document.querySelector('#lib-body');
         if (!body) return;
-        document.querySelector('#lib-count').textContent = `${G.items.length} photo${G.items.length === 1 ? '' : 's'}`;
+        const count = document.querySelector('#lib-count');
+        if (count) count.textContent = `${G.items.length} photo${G.items.length === 1 ? '' : 's'}`;
 
         if (!G.items.length) {
             body.innerHTML = `
@@ -219,7 +236,8 @@
             renderGrid();
         } catch (err) {
             body.innerHTML = `<div class="empty"><i class="ph ph-warning-circle"></i>${escapeHtml(err.message || 'Could not load photos')}</div>`;
-            document.querySelector('#lib-count').textContent = '';
+            const count = document.querySelector('#lib-count');
+            if (count) count.textContent = '';
         }
     }
 
@@ -298,10 +316,12 @@
             G.items.splice(old, 1);
             if (!G.items.length) closeViewer();
             else { G.index = Math.min(old, G.items.length - 1); renderViewer(); }
-            closeSheet?.();
+            if (typeof closeSheet === 'function') closeSheet();
             renderGrid();
-            toast?.('Photo deleted', 'success', 1800);
-        } catch (err) { toast?.(err.message || 'Could not delete photo', 'error', 4000); }
+            if (typeof toast === 'function') toast('Photo deleted', 'success', 1800);
+        } catch (err) {
+            if (typeof toast === 'function') toast(err.message || 'Could not delete photo', 'error', 4000);
+        }
     }
 
     document.addEventListener('click', event => {
