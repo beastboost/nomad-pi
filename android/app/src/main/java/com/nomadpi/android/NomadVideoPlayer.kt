@@ -3,6 +3,7 @@ package com.nomadpi.android
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
@@ -132,17 +134,37 @@ fun NomadVideoPlayer(
         }
     }
 
-    DisposableEffect(activity, settings.fullscreenVideo, settings.keepScreenAwake) {
+    DisposableEffect(
+        activity,
+        settings.fullscreenVideo,
+        settings.autoLandscapeVideo,
+        settings.keepScreenAwake,
+    ) {
         val window = activity?.window
+        val previousOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         val insets = window?.let { WindowInsetsControllerCompat(it, it.decorView) }
-        if (settings.keepScreenAwake) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        if (settings.keepScreenAwake) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        if (settings.autoLandscapeVideo) {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         if (settings.fullscreenVideo) {
             insets?.hide(WindowInsetsCompat.Type.systemBars())
             insets?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+
         onDispose {
-            if (settings.keepScreenAwake) window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            if (settings.fullscreenVideo) insets?.show(WindowInsetsCompat.Type.systemBars())
+            if (settings.keepScreenAwake) {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            if (settings.fullscreenVideo) {
+                insets?.show(WindowInsetsCompat.Type.systemBars())
+            }
+            if (settings.autoLandscapeVideo) {
+                activity?.requestedOrientation = previousOrientation
+            }
         }
     }
 
@@ -212,7 +234,11 @@ fun NomadVideoPlayer(
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = .82f), Color.Black.copy(alpha = .38f), Color.Transparent),
+                                listOf(
+                                    Color.Black.copy(alpha = .82f),
+                                    Color.Black.copy(alpha = .38f),
+                                    Color.Transparent,
+                                ),
                             ),
                         )
                         .padding(horizontal = 10.dp, vertical = 12.dp),
@@ -253,14 +279,21 @@ fun NomadVideoPlayer(
                         },
                         modifier = Modifier.size(58.dp),
                     ) {
-                        Icon(Icons.Outlined.Replay10, "Back 10 seconds", tint = Color.White, modifier = Modifier.size(38.dp))
+                        Icon(
+                            Icons.Outlined.Replay10,
+                            "Back 10 seconds",
+                            tint = Color.White,
+                            modifier = Modifier.size(38.dp),
+                        )
                     }
                     IconButton(
                         onClick = {
                             if (player.isPlaying) player.pause() else player.play()
                             controlsVisible = true
                         },
-                        modifier = Modifier.size(76.dp).background(Color.White.copy(alpha = .94f), CircleShape),
+                        modifier = Modifier
+                            .size(76.dp)
+                            .background(Color.White.copy(alpha = .94f), CircleShape),
                     ) {
                         Icon(
                             if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -277,7 +310,12 @@ fun NomadVideoPlayer(
                         },
                         modifier = Modifier.size(58.dp),
                     ) {
-                        Icon(Icons.Outlined.Forward30, "Forward 30 seconds", tint = Color.White, modifier = Modifier.size(38.dp))
+                        Icon(
+                            Icons.Outlined.Forward30,
+                            "Forward 30 seconds",
+                            tint = Color.White,
+                            modifier = Modifier.size(38.dp),
+                        )
                     }
                 }
 
@@ -287,7 +325,11 @@ fun NomadVideoPlayer(
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = .48f), Color.Black.copy(alpha = .88f)),
+                                listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = .48f),
+                                    Color.Black.copy(alpha = .88f),
+                                ),
                             ),
                         )
                         .padding(horizontal = 18.dp, vertical = 18.dp),
@@ -309,9 +351,17 @@ fun NomadVideoPlayer(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(formatDuration(shownPosition), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            formatDuration(shownPosition),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                         Spacer(Modifier.weight(1f))
-                        Text(formatDuration(duration), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            formatDuration(duration),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
                 }
             }
@@ -324,7 +374,10 @@ fun NomadVideoPlayer(
             title = { Text("Video display") },
             text = {
                 Column {
-                    Text("Choose how the video fits your screen.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Choose how the video fits your screen.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     listOf("fit" to "Fit", "fill" to "Fill", "zoom" to "Zoom").forEach { (value, label) ->
                         TextButton(
                             onClick = {
@@ -365,8 +418,12 @@ private fun NomadApi.fetchPlaybackDurationMs(sessionId: String): Long {
         connectTimeout = 3_500
         readTimeout = 5_000
         setRequestProperty("Accept", "application/json")
-        token?.takeIf { it.isNotBlank() }?.let { setRequestProperty("Authorization", "Bearer $it") }
-        profileId?.let { setRequestProperty("X-Nomad-Profile-ID", it.toString()) }
+        token?.takeIf { it.isNotBlank() }?.let {
+            setRequestProperty("Authorization", "Bearer $it")
+        }
+        profileId?.let {
+            setRequestProperty("X-Nomad-Profile-ID", it.toString())
+        }
     }
     return try {
         if (connection.responseCode !in 200..299) return 0L
@@ -374,8 +431,13 @@ private fun NomadApi.fetchPlaybackDurationMs(sessionId: String): Long {
             BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).readText()
         }
         val json = JSONObject(text)
-        val seconds = json.optDouble("duration", json.optJSONObject("metadata")?.optJSONObject("source")?.optDouble("duration", 0.0) ?: 0.0)
-        (seconds.coerceAtLeast(0.0) * 1000.0).toLong()
+        val sourceDuration = json
+            .optJSONObject("metadata")
+            ?.optJSONObject("source")
+            ?.optDouble("duration", 0.0)
+            ?: 0.0
+        val seconds = json.optDouble("duration", sourceDuration)
+        (max(seconds, sourceDuration).coerceAtLeast(0.0) * 1000.0).toLong()
     } catch (_: Throwable) {
         0L
     } finally {
