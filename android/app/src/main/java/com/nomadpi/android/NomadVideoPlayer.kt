@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
@@ -207,7 +206,7 @@ fun NomadVideoPlayer(
                 PlayerView(ctx).apply {
                     useController = false
                     this.player = player
-                    resizeMode = resizeMode.toResizeMode()
+                    this.resizeMode = resizeMode.toResizeMode()
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                 }
             },
