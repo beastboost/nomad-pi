@@ -1,12 +1,12 @@
-const CACHE_NAME = 'nomad-pi-v2.0.17-photos-private';
+const CACHE_NAME = 'nomad-pi-v2.0.18-qol';
 
 const APP_SHELL = [
-  '/', '/index.html', '/manifest.json', '/css/nocturne.css', '/css/appliance-polish.css', '/css/media-experience.css', '/css/gallery-photos.css',
+  '/', '/index.html', '/manifest.json', '/css/nocturne.css', '/css/appliance-polish.css', '/css/media-experience.css', '/css/gallery-photos.css', '/css/qol-polish.css',
   '/js/app.js', '/js/app_legacy.js', '/js/playback-core.js', '/js/runtime-ui-guard.js', '/js/debrid-lite.js', '/js/player-mobile-fix.js', '/js/direct-play-guard.js',
   '/js/replacement-control.js', '/js/track-control.js', '/js/subtitle-control.js',
   '/js/quality-control.js', '/js/device-control.js', '/js/watch-party.js', '/js/audio-direct-bridge.js', '/js/music2-player.js', '/js/music-player-polish.js',
   '/js/music2-fallback.js', '/js/media-exclusivity.js', '/js/stream-keep-control.js', '/js/universal-search.js', '/js/series-download-picker.js', '/js/universal-home.js',
-  '/js/offline-control.js', '/js/download-live.js', '/js/library-health.js', '/js/media-actions.js', '/js/storage-failover.js', '/js/playback-health-ui.js', '/js/profile-context.js', '/js/profile-switch.js', '/js/gallery-photos.js', '/js/gallery-library-guard.js', '/js/reader-state.js', '/js/reader-ui-polish.js',
+  '/js/offline-control.js', '/js/download-live.js', '/js/library-health.js', '/js/media-actions.js', '/js/storage-failover.js', '/js/playback-health-ui.js', '/js/profile-context.js', '/js/profile-switch.js', '/js/gallery-photos.js', '/js/gallery-library-guard.js', '/js/qol-polish.js', '/js/reader-state.js', '/js/reader-ui-polish.js',
   '/js/admin.js', '/js/features.js', '/js/reader.js',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png',
   '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/icon-512.svg',
