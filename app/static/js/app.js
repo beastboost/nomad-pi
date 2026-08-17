@@ -43,6 +43,7 @@
     document.write(`<script src="js/profile-context.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/profile-switch.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/gallery-photos.js?v=${encodeURIComponent(version)}"><\/script>`);
+    document.write(`<script src="js/gallery-library-guard.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/reader-state.js?v=${encodeURIComponent(version)}"><\/script>`);
     document.write(`<script src="js/reader-ui-polish.js?v=${encodeURIComponent(version)}"><\/script>`);
 })();
