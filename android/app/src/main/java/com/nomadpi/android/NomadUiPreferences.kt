@@ -11,6 +11,7 @@ private val Context.nomadUiDataStore by preferencesDataStore(name = "nomad_nativ
 
 data class NomadUiSettings(
     val fullscreenVideo: Boolean = true,
+    val autoLandscapeVideo: Boolean = true,
     val keepScreenAwake: Boolean = true,
     val videoResize: String = "fit",
 )
@@ -20,6 +21,7 @@ class NomadUiPreferences(context: Context) {
 
     private object Keys {
         val fullscreenVideo = booleanPreferencesKey("fullscreen_video")
+        val autoLandscapeVideo = booleanPreferencesKey("auto_landscape_video")
         val keepScreenAwake = booleanPreferencesKey("keep_screen_awake")
         val videoResize = stringPreferencesKey("video_resize")
     }
@@ -28,6 +30,7 @@ class NomadUiPreferences(context: Context) {
         val prefs = store.data.first()
         return NomadUiSettings(
             fullscreenVideo = prefs[Keys.fullscreenVideo] ?: true,
+            autoLandscapeVideo = prefs[Keys.autoLandscapeVideo] ?: true,
             keepScreenAwake = prefs[Keys.keepScreenAwake] ?: true,
             videoResize = prefs[Keys.videoResize]?.takeIf { it in setOf("fit", "fill", "zoom") } ?: "fit",
         )
@@ -36,6 +39,7 @@ class NomadUiPreferences(context: Context) {
     suspend fun save(value: NomadUiSettings) {
         store.edit { prefs ->
             prefs[Keys.fullscreenVideo] = value.fullscreenVideo
+            prefs[Keys.autoLandscapeVideo] = value.autoLandscapeVideo
             prefs[Keys.keepScreenAwake] = value.keepScreenAwake
             prefs[Keys.videoResize] = value.videoResize
         }
