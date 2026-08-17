@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -134,7 +133,11 @@ private fun NativePdfReader(api: NomadApi, source: NativeReaderSource.Pdf, onClo
         return
     }
 
-    val holder = remember(file.absolutePath) { PdfHolder(file) }
+    val holder = remember(file.absolutePath) { runCatching { PdfHolder(file) }.getOrNull() }
+    if (holder == null) {
+        ReaderError(source.title, "Android could not open this PDF.", onClose)
+        return
+    }
     DisposableEffect(holder) { onDispose { holder.close() } }
     if (holder.pageCount <= 0) {
         ReaderError(source.title, "This PDF has no renderable pages.", onClose)
@@ -146,7 +149,7 @@ private fun NativePdfReader(api: NomadApi, source: NativeReaderSource.Pdf, onClo
         Box(Modifier.fillMaxSize()) {
             HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
                 val bitmap by produceState<Bitmap?>(initialValue = null, page) {
-                    value = withContext(Dispatchers.IO) { holder.render(page, 1800) }
+                    value = withContext(Dispatchers.IO) { holder.render(page, 1600) }
                 }
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (bitmap == null) CircularProgressIndicator()
@@ -214,7 +217,8 @@ private class PdfHolder(file: File) {
             val width = targetWidth.coerceAtLeast(600)
             val scale = width.toFloat() / page.width.toFloat().coerceAtLeast(1f)
             val height = max(1, (page.height * scale).toInt())
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+            // PdfRenderer explicitly requires an ARGB destination bitmap.
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             return bitmap
