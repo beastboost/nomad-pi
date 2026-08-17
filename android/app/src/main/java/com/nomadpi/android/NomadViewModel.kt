@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 enum class EntryScreen { LOADING, CONNECT, LOGIN, APP }
 enum class MainTab { HOME, LIBRARY, PHOTOS, DOWNLOADS, SERVER }
@@ -32,44 +34,25 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
     private val discovery = NomadDiscovery(application)
     private val capabilities = AndroidCapabilities.detect()
 
-    var entry by mutableStateOf(EntryScreen.LOADING)
-        private set
-    var server by mutableStateOf("http://nomadpi.local")
-        private set
-    var session by mutableStateOf<NomadSession?>(null)
-        private set
-    var profiles by mutableStateOf<List<NomadProfile>>(emptyList())
-        private set
-    var profile by mutableStateOf<NomadProfile?>(null)
-        private set
-    var discovered by mutableStateOf<List<DiscoveredNomad>>(emptyList())
-        private set
-    var discovering by mutableStateOf(false)
-        private set
-    var tab by mutableStateOf(MainTab.HOME)
-        private set
-    var librarySection by mutableStateOf(LibrarySection.MOVIES)
-        private set
-    var library by mutableStateOf<List<LibraryItem>>(emptyList())
-        private set
-    var shows by mutableStateOf<List<ShowItem>>(emptyList())
-        private set
-    var photos by mutableStateOf<GalleryResult?>(null)
-        private set
-    var downloads by mutableStateOf<List<DownloadJob>>(emptyList())
-        private set
-    var stats by mutableStateOf<ServerStats?>(null)
-        private set
-    var playback by mutableStateOf<ActivePlayback?>(null)
-        private set
-    var busy by mutableStateOf(false)
-        private set
-    var message by mutableStateOf<String?>(null)
-        private set
+    var entry by mutableStateOf(EntryScreen.LOADING); private set
+    var server by mutableStateOf("http://nomadpi.local"); private set
+    var session by mutableStateOf<NomadSession?>(null); private set
+    var profiles by mutableStateOf<List<NomadProfile>>(emptyList()); private set
+    var profile by mutableStateOf<NomadProfile?>(null); private set
+    var discovered by mutableStateOf<List<DiscoveredNomad>>(emptyList()); private set
+    var discovering by mutableStateOf(false); private set
+    var tab by mutableStateOf(MainTab.HOME); private set
+    var librarySection by mutableStateOf(LibrarySection.MOVIES); private set
+    var library by mutableStateOf<List<LibraryItem>>(emptyList()); private set
+    var shows by mutableStateOf<List<ShowItem>>(emptyList()); private set
+    var photos by mutableStateOf<GalleryResult?>(null); private set
+    var downloads by mutableStateOf<List<DownloadJob>>(emptyList()); private set
+    var stats by mutableStateOf<ServerStats?>(null); private set
+    var playback by mutableStateOf<ActivePlayback?>(null); private set
+    var busy by mutableStateOf(false); private set
+    var message by mutableStateOf<String?>(null); private set
 
-    init {
-        viewModelScope.launch { restore() }
-    }
+    init { viewModelScope.launch { restore() } }
 
     private suspend fun restore() {
         val saved = store.load()
@@ -106,36 +89,24 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
         startDiscovery()
     }
 
-    fun login(username: String, password: String) {
-        if (busy) return
-        busy = true
-        message = null
-        viewModelScope.launch {
-            try {
-                val loggedIn = withContext(Dispatchers.IO) { api.login(server, username.trim(), password) }
-                session = loggedIn
-                store.save(loggedIn)
-                entry = EntryScreen.APP
-                refreshProfiles()
-                refreshHome()
-            } catch (t: Throwable) {
-                message = t.message ?: "Login failed"
-            } finally {
-                busy = false
-            }
-        }
+    fun login(username: String, password: String) = request(showBusy = true) {
+        val loggedIn = withContext(Dispatchers.IO) { api.login(server, username.trim(), password) }
+        session = loggedIn
+        store.save(loggedIn)
+        entry = EntryScreen.APP
+        refreshProfiles()
+        refreshHome()
     }
 
     fun logout() {
         viewModelScope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    // Logout is best-effort. Clearing the local token must never be blocked by LAN loss.
-                    val connection = java.net.URL(api.absoluteUrl("/api/auth/logout")).openConnection() as java.net.HttpURLConnection
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = URL(api.absoluteUrl("/api/auth/logout")).openConnection() as HttpURLConnection
                     connection.requestMethod = "POST"
-                    api.token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
                     connection.connectTimeout = 2_500
                     connection.readTimeout = 2_500
+                    api.token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
                     runCatching { connection.responseCode }
                     connection.disconnect()
                 }
@@ -144,6 +115,10 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
             session = null
             profile = null
             profiles = emptyList()
+            library = emptyList()
+            shows = emptyList()
+            photos = null
+            downloads = emptyList()
             api.configure(server, null)
             entry = EntryScreen.LOGIN
         }
@@ -160,12 +135,7 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
                     if (discovered.none { it.url == url }) discovered = discovered + item
                 }
             },
-            onError = { error ->
-                viewModelScope.launch {
-                    discovering = false
-                    message = error
-                }
-            },
+            onError = { text -> viewModelScope.launch { discovering = false; message = text } },
         )
         viewModelScope.launch {
             delay(8_000)
@@ -195,98 +165,79 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
         refreshLibrary()
     }
 
-    fun refreshProfiles() = launchLoad(silent = true) {
-        val (list, current) = api.profiles()
-        withContext(Dispatchers.Main) {
-            profiles = list
-            profile = current
-            current?.id?.let {
-                api.profileId = it
-                viewModelScope.launch { store.updateProfile(it) }
-            }
+    fun refreshProfiles() = request {
+        val result = withContext(Dispatchers.IO) { api.profiles() }
+        profiles = result.first
+        profile = result.second
+        result.second?.id?.let {
+            api.profileId = it
+            store.updateProfile(it)
         }
     }
 
     fun switchProfile(target: NomadProfile, pin: String? = null, onDone: (Boolean) -> Unit = {}) {
         if (busy) return
-        busy = true
-        message = null
-        viewModelScope.launch {
-            try {
-                val selected = withContext(Dispatchers.IO) { api.switchProfile(target.id, pin) }
-                profile = selected
-                store.updateProfile(selected.id)
-                library = emptyList()
-                shows = emptyList()
-                photos = null
-                downloads = emptyList()
-                refreshHome()
-                onDone(true)
-            } catch (t: Throwable) {
-                message = t.message ?: "Could not switch profile"
-                onDone(false)
-            } finally {
-                busy = false
-            }
+        request(showBusy = true, onFailure = { onDone(false) }) {
+            val selected = withContext(Dispatchers.IO) { api.switchProfile(target.id, pin) }
+            profile = selected
+            store.updateProfile(selected.id)
+            library = emptyList()
+            shows = emptyList()
+            photos = null
+            downloads = emptyList()
+            refreshHome()
+            onDone(true)
         }
     }
 
-    fun refreshHome() = launchLoad(silent = true) {
-        val s = runCatching { api.serverStats() }.getOrNull()
-        withContext(Dispatchers.Main) { if (s != null) stats = s }
+    fun refreshHome() = request {
+        val value = withContext(Dispatchers.IO) { runCatching { api.serverStats() }.getOrNull() }
+        if (value != null) stats = value
     }
 
-    fun refreshStats() = launchLoad(silent = true) {
-        val s = api.serverStats()
-        withContext(Dispatchers.Main) { stats = s }
+    fun refreshStats() = request {
+        stats = withContext(Dispatchers.IO) { api.serverStats() }
     }
 
-    fun refreshLibrary() = launchLoad {
-        when (librarySection) {
-            LibrarySection.SHOWS -> {
-                val result = api.shows()
-                withContext(Dispatchers.Main) {
-                    shows = result
-                    library = emptyList()
-                }
+    fun refreshLibrary() = request(showBusy = true) {
+        if (librarySection == LibrarySection.SHOWS) {
+            shows = withContext(Dispatchers.IO) { api.shows() }
+            library = emptyList()
+        } else {
+            val category = when (librarySection) {
+                LibrarySection.MOVIES -> "movies"
+                LibrarySection.MUSIC -> "music"
+                LibrarySection.BOOKS -> "books"
+                LibrarySection.SHOWS -> "shows"
             }
-            else -> {
-                val category = when (librarySection) {
-                    LibrarySection.MOVIES -> "movies"
-                    LibrarySection.MUSIC -> "music"
-                    LibrarySection.BOOKS -> "books"
-                    LibrarySection.SHOWS -> "shows"
-                }
-                val result = api.library(category)
-                withContext(Dispatchers.Main) {
-                    library = result
-                    shows = emptyList()
-                }
-            }
+            library = withContext(Dispatchers.IO) { api.library(category) }
+            shows = emptyList()
         }
     }
 
-    fun refreshPhotos() = launchLoad {
-        val result = api.gallery()
-        withContext(Dispatchers.Main) { photos = result }
+    fun refreshPhotos() = request(showBusy = true) {
+        photos = withContext(Dispatchers.IO) { api.gallery() }
     }
 
-    fun refreshDownloads() = launchLoad(silent = true) {
-        val result = api.downloads()
-        withContext(Dispatchers.Main) { downloads = result }
+    fun refreshDownloads() = request {
+        downloads = withContext(Dispatchers.IO) { api.downloads() }
     }
 
-    fun cancelDownload(id: String) = launchLoad(silent = true) {
-        api.cancelDownload(id)
-        val result = api.downloads()
-        withContext(Dispatchers.Main) { downloads = result }
+    fun cancelDownload(id: String) = request {
+        downloads = withContext(Dispatchers.IO) {
+            api.cancelDownload(id)
+            api.downloads()
+        }
     }
 
-    fun clearDownloadQueue() = launchLoad(silent = true) {
-        val active = api.downloads().filterNot { it.status.lowercase() in setOf("completed", "failed", "error", "cancelled") }
-        for (job in active) runCatching { api.cancelDownload(job.id) }
-        api.clearDownloads()
-        withContext(Dispatchers.Main) { downloads = api.downloads() }
+    fun clearDownloadQueue() = request {
+        downloads = withContext(Dispatchers.IO) {
+            val current = api.downloads()
+            val terminal = setOf("completed", "failed", "error", "cancelled")
+            current.filterNot { it.status.lowercase() in terminal }.forEach { runCatching { api.cancelDownload(it.id) } }
+            api.clearDownloads()
+            api.downloads()
+        }
     }
 
     fun play(item: LibraryItem) {
@@ -299,37 +250,21 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playPath(path: String, title: String, audioOnly: Boolean, resume: Double = 0.0) {
         if (busy) return
-        busy = true
-        message = null
-        viewModelScope.launch {
-            try {
-                val active = withContext(Dispatchers.IO) {
-                    if (audioOnly) {
-                        ActivePlayback(
-                            title = title,
-                            path = path,
-                            url = api.musicStreamUrl(path),
-                            sessionId = null,
-                            mode = "direct_audio",
-                            audioOnly = true,
-                        )
-                    } else {
-                        val started = api.startPlayback(path, capabilities, resume)
-                        ActivePlayback(
-                            title = title,
-                            path = path,
-                            url = started.playbackUrl,
-                            sessionId = started.sessionId.takeIf { it.isNotBlank() },
-                            mode = started.mode,
-                            audioOnly = false,
-                        )
-                    }
+        request(showBusy = true) {
+            playback = withContext(Dispatchers.IO) {
+                if (audioOnly) {
+                    ActivePlayback(title, path, api.musicStreamUrl(path), null, "direct_audio", true)
+                } else {
+                    val started = api.startPlayback(path, capabilities, resume)
+                    ActivePlayback(
+                        title = title,
+                        path = path,
+                        url = started.playbackUrl,
+                        sessionId = started.sessionId.takeIf { it.isNotBlank() },
+                        mode = started.mode,
+                        audioOnly = false,
+                    )
                 }
-                playback = active
-            } catch (t: Throwable) {
-                message = t.message ?: "Playback could not start"
-            } finally {
-                busy = false
             }
         }
     }
@@ -337,46 +272,37 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
     fun closePlayback(positionMs: Long = 0, durationMs: Long = 0) {
         val active = playback
         playback = null
-        val sessionId = active?.sessionId ?: return
+        val id = active?.sessionId ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                api.playbackHeartbeat(
-                    sessionId,
-                    positionMs.coerceAtLeast(0) / 1000.0,
-                    durationMs.coerceAtLeast(0) / 1000.0,
-                    "stopped",
-                )
-            }
-            runCatching { api.stopPlayback(sessionId) }
+            runCatching { api.playbackHeartbeat(id, positionMs / 1000.0, durationMs / 1000.0, "stopped") }
+            runCatching { api.stopPlayback(id) }
         }
     }
 
     fun heartbeat(positionMs: Long, durationMs: Long, playing: Boolean) {
-        val sessionId = playback?.sessionId ?: return
+        val id = playback?.sessionId ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                api.playbackHeartbeat(
-                    sessionId,
-                    positionMs.coerceAtLeast(0) / 1000.0,
-                    durationMs.coerceAtLeast(0) / 1000.0,
-                    if (playing) "playing" else "paused",
-                )
-            }
+            runCatching { api.playbackHeartbeat(id, positionMs / 1000.0, durationMs / 1000.0, if (playing) "playing" else "paused") }
         }
     }
 
     fun clearMessage() { message = null }
 
-    private fun launchLoad(silent: Boolean = false, block: suspend () -> Unit) {
+    private fun request(
+        showBusy: Boolean = false,
+        onFailure: (() -> Unit)? = null,
+        block: suspend () -> Unit,
+    ) {
         viewModelScope.launch {
-            if (!silent) busy = true
-            if (!silent) message = null
+            if (showBusy) busy = true
+            if (showBusy) message = null
             try {
-                withContext(Dispatchers.IO) { block() }
+                block()
             } catch (t: Throwable) {
                 message = t.message ?: "Nomad request failed"
+                onFailure?.invoke()
             } finally {
-                if (!silent) busy = false
+                if (showBusy) busy = false
             }
         }
     }
