@@ -123,6 +123,12 @@
 .nomad-photo-viewer.chrome-hidden .photo-viewer-count,
 .nomad-photo-viewer.chrome-hidden .photo-viewer-nav { opacity:0; pointer-events:none; }
 html.photo-viewer-open, html.photo-viewer-open body { overflow:hidden !important; }
+/* Shared Nomad sheets/dialogs are normally below immersive media. While the
+   photo viewer is open, actions must sit above it. */
+html.photo-viewer-open .scrim { z-index:289 !important; }
+html.photo-viewer-open .sheet { z-index:290 !important; }
+html.photo-viewer-open .dialog-wrap { z-index:300 !important; }
+html.photo-viewer-open #toast-stack { z-index:310 !important; }
 
 @media (max-width:699px) {
     .gallery-photo-grid { grid-template-columns:repeat(3, minmax(0,1fr)); }
