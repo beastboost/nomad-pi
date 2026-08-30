@@ -66,6 +66,10 @@ bool mdns_started = false;
 char discovered_server_ip[64] = "";
 int discovered_server_port = 8000;
 char last_server_ip[64] = "";
+// Read-only display token. The dashboard websocket and snapshot used to be
+// open to anyone on the network; they now want either a login or a token
+// minted by an admin under Server -> Display tokens.
+char display_token[256] = "";
 
 bool wifi_connecting = false;
 unsigned long wifi_connect_start_ms = 0;
@@ -243,7 +247,40 @@ void setup() {
 }
 
 // --- LOOP ---
+// Provisioning the display token over the on-screen keyboard would mean
+// thumbing ~200 characters into a 2.8" panel, so it is pasted over USB serial
+// once instead: `token <paste>` stores it, `token clear` forgets it.
+void handleSerialCommands() {
+    if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (!line.startsWith("token")) return;
+
+    String value = line.substring(5);
+    value.trim();
+    if (value == "clear") {
+        display_token[0] = '\0';
+    } else if (value.length() == 0) {
+        Serial.println(strlen(display_token) > 0 ? "token: set" : "token: not set");
+        return;
+    } else if (value.length() >= sizeof(display_token)) {
+        Serial.println("token: too long");
+        return;
+    } else {
+        strncpy(display_token, value.c_str(), sizeof(display_token) - 1);
+        display_token[sizeof(display_token) - 1] = '\0';
+    }
+
+    Preferences p;
+    p.begin("nomad-display", false);
+    p.putString("display_token", display_token);
+    p.end();
+    Serial.println(strlen(display_token) > 0 ? "token: saved" : "token: cleared");
+    ws_configured = false;  // reconnect with the new credential
+}
+
 void loop() {
+    handleSerialCommands();
     if (ws_configured) webSocket.loop();
 
     processWsMessage();
@@ -356,6 +393,7 @@ void loadPreferences() {
     String s = preferences.getString("ssid", "");
     String p = preferences.getString("pass", "");
     String lastIp = preferences.getString("last_server_ip", "");
+    String token = preferences.getString("display_token", "");
     theme_dark = preferences.getBool("theme_dark", true);
     brightness = preferences.getInt("brightness", 128);
     preferences.end();
@@ -364,6 +402,8 @@ void loadPreferences() {
     strncpy(wifi_pass, p.c_str(), 63);
     strncpy(last_server_ip, lastIp.c_str(), 63);
     last_server_ip[63] = '\0';
+    strncpy(display_token, token.c_str(), sizeof(display_token) - 1);
+    display_token[sizeof(display_token) - 1] = '\0';
 
     if (strlen(last_server_ip) > 0) {
         strncpy(discovered_server_ip, last_server_ip, sizeof(discovered_server_ip) - 1);
@@ -375,6 +415,7 @@ void savePreferences() {
     preferences.begin("nomad-display", false);
     preferences.putString("ssid", wifi_ssid);
     preferences.putString("pass", wifi_pass);
+    preferences.putString("display_token", display_token);
     preferences.putBool("theme_dark", theme_dark);
     preferences.putInt("brightness", brightness);
     preferences.end();
@@ -1266,7 +1307,12 @@ void tryConnectWebSocket() {
         webSocket.disconnect();
         delay(10);
     }
-    webSocket.begin(ws_host, ws_port, "/api/dashboard/ws");
+    String ws_path = "/api/dashboard/ws";
+    if (strlen(display_token) > 0) {
+        ws_path += "?display_token=";
+        ws_path += display_token;
+    }
+    webSocket.begin(ws_host, ws_port, ws_path.c_str());
     webSocket.onEvent(webSocketEvent);
     webSocket.setReconnectInterval(15000);
     ws_configured = true;
@@ -1382,6 +1428,10 @@ void pollDashboardHttp() {
 
     HTTPClient http;
     String url = "http://" + server_ip + ":" + String(server_port) + "/api/dashboard/public";
+    if (strlen(display_token) > 0) {
+        url += "?display_token=";
+        url += display_token;
+    }
     http.begin(url);
     http.setConnectTimeout(800);
     http.setTimeout(800);

@@ -14,6 +14,63 @@ The Dashboard API provides real-time monitoring of active playback sessions and 
 
 ---
 
+## Authentication
+
+Every dashboard endpoint requires a credential. `/ws`, `/public` and `/stats`
+used to accept anonymous callers, which meant anyone who could reach the port
+could watch what the whole household was playing.
+
+There are two ways in:
+
+**1. A normal login** — the session cookie or an `Authorization: Bearer <token>`
+header, exactly as the rest of the API. Use this for browsers and apps.
+
+**2. A display token** — a signed, read-only credential for panels that cannot
+complete an interactive login (ESP32, smart mirror, spare tablet). An admin
+mints one:
+
+```bash
+curl -X POST http://nomadpi.local:8000/api/dashboard/display/tokens \
+     -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"label": "hallway", "ttl_days": 365}'
+```
+
+The response carries the token and ready-made URLs. It is **shown once and not
+stored server-side**, so copy it when it is issued. Pass it as a query
+parameter:
+
+```
+ws://nomadpi.local:8000/api/dashboard/ws?display_token=<token>
+http://nomadpi.local:8000/api/dashboard/public?display_token=<token>
+```
+
+A display token is read-only. It cannot open `/control/ws`, and it cannot
+pause, resume or stop a session — those need a real account that owns the
+session.
+
+To invalidate every token ever issued (a display was lost or resold):
+
+```bash
+curl -X POST http://nomadpi.local:8000/api/dashboard/display/revoke \
+     -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+`GET /api/dashboard/display/tokens` reports the current generation without
+echoing any secret.
+
+### Provisioning the bundled ESP32 display
+
+The firmware reads its token from NVS. Paste it once over USB serial:
+
+```
+token eyJ...<the token>
+```
+
+`token` on its own reports whether one is set; `token clear` forgets it.
+
+---
+
 ## Quick Start
 
 ### Test the WebSocket

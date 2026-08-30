@@ -4,7 +4,7 @@ Provides WebSocket streaming and REST endpoints for live playback tracking
 Designed for external displays (ESP32, tablets, etc.)
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from typing import Dict, List, Optional
 import asyncio
@@ -16,11 +16,61 @@ import subprocess
 import logging
 import hashlib
 from datetime import datetime
-from app.routers.auth import get_current_user_id
+from app.routers.auth import _extract_auth_token, get_current_admin, get_current_user_id
 from app.routers.media import cache_remote_poster, find_file_poster, POSTER_CACHE_DIR, BASE_DIR
+from app.services import display_tokens
+from app import database
 
 logger = logging.getLogger("nomad")
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+def _display_token_from(scope) -> Optional[str]:
+    """Pull a display token off a request or websocket query string."""
+    params = scope.query_params
+    return params.get("display_token") or params.get("display") or None
+
+
+def _session_user_id(scope) -> Optional[int]:
+    """Resolve a normal logged-in user from cookie, Authorization or ?token=."""
+    token = scope.cookies.get("auth_token")
+    if not token:
+        header = scope.headers.get("authorization") or ""
+        if header.startswith("Bearer "):
+            token = header.split(" ", 1)[1].strip()
+    if not token:
+        token = scope.query_params.get("token")
+    if not token:
+        return None
+    session = database.get_session(token)
+    return session["user_id"] if session else None
+
+
+def authorize_dashboard_read(scope) -> dict:
+    """Read access to live dashboard data.
+
+    Two ways in: a logged-in user, or a signed read-only display token. The
+    display token exists because a wall panel cannot hold an interactive
+    login; it is not a way to skip authentication.
+    """
+    user_id = _session_user_id(scope)
+    if user_id is not None:
+        return {"kind": "user", "user_id": user_id}
+
+    token = _display_token_from(scope)
+    if token:
+        payload = display_tokens.verify(token)
+        return {"kind": "display", "label": payload.get("label", "display")}
+
+    raise display_tokens.DisplayTokenError("Authentication or a display token is required")
+
+
+def require_dashboard_read(request) -> dict:
+    """authorize_dashboard_read for HTTP routes, as a 401 instead of a 500."""
+    try:
+        return authorize_dashboard_read(request)
+    except display_tokens.DisplayTokenError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
 
 # In-memory storage for active playback sessions
 # Structure: {session_id: {user_id, path, title, current_time, duration, last_update, state, ...}}
@@ -544,7 +594,17 @@ async def websocket_endpoint(websocket: WebSocket):
         "timestamp": 1234567890
     }
     """
+    try:
+        viewer = authorize_dashboard_read(websocket)
+    except display_tokens.DisplayTokenError as exc:
+        # 1008 = policy violation. Close before accept() so an unauthorized
+        # client never sees a single frame of session data.
+        logger.warning(f"Dashboard websocket refused: {exc}")
+        await websocket.close(code=1008)
+        return
+
     await manager.connect(websocket)
+    logger.info(f"Dashboard websocket connected ({viewer['kind']})")
 
     try:
         while True:
@@ -700,6 +760,20 @@ async def websocket_control_endpoint(websocket: WebSocket):
             await websocket.close(code=1008)
         finally:
             return
+
+    # This socket receives pause/resume/stop for one playback session, so it
+    # needs a real account behind it and that account must own the session.
+    # A display token deliberately does not qualify: it is read-only.
+    user_id = _session_user_id(websocket)
+    if user_id is None:
+        await websocket.close(code=1008)
+        return
+    existing = active_sessions.get(session_id)
+    if isinstance(existing, dict) and existing.get("user_id") not in (None, user_id):
+        logger.warning(f"Refused control socket for someone else's session: {session_id}")
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     control_connections[session_id] = websocket
     try:
@@ -772,48 +846,50 @@ async def stop_session(session_id: str, user_id: int = Depends(get_current_user_
 
     Removes the session from active tracking
     """
-    if session_id in active_sessions:
-        # Verify ownership
-        if active_sessions[session_id].get("user_id") != user_id:
-            raise HTTPException(status_code=403, detail="Not your session")
-
+    if _owned_session(session_id, user_id) is not None:
         del active_sessions[session_id]
         logger.info(f"Session stopped: {session_id}")
         return {"status": "ok", "message": "Session stopped"}
 
     return {"status": "not_found", "message": "Session not found"}
 
+def _owned_session(session_id: str, user_id: int) -> Optional[Dict]:
+    """The session, if this user may control it.
+
+    None means "no such session"; a session owned by someone else raises 403.
+    Ownership is checked exactly as command_session/stop_session do it — pause
+    and resume used to skip it entirely, so any logged-in account could pause
+    or resume anyone else's playback.
+    """
+    session = active_sessions.get(session_id)
+    if not isinstance(session, dict):
+        return None
+    if session.get("user_id") not in (None, user_id):
+        raise HTTPException(status_code=403, detail="Not your session")
+    return session
+
+
 @router.post("/session/{session_id}/pause")
 async def pause_session(session_id: str, user_id: int = Depends(get_current_user_id)):
-    """
-    Pause an active session
-    """
-    if session_id in active_sessions:
-        # Verify ownership (optional, strict for now)
-        if active_sessions[session_id].get("user_id") != user_id:
-             # Allow admin to pause anyone? For now, strict.
-             # raise HTTPException(status_code=403, detail="Not your session")
-             pass 
+    """Pause an active session owned by the caller."""
+    session = _owned_session(session_id, user_id)
+    if session is None:
+        return {"status": "not_found", "message": "Session not found"}
 
-        # Update state
-        active_sessions[session_id]["state"] = "paused"
-        # In a real implementation, we would send a WebSocket message to the player here
-        logger.info(f"Session paused: {session_id}")
-        return {"status": "ok", "message": "Session paused"}
-
-    return {"status": "not_found", "message": "Session not found"}
+    session["state"] = "paused"
+    logger.info(f"Session paused: {session_id}")
+    return {"status": "ok", "message": "Session paused"}
 
 @router.post("/session/{session_id}/resume")
 async def resume_session(session_id: str, user_id: int = Depends(get_current_user_id)):
-    """
-    Resume an active session
-    """
-    if session_id in active_sessions:
-        active_sessions[session_id]["state"] = "playing"
-        logger.info(f"Session resumed: {session_id}")
-        return {"status": "ok", "message": "Session resumed"}
+    """Resume an active session owned by the caller."""
+    session = _owned_session(session_id, user_id)
+    if session is None:
+        return {"status": "not_found", "message": "Session not found"}
 
-    return {"status": "not_found", "message": "Session not found"}
+    session["state"] = "playing"
+    logger.info(f"Session resumed: {session_id}")
+    return {"status": "ok", "message": "Session resumed"}
 
 @router.get("/now-playing")
 async def get_now_playing(user_id: int = Depends(get_current_user_id)):
@@ -840,16 +916,19 @@ async def get_now_playing(user_id: int = Depends(get_current_user_id)):
     }
 
 @router.get("/stats")
-async def get_stats():
-    """
-    Get system statistics only (no authentication required)
-
-    Useful for public displays that only need system monitoring
-    """
+async def get_stats(request: Request):
+    """System statistics for a logged-in user or a signed display token."""
+    require_dashboard_read(request)
     return get_system_stats()
 
 @router.get("/public")
-async def get_public_dashboard_snapshot():
+async def get_public_dashboard_snapshot(request: Request):
+    """Snapshot of what is playing, for a display panel that cannot log in.
+
+    Despite the path this was never meant to be public: it lists every active
+    session's title, poster and progress for the whole household.
+    """
+    require_dashboard_read(request)
     clean_stale_sessions()
 
     sessions_list = []
@@ -871,6 +950,52 @@ async def get_public_dashboard_snapshot():
 
 # Watch History Endpoints
 from app import database
+
+# ── Display tokens ────────────────────────────────────────────────────────
+# A wall panel (ESP32, tablet, spare phone) cannot complete an interactive
+# login, which is why /ws and /public used to be wide open. An admin mints a
+# read-only token here instead and pastes it into the display's config.
+
+@router.get("/display/tokens")
+async def display_token_state(admin=Depends(get_current_admin)):
+    """Report whether display tokens are live, without echoing any secret."""
+    return {
+        "generation": display_tokens.current_generation(),
+        "default_ttl_days": display_tokens.DEFAULT_TTL_DAYS,
+        "note": "Tokens are not stored server-side; copy one when it is issued.",
+    }
+
+
+@router.post("/display/tokens")
+async def issue_display_token(data: Optional[Dict] = None, admin=Depends(get_current_admin)):
+    """Mint a read-only display token. Shown once — it is not stored."""
+    payload = data or {}
+    label = str(payload.get("label") or "display")[:64]
+    try:
+        ttl_days = int(payload.get("ttl_days") or display_tokens.DEFAULT_TTL_DAYS)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="ttl_days must be a number")
+    if not 1 <= ttl_days <= 3650:
+        raise HTTPException(status_code=400, detail="ttl_days must be between 1 and 3650")
+
+    token = display_tokens.issue(label=label, ttl_days=ttl_days)
+    return {
+        "token": token,
+        "label": label,
+        "ttl_days": ttl_days,
+        "generation": display_tokens.current_generation(),
+        "websocket": f"/api/dashboard/ws?display_token={token}",
+        "snapshot": f"/api/dashboard/public?display_token={token}",
+    }
+
+
+@router.post("/display/revoke")
+async def revoke_display_tokens(admin=Depends(get_current_admin)):
+    """Invalidate every display token ever issued, in one step."""
+    generation = display_tokens.revoke_all()
+    logger.warning(f"All display tokens revoked; generation is now {generation}")
+    return {"status": "ok", "generation": generation}
+
 
 @router.get("/watch-history")
 def get_watch_history(user_id: int = Depends(get_current_user_id), limit: int = 20):
