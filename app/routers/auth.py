@@ -5,6 +5,8 @@ from typing import Optional
 import uuid
 import os
 import secrets
+
+from app.services import media_tickets
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -52,13 +54,28 @@ def clear_attempts(attempts_dict: dict, client_ip: str) -> None:
 
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
-ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "true").lower() == "true"
+# Defaults to OFF. This used to default to true, so every fresh install shipped
+# with the password "nomad" and stayed that way until someone thought to change
+# it. Set ALLOW_INSECURE_DEFAULT=true only for a throwaway lab box.
+ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "false").lower() == "true"
+
+# Passwords nobody may settle on, whatever the install flags say.
+WEAK_PASSWORDS = {"nomad", "admin", "password", "raspberry", "nomadpi", "changeme", "12345678"}
+
+
+def is_weak_password(password: str) -> bool:
+    candidate = (password or "").strip().lower()
+    return len(candidate) < 8 or candidate in WEAK_PASSWORDS
 MIN_PASSWORD_LENGTH = 8
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
     if len(password) < MIN_PASSWORD_LENGTH:
         return False, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
+    # Length alone let an operator "change" the shipped password to another
+    # well-known one and consider the job done.
+    if (password or "").strip().lower() in WEAK_PASSWORDS and not ALLOW_INSECURE_DEFAULT:
+        return False, "That password is too common. Choose something specific to this device."
     return True, ""
 
 
@@ -72,28 +89,37 @@ def ensure_admin_user():
         must_change = True
         if ADMIN_PASSWORD:
             password = ADMIN_PASSWORD
+            if is_weak_password(password) and not ALLOW_INSECURE_DEFAULT:
+                logger.warning(
+                    "ADMIN_PASSWORD is weak; generating a random password instead. "
+                    "Set ALLOW_INSECURE_DEFAULT=true to override.")
+                password = secrets.token_urlsafe(16)
         elif ADMIN_PASSWORD_HASH:
             password = None
             must_change = False
+        elif ALLOW_INSECURE_DEFAULT:
+            password = "nomad"
+            logger.warning(
+                "ALLOW_INSECURE_DEFAULT is set: the admin password is the well-known "
+                "default. Do not run this configuration on a reachable network.")
         else:
-            if ALLOW_INSECURE_DEFAULT:
-                password = "nomad"
-            else:
-                password = secrets.token_urlsafe(16)
+            password = secrets.token_urlsafe(16)
 
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
         database.create_user("admin", h, is_admin=True, must_change_password=must_change)
 
         if password:
-            print("\n" + "=" * 50)
-            print("!!! FIRST TIME SETUP: ADMIN USER CREATED !!!")
+            print("\n" + "=" * 60)
+            print("FIRST TIME SETUP: ADMIN USER CREATED")
             print("Username: admin")
             print(f"Password: {password}")
-            print("PLEASE LOGIN AND CHANGE YOUR PASSWORD IMMEDIATELY.")
-            print("=" * 50 + "\n")
-            logger.warning("Created default admin user. Password displayed in console.")
+            print("")
+            print("This password is provisional. Nomad will not serve the API")
+            print("until it has been changed on first login.")
+            print("=" * 60 + "\n")
+            logger.warning("Created admin user with a provisional password.")
         else:
-            print("Created default admin user with pre-hashed password")
+            print("Created admin user from ADMIN_PASSWORD_HASH")
 
 
 class LoginRequest(BaseModel):
@@ -148,15 +174,38 @@ class ProfileUpdateRequest(BaseModel):
     parental_controls: int = 0
 
 
-def _extract_auth_token(request: Request, allow_query: bool = True) -> Optional[str]:
+def _extract_auth_token(request: Request) -> Optional[str]:
+    """The caller's session token, from the cookie or the Authorization header.
+
+    The query string is deliberately not consulted. The session token is a
+    30-day credential for the entire API, and accepting it from a URL put it
+    into browser history, proxy logs and Referer headers on every media URL —
+    a leaked stream link was a leaked account. URLs that cannot carry a header
+    use a short-lived media ticket instead; see app/services/media_tickets.py.
+    """
     token = request.cookies.get("auth_token")
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1].strip()
-    if not token and allow_query:
-        token = request.query_params.get("token")
     return token or None
+
+
+def get_media_user_id(request: Request) -> int:
+    """Authenticate a request for media bytes.
+
+    Same as get_current_user_id, plus ``?ticket=`` for the URLs that cannot
+    carry a header: <video src>, CSS backgrounds, download links and the VLC
+    handoff. A ticket is short-lived and only these endpoints accept it.
+    """
+    ticket = request.query_params.get("ticket")
+    if ticket:
+        try:
+            return media_tickets.user_id_from(ticket)
+        except media_tickets.MediaTicketError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return get_current_user_id(request)
 
 
 @router.post("/login")
@@ -189,7 +238,9 @@ def login(request: LoginRequest, request_obj: Request):
             key="auth_token",
             value=token,
             httponly=True,
-            max_age=86400 * 30,
+            # Match the server-side session, so the browser stops presenting a
+            # credential the server has already stopped honouring.
+            max_age=86400 * database.SESSION_MAX_AGE_DAYS,
             path="/",
             secure=os.getenv('NOMAD_SECURE_COOKIES', 'false').lower() == 'true',
             samesite="lax"
@@ -207,9 +258,38 @@ def get_current_user_id(request: Request):
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
     user_id = session['user_id']
+    enforce_password_change(request, user_id)
     from app.services.profile_policy_shell import enforce_request_policy_shell
     enforce_request_policy_shell(request, user_id, token)
     return user_id
+
+
+# Endpoints a user must still reach while their password is provisional:
+# enough to see who they are, change it, and log out.
+PASSWORD_CHANGE_EXEMPT_PATHS = (
+    "/api/auth/change-password",
+    "/api/auth/logout",
+    "/api/auth/check",
+    "/api/auth/me",
+)
+
+
+def enforce_password_change(request: Request, user_id: int) -> None:
+    """Block the API while an account is still on its provisional password.
+
+    must_change_password was reported to the client and otherwise ignored, so a
+    first-run admin could dismiss the prompt and keep using the shipped
+    password indefinitely.
+    """
+    path = request.url.path.rstrip("/") or request.url.path
+    if any(path.startswith(exempt) for exempt in PASSWORD_CHANGE_EXEMPT_PATHS):
+        return
+    user = database.get_user_by_id(user_id)
+    if user and user.get("must_change_password"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Set a new password before using Nomad",
+        )
 
 
 def get_current_admin(user_id=Depends(get_current_user_id)):
@@ -249,7 +329,12 @@ def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_c
     if user_id == admin['id']:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
     database.update_user_role(user_id, request.is_admin)
-    return {"status": "ok"}
+    # A role change is a privilege boundary: sessions minted under the old role
+    # must not keep running. Password changes already do this; promotion and
+    # demotion did not, so a demoted admin stayed an admin until their token
+    # aged out, and a promotion did not take effect until they logged in again.
+    database.delete_user_sessions(user_id)
+    return {"status": "ok", "sessions_revoked": True}
 
 
 @router.post("/users/{user_id}/password")
@@ -279,6 +364,19 @@ def update_profile(request: ProfileUpdateRequest, user_id=Depends(get_current_us
         parental_controls=request.parental_controls
     )
     return {"status": "ok"}
+
+
+@router.get("/media-ticket")
+def get_media_ticket(user_id=Depends(get_current_user_id)):
+    """Mint a short-lived ticket for URLs that cannot carry an auth header.
+
+    The client asks for one after login and puts it on <video src>, artwork and
+    download links in place of the session token.
+    """
+    return {
+        "ticket": media_tickets.issue(user_id),
+        "expires_in": media_tickets.DEFAULT_TTL_SECONDS,
+    }
 
 
 @router.post("/change-password")
@@ -339,7 +437,7 @@ def get_me(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/check")
 def check_auth(request: Request):
-    token = _extract_auth_token(request, allow_query=False)
+    token = _extract_auth_token(request)
     if token:
         session = database.get_session(token)
         if session:

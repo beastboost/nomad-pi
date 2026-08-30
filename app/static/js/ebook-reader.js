@@ -259,7 +259,7 @@ class EBookReader {
 
     async loadPDF(path) {
         const token = getCookie('auth_token');
-        const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
+        const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${typeof ticketParam === 'function' ? ticketParam() : ''}`;
 
         // Load PDF.js if not already loaded
         if (typeof window.pdfjsLib === 'undefined') {
@@ -304,7 +304,7 @@ class EBookReader {
     async loadEPUB(path) {
         try {
             const token = getCookie('auth_token');
-            const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${token ? '&token=' + token : ''}`;
+            const url = `${API_BASE}/media/stream?path=${encodeURIComponent(path)}${typeof ticketParam === 'function' ? ticketParam() : ''}`;
 
             console.log('Starting EPUB load for:', path);
 
@@ -429,7 +429,7 @@ class EBookReader {
 
         const token = getCookie('auth_token');
         const page = this.comicPages[index];
-        const url = `${API_BASE}/media/stream?path=${encodeURIComponent(page.path)}${token ? '&token=' + token : ''}`;
+        const url = `${API_BASE}/media/stream?path=${encodeURIComponent(page.path)}${typeof ticketParam === 'function' ? ticketParam() : ''}`;
 
         const img = document.getElementById('comic-image');
         img.src = url;

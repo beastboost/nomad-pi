@@ -158,15 +158,9 @@ update_status 85 "Refreshing media services..."
 CURRENT_HOSTNAME="$(hostname 2>/dev/null || echo nomad)"
 nomad_configure_minidlna "$SCRIPT_DIR" "$CURRENT_HOSTNAME"
 
-# Preserve the existing web-admin privilege model, but repair the file if an OS
-# update removed it. Validate before install so a malformed sudoers file cannot
-# lock out the device.
-SUDOERS_TMP="$(mktemp)"
-printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$REAL_USER" > "$SUDOERS_TMP"
-if nomad_sudo visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
-    nomad_sudo install -m 0440 "$SUDOERS_TMP" /etc/sudoers.d/nomad-pi
-fi
-rm -f "$SUDOERS_TMP"
+# Reinstall the scoped web-admin policy, repairing it if an OS update removed
+# it. Validated before install so a malformed file cannot lock out the device.
+nomad_install_sudoers "$SCRIPT_DIR" "$REAL_USER"
 
 # Ensure the service definition follows the current checkout path/user. This is
 # important when an install was migrated from /root or boot media.

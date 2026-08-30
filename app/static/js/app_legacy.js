@@ -73,6 +73,55 @@ function escapeHtml(str) {
 }
 
 function token() { return localStorage.getItem(TOKEN_KEY); }
+
+/* ── Media tickets ──────────────────────────────────────────────────────
+   <video src>, artwork and download links authenticate through the URL, and
+   we used to put the session token there — a 30-day credential for the whole
+   API, landing in browser history, proxy logs and Referer headers. A media
+   ticket is the narrow replacement: signed, short-lived, and accepted only by
+   endpoints that serve bytes.
+
+   Held in memory only, so it is never persisted anywhere a session token used
+   to be, and refreshed well before it lapses.                              */
+const TICKET_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+let _mediaTicket = null;
+let _mediaTicketExpiry = 0;
+let _mediaTicketInFlight = null;
+
+function mediaTicket() { return _mediaTicket; }
+
+function ticketParam() {
+    return _mediaTicket ? `&ticket=${encodeURIComponent(_mediaTicket)}` : '';
+}
+
+async function refreshMediaTicket(force = false) {
+    if (!token()) return null;
+    if (!force && _mediaTicket && Date.now() < _mediaTicketExpiry - TICKET_REFRESH_MARGIN_MS) {
+        return _mediaTicket;
+    }
+    // Collapse concurrent callers onto one request; the player, artwork and
+    // the library grid all ask at once on first paint.
+    if (_mediaTicketInFlight) return _mediaTicketInFlight;
+
+    _mediaTicketInFlight = (async () => {
+        try {
+            const res = await api('/auth/media-ticket');
+            _mediaTicket = res.ticket;
+            _mediaTicketExpiry = Date.now() + (Number(res.expires_in) || 21600) * 1000;
+            return _mediaTicket;
+        } catch {
+            return null;
+        } finally {
+            _mediaTicketInFlight = null;
+        }
+    })();
+    return _mediaTicketInFlight;
+}
+
+function clearMediaTicket() {
+    _mediaTicket = null;
+    _mediaTicketExpiry = 0;
+}
 function authHeaders() {
     const t = token();
     return t ? { Authorization: `Bearer ${t}` } : {};
@@ -162,8 +211,7 @@ function fmtLeft(sec) {
     return h ? `${h}h ${m}m left` : `${m} min left`;
 }
 function streamUrl(path, extra = '') {
-    const t = token();
-    return `${API}/media/stream?path=${encodeURIComponent(path)}${t ? `&token=${encodeURIComponent(t)}` : ''}${extra}`;
+    return `${API}/media/stream?path=${encodeURIComponent(path)}${ticketParam()}${extra}`;
 }
 /* VLC's handler wants an absolute http(s) URL after the scheme. */
 function vlcUrl(path) {
@@ -326,7 +374,20 @@ async function login(ev) {
         const tok = data.token || data.access_token;
         if (!tok) throw new Error('Server did not return a session token');
         localStorage.setItem(TOKEN_KEY, tok);
+        const provisional = data.user && data.user.must_change_password;
+        if (provisional) {
+            // The server 403s the rest of the API until this is done, so
+            // sending them into the app would only show a broken shell.
+            _provisionalPassword = p;
+            $('#password-input').value = '';
+            $('#login-form').classList.add('hidden');
+            $('#setup-hint').classList.add('hidden');
+            $('#first-password-form').classList.remove('hidden');
+            $('#new-password-input').focus();
+            return;
+        }
         $('#password-input').value = '';
+        await refreshMediaTicket(true);
         await startApp();
     } catch (e) {
         errEl.textContent = e.message || 'Sign in failed';
@@ -339,6 +400,7 @@ async function login(ev) {
 function logout() {
     try { fetch(`${API}/auth/logout`, { method: 'POST', headers: authHeaders() }); } catch {}
     localStorage.removeItem(TOKEN_KEY);
+    clearMediaTicket();
     stopVideo();
     stopAudio();
     $('#app-shell').classList.add('hidden');
@@ -1916,6 +1978,7 @@ document.addEventListener('click', async (e) => {
 
 function wire() {
     $('#login-form')?.addEventListener('submit', login);
+    $('#first-password-form')?.addEventListener('submit', setFirstPassword);
 
     $('#lib-sort-btn')?.addEventListener('click', openSortSheet);
     $('#sheet-scrim')?.addEventListener('click', closeSheet);
@@ -2058,6 +2121,62 @@ async function startApp() {
     if (!routeFromHash()) goTab('home');
 }
 
+let _provisionalPassword = null;
+
+async function setFirstPassword(ev) {
+    if (ev) ev.preventDefault();
+    const next = $('#new-password-input').value;
+    const confirm = $('#confirm-password-input').value;
+    const errEl = $('#first-password-error');
+    const btn = $('#first-password-btn');
+    errEl.textContent = '';
+
+    if (next !== confirm) { errEl.textContent = 'Those do not match.'; return; }
+    if (!next || next.length < 8) { errEl.textContent = 'Use at least 8 characters.'; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        await api('/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({
+                current_password: _provisionalPassword || '',
+                new_password: next,
+            }),
+        });
+        // change-password revokes every session for the account, so the token
+        // in hand is already dead; sign in again with the new password.
+        const res = await fetch(`${API}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: $('#username-input').value.trim() || 'admin',
+                password: next,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !(data.token || data.access_token)) {
+            throw new Error('Password saved — please sign in again.');
+        }
+        localStorage.setItem(TOKEN_KEY, data.token || data.access_token);
+        _provisionalPassword = null;
+        $('#new-password-input').value = '';
+        $('#confirm-password-input').value = '';
+        $('#first-password-form').classList.add('hidden');
+        $('#login-form').classList.remove('hidden');
+        await refreshMediaTicket(true);
+        await startApp();
+        toast('Password set ✓', 'success');
+    } catch (e) {
+        errEl.textContent = e.message || 'Could not set the password';
+        $('#first-password-form').classList.add('hidden');
+        $('#login-form').classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Set password';
+    }
+}
+
 async function boot() {
     wire();
 
@@ -2075,7 +2194,22 @@ async function boot() {
         return;
     }
     try {
-        await api('/auth/check');
+        const check = await api('/auth/check');
+        if (!check || !check.authenticated) throw new Error('Not authenticated');
+        if (check.user && check.user.must_change_password) {
+            // A stored token belonging to a still-provisional account: the API
+            // is closed to it, so ask for the old password and set a new one
+            // rather than dropping them into a shell that 403s everywhere.
+            $('#username-input').value = check.user.username || 'admin';
+            $('#login-screen').classList.remove('hidden');
+            $('#setup-hint').textContent =
+                'Sign in once more to set your own password.';
+            $('#setup-hint').classList.remove('hidden');
+            return;
+        }
+        // Media URLs are unusable without this, so it has to land before the
+        // first screen that shows artwork or offers playback.
+        await refreshMediaTicket(true);
         await startApp();
     } catch {
         localStorage.removeItem(TOKEN_KEY);

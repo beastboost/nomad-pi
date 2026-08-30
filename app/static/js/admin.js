@@ -457,7 +457,7 @@ async function renderBackup(body) {
           Database, mount configuration and environment — everything except the media itself.
         </div>
         <a class="btn btn-primary btn-block" id="backup-dl" style="min-height:48px"
-           href="${escapeHtml(`${API}/system/backup?token=${encodeURIComponent(token() || '')}`)}">
+           href="${escapeHtml(`${API}/system/backup`)}">
           <i class="ph ph-download-simple"></i>Download backup
         </a>
       </div>

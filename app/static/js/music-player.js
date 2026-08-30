@@ -114,7 +114,7 @@ class MusicPlayer {
         const token = this.getCookie('auth_token');
         let streamUrl = `/api/media/stream?path=${encodeURIComponent(track.path)}`;
         if (token) {
-            streamUrl += `&token=${token}`;
+            streamUrl += typeof ticketParam === 'function' ? ticketParam() : '';
         }
 
         this.audio.pause();
