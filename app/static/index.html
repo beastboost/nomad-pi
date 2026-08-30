@@ -44,6 +44,24 @@
         </form>
         <p id="login-error" class="login-error"></p>
         <p id="setup-hint" class="login-hint hidden"></p>
+
+        <!-- Shown when the account is still on its provisional password. The
+             server refuses the rest of the API until this is done, so there is
+             deliberately no way past it. -->
+        <form class="login-form hidden" id="first-password-form" autocomplete="on">
+            <p class="login-copy" style="margin-bottom:14px">
+                This account is still on the password Nomad printed during setup.
+                Choose your own to continue.
+            </p>
+            <input type="password" id="new-password-input" class="input input-plain"
+                   placeholder="New password" autocomplete="new-password">
+            <input type="password" id="confirm-password-input" class="input input-plain"
+                   placeholder="Confirm new password" autocomplete="new-password">
+            <button type="submit" class="btn btn-primary btn-block btn-lg" id="first-password-btn">
+                Set password
+            </button>
+            <p id="first-password-error" class="login-error"></p>
+        </form>
     </div>
 </div>
 

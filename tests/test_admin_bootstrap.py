@@ -109,3 +109,26 @@ def test_hotspot_passphrase_is_per_device():
     source = Path("scripts/network-appliance.sh").read_text()
     assert "nomadpassword" not in source, "the shared default hotspot key is back"
     assert "nomad_hotspot_password" in source
+
+
+# ── the forced change must be completable ─────────────────────────────────
+# Enforcing must_change_password without a way to satisfy it would strand a
+# first-run user in an app that 403s every request.
+
+def test_login_screen_offers_a_first_password_form():
+    markup = Path("app/static/index.html").read_text()
+    assert 'id="first-password-form"' in markup
+    assert 'id="new-password-input"' in markup
+    assert 'id="confirm-password-input"' in markup
+
+
+def test_client_diverts_a_provisional_account_to_that_form():
+    source = Path("app/static/js/app_legacy.js").read_text()
+    assert "must_change_password" in source, "the client ignores the provisional flag"
+    assert "setFirstPassword" in source
+    # Both entry points: a fresh login and a stored token on boot.
+    assert source.count("must_change_password") >= 2
+
+
+def test_change_password_endpoint_is_reachable_while_provisional():
+    assert "/api/auth/change-password" in auth.PASSWORD_CHANGE_EXEMPT_PATHS

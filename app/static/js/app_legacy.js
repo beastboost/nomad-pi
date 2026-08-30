@@ -374,6 +374,18 @@ async function login(ev) {
         const tok = data.token || data.access_token;
         if (!tok) throw new Error('Server did not return a session token');
         localStorage.setItem(TOKEN_KEY, tok);
+        const provisional = data.user && data.user.must_change_password;
+        if (provisional) {
+            // The server 403s the rest of the API until this is done, so
+            // sending them into the app would only show a broken shell.
+            _provisionalPassword = p;
+            $('#password-input').value = '';
+            $('#login-form').classList.add('hidden');
+            $('#setup-hint').classList.add('hidden');
+            $('#first-password-form').classList.remove('hidden');
+            $('#new-password-input').focus();
+            return;
+        }
         $('#password-input').value = '';
         await refreshMediaTicket(true);
         await startApp();
@@ -1966,6 +1978,7 @@ document.addEventListener('click', async (e) => {
 
 function wire() {
     $('#login-form')?.addEventListener('submit', login);
+    $('#first-password-form')?.addEventListener('submit', setFirstPassword);
 
     $('#lib-sort-btn')?.addEventListener('click', openSortSheet);
     $('#sheet-scrim')?.addEventListener('click', closeSheet);
@@ -2108,6 +2121,62 @@ async function startApp() {
     if (!routeFromHash()) goTab('home');
 }
 
+let _provisionalPassword = null;
+
+async function setFirstPassword(ev) {
+    if (ev) ev.preventDefault();
+    const next = $('#new-password-input').value;
+    const confirm = $('#confirm-password-input').value;
+    const errEl = $('#first-password-error');
+    const btn = $('#first-password-btn');
+    errEl.textContent = '';
+
+    if (next !== confirm) { errEl.textContent = 'Those do not match.'; return; }
+    if (!next || next.length < 8) { errEl.textContent = 'Use at least 8 characters.'; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        await api('/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({
+                current_password: _provisionalPassword || '',
+                new_password: next,
+            }),
+        });
+        // change-password revokes every session for the account, so the token
+        // in hand is already dead; sign in again with the new password.
+        const res = await fetch(`${API}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: $('#username-input').value.trim() || 'admin',
+                password: next,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !(data.token || data.access_token)) {
+            throw new Error('Password saved — please sign in again.');
+        }
+        localStorage.setItem(TOKEN_KEY, data.token || data.access_token);
+        _provisionalPassword = null;
+        $('#new-password-input').value = '';
+        $('#confirm-password-input').value = '';
+        $('#first-password-form').classList.add('hidden');
+        $('#login-form').classList.remove('hidden');
+        await refreshMediaTicket(true);
+        await startApp();
+        toast('Password set ✓', 'success');
+    } catch (e) {
+        errEl.textContent = e.message || 'Could not set the password';
+        $('#first-password-form').classList.add('hidden');
+        $('#login-form').classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Set password';
+    }
+}
+
 async function boot() {
     wire();
 
@@ -2125,7 +2194,19 @@ async function boot() {
         return;
     }
     try {
-        await api('/auth/check');
+        const check = await api('/auth/check');
+        if (!check || !check.authenticated) throw new Error('Not authenticated');
+        if (check.user && check.user.must_change_password) {
+            // A stored token belonging to a still-provisional account: the API
+            // is closed to it, so ask for the old password and set a new one
+            // rather than dropping them into a shell that 403s everywhere.
+            $('#username-input').value = check.user.username || 'admin';
+            $('#login-screen').classList.remove('hidden');
+            $('#setup-hint').textContent =
+                'Sign in once more to set your own password.';
+            $('#setup-hint').classList.remove('hidden');
+            return;
+        }
         // Media URLs are unusable without this, so it has to land before the
         // first screen that shows artwork or offers playback.
         await refreshMediaTicket(true);
