@@ -402,3 +402,36 @@ nomad_ensure_tailscale() {
         echo "WARNING: Tailscale installation failed; Nomad itself remains usable."
     fi
 }
+
+# ── Web-admin privileges ─────────────────────────────────────────────────
+# Installs a scoped sudoers policy in place of the historical
+# "NOPASSWD: ALL", which made any web request from the media server
+# equivalent to a root shell. Falls back to leaving the existing policy in
+# place if the generated file fails validation, so a bad template can never
+# lock the operator out of their own device.
+nomad_install_sudoers() {
+    local root="$1" user="$2"
+    local template="$root/scripts/nomad-sudoers.template"
+    local tmp rendered
+
+    if [ ! -f "$template" ]; then
+        echo "WARNING: $template is missing; leaving sudoers policy untouched." >&2
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    rendered="$(sed -e "s|__USER__|$user|g" -e "s|__ROOT__|$root|g" "$template")"
+    printf '%s\n' "$rendered" > "$tmp"
+    chmod 0440 "$tmp" 2>/dev/null || true
+
+    if nomad_sudo visudo -cf "$tmp" >/dev/null 2>&1; then
+        nomad_sudo install -m 0440 "$tmp" /etc/sudoers.d/nomad-pi
+        rm -f "$tmp"
+        echo "Web-admin sudo scoped to power, storage, network, services and updates."
+        return 0
+    fi
+
+    rm -f "$tmp"
+    echo "ERROR: generated sudoers policy failed validation; existing policy kept." >&2
+    return 1
+}

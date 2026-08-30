@@ -57,6 +57,7 @@ from app.routers.playback_intelligence import router as _intelligence_router
 from app.routers.playback_profile_policy import router as _profile_policy_router
 from app.routers.playback_reader import router as _reader_router
 from app.routers.playback_watch_party import router as _watch_party_router
+from app.routers.playback_cues import router as _cues_router
 from app.routers.playback_abr import (
     abr_manager as _abr_manager,
     ensure_adaptive_session as _ensure_adaptive_session,
@@ -173,6 +174,7 @@ for _router in (
     _profile_policy_router,
     _reader_router,
     _watch_party_router,
+    _cues_router,
 ):
     _core.router.include_router(_router)
 

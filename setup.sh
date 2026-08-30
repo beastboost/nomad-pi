@@ -228,19 +228,10 @@ rm -f "$SERVICE_TMP"
 nomad_sudo systemctl daemon-reload
 nomad_sudo systemctl enable nomad-pi.service
 
-# Web-admin system controls currently require broad privileged operations. Keep
-# the existing behaviour, but validate the generated sudoers file atomically.
+# Web-admin system controls are scoped to power, storage, network, Nomad's own
+# services and self-update. See scripts/nomad-sudoers.template.
 echo "[6/10] Web-admin permissions"
-SUDOERS_TMP="$(mktemp)"
-printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$REAL_USER" > "$SUDOERS_TMP"
-if nomad_sudo visudo -cf "$SUDOERS_TMP" >/dev/null; then
-    nomad_sudo install -m 0440 "$SUDOERS_TMP" /etc/sudoers.d/nomad-pi
-else
-    echo "ERROR: generated sudoers policy failed validation." >&2
-    rm -f "$SUDOERS_TMP"
-    exit 1
-fi
-rm -f "$SUDOERS_TMP"
+nomad_install_sudoers "$SCRIPT_DIR" "$REAL_USER"
 
 # NetworkManager setup is hardware-capability based: servers without Wi-Fi are
 # simply left alone; SBCs with Wi-Fi receive the optional fallback hotspot.
@@ -371,6 +362,7 @@ echo "Web:     http://$NEW_HOSTNAME.local"
 echo "Direct:  http://${IP_ADDR:-$NEW_HOSTNAME}:8000"
 echo "mDNS:    $NEW_HOSTNAME.local"
 echo "SMB:     \\\\$NEW_HOSTNAME.local\\data"
-echo "Hotspot: ${NOMAD_HOTSPOT_NAME:-NomadPi} / ${NOMAD_HOTSPOT_PASSWORD:-nomadpassword} · portal http://${NOMAD_HOTSPOT_IP:-10.42.0.1}/"
+echo "Hotspot: ${NOMAD_HOTSPOT_NAME:-NomadPi} / ${NOMAD_HOTSPOT_PASSWORD:-<generated>} · portal http://${NOMAD_HOTSPOT_IP:-10.42.0.1}/"
+echo "  (this passphrase is unique to this device and stored in /etc/nomadpi.env)"
 echo "Admin:   initial password is the value in /etc/nomadpi.env"
 echo "============================================================"

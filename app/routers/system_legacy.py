@@ -1055,8 +1055,15 @@ def restart_wifi(user_id: int = Depends(get_current_user_id)):
 
     try:
         # Use sudo -n for passwordless execution, relying on sudoers config
-        script = "nmcli connection down NomadPi >/dev/null 2>&1 || true; nmcli radio wifi off >/dev/null 2>&1 || true; sleep 2; nmcli radio wifi on >/dev/null 2>&1 || true"
-        cmd = ["sudo", "-n", "bash", "-c", script]
+        # A fixed script rather than `sudo bash -c <string>`: the sudoers policy
+        # can grant this one path, where granting `bash -c` is granting root.
+        helper = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "scripts", "nomad-wifi-restart.sh",
+        )
+        if not os.path.isfile(helper):
+            raise HTTPException(status_code=500, detail="Wi-Fi restart helper is missing")
+        cmd = ["sudo", "-n", helper]
         
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return {"status": "ok", "message": "Wi-Fi restart initiated"}
