@@ -249,7 +249,12 @@ def update_user_role(user_id: int, request: UserRoleRequest, admin=Depends(get_c
     if user_id == admin['id']:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
     database.update_user_role(user_id, request.is_admin)
-    return {"status": "ok"}
+    # A role change is a privilege boundary: sessions minted under the old role
+    # must not keep running. Password changes already do this; promotion and
+    # demotion did not, so a demoted admin stayed an admin until their token
+    # aged out, and a promotion did not take effect until they logged in again.
+    database.delete_user_sessions(user_id)
+    return {"status": "ok", "sessions_revoked": True}
 
 
 @router.post("/users/{user_id}/password")

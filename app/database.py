@@ -172,6 +172,7 @@ def init_db():
                 token TEXT PRIMARY KEY,
                 user_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
@@ -218,6 +219,21 @@ def init_db():
 
         try:
             c.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+        except sqlite3.OperationalError: pass
+
+        # Expiry used to be derived from created_at against the *current*
+        # SESSION_MAX_AGE_DAYS on every read, so raising the setting silently
+        # resurrected sessions that had already lapsed. Stamp the deadline on
+        # the row at issue time instead, and backfill existing rows once.
+        try:
+            c.execute("ALTER TABLE sessions ADD COLUMN expires_at TIMESTAMP")
+        except sqlite3.OperationalError: pass
+        try:
+            c.execute(
+                "UPDATE sessions SET expires_at = datetime(created_at, '+' || ? || ' days') "
+                "WHERE expires_at IS NULL",
+                (SESSION_MAX_AGE_DAYS,),
+            )
         except sqlite3.OperationalError: pass
 
         try:
@@ -1182,13 +1198,35 @@ def rename_media_path(old_path: str, new_path: str, is_dir: bool = False):
     finally:
         return_db(conn)
 
-SESSION_MAX_AGE_DAYS = int(os.environ.get("SESSION_MAX_AGE_DAYS", 30))
+def _session_max_age_days() -> int:
+    """SESSION_MAX_AGE_DAYS, clamped so a bad value cannot mint eternal sessions."""
+    try:
+        days = int(os.environ.get("SESSION_MAX_AGE_DAYS", 30))
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            "SESSION_MAX_AGE_DAYS is not a number; falling back to 30 days")
+        return 30
+    return max(1, min(days, 365))
 
-def create_session(token: str, user_id: int):
+
+SESSION_MAX_AGE_DAYS = _session_max_age_days()
+
+def create_session(token: str, user_id: int, max_age_days: Optional[int] = None):
+    """Issue a session with its expiry stamped on the row.
+
+    Recording the deadline at issue time means a later change to
+    SESSION_MAX_AGE_DAYS applies to new logins only; it can no longer revive a
+    session that has already lapsed.
+    """
+    ttl_days = int(SESSION_MAX_AGE_DAYS if max_age_days is None else max_age_days)
     conn = get_db()
     try:
         c = conn.cursor()
-        c.execute('INSERT INTO sessions (token, user_id) VALUES (?, ?)', (token, user_id))
+        c.execute(
+            "INSERT INTO sessions (token, user_id, expires_at) "
+            "VALUES (?, ?, datetime('now', '+' || ? || ' days'))",
+            (token, user_id, ttl_days),
+        )
         conn.commit()
     finally:
         return_db(conn)
@@ -1198,10 +1236,17 @@ def get_session(token: str) -> Optional[dict]:
     try:
         c = conn.cursor()
         # Only return session if it hasn't expired
+        # expires_at is authoritative. The created_at arm only covers rows
+        # written before the column existed and never backfilled.
         c.execute('''
-            SELECT token, user_id, created_at 
-            FROM sessions 
-            WHERE token = ? AND created_at >= datetime('now', '-' || ? || ' days')
+            SELECT token, user_id, created_at, expires_at
+            FROM sessions
+            WHERE token = ?
+              AND (
+                  (expires_at IS NOT NULL AND expires_at > datetime('now'))
+                  OR (expires_at IS NULL
+                      AND created_at >= datetime('now', '-' || ? || ' days'))
+              )
         ''', (token, SESSION_MAX_AGE_DAYS))
         row = c.fetchone()
         
@@ -1238,7 +1283,9 @@ def cleanup_sessions():
         c = conn.cursor()
         c.execute('''
             DELETE FROM sessions
-            WHERE created_at < datetime('now', '-' || ? || ' days')
+            WHERE (expires_at IS NOT NULL AND expires_at <= datetime('now'))
+               OR (expires_at IS NULL
+                   AND created_at < datetime('now', '-' || ? || ' days'))
         ''', (SESSION_MAX_AGE_DAYS,))
         conn.commit()
     except Exception as e:
