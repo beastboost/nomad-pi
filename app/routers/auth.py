@@ -5,6 +5,8 @@ from typing import Optional
 import uuid
 import os
 import secrets
+
+from app.services import media_tickets
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -172,15 +174,38 @@ class ProfileUpdateRequest(BaseModel):
     parental_controls: int = 0
 
 
-def _extract_auth_token(request: Request, allow_query: bool = True) -> Optional[str]:
+def _extract_auth_token(request: Request) -> Optional[str]:
+    """The caller's session token, from the cookie or the Authorization header.
+
+    The query string is deliberately not consulted. The session token is a
+    30-day credential for the entire API, and accepting it from a URL put it
+    into browser history, proxy logs and Referer headers on every media URL —
+    a leaked stream link was a leaked account. URLs that cannot carry a header
+    use a short-lived media ticket instead; see app/services/media_tickets.py.
+    """
     token = request.cookies.get("auth_token")
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1].strip()
-    if not token and allow_query:
-        token = request.query_params.get("token")
     return token or None
+
+
+def get_media_user_id(request: Request) -> int:
+    """Authenticate a request for media bytes.
+
+    Same as get_current_user_id, plus ``?ticket=`` for the URLs that cannot
+    carry a header: <video src>, CSS backgrounds, download links and the VLC
+    handoff. A ticket is short-lived and only these endpoints accept it.
+    """
+    ticket = request.query_params.get("ticket")
+    if ticket:
+        try:
+            return media_tickets.user_id_from(ticket)
+        except media_tickets.MediaTicketError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return get_current_user_id(request)
 
 
 @router.post("/login")
@@ -341,6 +366,19 @@ def update_profile(request: ProfileUpdateRequest, user_id=Depends(get_current_us
     return {"status": "ok"}
 
 
+@router.get("/media-ticket")
+def get_media_ticket(user_id=Depends(get_current_user_id)):
+    """Mint a short-lived ticket for URLs that cannot carry an auth header.
+
+    The client asks for one after login and puts it on <video src>, artwork and
+    download links in place of the session token.
+    """
+    return {
+        "ticket": media_tickets.issue(user_id),
+        "expires_in": media_tickets.DEFAULT_TTL_SECONDS,
+    }
+
+
 @router.post("/change-password")
 def change_password(request: PasswordChangeRequest, request_obj: Request, user_id=Depends(get_current_user_id)):
     client_ip = request_obj.client.host if request_obj.client else "unknown"
@@ -399,7 +437,7 @@ def get_me(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/check")
 def check_auth(request: Request):
-    token = _extract_auth_token(request, allow_query=False)
+    token = _extract_auth_token(request)
     if token:
         session = database.get_session(token)
         if session:

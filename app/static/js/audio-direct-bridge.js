@@ -39,7 +39,7 @@
 
     function directUrl(path) {
         const t = typeof token === 'function' ? token() : localStorage.getItem('nomad_auth_token');
-        return `${API}/playback/music/stream?path=${encodeURIComponent(path)}${t ? `&token=${encodeURIComponent(t)}` : ''}`;
+        return `${API}/playback/music/stream?path=${encodeURIComponent(path)}${typeof ticketParam === 'function' ? ticketParam() : ''}`;
     }
 
     api = async function nomadAudioAwareApi(path, opts = {}) {

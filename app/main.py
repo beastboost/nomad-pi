@@ -20,6 +20,7 @@ try:
 
     from app.services import ingest
     from app.routers import media, system, uploads, dashboard, debrid, playlists, tmdb, playback
+    from app.services import media_tickets
 except Exception as e:
     print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
@@ -375,6 +376,9 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Public system endpoints
 app.include_router(system.public_router, prefix="/api/system", tags=["system"])
 app.include_router(media.public_router, prefix="/api/media", tags=["media"])
+# Streaming endpoints authenticate themselves (login or media ticket), so they
+# must not inherit the blanket session dependency below.
+app.include_router(media.stream_router, prefix="/api/media", tags=["media"])
 # Protect these routes
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
@@ -393,8 +397,21 @@ async def protect_data(request: Request, call_next):
         return await call_next(request)
 
     if request.url.path.startswith("/data/"):
-        token = request.cookies.get("auth_token") or request.query_params.get("token")
-        
+        # A media ticket covers <video src>, artwork and download links, which
+        # cannot send a header. The raw session token is no longer accepted
+        # here: it is a 30-day credential for the whole API and putting it in a
+        # URL leaked it to history, proxies and Referer headers.
+        ticket = request.query_params.get("ticket")
+        if ticket:
+            try:
+                media_tickets.verify(ticket)
+                return await call_next(request)
+            except media_tickets.MediaTicketError as exc:
+                logger.warning(f"Rejected media ticket for {request.url.path}: {exc}")
+                return Response(status_code=401)
+
+        token = request.cookies.get("auth_token")
+
         if not token:
             logger.warning(f"Unauthorized access attempt (no token): {request.url.path}")
             return Response(status_code=401)

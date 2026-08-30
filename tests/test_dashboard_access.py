@@ -184,6 +184,11 @@ def real_user_token():
         database.delete_session(token)
 
 
+def _as_cookie(token):
+    """The session token travels in the cookie, never the query string."""
+    return {"auth_token": token}
+
+
 def test_control_socket_refuses_anonymous_clients(client):
     dashboard.active_sessions["s1"] = {"user_id": 7}
     with pytest.raises(Exception):
@@ -197,7 +202,7 @@ def test_control_socket_refuses_someone_elses_session(client, real_user_token):
     dashboard.active_sessions["s1"] = {"user_id": user_id + 1}
     with pytest.raises(Exception):
         with client.websocket_connect(
-            f"/api/dashboard/control/ws?session_id=s1&token={token}"
+            "/api/dashboard/control/ws?session_id=s1", cookies=_as_cookie(token)
         ) as ws:
             ws.send_text("hi")
             ws.receive_text()
@@ -208,7 +213,7 @@ def test_control_socket_accepts_the_session_owner(client, real_user_token):
     token, user_id = real_user_token
     dashboard.active_sessions["s1"] = {"user_id": user_id}
     with client.websocket_connect(
-        f"/api/dashboard/control/ws?session_id=s1&token={token}"
+        "/api/dashboard/control/ws?session_id=s1", cookies=_as_cookie(token)
     ) as ws:
         assert dashboard.control_connections.get("s1") is not None
         ws.close()

@@ -192,7 +192,9 @@ def get_samba_config(request: Request):
     }
 
     # Only an authenticated caller learns the password state.
-    token = request.cookies.get("auth_token") or request.query_params.get("token")
+    # Cookie or Authorization only: the session token is no longer read from
+    # the query string anywhere.
+    token = request.cookies.get("auth_token")
     if not token:
         auth_header = request.headers.get("authorization") or ""
         if auth_header.lower().startswith("bearer "):

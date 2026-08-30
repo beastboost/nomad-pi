@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from app.routers.auth import get_current_user_id
+from app.routers.auth import get_current_user_id, get_media_user_id
 from app.routers import media, music2
 
 
@@ -134,7 +134,8 @@ def facets(user_id: int = Depends(get_current_user_id)):
 @router.get("/music/artwork")
 def artwork(
     path: str = Query(...),
-    user_id: int = Depends(get_current_user_id),
+    ticket: str = Query(None),
+    user_id: int = Depends(get_media_user_id),
 ):
     return music2.music_artwork(path=path)
 
@@ -143,7 +144,8 @@ def artwork(
 def stream_music(
     request: Request,
     path: str = Query(...),
-    user_id: int = Depends(get_current_user_id),
+    ticket: str = Query(None),
+    user_id: int = Depends(get_media_user_id),
 ):
     """Zero-transcode music streaming with native byte-range seeking."""
     fs_path = _music_fs_path(path)

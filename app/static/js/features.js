@@ -289,7 +289,7 @@ async function downloadSubtitle(index) {
             const track = document.createElement('track');
             track.kind = 'subtitles';
             track.label = r.language || 'Downloaded';
-            track.src = `${API}/media/subtitle?path=${encodeURIComponent(res.path)}&token=${encodeURIComponent(token() || '')}`;
+            track.src = `${API}/media/subtitle?path=${encodeURIComponent(res.path)}${ticketParam()}`;
             track.default = true;
             V.el.appendChild(track);
             track.addEventListener('load', () => { if (V.el.textTracks.length) V.el.textTracks[V.el.textTracks.length - 1].mode = 'showing'; });

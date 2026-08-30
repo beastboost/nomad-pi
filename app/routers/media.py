@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Body, Request, Query, BackgroundTasks, Depends
-from app.routers.auth import get_current_user_id, get_current_admin
+from app.routers.auth import get_current_user_id, get_media_user_id, get_current_admin
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, validator
 from typing import List, Dict, Optional
@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 public_router = APIRouter()
+# Byte-serving endpoints live on their own router because main.py puts a
+# blanket get_current_user_id dependency on `router`, which would reject the
+# media tickets that <video src>, artwork and download links rely on. These
+# endpoints are not public: each declares get_media_user_id itself, which
+# accepts a login *or* a ticket and nothing else.
+stream_router = APIRouter()
 _progress_log_next_at = {}
 _scan_state = {"in_progress": False, "category": None, "count": 0, "message": "", "running": 0}
 _scan_lock = threading.Lock()
@@ -2139,8 +2145,8 @@ def get_media_info(path: str = Query(...), user_id: int = Depends(get_current_us
     except Exception as e:
         return {"error": str(e)}
 
-@router.get("/stream")
-async def stream_media(path: str = Query(...), token: str = Query(None), download: bool = Query(False), user_id: int = Depends(get_current_user_id)):
+@stream_router.get("/stream")
+async def stream_media(path: str = Query(...), ticket: str = Query(None), download: bool = Query(False), user_id: int = Depends(get_media_user_id)):
     # The middleware already checks for token, but we can double check here if needed
     # However, if it got here, it's either authenticated or it's a path that doesn't start with /data or /api/media
 
@@ -2191,8 +2197,8 @@ async def stream_media(path: str = Query(...), token: str = Query(None), downloa
     return FileResponse(fs_path, media_type=media_type)
 
 
-@router.get("/subtitle")
-async def serve_subtitle(path: str = Query(...), token: str = Query(None), user_id: int = Depends(get_current_user_id)):
+@stream_router.get("/subtitle")
+async def serve_subtitle(path: str = Query(...), ticket: str = Query(None), user_id: int = Depends(get_media_user_id)):
     """Serve a subtitle file as WebVTT, converting from SRT/ASS/SSA if needed.
     Browsers require WebVTT for <track> elements; SRT is not natively supported."""
     try:

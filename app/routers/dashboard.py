@@ -31,14 +31,17 @@ def _display_token_from(scope) -> Optional[str]:
 
 
 def _session_user_id(scope) -> Optional[int]:
-    """Resolve a normal logged-in user from cookie, Authorization or ?token=."""
+    """Resolve a normal logged-in user from the cookie or Authorization header.
+
+    Not the query string: browsers send same-origin cookies on a WebSocket
+    handshake, and a native client can set the header, so nothing here needs
+    the session token in a URL.
+    """
     token = scope.cookies.get("auth_token")
     if not token:
         header = scope.headers.get("authorization") or ""
         if header.startswith("Bearer "):
             token = header.split(" ", 1)[1].strip()
-    if not token:
-        token = scope.query_params.get("token")
     if not token:
         return None
     session = database.get_session(token)

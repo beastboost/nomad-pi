@@ -73,6 +73,55 @@ function escapeHtml(str) {
 }
 
 function token() { return localStorage.getItem(TOKEN_KEY); }
+
+/* ── Media tickets ──────────────────────────────────────────────────────
+   <video src>, artwork and download links authenticate through the URL, and
+   we used to put the session token there — a 30-day credential for the whole
+   API, landing in browser history, proxy logs and Referer headers. A media
+   ticket is the narrow replacement: signed, short-lived, and accepted only by
+   endpoints that serve bytes.
+
+   Held in memory only, so it is never persisted anywhere a session token used
+   to be, and refreshed well before it lapses.                              */
+const TICKET_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+let _mediaTicket = null;
+let _mediaTicketExpiry = 0;
+let _mediaTicketInFlight = null;
+
+function mediaTicket() { return _mediaTicket; }
+
+function ticketParam() {
+    return _mediaTicket ? `&ticket=${encodeURIComponent(_mediaTicket)}` : '';
+}
+
+async function refreshMediaTicket(force = false) {
+    if (!token()) return null;
+    if (!force && _mediaTicket && Date.now() < _mediaTicketExpiry - TICKET_REFRESH_MARGIN_MS) {
+        return _mediaTicket;
+    }
+    // Collapse concurrent callers onto one request; the player, artwork and
+    // the library grid all ask at once on first paint.
+    if (_mediaTicketInFlight) return _mediaTicketInFlight;
+
+    _mediaTicketInFlight = (async () => {
+        try {
+            const res = await api('/auth/media-ticket');
+            _mediaTicket = res.ticket;
+            _mediaTicketExpiry = Date.now() + (Number(res.expires_in) || 21600) * 1000;
+            return _mediaTicket;
+        } catch {
+            return null;
+        } finally {
+            _mediaTicketInFlight = null;
+        }
+    })();
+    return _mediaTicketInFlight;
+}
+
+function clearMediaTicket() {
+    _mediaTicket = null;
+    _mediaTicketExpiry = 0;
+}
 function authHeaders() {
     const t = token();
     return t ? { Authorization: `Bearer ${t}` } : {};
@@ -162,8 +211,7 @@ function fmtLeft(sec) {
     return h ? `${h}h ${m}m left` : `${m} min left`;
 }
 function streamUrl(path, extra = '') {
-    const t = token();
-    return `${API}/media/stream?path=${encodeURIComponent(path)}${t ? `&token=${encodeURIComponent(t)}` : ''}${extra}`;
+    return `${API}/media/stream?path=${encodeURIComponent(path)}${ticketParam()}${extra}`;
 }
 /* VLC's handler wants an absolute http(s) URL after the scheme. */
 function vlcUrl(path) {
@@ -327,6 +375,7 @@ async function login(ev) {
         if (!tok) throw new Error('Server did not return a session token');
         localStorage.setItem(TOKEN_KEY, tok);
         $('#password-input').value = '';
+        await refreshMediaTicket(true);
         await startApp();
     } catch (e) {
         errEl.textContent = e.message || 'Sign in failed';
@@ -339,6 +388,7 @@ async function login(ev) {
 function logout() {
     try { fetch(`${API}/auth/logout`, { method: 'POST', headers: authHeaders() }); } catch {}
     localStorage.removeItem(TOKEN_KEY);
+    clearMediaTicket();
     stopVideo();
     stopAudio();
     $('#app-shell').classList.add('hidden');
@@ -2076,6 +2126,9 @@ async function boot() {
     }
     try {
         await api('/auth/check');
+        // Media URLs are unusable without this, so it has to land before the
+        // first screen that shows artwork or offers playback.
+        await refreshMediaTicket(true);
         await startApp();
     } catch {
         localStorage.removeItem(TOKEN_KEY);

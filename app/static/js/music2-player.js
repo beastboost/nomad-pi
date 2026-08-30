@@ -49,7 +49,7 @@
     function artUrl(track) {
         if (!track?.has_artwork || !track.path) return '';
         const t = token();
-        return `${API}/playback/music/artwork?path=${encodeURIComponent(track.path)}${t ? `&token=${encodeURIComponent(t)}` : ''}`;
+        return `${API}/playback/music/artwork?path=${encodeURIComponent(track.path)}${typeof ticketParam === 'function' ? ticketParam() : ''}`;
     }
 
     function trackTitle(track) {
