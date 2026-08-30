@@ -16,10 +16,9 @@ import threading
 from pathlib import Path
 from typing import Optional, AsyncGenerator, Dict, List
 from datetime import datetime
-from io import BytesIO
+
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, BackgroundTasks, Depends
-from fastapi.responses import JSONResponse, StreamingResponse
 import aiofiles
 import aiofiles.os
 from pydantic import BaseModel, Field
@@ -35,18 +34,6 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 UPLOAD_DIR = Path("data/uploads")
 
 
-def _safe_upload_dir(file_id: str) -> "Path":
-    """Contain file_id/filename inside UPLOAD_DIR.
-
-    verify/ and info/ built paths by plain join, so a segment of ".." walked
-    out of the upload sandbox and let a caller hash or list arbitrary files
-    under data/ (a content oracle for the database and backups)."""
-    from pathlib import Path as _P
-    base = _P(UPLOAD_DIR).resolve()
-    target = (base / file_id).resolve()
-    if target != base and base not in target.parents:
-        raise HTTPException(status_code=400, detail="Invalid file id")
-    return target
 CHUNK_SIZE = 16 * 1024 * 1024  # 16MB chunks (optimized for WiFi throughput)
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
 BUFFER_SIZE = 64 * 1024  # 64KB buffer for file I/O
@@ -98,7 +85,10 @@ class UploadProgress(BaseModel):
     filename: str
     total_size: int
     uploaded_size: int
-    percentage: float = Field(ge=0, le=100)
+    # Required-with-no-default made every upload 500 on construction: the one
+    # site that builds this model reports size as it goes and fills the
+    # percentage in on later updates.
+    percentage: float = Field(default=0.0, ge=0, le=100)
     status: str = Field(default="uploading")
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -128,8 +118,24 @@ class MultipleUploadResponse(BaseModel):
 progress_tracker: Dict[str, UploadProgress] = {}
 progress_lock = threading.Lock()
 
+# The only directories an upload may target. ``category`` arrives straight off
+# a query string, and it used to be pasted into a filesystem path unchecked, so
+# "../../etc" resolved outside data/ and mkdir(parents=True) then created it.
+UPLOAD_CATEGORIES = ("movies", "shows", "music", "books", "gallery", "files")
+
+
+def _validated_category(category: str) -> str:
+    normalized = (category or "files").strip().lower() or "files"
+    if normalized not in UPLOAD_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Allowed: {', '.join(UPLOAD_CATEGORIES)}",
+        )
+    return normalized
+
+
 def _detect_category(requested_category: str, filename: str) -> str:
-    category = (requested_category or "files").strip().lower() or "files"
+    category = _validated_category(requested_category)
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     if category != "files":
@@ -157,8 +163,21 @@ def _detect_category(requested_category: str, filename: str) -> str:
     return "files"
 
 
+def _contain(destination: Path, base_dir: Path) -> Path:
+    """Refuse any destination that escaped its category directory.
+
+    auto_dest_rel() derives sub-paths from the *filename*, so this backstops
+    the category allow-list against a crafted name as well.
+    """
+    resolved = destination.resolve()
+    base = base_dir.resolve()
+    if resolved != base and base not in resolved.parents:
+        raise HTTPException(status_code=400, detail="Invalid upload destination")
+    return resolved
+
+
 def _compute_destination(category: str, filename: str) -> Path:
-    cat = (category or "files").strip().lower() or "files"
+    cat = _validated_category(category)
     safe_name = os.path.basename(filename)
     base_dir = Path("data") / cat
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -169,21 +188,23 @@ def _compute_destination(category: str, filename: str) -> Path:
         dest_rel = media_router.auto_dest_rel(cat, safe_name, rename_files=True)
         dest_abs = (base_dir / Path(dest_rel)).resolve()
         dest_abs_str = media_router.pick_unique_dest(str(dest_abs))
-        return Path(dest_abs_str)
+        return _contain(Path(dest_abs_str), base_dir)
 
     dest_abs = (base_dir / safe_name).resolve()
     try:
         from app.routers import media as media_router
 
         dest_abs_str = media_router.pick_unique_dest(str(dest_abs))
-        return Path(dest_abs_str)
+        return _contain(Path(dest_abs_str), base_dir)
+    except HTTPException:
+        raise
     except Exception:
         i = 2
         base, ext = os.path.splitext(str(dest_abs))
         while Path(dest_abs).exists() and i < 1000:
             dest_abs = Path(f"{base} ({i}){ext}")
             i += 1
-        return dest_abs
+        return _contain(Path(dest_abs), base_dir)
 
 
 async def validate_file(filename: str, file_size: int) -> tuple[bool, Optional[str]]:
@@ -211,25 +232,6 @@ async def validate_file(filename: str, file_size: int) -> tuple[bool, Optional[s
         return False, "Invalid filename detected"
     
     return True, None
-
-
-async def calculate_file_hash(file_path: Path) -> str:
-    """
-    Calculate SHA256 hash of a file asynchronously.
-    
-    Args:
-        file_path: Path to the file
-        
-    Returns:
-        Hexadecimal hash string
-    """
-    hash_sha256 = hashlib.sha256()
-    
-    async with aiofiles.open(file_path, "rb") as f:
-        async for chunk in iter_file_chunks(f):
-            hash_sha256.update(chunk)
-    
-    return hash_sha256.hexdigest()
 
 
 async def iter_file_chunks(file, chunk_size: int = CHUNK_SIZE) -> AsyncGenerator[bytes, None]:
@@ -286,7 +288,10 @@ async def save_upload_file(
         # Write file with chunked buffering and optimized I/O
         async with aiofiles.open(destination, "wb", buffering=BUFFER_SIZE) as f:
             while True:
-                chunk = await upload_file.file.read(CHUNK_SIZE)
+                # UploadFile.read() is the awaitable one; UploadFile.file is the
+                # raw SpooledTemporaryFile and its read() returns bytes, so
+                # awaiting it raised TypeError on the first chunk of every upload.
+                chunk = await upload_file.read(CHUNK_SIZE)
                 if not chunk:
                     break
                 
@@ -558,186 +563,10 @@ async def get_upload_progress(
     return progress_tracker[file_id]
 
 
-@router.get("/download/{file_id}/{filename}")
-async def download_file(
-    file_id: str, 
-    filename: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """
-    Download a previously uploaded file with streaming.
-    
-    Args:
-        file_id: Unique file identifier
-        filename: Name of the file to download
-        
-    Returns:
-        StreamingResponse with file content
-    """
-    file_path = _safe_upload_dir(file_id) / filename
-    
-    # Validate file exists and is within upload directory
-    try:
-        file_path = file_path.resolve()
-        upload_dir = UPLOAD_DIR.resolve()
-        
-        if not file_path.is_relative_to(upload_dir):
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        if not await aiofiles.os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="File not found")
-    
-    except Exception as e:
-        logger.error(f"Error accessing file: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error accessing file")
-    
-    # Stream file in chunks
-    async def file_iterator():
-        async with aiofiles.open(file_path, "rb") as f:
-            async for chunk in iter_file_chunks(f):
-                yield chunk
-    
-    return StreamingResponse(
-        file_iterator(),
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
-
-
-@router.delete("/{file_id}")
-async def delete_upload(
-    file_id: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """
-    Delete an uploaded file.
-    
-    Args:
-        file_id: Unique file identifier
-        
-    Returns:
-        JSON response with deletion status
-    """
-    file_dir = _safe_upload_dir(file_id)
-    
-    try:
-        # Validate directory is within upload directory
-        file_dir = file_dir.resolve()
-        upload_dir = UPLOAD_DIR.resolve()
-        
-        if not file_dir.is_relative_to(upload_dir):
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        if await aiofiles.os.path.exists(file_dir):
-            # Remove all files in directory
-            for file in os.listdir(file_dir):
-                file_path = file_dir / file
-                if os.path.isfile(file_path):
-                    await aiofiles.os.remove(file_path)
-            
-            # Remove directory
-            await aiofiles.os.rmdir(file_dir)
-            
-            # Clean progress tracker with thread safety
-            with progress_lock:
-                if file_id in progress_tracker:
-                    del progress_tracker[file_id]
-            
-            return JSONResponse(
-                status_code=200,
-                content={"message": f"File {file_id} deleted successfully"}
-            )
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting file {file_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error deleting file")
-
-
-@router.post("/verify/{file_id}/{filename}")
-async def verify_file_integrity(
-    file_id: str, 
-    filename: str, 
-    expected_checksum: str,
-    user_id: str = Depends(get_current_user_id),
-):
-    """
-    Verify integrity of uploaded file against checksum.
-    
-    Args:
-        file_id: Unique file identifier
-        filename: Name of the file
-        expected_checksum: Expected SHA256 checksum
-        
-    Returns:
-        JSON response with verification result
-    """
-    file_path = _safe_upload_dir(file_id) / filename
-    
-    if not await aiofiles.os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    try:
-        actual_checksum = await calculate_file_hash(file_path)
-        is_valid = actual_checksum == expected_checksum
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "file_id": file_id,
-                "filename": filename,
-                "expected_checksum": expected_checksum,
-                "actual_checksum": actual_checksum,
-                "valid": is_valid
-            }
-        )
-    
-    except Exception as e:
-        logger.error(f"Error verifying file: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error verifying file")
-
-
-@router.get("/info/{file_id}")
-async def get_file_info(
-    file_id: str,
-    user_id: str = Depends(get_current_user_id),
-) -> Dict:
-    """
-    Get information about an uploaded file.
-    
-    Args:
-        file_id: Unique file identifier
-        
-    Returns:
-        Dictionary with file information
-    """
-    file_dir = _safe_upload_dir(file_id)
-    
-    if not await aiofiles.os.path.exists(file_dir):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    try:
-        files_info = []
-        for filename in os.listdir(file_dir):
-            file_path = file_dir / filename
-            if os.path.isfile(file_path):
-                stat = os.stat(file_path)
-                files_info.append({
-                    "filename": filename,
-                    "size": stat.st_size,
-                    "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
-                })
-        
-        return {
-            "file_id": file_id,
-            "files": files_info,
-            "total_size": sum(f["size"] for f in files_info)
-        }
-    
-    except Exception as e:
-        logger.error(f"Error getting file info: {str(e)}")
-        raise HTTPException(status_code=500, detail="Error getting file info")
+# The download/delete/verify/info endpoints that used to live here have been
+# removed. They all looked for data/uploads/<file_id>/<filename>, but no upload
+# path has ever written there — _compute_destination() files an upload straight
+# into its library category — so every one of them was a permanent 404 that
+# advertised capabilities the server does not have. Uploaded files are reached
+# through the media API instead: /api/media/browse to list, /api/media/stream
+# with download=true to fetch, and /api/media/delete to remove.
