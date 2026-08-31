@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, validator
 from typing import Optional
 import uuid
 import os
+import ipaddress
 import secrets
 
 from app.services import media_tickets
@@ -54,9 +55,12 @@ def clear_attempts(attempts_dict: dict, client_ip: str) -> None:
 
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
-# Defaults to OFF. This used to default to true, so every fresh install shipped
-# with the password "nomad" and stayed that way until someone thought to change
-# it. Set ALLOW_INSECURE_DEFAULT=true only for a throwaway lab box.
+# Nomad bootstraps on a known password ("nomad") so a freshly flashed device is
+# reachable without hunting for a generated secret — on an image install there
+# is no console to print one to, and reading it over SSH needs a network you can
+# only reach by first logging in. What used to be missing was the other half:
+# the password could simply be kept. It cannot now, unless this is set, which
+# turns off the forced change entirely for a throwaway lab box.
 ALLOW_INSECURE_DEFAULT = os.environ.get("ALLOW_INSECURE_DEFAULT", "false").lower() == "true"
 
 # Passwords nobody may settle on, whatever the install flags say.
@@ -88,22 +92,17 @@ def ensure_admin_user():
     if not users:
         must_change = True
         if ADMIN_PASSWORD:
+            # Accepted as-is, weak or not. It is a one-time credential: the
+            # account is flagged must_change_password, the API stays closed
+            # until that is done, and only local clients can authenticate
+            # while it is outstanding. Replacing it here would leave the
+            # installer announcing a password that does not work.
             password = ADMIN_PASSWORD
-            if is_weak_password(password) and not ALLOW_INSECURE_DEFAULT:
-                logger.warning(
-                    "ADMIN_PASSWORD is weak; generating a random password instead. "
-                    "Set ALLOW_INSECURE_DEFAULT=true to override.")
-                password = secrets.token_urlsafe(16)
         elif ADMIN_PASSWORD_HASH:
             password = None
             must_change = False
-        elif ALLOW_INSECURE_DEFAULT:
-            password = "nomad"
-            logger.warning(
-                "ALLOW_INSECURE_DEFAULT is set: the admin password is the well-known "
-                "default. Do not run this configuration on a reachable network.")
         else:
-            password = secrets.token_urlsafe(16)
+            password = "nomad"
 
         h = ADMIN_PASSWORD_HASH or pwd_context.hash(password)
         database.create_user("admin", h, is_admin=True, must_change_password=must_change)
@@ -221,6 +220,7 @@ def login(request: LoginRequest, request_obj: Request):
             logger.error(f"Password verification failed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Password verification backend error. Check logs.")
     if user and verified:
+        enforce_local_only_while_provisional(request_obj, dict(user))
         clear_attempts(login_attempts, client_ip)
         token = str(uuid.uuid4())
         database.create_session(token, user['id'])
@@ -274,6 +274,44 @@ PASSWORD_CHANGE_EXEMPT_PATHS = (
 )
 
 
+def _is_local_client(host: Optional[str]) -> bool:
+    """True for loopback, private, link-local and CGNAT (Tailscale) addresses."""
+    if not host:
+        # No client address (ASGI test transports, some proxies). Treat as
+        # local: the alternative is locking the owner out of their own box.
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address in ipaddress.ip_network("100.64.0.0/10")  # Tailscale/CGNAT
+    )
+
+
+def enforce_local_only_while_provisional(request: Request, user: dict) -> None:
+    """Confine a still-default account to the local network.
+
+    A known bootstrap password means whoever reaches the box first can claim
+    it. This does not remove that race, but it narrows it to someone already on
+    your LAN or hotspot rather than anyone who can route to the port — which is
+    where a Nomad is set up anyway.
+    """
+    if ALLOW_INSECURE_DEFAULT or not user.get("must_change_password"):
+        return
+    host = request.client.host if request.client else None
+    if not _is_local_client(host):
+        logger.warning(
+            "Refused remote sign-in to an account still on its setup password (from %s)", host)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account still has its setup password. Sign in from the local network first.",
+        )
+
+
 def enforce_password_change(request: Request, user_id: int) -> None:
     """Block the API while an account is still on its provisional password.
 
@@ -286,6 +324,7 @@ def enforce_password_change(request: Request, user_id: int) -> None:
         return
     user = database.get_user_by_id(user_id)
     if user and user.get("must_change_password"):
+        enforce_local_only_while_provisional(request, dict(user))
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Set a new password before using Nomad",
