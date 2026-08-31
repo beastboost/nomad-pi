@@ -179,9 +179,17 @@ ADMIN_PASS_VALUE="${ADMIN_PASSWORD:-$(nomad_get_env_key "$ENV_FILE" ADMIN_PASSWO
 if [ -z "$OMDB_KEY_VALUE" ] && [ -t 0 ]; then
     read -r -t 10 -p 'OMDb API key (optional, Enter to skip): ' OMDB_KEY_VALUE || OMDB_KEY_VALUE=""
 fi
+ADMIN_PASS_GENERATED=0
 if [ -z "$ADMIN_PASS_VALUE" ]; then
-    ADMIN_PASS_VALUE="nomad"
-    echo "No existing admin password found; initial password is 'nomad'. Change it after login."
+    # Every install used to bootstrap on the literal password "nomad". Generate
+    # a per-device one instead. The app refuses well-known passwords anyway, so
+    # a weak value here would only be discarded and replaced by one the
+    # operator never sees.
+    ADMIN_PASS_VALUE="$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 16)"
+    if [ "${#ADMIN_PASS_VALUE}" -lt 16 ]; then
+        ADMIN_PASS_VALUE="nomad-$(od -An -N6 -tx1 < /dev/urandom | tr -d ' \n')"
+    fi
+    ADMIN_PASS_GENERATED=1
 fi
 nomad_sudo touch "$ENV_FILE"
 nomad_sudo chmod 600 "$ENV_FILE"
@@ -364,5 +372,11 @@ echo "mDNS:    $NEW_HOSTNAME.local"
 echo "SMB:     \\\\$NEW_HOSTNAME.local\\data"
 echo "Hotspot: ${NOMAD_HOTSPOT_NAME:-NomadPi} / ${NOMAD_HOTSPOT_PASSWORD:-<generated>} · portal http://${NOMAD_HOTSPOT_IP:-10.42.0.1}/"
 echo "  (this passphrase is unique to this device and stored in /etc/nomadpi.env)"
-echo "Admin:   initial password is the value in /etc/nomadpi.env"
+if [ "$ADMIN_PASS_GENERATED" = "1" ]; then
+    echo "Admin:   admin / $ADMIN_PASS_VALUE"
+    echo "  (write this down — Nomad makes you change it at first sign-in)"
+else
+    echo "Admin:   admin / the ADMIN_PASSWORD value in /etc/nomadpi.env"
+fi
+echo "  Lost it?  sudo grep ADMIN_PASSWORD /etc/nomadpi.env"
 echo "============================================================"
