@@ -43,8 +43,9 @@ def test_weak_check_is_case_insensitive():
 # ── must_change_password is enforced, not merely advertised ───────────────
 
 class _FakeRequest:
-    def __init__(self, path):
+    def __init__(self, path, host="192.168.1.20"):
         self.url = type("U", (), {"path": path})()
+        self.client = type("C", (), {"host": host})()
 
 
 def test_provisional_password_blocks_the_api(monkeypatch):
@@ -105,12 +106,6 @@ def test_wifi_restart_uses_a_fixed_script_not_sudo_bash():
     assert Path("scripts/nomad-wifi-restart.sh").exists()
 
 
-def test_hotspot_passphrase_is_per_device():
-    source = Path("scripts/network-appliance.sh").read_text()
-    assert "nomadpassword" not in source, "the shared default hotspot key is back"
-    assert "nomad_hotspot_password" in source
-
-
 # ── the forced change must be completable ─────────────────────────────────
 # Enforcing must_change_password without a way to satisfy it would strand a
 # first-run user in an app that 403s every request.
@@ -134,30 +129,83 @@ def test_change_password_endpoint_is_reachable_while_provisional():
     assert "/api/auth/change-password" in auth.PASSWORD_CHANGE_EXEMPT_PATHS
 
 
-# ── setup.sh and the app must agree on the bootstrap password ─────────────
-# setup.sh wrote ADMIN_PASSWORD=nomad into /etc/nomadpi.env and announced it as
-# the initial password. The app then rejected it as well-known and generated a
-# random one instead, so the operator was told a password that did not work and
-# the real one only ever reached the service journal.
+# ── the known bootstrap password ─────────────────────────────────────────
+# Nomad bootstraps on "nomad" on purpose. An image install has no console to
+# print a generated secret to, and reading one over SSH needs a network you can
+# only reach by logging in first. What makes it safe is that it cannot be kept:
+# the API is closed until it is replaced, and only local clients can sign in
+# while it is outstanding.
 
-def test_setup_does_not_bootstrap_on_a_well_known_password():
+def test_setup_and_the_app_agree_on_the_bootstrap_password():
     setup = Path("setup.sh").read_text()
-    assert 'ADMIN_PASS_VALUE="nomad"' not in setup
-    assert "initial password is 'nomad'" not in setup
+    assert 'ADMIN_PASS_VALUE="nomad"' in setup
+    # The app must take it verbatim; silently substituting a random one is what
+    # made the installer announce a password that did not work.
+    source = Path("app/routers/auth.py").read_text()
+    assert "password = secrets.token_urlsafe(16)" not in source
 
 
-def test_setup_generates_a_password_the_app_will_accept(monkeypatch):
+def test_setup_tells_the_operator_the_password_and_that_it_expires():
+    setup = Path("setup.sh").read_text()
+    assert 'echo "Admin:   admin / $ADMIN_PASS_VALUE"' in setup
+    assert "set your own password immediately" in setup
+
+
+def test_the_bootstrap_password_still_cannot_be_chosen(monkeypatch):
+    # Accepting "nomad" as a starting point must not mean it can be settled on.
     monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", False)
-    setup = Path("setup.sh").read_text()
-    assert "ADMIN_PASS_GENERATED=1" in setup
-    # 16 random lowercase-alnum characters clears both the length floor and the
-    # well-known list, so the app uses it verbatim instead of silently
-    # replacing it with one nobody has seen.
-    assert "head -c 16" in setup
-    assert not auth.is_weak_password("niep4ehi2e8mqroe")
+    assert not auth.validate_password_strength("nomad")[0]
 
 
-def test_setup_tells_the_operator_where_to_find_it():
-    setup = Path("setup.sh").read_text()
-    assert "ADMIN_PASSWORD /etc/nomadpi.env" in setup, "no recovery hint in the banner"
-    assert 'echo "Admin:   admin / $ADMIN_PASS_VALUE"' in setup, "banner does not print it"
+def test_hotspot_passphrase_is_unchanged():
+    # A per-device passphrase deadlocks the flashed-image install: joining the
+    # AP is the only way to reach the UI that would show it.
+    appliance = Path("scripts/network-appliance.sh").read_text()
+    assert 'NOMAD_HOTSPOT_PASSWORD="${NOMAD_HOTSPOT_PASSWORD:-nomadpassword}"' in appliance
+    firstboot = Path("os-builder/stage3-nomad/03-setup-services/files/nomad-pi-firstboot.sh").read_text()
+    assert "nomadpassword" in firstboot, "image and setup.sh installs must agree"
+
+
+# ── the race a known password opens ──────────────────────────────────────
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "192.168.1.20", "10.42.0.9", "100.101.5.9", "::1"])
+def test_local_clients_may_sign_in_while_provisional(host):
+    assert auth._is_local_client(host)
+
+
+@pytest.mark.parametrize("host", ["8.8.8.8", "1.1.1.1", "2606:4700::1111"])
+def test_remote_clients_may_not(host):
+    assert not auth._is_local_client(host)
+
+
+class _ClientRequest:
+    def __init__(self, host):
+        self.client = type("C", (), {"host": host})() if host else None
+        self.url = type("U", (), {"path": "/api/auth/login"})()
+
+
+def test_provisional_account_refuses_a_remote_sign_in(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", False)
+    with pytest.raises(HTTPException) as excinfo:
+        auth.enforce_local_only_while_provisional(
+            _ClientRequest("8.8.8.8"), {"must_change_password": 1})
+    assert excinfo.value.status_code == 403
+
+
+def test_provisional_account_allows_a_local_sign_in(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", False)
+    auth.enforce_local_only_while_provisional(
+        _ClientRequest("192.168.1.20"), {"must_change_password": 1})
+
+
+def test_a_settled_account_is_reachable_from_anywhere(monkeypatch):
+    # The restriction is about the setup password, not about remote access.
+    monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", False)
+    auth.enforce_local_only_while_provisional(
+        _ClientRequest("8.8.8.8"), {"must_change_password": 0})
+
+
+def test_lab_override_lifts_the_restriction(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", True)
+    auth.enforce_local_only_while_provisional(
+        _ClientRequest("8.8.8.8"), {"must_change_password": 1})

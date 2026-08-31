@@ -5,47 +5,7 @@
 NOMAD_HOTSPOT_NAME="${NOMAD_HOTSPOT_NAME:-NomadPi}"
 NOMAD_HOTSPOT_IP="${NOMAD_HOTSPOT_IP:-10.42.0.1}"
 NOMAD_HOTSPOT_CIDR="${NOMAD_HOTSPOT_CIDR:-10.42.0.1/24}"
-# Every Nomad shipped with the same hotspot passphrase, so knowing one device's
-# key was knowing all of them. Generate a per-device passphrase on first run and
-# persist it to /etc/nomadpi.env; NOMAD_HOTSPOT_PASSWORD still overrides, for an
-# operator who wants one key across a fleet.
-NOMAD_HOTSPOT_ENV_FILE="${NOMAD_HOTSPOT_ENV_FILE:-/etc/nomadpi.env}"
-
-nomad_hotspot_password() {
-    local env_file="$NOMAD_HOTSPOT_ENV_FILE" stored="" generated=""
-
-    if [ -n "${NOMAD_HOTSPOT_PASSWORD:-}" ]; then
-        printf '%s' "$NOMAD_HOTSPOT_PASSWORD"
-        return 0
-    fi
-
-    if [ -r "$env_file" ]; then
-        stored="$(sed -n 's/^NOMAD_HOTSPOT_PASSWORD=//p' "$env_file" | tail -n1)"
-        stored="${stored%\"}"
-        stored="${stored#\"}"
-    fi
-    if [ -n "$stored" ]; then
-        printf '%s' "$stored"
-        return 0
-    fi
-
-    # 12 lowercase-alnum characters: well past the WPA2 minimum, still short
-    # enough to read off a label and type on a phone.
-    generated="$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 12)"
-    if [ "${#generated}" -lt 12 ]; then
-        generated="nomad$(od -An -N4 -tu4 < /dev/urandom 2>/dev/null | tr -d ' \n')"
-    fi
-
-    _nomad_net_sudo touch "$env_file" >/dev/null 2>&1 || true
-    if _nomad_net_sudo sed -i '/^NOMAD_HOTSPOT_PASSWORD=/d' "$env_file" >/dev/null 2>&1; then
-        printf 'NOMAD_HOTSPOT_PASSWORD=%s\n' "$generated" \
-            | _nomad_net_sudo tee -a "$env_file" >/dev/null 2>&1 || true
-        _nomad_net_sudo chmod 600 "$env_file" >/dev/null 2>&1 || true
-    fi
-
-    printf '%s' "$generated"
-}
-
+NOMAD_HOTSPOT_PASSWORD="${NOMAD_HOTSPOT_PASSWORD:-nomadpassword}"
 NOMAD_PRODUCT_HOSTNAME="${NOMAD_PRODUCT_HOSTNAME:-nomadpi}"
 
 _nomad_net_sudo() {
@@ -57,10 +17,6 @@ _nomad_net_sudo() {
         sudo "$@"
     fi
 }
-
-# Resolved here rather than beside the other defaults: the generator needs
-# _nomad_net_sudo to persist the passphrase it mints.
-NOMAD_HOTSPOT_PASSWORD="$(nomad_hotspot_password)"
 
 nomad_configure_hostname_mdns() {
     local hostname="${1:-$NOMAD_PRODUCT_HOSTNAME}"
