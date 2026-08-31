@@ -132,3 +132,32 @@ def test_client_diverts_a_provisional_account_to_that_form():
 
 def test_change_password_endpoint_is_reachable_while_provisional():
     assert "/api/auth/change-password" in auth.PASSWORD_CHANGE_EXEMPT_PATHS
+
+
+# ── setup.sh and the app must agree on the bootstrap password ─────────────
+# setup.sh wrote ADMIN_PASSWORD=nomad into /etc/nomadpi.env and announced it as
+# the initial password. The app then rejected it as well-known and generated a
+# random one instead, so the operator was told a password that did not work and
+# the real one only ever reached the service journal.
+
+def test_setup_does_not_bootstrap_on_a_well_known_password():
+    setup = Path("setup.sh").read_text()
+    assert 'ADMIN_PASS_VALUE="nomad"' not in setup
+    assert "initial password is 'nomad'" not in setup
+
+
+def test_setup_generates_a_password_the_app_will_accept(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", False)
+    setup = Path("setup.sh").read_text()
+    assert "ADMIN_PASS_GENERATED=1" in setup
+    # 16 random lowercase-alnum characters clears both the length floor and the
+    # well-known list, so the app uses it verbatim instead of silently
+    # replacing it with one nobody has seen.
+    assert "head -c 16" in setup
+    assert not auth.is_weak_password("niep4ehi2e8mqroe")
+
+
+def test_setup_tells_the_operator_where_to_find_it():
+    setup = Path("setup.sh").read_text()
+    assert "ADMIN_PASSWORD /etc/nomadpi.env" in setup, "no recovery hint in the banner"
+    assert 'echo "Admin:   admin / $ADMIN_PASS_VALUE"' in setup, "banner does not print it"
