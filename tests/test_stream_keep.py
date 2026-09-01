@@ -59,8 +59,12 @@ def test_start_download_reuses_existing_debrid_worker(monkeypatch, tmp_path):
     )
     calls = []
     monkeypatch.setattr(
-        "app.services.stream_keep.debrid.download_to_pi",
-        lambda provider, url, filename, category, is_show: calls.append((provider, url, filename, category, is_show)) or "dl-123",
+        "app.services.stream_keep.stream_keep_download.start_download",
+        lambda **kwargs: calls.append(kwargs) or "dl-123",
+    )
+    monkeypatch.setattr(
+        "app.services.stream_keep.stream_keep_download.get_status",
+        lambda download_id: {"dest_path": "/tmp/local/file.mkv", "range_supported": True},
     )
     # Prevent a real monitor thread for this focused orchestration test.
     monkeypatch.setattr(manager, "_start_monitor", lambda *args, **kwargs: None)
@@ -68,7 +72,11 @@ def test_start_download_reuses_existing_debrid_worker(monkeypatch, tmp_path):
     updated = manager.start_download(job)
     assert updated.status == "downloading"
     assert updated.download_id == "dl-123"
-    assert calls == [("", job.remote_url, "file.mkv", "movies", False)]
+    assert len(calls) == 1
+    assert calls[0]["url"] == job.remote_url
+    assert calls[0]["filename"] == "file.mkv"
+    assert calls[0]["category"] == "movies"
+    assert calls[0]["is_show"] is False
 
 
 def test_monitor_promotes_completed_download_to_local_ready(monkeypatch, tmp_path):
@@ -84,7 +92,7 @@ def test_monitor_promotes_completed_download_to_local_ready(monkeypatch, tmp_pat
     )
     job = store.update(job.id, user_id=1, status="downloading", download_id="dl-1")
     monkeypatch.setattr(
-        "app.services.stream_keep.debrid.get_download_status",
+        "app.services.stream_keep.stream_keep_download.get_status",
         lambda download_id: {
             "status": "completed",
             "progress": 100,
@@ -92,10 +100,12 @@ def test_monitor_promotes_completed_download_to_local_ready(monkeypatch, tmp_pat
             "size_downloaded": 1000,
             "speed": 0,
             "dest_path": "/tmp/local/Movie/file.mkv",
+            # The downloader publishes local_path already converted to a web
+            # path; the manager stores it as-is rather than mapping it itself.
+            "local_path": "/data/movies/Movie/file.mkv",
             "error": None,
         },
     )
-    monkeypatch.setattr(manager, "_web_path_from_dest", lambda path: "/data/movies/Movie/file.mkv")
 
     manager._monitor(job.id, 1, "dl-1")
     restored = store.get(job.id, user_id=1)
@@ -118,7 +128,7 @@ def test_cancel_stops_underlying_keep_download(monkeypatch, tmp_path):
     job = store.update(job.id, user_id=1, status="downloading", download_id="dl-9")
     cancelled = []
     monkeypatch.setattr(
-        "app.services.stream_keep.debrid.cancel_download",
+        "app.services.stream_keep.stream_keep_download.cancel",
         lambda download_id: cancelled.append(download_id) or True,
     )
     updated = manager.cancel(job)

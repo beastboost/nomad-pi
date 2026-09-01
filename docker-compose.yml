@@ -12,7 +12,17 @@ services:
       - ./data:/app/data
       - /media:/media:ro  # Mount external drives (read-only)
     environment:
-      - PYTHONUNBUFFERED=1
+      PYTHONUNBUFFERED: "1"
+      # Server mode: media and playback only. The runtime guard returns 409 for
+      # host-management routes (Wi-Fi, reboot, drive formatting) instead of
+      # shelling out to NetworkManager and systemd, which a container has not
+      # got.
+      NOMAD_RUNTIME_MODE: server
+      # No device passthrough by default, so software decoding only. Set to a
+      # backend name and add the matching `devices:` entry to use one.
+      NOMAD_HW_ACCEL: "off"
+      # Adaptive bitrate costs CPU the host may not have to spare; opt in.
+      NOMAD_ABR: "off"
     env_file:
       - .env
     # For Raspberry Pi, limit memory to prevent OOM
