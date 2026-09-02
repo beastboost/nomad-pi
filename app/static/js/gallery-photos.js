@@ -25,10 +25,13 @@
     }
 
     function itemUrl(item) {
-        const t = typeof token === 'function' ? token() : localStorage.getItem('nomad_auth_token');
+        // An <img src> cannot carry an Authorization header. This used to put
+        // the session token here, which the server no longer accepts from a
+        // query string; a short-lived media ticket is the replacement.
+        const ticket = typeof mediaTicket === 'function' ? mediaTicket() : null;
         const pid = profileId();
         const params = new URLSearchParams();
-        if (t) params.set('token', t);
+        if (ticket) params.set('ticket', ticket);
         if (pid) params.set('profile_id', String(pid));
         return `${API}/playback/gallery/item/${encodeURIComponent(item.id)}?${params.toString()}`;
     }

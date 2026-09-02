@@ -64,6 +64,9 @@ class NomadViewModel(application: Application) : AndroidViewModel(application) {
         server = saved.server
         api.configure(saved.server, saved.token, saved.profileId)
         val valid = runCatching { withContext(Dispatchers.IO) { api.check() } }.getOrDefault(false)
+        // A restored session has a token but no media ticket, and artwork and
+        // playback URLs are unusable without one.
+        if (valid) runCatching { withContext(Dispatchers.IO) { api.ensureMediaTicket() } }
         if (!valid) {
             store.clear()
             api.configure(saved.server, null)
