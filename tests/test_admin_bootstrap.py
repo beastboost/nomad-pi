@@ -209,3 +209,69 @@ def test_lab_override_lifts_the_restriction(monkeypatch):
     monkeypatch.setattr(auth, "ALLOW_INSECURE_DEFAULT", True)
     auth.enforce_local_only_while_provisional(
         _ClientRequest("8.8.8.8"), {"must_change_password": 1})
+
+
+# ── the scoped policy must cover what the code actually runs ──────────────
+# Scoping sudo trades a blanket grant for a list that can fall out of date. A
+# missing entry does not fail loudly: the sudo call returns non-zero and the
+# admin feature silently stops working.
+
+def _sudo_invocations():
+    """Every ["sudo", ...] argument list built anywhere in app/."""
+    import ast
+
+    found = []
+    for path in Path("app").rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List) or not node.elts:
+                continue
+            first = node.elts[0]
+            if not (isinstance(first, ast.Constant) and first.value == "sudo"):
+                continue
+            words = []
+            for element in node.elts[1:]:
+                if isinstance(element, ast.Constant):
+                    words.append(str(element.value))
+                else:
+                    words.append(None)  # resolved at runtime
+            words = [w for w in words if w != "-n"]
+            if words:
+                found.append((str(path), node.lineno, words))
+    return found
+
+
+def test_the_sudo_probe_is_granted():
+    # `sudo -n true` is how two diagnostics endpoints ask whether passwordless
+    # sudo works. Ungranted, they report a healthy device as broken.
+    probes = [w for _, _, w in _sudo_invocations() if w and w[0] == "true"]
+    assert probes, "the sudo probe has moved; update this test"
+    directives = _sudoers_directives()
+    assert "/usr/bin/true" in directives or "/bin/true" in directives
+
+
+def test_every_literal_sudo_binary_appears_in_the_policy():
+    directives = _sudoers_directives()
+    granted = set(re.findall(r"(/[A-Za-z0-9_/.*-]+)", directives))
+    granted_names = {p.rsplit("/", 1)[-1] for p in granted}
+
+    missing = []
+    for path, line, words in _sudo_invocations():
+        binary = words[0]
+        if binary is None:  # shutil.which() result, checked by path below
+            continue
+        name = binary.rsplit("/", 1)[-1]
+        if name not in granted_names:
+            missing.append(f"{path}:{line} runs sudo {name}")
+    assert not missing, "sudo calls with no matching grant: " + "; ".join(missing)
+
+
+def test_mount_targets_inside_the_checkout_are_grantable():
+    # Drives can be mounted under data/external as well as /media and /mnt;
+    # the chown/chmod that follows the mount has to reach all three or the
+    # library cannot read the drive it just mounted.
+    directives = _sudoers_directives()
+    assert "__ROOT__/data/external/*" in directives

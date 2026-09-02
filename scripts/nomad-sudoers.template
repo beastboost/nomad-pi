@@ -12,14 +12,20 @@
 
 Cmnd_Alias NOMAD_POWER = /usr/sbin/reboot, /sbin/reboot, /usr/sbin/shutdown, /sbin/shutdown
 
+# A drive can be mounted under /media, /mnt, or data/external inside the Nomad
+# checkout. Omitting the third meant a drive mounted there stayed root-owned
+# and the library could not read it — the mount itself succeeded, so the
+# failure was silent.
 Cmnd_Alias NOMAD_STORAGE = /usr/bin/mount, /bin/mount, /usr/bin/umount, /bin/umount, \
                            /usr/sbin/mkfs, /sbin/mkfs, /usr/sbin/mkfs.*, /sbin/mkfs.*, \
                            /usr/bin/chown [0-9]*\:[0-9]* /media/*, \
                            /usr/bin/chown [0-9]*\:[0-9]* /mnt/*, \
+                           /usr/bin/chown [0-9]*\:[0-9]* __ROOT__/data/external/*, \
                            /usr/bin/chmod o+rx /media/*, \
                            /usr/bin/chmod o+rx /mnt/*, \
                            /usr/bin/chmod 0775 /media/*, \
-                           /usr/bin/chmod 0775 /mnt/*
+                           /usr/bin/chmod 0775 /mnt/*, \
+                           /usr/bin/chmod 0775 __ROOT__/data/external/*
 
 Cmnd_Alias NOMAD_NETWORK = /usr/bin/nmcli, /bin/nmcli, \
                            /usr/sbin/rfkill, /usr/bin/rfkill, \
@@ -50,7 +56,11 @@ Cmnd_Alias NOMAD_DLNA = /usr/bin/rm -f /var/cache/minidlna/files.db, \
                         /usr/bin/chown -R minidlna\:minidlna /var/cache/minidlna, \
                         /usr/bin/chown -R minidlna\:minidlna /var/log/minidlna
 
-Cmnd_Alias NOMAD_DIAG = /usr/bin/journalctl -u minidlna *, \
+# `sudo -n true` is how the diagnostics pages ask "do I have passwordless
+# sudo?". Without it they report sudo as unavailable on a correctly configured
+# device, sending the operator to debug a problem that does not exist.
+Cmnd_Alias NOMAD_DIAG = /usr/bin/true, /bin/true, \
+                        /usr/bin/journalctl -u minidlna *, \
                         /usr/bin/tail -30 /var/log/minidlna/*, \
                         /usr/bin/tail -n 30 /var/log/minidlna/*
 
