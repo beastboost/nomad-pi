@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from app import database
-from app.routers.auth import _extract_auth_token, get_current_user_id
+from app.routers.auth import _extract_auth_token, get_current_user_id, get_media_user_id
 from app.services.household_profiles import HouseholdProfile, HouseholdProfileStore
 
 
@@ -269,8 +269,13 @@ def gallery_library(
 def gallery_item(
     item_id: str,
     request: Request,
-    user_id: int = Depends(get_current_user_id),
+    ticket: str = Query(None),
+    user_id: int = Depends(get_media_user_id),
 ):
+    # Reached from <img src> and a native image loader, neither of which can
+    # set an Authorization header, so this accepts a media ticket as well as a
+    # session. _active_profile() copes with there being no session token: the
+    # profile then comes from ?profile_id=, still ownership- and PIN-checked.
     profile = _active_profile(request, int(user_id))
     path = _resolve_item(int(user_id), profile, item_id)
     size = path.stat().st_size

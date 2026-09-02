@@ -343,3 +343,38 @@ class TestPrivilegedEndpointsRequireAdmin:
         # On any real host the root device must resolve to something.
         protected = _protected_block_devices()
         assert isinstance(protected, set)
+
+
+def test_no_route_is_registered_twice_anywhere():
+    """A whole-app guard, not another per-path one.
+
+    Registering two handlers on one path is this codebase's most repeated
+    routing bug — four instances so far, each found only when the shadowed
+    behaviour was missed in the UI. FastAPI takes the first match silently, so
+    the second handler becomes unreachable dead code. The per-path checks above
+    were each added after the fact; this one covers paths nobody has broken yet.
+    """
+    import collections
+
+    from app.main import app
+
+    seen = collections.Counter()
+
+    def walk(router, prefix=""):
+        for route in getattr(router, "routes", []):
+            ctx = getattr(route, "include_context", None)
+            if ctx is not None:
+                walk(ctx.included_router, prefix + (ctx.prefix or ""))
+                continue
+            path = prefix + getattr(route, "path", "")
+            for method in getattr(route, "methods", None) or []:
+                if method not in ("HEAD", "OPTIONS"):
+                    seen[(method, path)] += 1
+
+    for route in app.routes:
+        ctx = getattr(route, "include_context", None)
+        if ctx is not None:
+            walk(ctx.included_router, ctx.prefix or "")
+
+    duplicates = {k: v for k, v in seen.items() if v > 1}
+    assert not duplicates, f"routes registered more than once: {duplicates}"

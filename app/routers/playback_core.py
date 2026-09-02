@@ -440,16 +440,15 @@ def stream_direct_media(session_id: str, request: Request, ticket: str = Query(.
     )
 
 
-@router.get("/hls/{session_id}/index.m3u8")
-def hls_playlist(session_id: str, ticket: str = Query(...)):
-    session = _require_ticket_session(session_id, ticket)
-    if session.mode == PlaybackMode.DIRECT_PLAY.value:
-        raise HTTPException(status_code=409, detail="This session does not use HLS")
-    try:
-        playlist = _ensure_hls(session)
-    except HLSJobError as exc:
-        raise HTTPException(status_code=503, detail=f"HLS unavailable: {exc}")
-    content = playlist.read_text(encoding="utf-8")
+def _ticketed_playlist(content: str, ticket: str) -> str:
+    """Re-sign every URI in an HLS playlist with the caller's stream ticket.
+
+    Segments and init maps are fetched by the player as separate requests, so
+    each one has to carry the ticket that authorised the playlist. This lived
+    inline in hls_playlist() while playback_abr and playback_stream_keep both
+    called core._ticketed_playlist(), which did not exist — every adaptive and
+    Stream + Keep playlist raised AttributeError instead of serving.
+    """
     escaped = quote(ticket, safe="")
     lines = []
     for line in content.splitlines():
@@ -460,8 +459,21 @@ def hls_playlist(session_id: str, ticket: str = Query(...)):
             lines.append(re.sub(r'URI="([^"]+)"', rf'URI="\1?ticket={escaped}"', line))
         else:
             lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+@router.get("/hls/{session_id}/index.m3u8")
+def hls_playlist(session_id: str, ticket: str = Query(...)):
+    session = _require_ticket_session(session_id, ticket)
+    if session.mode == PlaybackMode.DIRECT_PLAY.value:
+        raise HTTPException(status_code=409, detail="This session does not use HLS")
+    try:
+        playlist = _ensure_hls(session)
+    except HLSJobError as exc:
+        raise HTTPException(status_code=503, detail=f"HLS unavailable: {exc}")
+    content = playlist.read_text(encoding="utf-8")
     return Response(
-        "\n".join(lines) + "\n",
+        _ticketed_playlist(content, ticket),
         media_type="application/vnd.apple.mpegurl",
         headers={"Cache-Control": "no-store"},
     )

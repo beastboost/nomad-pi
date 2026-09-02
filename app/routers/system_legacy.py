@@ -2346,7 +2346,12 @@ def restart_dlna(user_id: int = Depends(get_current_user_id)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/info")
+# Registered at /info/detailed, not /info: public_router already owns /info for
+# the pre-login setup page, and because that router is mounted first this
+# handler was shadowed and unreachable — a second registration on the same path
+# rather than a distinct endpoint. Board model, kernel and OS release are not
+# things to serve unauthenticated, so the two are kept separate.
+@router.get("/info/detailed")
 def get_system_info(user_id: int = Depends(get_current_user_id)):
     """Get detailed system information"""
     info = {

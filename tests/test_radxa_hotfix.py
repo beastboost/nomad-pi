@@ -142,10 +142,34 @@ def test_remux_hls_command_uses_event_playlist_and_readrate(tmp_path):
 
 
 def test_legacy_ffmpeg_falls_back_to_re_instead_of_readrate(tmp_path):
-    cmd = build_hls_command(source_path="movie.mkv", output_dir=Path(tmp_path), mode="remux", target_video_codec=None, target_audio_codec=None, source_video_codec="h264", input_readrate=2.0, readrate_supported=False)
+    # The pure builder's own contract. Bind it through remux_stability's saved
+    # reference rather than the module attribute: install_remux_stability()
+    # replaces hls.build_hls_command at import time, so a plain `from ...
+    # import build_hls_command` picks up whichever version won the import race
+    # and this test's result depended on file ordering.
+    from app.services.playback import remux_stability
+
+    cmd = remux_stability._ORIGINAL_BUILD(source_path="movie.mkv", output_dir=Path(tmp_path), mode="remux", target_video_codec=None, target_audio_codec=None, source_video_codec="h264", input_readrate=2.0, readrate_supported=False)
     assert "-readrate" not in cmd
     assert "-re" in cmd
     assert cmd.index("-re") < cmd.index("-i")
+
+
+def test_stability_overlay_runs_ahead_rather_than_pacing_at_1x(tmp_path):
+    """What actually ships, which is the opposite of the line above.
+
+    On a legacy FFmpeg the overlay would rather let a cheap stream-copy run
+    ahead of realtime at a lowered scheduler priority than pace it at 1x with
+    -re, because a 1x producer is the underrun this module exists to prevent.
+    Both behaviours are deliberate; only this one reaches a running Nomad.
+    """
+    from app.services.playback import remux_stability
+    from app.services.playback import hls as hls_module
+
+    remux_stability.install_remux_stability()
+    cmd = hls_module.build_hls_command(source_path="movie.mkv", output_dir=Path(tmp_path), mode="remux", target_video_codec=None, target_audio_codec=None, source_video_codec="h264", input_readrate=2.0, readrate_supported=False)
+    assert "-re" not in cmd
+    assert "-readrate" not in cmd
 
 
 def test_one_gib_device_uses_sequential_quality_handover(monkeypatch):

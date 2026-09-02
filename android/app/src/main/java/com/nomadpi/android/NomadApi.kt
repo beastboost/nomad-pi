@@ -163,10 +163,58 @@ class NomadApi(server: String = "http://nomadpi.local") {
     @Volatile var token: String? = null
     @Volatile var profileId: Int? = null
 
+    // Media URLs are handed to ExoPlayer and the image loader, neither of which
+    // routes through requestJson(), so they cannot carry the Authorization
+    // header. They used to carry the session token in the query string; the
+    // server no longer accepts that, so they carry a short-lived media ticket
+    // fetched from /api/auth/media-ticket instead.
+    @Volatile private var cachedMediaTicket: String? = null
+    @Volatile private var mediaTicketExpiresAt: Long = 0L
+
     fun configure(server: String, authToken: String?, activeProfile: Int? = null) {
         baseUrl = normalizeServer(server)
         token = authToken
         profileId = activeProfile
+        clearMediaTicket()
+    }
+
+    private fun clearMediaTicket() {
+        cachedMediaTicket = null
+        mediaTicketExpiresAt = 0L
+    }
+
+    /**
+     * Fetch a media ticket if the cached one is missing or close to expiry.
+     *
+     * This performs network I/O, so it must be called from a background
+     * thread. The URL builders below deliberately never call it: they run
+     * inside composables, where a blocking request would raise
+     * NetworkOnMainThreadException.
+     */
+    fun ensureMediaTicket(force: Boolean = false): String? {
+        if (token.isNullOrBlank()) return null
+        val now = System.currentTimeMillis()
+        val current = cachedMediaTicket
+        if (!force && current != null && now < mediaTicketExpiresAt - 60_000L) return current
+        return try {
+            val json = requestJson("GET", "/api/auth/media-ticket")
+            val issued = json.optString("ticket").takeIf { it.isNotBlank() }
+            if (issued != null) {
+                synchronized(this) {
+                    cachedMediaTicket = issued
+                    mediaTicketExpiresAt = now + json.optLong("expires_in", 21600L) * 1000L
+                }
+            }
+            issued
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** The cached ticket only. Safe to call from the UI thread. */
+    private fun ticketQuery(prefix: String = "&"): String {
+        val t = cachedMediaTicket ?: return ""
+        return "${prefix}ticket=${enc(t)}"
     }
 
     fun login(server: String, username: String, password: String): NomadSession {
@@ -179,6 +227,10 @@ class NomadApi(server: String = "http://nomadpi.local") {
         if (authToken.isBlank()) throw NomadApiException("Nomad did not return a session token")
         val user = json.optJSONObject("user") ?: JSONObject()
         token = authToken
+        clearMediaTicket()
+        // login() already runs on a background thread, so priming the ticket
+        // here means the first screen can render artwork without waiting.
+        ensureMediaTicket(force = true)
         return NomadSession(
             server = baseUrl,
             token = authToken,
@@ -325,13 +377,11 @@ class NomadApi(server: String = "http://nomadpi.local") {
     }
 
     fun musicStreamUrl(path: String): String {
-        val t = token.orEmpty()
-        return "$baseUrl/api/playback/music/stream?path=${enc(path)}&token=${enc(t)}${profileQuery()}"
+        return "$baseUrl/api/playback/music/stream?path=${enc(path)}${ticketQuery()}${profileQuery()}"
     }
 
     fun mediaStreamUrl(path: String): String {
-        val t = token.orEmpty()
-        return "$baseUrl/api/media/stream?path=${enc(path)}&token=${enc(t)}${profileQuery()}"
+        return "$baseUrl/api/media/stream?path=${enc(path)}${ticketQuery()}${profileQuery()}"
     }
 
     fun imageUrl(path: String?): String? {
@@ -341,8 +391,13 @@ class NomadApi(server: String = "http://nomadpi.local") {
     }
 
     fun galleryItemUrl(id: String): String {
-        val t = token.orEmpty()
-        return "$baseUrl/api/playback/gallery/item/${encPathSegment(id)}?token=${enc(t)}${profileQuery(prefix = "&") }"
+        // Build the query from its parts so a missing ticket cannot produce
+        // "...item/abc&profile_id=1" with no leading question mark.
+        val parts = mutableListOf<String>()
+        cachedMediaTicket?.let { parts += "ticket=${enc(it)}" }
+        profileId?.let { parts += "profile_id=$it" }
+        val query = if (parts.isEmpty()) "" else "?" + parts.joinToString("&")
+        return "$baseUrl/api/playback/gallery/item/${encPathSegment(id)}$query"
     }
 
     fun absoluteUrl(path: String): String {

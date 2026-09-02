@@ -21,6 +21,7 @@ try:
     from app.services import ingest
     from app.routers import media, system, uploads, dashboard, debrid, playlists, tmdb, playback
     from app.services import media_tickets
+    from app.services import runtime_mode
 except Exception as e:
     print(f"CRITICAL STARTUP ERROR: {e}", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
@@ -381,7 +382,17 @@ app.include_router(media.public_router, prefix="/api/media", tags=["media"])
 app.include_router(media.stream_router, prefix="/api/media", tags=["media"])
 # Protect these routes
 app.include_router(media.router, prefix="/api/media", tags=["media"], dependencies=[Depends(auth.get_current_user_id)])
-app.include_router(system.router, prefix="/api/system", tags=["system"], dependencies=[Depends(auth.get_current_user_id)])
+# runtime_mode.system_runtime_guard was written, tested and documented in
+# DOCKER.md, but never attached to a router — so NOMAD_RUNTIME_MODE=server
+# enforced nothing and host-management routes stayed live inside a container.
+# /api/system/control/reboot in particular returned 200 and really did try to
+# reboot the host. Attached here, where every host-management route lives.
+app.include_router(
+    system.router,
+    prefix="/api/system",
+    tags=["system"],
+    dependencies=[Depends(auth.get_current_user_id), Depends(runtime_mode.system_runtime_guard)],
+)
 app.include_router(uploads.router, dependencies=[Depends(auth.get_current_user_id)])
 app.include_router(dashboard.router)  # Dashboard has its own prefix and auth where needed
 app.include_router(debrid.router)  # Real-Debrid integration (has its own auth)

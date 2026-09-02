@@ -137,3 +137,95 @@ def test_ticket_does_not_open_the_wider_api(client):
     ticket = media_tickets.issue(3131)
     for path in ("/api/auth/users", "/api/system/settings", "/api/media/library/movies"):
         assert client.get(f"{path}?ticket={ticket}").status_code in (401, 403)
+
+
+# ── no client may put the session token in a URL ──────────────────────────
+# The first sweep for this only looked for a literal "&token=" in a template
+# string, and missed gallery-photos.js building the same thing through
+# URLSearchParams — so every photo thumbnail 401'd. It also missed the Android
+# client entirely. These check every form, in every client.
+
+TOKEN_IN_URL_PATTERNS = [
+    r"[?&]token=\$\{",                     # `...?token=${t}`
+    r"[?&]token=\"?\s*\+",                 # "...?token=" + t
+    r"params\.set\(\s*['\"]token['\"]",    # URLSearchParams
+    r"append\(\s*['\"]token['\"]",
+    r"[?&]token=\$\{enc\(",                # Kotlin string template
+]
+
+
+def _offending_lines(text, patterns):
+    hits = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if "display_token" in line:
+            continue
+        for pattern in patterns:
+            if re.search(pattern, line):
+                hits.append((number, line.strip()[:100]))
+                break
+    return hits
+
+
+def test_no_frontend_module_puts_the_session_token_in_a_url():
+    for path in Path("app/static/js").glob("*.js"):
+        hits = _offending_lines(path.read_text(), TOKEN_IN_URL_PATTERNS)
+        assert not hits, f"{path} puts the session token in a URL: {hits}"
+
+
+def test_the_android_client_does_not_put_the_session_token_in_a_url():
+    android = Path("android/app/src/main/java/com/nomadpi/android")
+    if not android.exists():
+        pytest.skip("android client not present in this checkout")
+    for path in android.glob("*.kt"):
+        hits = _offending_lines(path.read_text(), TOKEN_IN_URL_PATTERNS)
+        assert not hits, f"{path} puts the session token in a URL: {hits}"
+
+
+def test_the_android_client_builds_media_urls_from_a_ticket():
+    api = Path("android/app/src/main/java/com/nomadpi/android/NomadApi.kt")
+    if not api.exists():
+        pytest.skip("android client not present in this checkout")
+    source = api.read_text()
+    assert "ensureMediaTicket" in source
+    # The builders run inside composables; a blocking fetch there would raise
+    # NetworkOnMainThreadException, so they must read the cache only.
+    builders = source[source.index("fun musicStreamUrl"):source.index("fun absoluteUrl")]
+    assert "ensureMediaTicket(" not in builders, "a URL builder fetches on the calling thread"
+    assert "cachedMediaTicket" in builders
+
+
+def test_every_byte_serving_endpoint_reached_from_a_url_accepts_a_ticket():
+    # <img src>, <video src> and native loaders cannot send a header, so any
+    # endpoint they hit must take a media ticket.
+    from app.main import app as fastapi_app
+    from app.routers.auth import get_media_user_id
+
+    URL_REACHED = (
+        "/api/media/stream",
+        "/api/media/subtitle",
+        "/api/playback/music/stream",
+        "/api/playback/music/artwork",
+        "/api/playback/gallery/item/{item_id}",
+    )
+    found = {}
+
+    def walk(router, prefix=""):
+        for route in getattr(router, "routes", []):
+            ctx = getattr(route, "include_context", None)
+            if ctx is not None:
+                walk(ctx.included_router, prefix + (ctx.prefix or ""))
+                continue
+            dependant = getattr(route, "dependant", None)
+            if dependant is None:
+                continue
+            names = {d.call.__name__ for d in dependant.dependencies if d.call}
+            found.setdefault(prefix + getattr(route, "path", ""), set()).update(names)
+
+    for route in fastapi_app.routes:
+        ctx = getattr(route, "include_context", None)
+        if ctx is not None:
+            walk(ctx.included_router, ctx.prefix or "")
+
+    for path in URL_REACHED:
+        assert path in found, f"{path} is no longer registered"
+        assert "get_media_user_id" in found[path], f"{path} does not accept a media ticket"

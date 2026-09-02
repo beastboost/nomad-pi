@@ -95,6 +95,34 @@ def _container_name(filename: str, ffprobe_name: str) -> str:
     return {"matroska": "mkv", "mov": "mp4", "mpegts": "ts"}.get(first, first or ext)
 
 
+def _validated_remote_url(url: str) -> str:
+    """Resolve a debrid URL to its final destination and prove that is public.
+
+    Checking only the URL the client hands us is not enough: a debrid host can
+    answer with a 302 to http://127.0.0.1/... and ffprobe or requests will
+    follow it, turning Stream + Keep into an SSRF primitive against the Pi's own
+    services. Follow the redirects here and validate where they actually land,
+    then use that resolved URL.
+    """
+    if not debrid.is_safe_external_url(url):
+        raise HTTPException(status_code=400, detail="Refusing to use a non-public remote URL")
+    try:
+        response = debrid.safe_head(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unsafe remote URL: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not reach the remote URL") from exc
+
+    final = getattr(response, "url", None) or url
+    try:
+        response.close()
+    except Exception:
+        pass
+    if not debrid.is_safe_external_url(final):
+        raise HTTPException(status_code=400, detail="Remote URL redirects to a non-public address")
+    return final
+
+
 def _probe_remote(url: str, filename: str, timeout: int = 25) -> MediaProbe:
     if not debrid.is_safe_external_url(url):
         raise HTTPException(status_code=400, detail="Refusing to probe a non-public remote URL")
@@ -272,9 +300,8 @@ def start_stream_keep(
     request: StreamKeepStartRequest,
     user_id: int = Depends(get_current_user_id),
 ):
-    if not debrid.is_safe_external_url(request.url):
-        raise HTTPException(status_code=400, detail="Refusing to stream from a non-public URL")
-    source = _probe_remote(request.url, request.filename)
+    resolved_url = _validated_remote_url(request.url)
+    source = _probe_remote(resolved_url, request.filename)
     plan = core.planner.plan(source, _caps(request.capabilities))
     if plan.mode == PlaybackMode.UNSUPPORTED:
         raise HTTPException(status_code=422, detail={
@@ -285,7 +312,7 @@ def start_stream_keep(
     job = store.create(
         user_id=user_id,
         provider=request.provider,
-        remote_url=request.url,
+        remote_url=resolved_url,
         filename=request.filename,
         category=request.category,
         is_show=request.is_show,
