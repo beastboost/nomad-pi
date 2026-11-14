@@ -26,6 +26,7 @@ import math
 import time as time_module
 import psutil
 from app import database
+from app.services.media_access import is_public_media_file
 
 logger = logging.getLogger(__name__)
 
@@ -2168,6 +2169,8 @@ async def stream_media(path: str = Query(...), ticket: str = Query(None), downlo
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid path")
 
+    if not is_public_media_file(fs_path, data_root=BASE_DIR):
+        raise HTTPException(status_code=404, detail="Media not found")
     if not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -2206,6 +2209,8 @@ async def serve_subtitle(path: str = Query(...), ticket: str = Query(None), user
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
 
+    if not is_public_media_file(fs_path, data_root=BASE_DIR):
+        raise HTTPException(status_code=404, detail="Subtitle not found")
     if not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="Subtitle not found")
 
