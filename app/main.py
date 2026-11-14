@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
+from app.services.media_access import PublicMediaStaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, JSONResponse
@@ -446,10 +447,8 @@ async def protect_data(request: Request, call_next):
         response.headers["content-type"] = "application/json; charset=utf-8"
     return response
 
-# Mount data for direct access (streaming)
-# Note: Protecting StaticFiles via dependency is tricky without a custom middleware or proxy.
-# For a home server, we'll leave media accessible if URL is known, but API is protected.
-app.mount("/data", StaticFiles(directory="data"), name="data")
+# Preserve legacy /data URLs, but never serve the database or private files.
+app.mount("/data", PublicMediaStaticFiles(directory="data"), name="data")
 
 # Mount frontend
 # We check if index.html exists, if not we might want to return a placeholder or 404
