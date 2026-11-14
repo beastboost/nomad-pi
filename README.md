@@ -136,6 +136,22 @@ Change the password after first login. Setup reruns no longer truncate unrelated
 
 The appliance web UI performs privileged host operations such as updates, mounts, networking and service control. The current appliance install therefore configures passwordless sudo for the Nomad service account. Use the server/container runtime instead if you do not want host-management privileges exposed to the application.
 
+## ⚠️ Security before using Nomad outside a trusted LAN
+
+Nomad is a self-hosted appliance with privileged system controls. Its factory
+hotspot password (`nomadpassword`), provisional admin login (`admin / nomad`)
+and legacy Samba password (`nomad`) are **publicly known**, not private
+credentials. Change the admin password at first login and set unique
+`NOMAD_HOTSPOT_PASSWORD` and `SAMBA_PASSWORD` values before taking the
+device into an untrusted environment. Re-run `sudo ./setup.sh` to apply
+network or Samba settings; preserve any existing values in `/etc/nomadpi.env`.
+
+Keep the web service behind a trusted LAN or correctly configured Tailscale
+connection, not an unprotected internet port forward. Media URL tickets grant
+access to media paths for a limited time; treat them as private links.
+The Samba media share now vetoes application DBs, secrets and backups; it
+does not replace unique Samba credentials.
+
 ## 🎞️ Playback Hardware Detection
 
 Nomad does not treat `ffmpeg -encoders` as proof that an SBC VPU works. Playback diagnostics now distinguish:
