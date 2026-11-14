@@ -1051,7 +1051,7 @@ def toggle_wifi(enable: bool, confirm: bool = False, admin: dict = Depends(get_c
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/wifi/restart")
-def restart_wifi(user_id: int = Depends(get_current_user_id)):
+def restart_wifi(admin: dict = Depends(get_current_admin)):
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Wi-Fi restart only supported on Linux/Raspberry Pi")
 
@@ -1420,7 +1420,7 @@ def get_wifi_info(user_id: int = Depends(get_current_user_id)):
         return {"mode": "error", "message": str(e)}
 
 @router.post("/wifi/toggle-hotspot")
-def toggle_hotspot(enable: bool = True, user_id: int = Depends(get_current_user_id)):
+def toggle_hotspot(enable: bool = True, admin: dict = Depends(get_current_admin)):
     """Toggle hotspot mode on/off"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
@@ -1665,7 +1665,7 @@ def connect_wifi(request: WifiConnectRequest, admin: dict = Depends(get_current_
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/wifi/reconnect")
-def reconnect_wifi(ssid: str = None, user_id: int = Depends(get_current_user_id)):
+def reconnect_wifi(ssid: str = None, admin: dict = Depends(get_current_admin)):
     """Reconnect to WiFi network"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="WiFi management only available on Linux")
@@ -1883,7 +1883,7 @@ def get_tailscale_status(user_id: int = Depends(get_current_user_id)):
         return {"installed": True, "connected": False, "service_running": False, "message": str(e), "error": str(e)}
 
 @router.post("/tailscale/service/{action}")
-def tailscale_service_control(action: str, user_id: int = Depends(get_current_user_id)):
+def tailscale_service_control(action: str, admin: dict = Depends(get_current_admin)):
     """Control tailscaled service."""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="Tailscale service control only available on Linux")
@@ -2115,7 +2115,7 @@ def get_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
         return {"has_key": False, "error": str(e)}
 
 @router.delete("/tailscale/auth-key")
-def delete_tailscale_auth_key(user_id: int = Depends(get_current_user_id)):
+def delete_tailscale_auth_key(admin: dict = Depends(get_current_admin)):
     """Delete stored Tailscale auth key"""
     try:
         database.set_setting("tailscale_auth_key", "")
@@ -2304,7 +2304,7 @@ def get_dlna_status(user_id: int = Depends(get_current_user_id)):
     return diagnostics
 
 @router.post("/dlna/restart")
-def restart_dlna(user_id: int = Depends(get_current_user_id)):
+def restart_dlna(admin: dict = Depends(get_current_admin)):
     """Restart DLNA server and rebuild database"""
     if platform.system() != "Linux":
         raise HTTPException(status_code=400, detail="DLNA only available on Linux")
