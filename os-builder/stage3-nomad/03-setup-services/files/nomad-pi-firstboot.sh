@@ -9,6 +9,12 @@ set -u
 DONE_STAMP="/etc/nomad-pi/.firstboot-done"
 HOTSPOT_NAME="NomadPi"
 HOTSPOT_IP="10.42.0.1"
+HOTSPOT_PASSWORD="${NOMAD_HOTSPOT_PASSWORD:-}"
+# Pre-provisioned images may include a unique hotspot secret.
+if [ -z "$HOTSPOT_PASSWORD" ] && [ -r /etc/nomadpi.env ]; then
+    HOTSPOT_PASSWORD="$(sed -n 's/^NOMAD_HOTSPOT_PASSWORD=//p' /etc/nomadpi.env | tail -n 1)"
+fi
+HOTSPOT_PASSWORD="${HOTSPOT_PASSWORD:-nomadpassword}"
 mkdir -p /etc/nomad-pi
 
 # Product identity remains `nomadpi`, so the stable Bonjour address is
@@ -67,7 +73,7 @@ nmcli con modify "$HOTSPOT_NAME" \
     ipv4.method shared \
     ipv4.addresses "$HOTSPOT_IP/24" \
     ipv6.method disabled 2>/dev/null || true
-nmcli con modify "$HOTSPOT_NAME" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "nomadpassword" 2>/dev/null || true
+nmcli con modify "$HOTSPOT_NAME" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$HOTSPOT_PASSWORD" 2>/dev/null || true
 
 mkdir -p /etc/NetworkManager/dnsmasq-shared.d
 cat > /etc/NetworkManager/dnsmasq-shared.d/nomad-captive.conf <<EOF
