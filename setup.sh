@@ -300,6 +300,12 @@ cat > "$SAMBA_TMP" <<EOF
    valid users = $REAL_USER
    force user = $REAL_USER
    force group = $REAL_USER
+   # The share is for media transfers, not the app's SQLite DB, ticket
+   # secret, backups or runtime caches, which also reside in data/.
+   veto files = /nomad.db*/.stream_ticket_secret/.nomad_*/.cache/.req_hash/.requirements_hash/mounts.json/app.log/backups/*.db/*.db-wal/*.db-shm/*.log/
+   delete veto files = no
+   follow symlinks = no
+   wide links = no
 EOF
 nomad_sudo install -m 644 "$SAMBA_TMP" "$SAMBA_CONF"
 rm -f "$SAMBA_TMP"
