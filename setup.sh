@@ -191,6 +191,8 @@ nomad_sudo touch "$ENV_FILE"
 nomad_sudo chmod 600 "$ENV_FILE"
 [ -n "$OMDB_KEY_VALUE" ] && nomad_set_env_key "$ENV_FILE" OMDB_API_KEY "$OMDB_KEY_VALUE"
 nomad_set_env_key "$ENV_FILE" ADMIN_PASSWORD "$ADMIN_PASS_VALUE"
+# Preserve a hotspot override for the next unattended in-place update.
+nomad_set_env_key "$ENV_FILE" NOMAD_HOTSPOT_PASSWORD "$NOMAD_HOTSPOT_PASSWORD"
 nomad_set_env_key "$ENV_FILE" NOMAD_HOSTNAME "$NEW_HOSTNAME"
 
 # Write detected platform into the service environment for diagnostics/logging.
