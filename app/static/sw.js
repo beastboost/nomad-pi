@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nomad-pi-v2.0.18-qol';
+const CACHE_NAME = 'nomad-pi-v2.0.18-private-cache-fix';
 
 const APP_SHELL = [
   '/', '/index.html', '/manifest.json', '/css/nocturne.css', '/css/appliance-polish.css', '/css/media-experience.css', '/css/gallery-photos.css', '/css/qol-polish.css',
@@ -17,12 +17,6 @@ const APP_SHELL = [
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/Phosphor.woff2',
   'https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/Phosphor-Fill.woff2',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap'
-];
-
-const API_CACHE_WHITELIST = [
-  '/api/system/stats', '/api/media/library/movies', '/api/media/library/shows',
-  '/api/media/library/music', '/api/media/library/books',
-  '/api/media/library', '/api/media/resume', '/api/media/watchlist', '/api/system/settings',
 ];
 
 self.addEventListener('install', (event) => {
@@ -48,6 +42,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
+  // API and user media responses can contain account-specific data. Never
+  // share them through the origin-wide service-worker cache.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/data/')) return;
   if (
     url.pathname.startsWith('/api/playback/') ||
     url.pathname.startsWith('/api/debrid/universal/stream/') ||
@@ -77,10 +74,6 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
-  const isWhitelistedApi = API_CACHE_WHITELIST.some((path) =>
-    url.pathname.startsWith(path) || url.pathname.includes(path)
-  );
-  if (isWhitelistedApi) event.respondWith(networkFirst(event.request));
 });
 
 async function staleWhileRevalidate(request) {
