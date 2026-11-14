@@ -65,6 +65,16 @@ fi
 nomad_as_user "$REAL_USER" git remote set-url origin https://github.com/beastboost/nomad-pi.git
 nomad_as_user "$REAL_USER" git config credential.helper 'cache --timeout=2592000' 2>/dev/null || true
 
+# The updater replaces tracked files with origin/main. Only the two precise
+# frontend build-stamp edits are expected in a deployed checkout; block any
+# other tracked change so local work is never silently lost.
+if ! nomad_as_user "$REAL_USER" python3 scripts/check_update_tree.py; then
+    update_status 12 "Update blocked: local tracked changes need review"
+    exit 1
+fi
+# Keep a recovery pointer to the pre-update code revision.
+nomad_as_user "$REAL_USER" git rev-parse HEAD > data/.previous_update_commit
+
 update_status 22 "Fetching latest Nomad version..."
 nomad_as_user "$REAL_USER" git fetch origin
 update_status 32 "Switching to latest main..."
