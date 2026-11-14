@@ -132,6 +132,17 @@ def test_stream_rejects_a_forged_ticket(client):
     assert response.status_code == 401
 
 
+def test_media_ticket_cannot_download_database_or_signing_secret(client):
+    ticket = media_tickets.issue(3131)
+    for private in ("nomad.db", ".stream_ticket_secret", "app.log"):
+        direct = client.get(f"/data/{private}", params={"ticket": ticket})
+        streamed = client.get(
+            "/api/media/stream", params={"path": f"/data/{private}", "ticket": ticket}
+        )
+        assert direct.status_code == 404, private
+        assert streamed.status_code == 404, private
+
+
 def test_ticket_does_not_open_the_wider_api(client):
     # A leaked stream URL must not become an account.
     ticket = media_tickets.issue(3131)
