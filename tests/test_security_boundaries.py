@@ -94,3 +94,12 @@ def test_service_worker_never_intercepts_account_api_or_media():
     assert "url.pathname.startsWith('/api/')" in source
     assert "url.pathname.startsWith('/data/')" in source
     assert "API_CACHE_WHITELIST" not in source
+
+
+
+def test_samba_share_vetoes_application_secrets():
+    setup = Path("setup.sh").read_text(encoding="utf-8")
+    assert "veto files = " in setup
+    for secret in ("nomad.db*", ".stream_ticket_secret", "backups", "*.log"):
+        assert secret in setup
+    assert "follow symlinks = no" in setup
