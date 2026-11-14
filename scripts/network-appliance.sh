@@ -5,6 +5,12 @@
 NOMAD_HOTSPOT_NAME="${NOMAD_HOTSPOT_NAME:-NomadPi}"
 NOMAD_HOTSPOT_IP="${NOMAD_HOTSPOT_IP:-10.42.0.1}"
 NOMAD_HOTSPOT_CIDR="${NOMAD_HOTSPOT_CIDR:-10.42.0.1/24}"
+# Setup and update run outside systemd, so EnvironmentFile is not loaded
+# automatically. Reuse an owner's stored password instead of silently restoring
+# the factory hotspot password on reconfiguration.
+if [ -z "${NOMAD_HOTSPOT_PASSWORD:-}" ] && declare -F nomad_get_env_key >/dev/null 2>&1; then
+    NOMAD_HOTSPOT_PASSWORD="$(nomad_get_env_key /etc/nomadpi.env NOMAD_HOTSPOT_PASSWORD)"
+fi
 NOMAD_HOTSPOT_PASSWORD="${NOMAD_HOTSPOT_PASSWORD:-nomadpassword}"
 NOMAD_PRODUCT_HOSTNAME="${NOMAD_PRODUCT_HOSTNAME:-nomadpi}"
 
